@@ -10,7 +10,9 @@ import com.cartisan.core.stereotype.PortType;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.model.BinaryExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.EnvironmentUsage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.OrphanSweepReport;
 import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
@@ -33,7 +35,10 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
  * 轻量直查 volumeExists（卷在否）。#171 休眠器补一条：
  * hibernate（删容器保卷——唤醒走既有幂等重建）。#172 封存与深度唤醒补三条：
  * packVolume（卷瘦身快照打包）/ restoreVolume（封存包回卷）/ deleteVolume
- * （封存后删卷）。restore（#93 回滚）与 attachResource 按需随各自切片扩。</p>
+ * （封存后删卷）。restore（#93 回滚）与 attachResource 按需随各自切片扩。
+ * #489 资源面改两条补一条：无主收编两面返回值扩为逐项处置报告（手动清扫面
+ * 消费全量、扫描轮消费计数）；environmentUsage（环境用量一瞥——资源大盘的
+ * 采样源）。</p>
  */
 @Port(PortType.CLIENT)
 public interface EnvironmentBackend {
@@ -213,28 +218,30 @@ public interface EnvironmentBackend {
     int sweepSnapshotContainersExcept(Collection<String> keepContainerNames);
 
     /**
-     * 清扫无主工作区容器（#179 触发器，运行期无主兜底）：「记录照删、物理尽力而为」
-     * 的销毁（{@link #destroyWorkspace} 撞 daemon 抖动窗）会把容器留在 Docker 侧
-     * 而库中无记录——休眠扫描只遍历注册表，无主容器永久不可见、永不休眠。按命名扫清
-     * 在跑的 {@code ws-<id>} 主容器（保留集 = 注册表全量编号；快照容器
-     * {@code ws-*-snap-*} 归 {@link #sweepSnapshotContainersExcept}，不在本面）。
-     * 只动启动时刻早于宽限线的容器——新建资源可能尚在「容器已建、记录未落」窗口
-     * （fork 先建容器后落记录），误杀窗口内容器＝杀在途 run。
+     * 清扫无主工作区容器（#179 触发器，运行期无主兜底；#489 返回值扩为逐项处置
+     * 报告）：「记录照删、物理尽力而为」的销毁（{@link #destroyWorkspace} 撞
+     * daemon 抖动窗）会把容器留在 Docker 侧而库中无记录——休眠扫描只遍历注册表，
+     * 无主容器永久不可见、永不休眠。按命名扫清在跑的 {@code ws-<id>} 主容器
+     * （保留集 = 注册表全量编号；快照容器 {@code ws-*-snap-*} 归
+     * {@link #sweepSnapshotContainersExcept}，不在本面）。只动启动时刻早于宽限线
+     * 的容器——新建资源可能尚在「容器已建、记录未落」窗口（fork 先建容器后落
+     * 记录），误杀窗口内容器＝杀在途 run。在册项不动但进报告（跳过原因＝在册）。
      *
      * @param keepWorkspaceIds 注册表全量工作区编号（保留集，含非 DEV 行）
      * @param startedBefore    宽限线：启动时刻早于本线的无主容器才删（调用方时钟）
-     * @return 清扫数
+     * @return 逐项处置报告（扫描轮消费 {@link OrphanSweepReport#sweptCount()}）
      */
-    int sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
+    OrphanSweepReport sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
             LocalDateTime startedBefore);
 
     /**
-     * 收编无主工作区卷（#486，ADR-0045：#179 容器侧准绳对称扩卷侧）：销毁级联
-     * 删不动的卷（占卷容器等）留在 Docker 侧而注册行已删——即无主。按命名点名删
-     * 保留集外的 {@code vol-ws-<id>}（保留集 = 注册表全量编号——在册一律不动，
-     * 含「在册但项目行已删」形态〔归人工/后台处置面〕与休眠保卷〔ADR-0016 用户
-     * 数据〕）。只动创建时刻早于宽限线的卷（与容器侧同一 10 分钟口径——新建
-     * 资源可能尚在「卷已建、记录未落」窗口，fork 先建卷后落记录）。
+     * 收编无主工作区卷（#486，ADR-0045：#179 容器侧准绳对称扩卷侧；#489 返回值
+     * 扩为逐项处置报告）：销毁级联删不动的卷（占卷容器等）留在 Docker 侧而注册行
+     * 已删——即无主。按命名点名删保留集外的 {@code vol-ws-<id>}（保留集 = 注册表
+     * 全量编号——在册一律不动，含「在册但项目行已删」形态〔归人工/后台处置面〕
+     * 与休眠保卷〔ADR-0016 用户数据〕）。只动创建时刻早于宽限线的卷（与容器侧
+     * 同一 10 分钟口径——新建资源可能尚在「卷已建、记录未落」窗口，fork 先建卷
+     * 后落记录）。在册项不动但进报告（跳过原因＝在册）。
      *
      * <p>准绳＝注册表唯一正本，绝无 prune 类通配回收（红线）：docker system df
      * 的「可回收」口径把休眠卷一并计入，不可作判定；本面只按保留集求差点名删。
@@ -242,8 +249,20 @@ public interface EnvironmentBackend {
      *
      * @param keepWorkspaceIds 注册表全量工作区编号（保留集，含非 DEV 行）
      * @param createdBefore    宽限线：创建时刻早于本线的无主卷才删（调用方时钟）
-     * @return 收编数
+     * @return 逐项处置报告（扫描轮消费 {@link OrphanSweepReport#sweptCount()}）
      */
-    int sweepOrphanWorkspaceVolumes(Collection<Long> keepWorkspaceIds,
+    OrphanSweepReport sweepOrphanWorkspaceVolumes(Collection<Long> keepWorkspaceIds,
             LocalDateTime createdBefore);
+
+    /**
+     * 环境用量一瞥（#489 资源面大盘的采样源）：docker system df（非 verbose，daemon
+     * 侧计数秒级回）四类用量（镜像/容器/本地卷/build cache 的计数与体量）＋工作区
+     * 命名资源清单（在跑 {@code ws-<id>} 容器与 {@code vol-ws-<id>} 卷的编号——
+     * 无主计数＝清单对注册表求差，由调用方判定）。只读探查：system df 的「可回收」
+     * 口径不入本面（判定红线，休眠卷被一并计入不可作准绳）。
+     *
+     * <p>docker CLI 自身失败（daemon 不可达等）抛环境操作失败——调用方（采样轮/
+     * 手动清扫）容错或呈报，不吞成「零资源」假象。</p>
+     */
+    EnvironmentUsage environmentUsage();
 }

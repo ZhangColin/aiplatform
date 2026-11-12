@@ -14,6 +14,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -23,6 +24,11 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.map.MapUtil;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -36,7 +42,9 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.BinaryExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.EnvironmentUsage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.OrphanSweepReport;
 import com.semgravio.aiplatform.base.workspace.domain.model.ProvisionedResource;
 import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
@@ -643,51 +651,83 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
-    public int sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
+    public OrphanSweepReport sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
             LocalDateTime startedBefore) {
         // #179 触发器：销毁「记录照删、物理尽力而为」撞 daemon 抖动窗时，容器留在
         // Docker 侧而库中无记录——休眠扫描只遍历注册表，无主容器永久不可见（clean-
         // ws-residue.sh 注释的同源口径）。只扫在跑容器（docker ps 默认面）；宽限线
         // 外才动手（fork「先建容器、后落记录」窗口保护）；本面只动容器，卷归
         // sweepOrphanWorkspaceVolumes（#486 同准绳对称收编，容器先卷后——占卷
-        // 容器在场则卷删不动）
+        // 容器在场则卷删不动）。#489 逐项报告：在册项列示不动、跳过/删除失败如实给因
         ExecResult listed = runCapture("docker", "ps", "--format", "{{.Names}}");
+        requireDockerOk(listed, "docker ps");
         Set<Long> keep = CollUtil.newHashSet(keepWorkspaceIds);
-        List<String> candidates = listed.stdout().lines().map(String::trim)
-                .flatMap(name -> {
-                    Matcher matcher = MAIN_CONTAINER_NAME.matcher(name);
-                    return matcher.matches()
-                            && !keep.contains(Long.parseLong(matcher.group(1)))
-                                    ? Stream.of(name)
-                                    : Stream.empty();
-                })
-                .toList();
-        if (candidates.isEmpty()) {
-            return 0;
-        }
-        // 批量取启动时刻判宽限（单次 inspect；候选在 ps 与 inspect 之间消失时 docker
-        // 把该对象的错误点名列 stderr、stdout 照旧只含拿到的——defensive 解析即可）
-        String[] inspect = Stream.concat(Stream.of(
-                "docker", "inspect", "--format", "{{.Name}}|{{.State.StartedAt}}"),
-                candidates.stream()).toArray(String[]::new);
-        ExecResult inspected = runCapture(inspect);
-        int removed = 0;
-        for (String line : inspected.stdout().lines().map(String::trim)
-                .filter(l -> !l.isEmpty()).toList()) {
-            int sep = line.indexOf('|');
-            if (sep <= 1) {
-                continue;   // 无 Name 前缀斜杠的畸形行不碰（宁可漏删）
+        List<OrphanSweepReport.Item> items = new ArrayList<>();
+        List<String> candidates = new ArrayList<>();
+        for (String name : listed.stdout().lines().map(String::trim)
+                .filter(n -> !n.isEmpty()).toList()) {
+            Matcher matcher = MAIN_CONTAINER_NAME.matcher(name);
+            if (!matcher.matches()) {
+                continue;   // 快照容器/无关命名不在本面
             }
-            Instant started = parseDockerTimestamp(line.substring(sep + 1));
-            String name = line.substring(1, sep);
-            if (started != null && started.atZone(ZoneId.systemDefault()).toLocalDateTime()
-                    .isBefore(startedBefore)) {
-                runSilently("docker", "rm", "-f", name);
-                removed++;
+            if (keep.contains(Long.parseLong(matcher.group(1)))) {
+                items.add(new OrphanSweepReport.Item(OrphanSweepReport.Kind.CONTAINER,
+                        name, OrphanSweepReport.Disposition.SKIPPED,
+                        OrphanSweepReport.SkipReason.REGISTERED, null));
+                continue;
+            }
+            candidates.add(name);
+        }
+        if (!candidates.isEmpty()) {
+            // 批量取启动时刻判宽限（单次 inspect；候选在 ps 与 inspect 之间消失时
+            // docker 把该对象的错误点名列 stderr、stdout 照旧只含拿到的——defensive
+            // 解析即可，消失者如实不进报告）
+            String[] inspect = Stream.concat(Stream.of(
+                    "docker", "inspect", "--format", "{{.Name}}|{{.State.StartedAt}}"),
+                    candidates.stream()).toArray(String[]::new);
+            ExecResult inspected = runCapture(inspect);
+            for (String line : inspected.stdout().lines().map(String::trim)
+                    .filter(l -> !l.isEmpty()).toList()) {
+                int sep = line.indexOf('|');
+                if (sep <= 1) {
+                    continue;   // 无 Name 前缀斜杠的畸形行不碰（宁可漏删）
+                }
+                String name = line.substring(1, sep);
+                Instant started = parseDockerTimestamp(line.substring(sep + 1));
+                if (started == null) {
+                    items.add(new OrphanSweepReport.Item(OrphanSweepReport.Kind.CONTAINER,
+                            name, OrphanSweepReport.Disposition.SKIPPED,
+                            OrphanSweepReport.SkipReason.TIMESTAMP_UNREADABLE, null));
+                    continue;   // 无从判宽限：宁可漏删不误杀窗口内新建资源
+                }
+                LocalDateTime startedAt = started.atZone(ZoneId.systemDefault())
+                        .toLocalDateTime();
+                if (!startedAt.isBefore(startedBefore)) {
+                    items.add(new OrphanSweepReport.Item(OrphanSweepReport.Kind.CONTAINER,
+                            name, OrphanSweepReport.Disposition.SKIPPED,
+                            OrphanSweepReport.SkipReason.GRACE_WINDOW, startedAt));
+                    continue;
+                }
+                items.add(sweepItem(OrphanSweepReport.Kind.CONTAINER, name, startedAt,
+                        "docker", "rm", "-f", name));
                 log.info("[workspace] 无主容器已清（库无记录；卷按注册表准绳另收）：{}", name);
             }
         }
-        return removed;
+        return new OrphanSweepReport(items);
+    }
+
+    /** 点名删一项并回处置结论（退出码 0＝已收编；非 0＝删除未成，如实报败）。 */
+    private OrphanSweepReport.Item sweepItem(OrphanSweepReport.Kind kind, String name,
+            LocalDateTime resourceCreatedAt, String... removeCommand) {
+        ExecResult removed = runCapture(removeCommand);
+        if (removed.exitCode() != 0) {
+            log.warn("[workspace] 无主资源删除未成（下轮扫描再收）：{} — {}",
+                    name, removed.stderr().trim());
+            return new OrphanSweepReport.Item(kind, name,
+                    OrphanSweepReport.Disposition.FAILED, null, resourceCreatedAt);
+        }
+        return new OrphanSweepReport.Item(kind, name,
+                OrphanSweepReport.Disposition.SWEPT, null, resourceCreatedAt);
     }
 
     /**
@@ -718,49 +758,170 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
-    public int sweepOrphanWorkspaceVolumes(Collection<Long> keepWorkspaceIds,
+    public OrphanSweepReport sweepOrphanWorkspaceVolumes(Collection<Long> keepWorkspaceIds,
             LocalDateTime createdBefore) {
         // #486（ADR-0045）：#179 容器侧准绳对称扩卷侧——销毁级联删不动的卷（占卷
         // 容器等）在注册行已删后即无主，扫描轮收编删除；保留集 = 注册表全量编号
         // （在册一律不动——休眠保卷是用户数据 ADR-0016）。只按准绳点名删，绝不
-        // prune 类通配（docker system df 的「可回收」口径不作判定，红线）
+        // prune 类通配（docker system df 的「可回收」口径不作判定，红线）。#489
+        // 逐项报告：在册项列示不动（报告解答「为什么这个卷还在」）
         ExecResult listed = runCapture("docker", "volume", "ls", "--format", "{{.Name}}");
+        requireDockerOk(listed, "docker volume ls");
         Set<Long> keep = CollUtil.newHashSet(keepWorkspaceIds);
-        List<String> candidates = listed.stdout().lines().map(String::trim)
-                .flatMap(name -> {
-                    Matcher matcher = WORKSPACE_VOLUME_NAME.matcher(name);
-                    return matcher.matches()
-                            && !keep.contains(Long.parseLong(matcher.group(1)))
-                                    ? Stream.of(name)
-                                    : Stream.empty();
-                })
-                .toList();
-        if (candidates.isEmpty()) {
-            return 0;
-        }
-        // 批量取创建时刻判宽限（单次 inspect；候选在 ls 与 inspect 之间消失时 docker
-        // 点名 stderr、stdout 照旧只含拿到的——defensive 解析即可）
-        String[] inspect = Stream.concat(Stream.of(
-                "docker", "volume", "inspect", "--format", "{{.Name}}|{{.CreatedAt}}"),
-                candidates.stream()).toArray(String[]::new);
-        ExecResult inspected = runCapture(inspect);
-        int removed = 0;
-        for (String line : inspected.stdout().lines().map(String::trim)
-                .filter(l -> !l.isEmpty()).toList()) {
-            int sep = line.indexOf('|');
-            if (sep <= 0) {
-                continue;   // 无卷名的畸形行不碰（宁可漏删）
+        List<OrphanSweepReport.Item> items = new ArrayList<>();
+        List<String> candidates = new ArrayList<>();
+        for (String name : listed.stdout().lines().map(String::trim)
+                .filter(n -> !n.isEmpty()).toList()) {
+            Matcher matcher = WORKSPACE_VOLUME_NAME.matcher(name);
+            if (!matcher.matches()) {
+                continue;   // 无关卷（外部自建等）不在本面
             }
-            Instant created = parseDockerTimestamp(line.substring(sep + 1));
-            String name = line.substring(0, sep);   // 卷名回执无容器名的前缀斜杠
-            if (created != null && created.atZone(ZoneId.systemDefault()).toLocalDateTime()
-                    .isBefore(createdBefore)) {
-                runSilently("docker", "volume", "rm", name);
-                removed++;
+            if (keep.contains(Long.parseLong(matcher.group(1)))) {
+                items.add(new OrphanSweepReport.Item(OrphanSweepReport.Kind.VOLUME,
+                        name, OrphanSweepReport.Disposition.SKIPPED,
+                        OrphanSweepReport.SkipReason.REGISTERED, null));
+                continue;
+            }
+            candidates.add(name);
+        }
+        if (!candidates.isEmpty()) {
+            // 批量取创建时刻判宽限（单次 inspect；候选在 ls 与 inspect 之间消失时
+            // docker 点名 stderr、stdout 照旧只含拿到的——defensive 解析即可）
+            String[] inspect = Stream.concat(Stream.of(
+                    "docker", "volume", "inspect", "--format", "{{.Name}}|{{.CreatedAt}}"),
+                    candidates.stream()).toArray(String[]::new);
+            ExecResult inspected = runCapture(inspect);
+            for (String line : inspected.stdout().lines().map(String::trim)
+                    .filter(l -> !l.isEmpty()).toList()) {
+                int sep = line.indexOf('|');
+                if (sep <= 0) {
+                    continue;   // 无卷名的畸形行不碰（宁可漏删）
+                }
+                String name = line.substring(0, sep);   // 卷名回执无容器名的前缀斜杠
+                Instant created = parseDockerTimestamp(line.substring(sep + 1));
+                if (created == null) {
+                    items.add(new OrphanSweepReport.Item(OrphanSweepReport.Kind.VOLUME,
+                            name, OrphanSweepReport.Disposition.SKIPPED,
+                            OrphanSweepReport.SkipReason.TIMESTAMP_UNREADABLE, null));
+                    continue;
+                }
+                LocalDateTime createdAt = created.atZone(ZoneId.systemDefault())
+                        .toLocalDateTime();
+                if (!createdAt.isBefore(createdBefore)) {
+                    items.add(new OrphanSweepReport.Item(OrphanSweepReport.Kind.VOLUME,
+                            name, OrphanSweepReport.Disposition.SKIPPED,
+                            OrphanSweepReport.SkipReason.GRACE_WINDOW, createdAt));
+                    continue;
+                }
+                items.add(sweepItem(OrphanSweepReport.Kind.VOLUME, name, createdAt,
+                        "docker", "volume", "rm", name));
                 log.info("[workspace] 无主卷已收编（库无记录）：{}", name);
             }
         }
-        return removed;
+        return new OrphanSweepReport(items);
+    }
+
+    // ---------- 环境用量一瞥（#489 资源面大盘采样源） ----------
+
+    /** docker system df 的类型行键（非 verbose 四行）。 */
+    private static final String DF_TYPE_IMAGES = "Images";
+    private static final String DF_TYPE_CONTAINERS = "Containers";
+    private static final String DF_TYPE_VOLUMES = "Local Volumes";
+    private static final String DF_TYPE_BUILD_CACHE = "Build Cache";
+
+    /** docker CLI 人类可读体量串（十进制单位，go-units HumanSize：4442639553 → "4.44GB"）。 */
+    private static final Pattern DOCKER_HUMAN_SIZE =
+            Pattern.compile("^([\\d.]+)\\s*([kMGTPE]?B?)$");
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    @Override
+    public EnvironmentUsage environmentUsage() {
+        // 资源大盘的 docker 侧数据源（#489）：system df 非 verbose（daemon 侧计数，
+        // 秒级回、非 -v 的全量 du 长操作）＋工作区命名清单（无主计数由调用方对
+        // 注册表求差）。「可回收」字段不取（判定红线——休眠卷被一并计入）
+        ExecResult df = runCapture("docker", "system", "df", "--format", "{{json .}}");
+        requireDockerOk(df, "docker system df");
+        Map<String, EnvironmentUsage.Usage> rows = MapUtil.newHashMap();
+        for (String line : df.stdout().lines().map(String::trim)
+                .filter(l -> !l.isEmpty()).toList()) {
+            JsonNode node = readJsonLine(line);
+            if (node == null || node.path("Type").asText().isEmpty()) {
+                continue;   // 畸形行容缺（daemon 版本差异的输出漂移不炸采样）
+            }
+            rows.put(node.path("Type").asText(), new EnvironmentUsage.Usage(
+                    node.path("TotalCount").asLong(0),
+                    parseDockerHumanSize(node.path("Size").asText(null))));
+        }
+        Set<Long> containerIds = listedWorkspaceIds(
+                runCapture("docker", "ps", "--format", "{{.Names}}"),
+                MAIN_CONTAINER_NAME, "docker ps");
+        Set<Long> volumeIds = listedWorkspaceIds(
+                runCapture("docker", "volume", "ls", "--format", "{{.Name}}"),
+                WORKSPACE_VOLUME_NAME, "docker volume ls");
+        return new EnvironmentUsage(
+                rows.getOrDefault(DF_TYPE_IMAGES, EnvironmentUsage.Usage.zero()),
+                rows.getOrDefault(DF_TYPE_CONTAINERS, EnvironmentUsage.Usage.zero()),
+                rows.getOrDefault(DF_TYPE_VOLUMES, EnvironmentUsage.Usage.zero()),
+                rows.getOrDefault(DF_TYPE_BUILD_CACHE, EnvironmentUsage.Usage.zero()),
+                containerIds, volumeIds);
+    }
+
+    /** docker 清单回执 → 主命名资源编号集（清单命令失败即抛——不容「零资源」假象）。 */
+    private static Set<Long> listedWorkspaceIds(ExecResult listed, Pattern namePattern,
+            String what) {
+        requireDockerOk(listed, what);
+        Set<Long> ids = CollUtil.newHashSet();
+        for (String name : listed.stdout().lines().map(String::trim)
+                .filter(n -> !n.isEmpty()).toList()) {
+            Matcher matcher = namePattern.matcher(name);
+            if (matcher.matches()) {
+                ids.add(Long.parseLong(matcher.group(1)));
+            }
+        }
+        return ids;
+    }
+
+    /** 单行 JSON 容错解析（解析不出返回 null——不炸采样轮）。 */
+    private static JsonNode readJsonLine(String line) {
+        try {
+            return JSON.readTree(line);
+        } catch (RuntimeException | JsonProcessingException e) {
+            return null;
+        }
+    }
+
+    /** docker CLI 人类可读体量 → 字节（十进制单位，与 docker 自身显示同基；解析不出 0）。 */
+    static long parseDockerHumanSize(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return 0;
+        }
+        Matcher matcher = DOCKER_HUMAN_SIZE.matcher(raw.trim());
+        if (!matcher.matches()) {
+            return 0;
+        }
+        long multiplier = switch (matcher.group(2)) {
+            case "", "B" -> 1L;
+            case "kB", "KB" -> 1_000L;
+            case "MB" -> 1_000_000L;
+            case "GB" -> 1_000_000_000L;
+            case "TB" -> 1_000_000_000_000L;
+            case "PB" -> 1_000_000_000_000_000L;
+            case "EB" -> 1_000_000_000_000_000_000L;
+            default -> 0L;
+        };
+        if (multiplier == 0) {
+            return 0;
+        }
+        return Math.round(Double.parseDouble(matcher.group(1)) * multiplier);
+    }
+
+    /** docker CLI 回执非 0 即抛环境操作失败（吞错＝「零资源」假象，采样/清扫不容）。 */
+    private static void requireDockerOk(ExecResult result, String what) {
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "命令失败: " + what + "\n" + result.stderr());
+        }
     }
 
     // ---------- dev 环境内部 ----------

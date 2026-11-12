@@ -67,9 +67,10 @@ public class WorkspaceHibernationAppService {
      * 无主收编宽限窗（#179 容器侧先行、#486 卷侧对称，ADR-0045 双闸之一）：新建
      * 资源可能尚在「资源已建、记录未落」窗口（fork 先建容器/卷后落记录），早于
      * 「本轮时刻减本宽限」创建/启动的无主资源才收编——与 clean-ws-residue.sh 的
-     * GRACE_MINUTES 同口径（10 分钟）。
+     * GRACE_MINUTES 同口径（10 分钟）。#489 手动清扫面（resources/sweep）复用
+     * 同一收编实现与同一宽限（包内共享常量，准绳不两套）。
      */
-    private static final Duration ORPHAN_SWEEP_GRACE = Duration.ofMinutes(10);
+    static final Duration ORPHAN_SWEEP_GRACE = Duration.ofMinutes(10);
 
     public WorkspaceHibernationAppService(EnvironmentBackend environmentBackend,
             WorkspaceRepository workspaceRepository,
@@ -150,7 +151,7 @@ public class WorkspaceHibernationAppService {
     private void sweepOrphanContainers(Set<Long> registeredIds, LocalDateTime now) {
         try {
             int swept = environmentBackend.sweepOrphanWorkspaceContainers(
-                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE));
+                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE)).sweptCount();
             if (swept > 0) {
                 log.info("[workspace] 无主容器收编：{} 个在跑容器库无记录已删（卷按准绳另收）", swept);
             }
@@ -169,7 +170,7 @@ public class WorkspaceHibernationAppService {
     private void sweepOrphanVolumes(Set<Long> registeredIds, LocalDateTime now) {
         try {
             int swept = environmentBackend.sweepOrphanWorkspaceVolumes(
-                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE));
+                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE)).sweptCount();
             if (swept > 0) {
                 log.info("[workspace] 无主卷收编：{} 个卷库无记录已删（注册表准绳点名删，非 prune）", swept);
             }

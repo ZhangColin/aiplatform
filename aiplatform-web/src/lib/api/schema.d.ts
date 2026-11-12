@@ -1109,6 +1109,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/resources/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动清扫（无主收编，逐项处置报告）
+         * @description 按需对账而不是等扫描轮（#473 故事 8）：手动触发一次无主收编，<b>复用 #486 扫描轮收编面同一实现同一准绳</b>——保留集＝注册表全量编号（在册一律不动，休眠保卷是用户数据 ADR-0016；在册但项目行已删＝在册失联只标记，裁决出口归 reclaim 一键回收）、宽限线＝触发时刻减 10 分钟（新建「资源已建、记录未落」窗口保护）、点名删非 prune（docker system df「可回收」不作判定、volume prune 永不进任何通道——红线）。回执＝逐项处置报告：收编了什么（SWEPT）、跳过什么为什么（SKIPPED：REGISTERED＝在册/GRACE_WINDOW＝宽限窗内/TIMESTAMP_UNREADABLE＝时刻解析不出）、删除未成什么（FAILED——下轮扫描再收）；库不可达（registryReachable=false）一刀未动（准绳无从构成绝不按「全部无主」动手）。手动清扫不受休眠总开关静默（管理员显式动作）。X-User-Id/X-User-Name 透传头落痕（append-only 留痕行＋报告 JSON 全量落档，缺头落空 NULL——照沙箱动作面口径）。docker CLI自身失败 500 WSP_002（未执行完的清扫不留痕不定格）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        post: operations["sweep"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects/{projectId}/production-handoff/update": {
         parameters: {
             query?: never;
@@ -2587,6 +2610,29 @@ export interface paths {
          *     - 404 KNW_008 — 沉淀草稿不存在
          */
         get: operations["detail_4"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/resources/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 资源大盘（主机盘/docker 用量/无主计数）
+         * @description #473 资源回收通道的观测面：主机磁盘（平台进程所在文件系统，hostPath＝与 df 对账的路径锚）＋docker 四类用量（镜像/容器/本地卷/build cache 的计数与体量——体量按十进制单位换算与 docker 显示同基）＋无主资源计数（docker 侧 ws-<id>/vol-ws-<id> 对注册表求差，ADR-0045 准绳——「可回收」口径不进本面）＋在册失联计数（只标记待人工裁决，#488）＋最近一次手动清扫（收编结果面）。数据取扫描轮采样落库（#487 采样面轮末主机帧）与清扫留痕，<b>请求路径零 docker 调用、秒级返回</b>；sampledAt＝新鲜度标注（未采样的首个扫描窗内各面如实 null——「没有帧」≠「零」；docker 不可达轮 docker 面各列 null——「缺测」≠「零」）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 NOT_FOUND — Resource not found
+         */
+        get: operations["resourceOverview"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4735,6 +4781,40 @@ export interface components {
              */
             reason?: string;
         };
+        ApiResponseBackofficeResourceSweepResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeResourceSweepResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeResourceSweepResponse: {
+            /** Format: date-time */
+            sweptAt?: string;
+            operatorId?: string;
+            operatorName?: string;
+            registryReachable?: boolean;
+            /** Format: date-time */
+            graceLine?: string;
+            /** Format: int32 */
+            sweptContainers?: number;
+            /** Format: int32 */
+            sweptVolumes?: number;
+            /** Format: int32 */
+            skippedCount?: number;
+            /** Format: int32 */
+            failedCount?: number;
+            items?: components["schemas"]["SweepItem"][];
+        };
+        SweepItem: {
+            kind?: string;
+            identifier?: string;
+            disposition?: string;
+            skipReason?: string;
+            /** Format: date-time */
+            resourceCreatedAt?: string;
+        };
         UpdateProductionHandoffCommand: {
             contact?: string;
             nextStep?: string;
@@ -5629,6 +5709,72 @@ export interface components {
             page?: number;
             /** Format: int32 */
             size?: number;
+        };
+        ApiResponseBackofficeResourceOverviewResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeResourceOverviewResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeResourceOverviewResponse: {
+            host?: components["schemas"]["HostFace"];
+            docker?: components["schemas"]["DockerFace"];
+            orphans?: components["schemas"]["OrphanFace"];
+            /** Format: int64 */
+            lostWorkspaceCount?: number;
+            /** Format: date-time */
+            sampledAt?: string;
+            lastSweep?: components["schemas"]["LastSweep"];
+        };
+        DockerFace: {
+            /** Format: int64 */
+            imageCount?: number;
+            /** Format: int64 */
+            imageSizeBytes?: number;
+            /** Format: int64 */
+            containerCount?: number;
+            /** Format: int64 */
+            containerSizeBytes?: number;
+            /** Format: int64 */
+            volumeCount?: number;
+            /** Format: int64 */
+            volumeSizeBytes?: number;
+            /** Format: int64 */
+            buildCacheCount?: number;
+            /** Format: int64 */
+            buildCacheSizeBytes?: number;
+        };
+        HostFace: {
+            path?: string;
+            /** Format: int64 */
+            totalBytes?: number;
+            /** Format: int64 */
+            usableBytes?: number;
+            /** Format: int64 */
+            usedBytes?: number;
+        };
+        LastSweep: {
+            /** Format: date-time */
+            sweptAt?: string;
+            operatorId?: string;
+            operatorName?: string;
+            registryReachable?: boolean;
+            /** Format: int32 */
+            sweptContainers?: number;
+            /** Format: int32 */
+            sweptVolumes?: number;
+            /** Format: int32 */
+            skippedCount?: number;
+            /** Format: int32 */
+            failedCount?: number;
+        };
+        OrphanFace: {
+            /** Format: int64 */
+            containerCount?: number;
+            /** Format: int64 */
+            volumeCount?: number;
         };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
@@ -7656,6 +7802,26 @@ export interface operations {
             };
         };
     };
+    sweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeResourceSweepResponse"];
+                };
+            };
+        };
+    };
     update_4: {
         parameters: {
             query?: never;
@@ -9198,6 +9364,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
+    resourceOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeResourceOverviewResponse"];
                 };
             };
         };

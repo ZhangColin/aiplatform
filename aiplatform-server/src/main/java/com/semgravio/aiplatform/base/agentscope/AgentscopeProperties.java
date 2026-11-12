@@ -85,6 +85,23 @@ public class AgentscopeProperties {
      */
     private Duration modelStreamMaxDuration = Duration.ofMinutes(15);
 
+    /**
+     * 生成车道 stripe 数＝跨项目并发产出轨上界（#475 分池，ADR-0042）：生成/
+     * 迭代复演/设计轨的小时级整场任务独立车道（饿不死交互轮），宽度即并发准入
+     * ——超出即排队（入队/出队滞留日志可见）。缺省 8＝共池时代容量平移（今日
+     * 行为不变）；按单机容量调低。改动重启生效（执行器是启动期装配的常驻线程
+     * 组，非运营配置热面——单机容量口径定档后随部署改）。
+     */
+    private Integer generationStripes = 8;
+
+    /**
+     * 会话任务队列滞留告警阈值（#475 队列可观测）：交互车道任务出队时滞留超此
+     * 即 WARN（sessionId＋滞留时长＋车道深度）——「任务排在队列里无痕迹」是
+     * 11-12 事故定位全靠 jstack 的根源。生成车道逐任务 INFO 留痕（低频），
+     * 不受此阈值约束。
+     */
+    private Duration sessionQueueWarnThreshold = Duration.ofSeconds(5);
+
     public String getAgentName() {
         return agentName;
     }
@@ -163,5 +180,21 @@ public class AgentscopeProperties {
 
     public void setModelStreamMaxDuration(Duration modelStreamMaxDuration) {
         this.modelStreamMaxDuration = modelStreamMaxDuration;
+    }
+
+    public Integer getGenerationStripes() {
+        return generationStripes;
+    }
+
+    public void setGenerationStripes(Integer generationStripes) {
+        this.generationStripes = generationStripes;
+    }
+
+    public Duration getSessionQueueWarnThreshold() {
+        return sessionQueueWarnThreshold;
+    }
+
+    public void setSessionQueueWarnThreshold(Duration sessionQueueWarnThreshold) {
+        this.sessionQueueWarnThreshold = sessionQueueWarnThreshold;
     }
 }

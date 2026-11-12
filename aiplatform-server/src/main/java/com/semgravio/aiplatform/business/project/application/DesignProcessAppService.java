@@ -336,7 +336,7 @@ public class DesignProcessAppService {
                 || item.getStatus() == DesignItemStatus.FAILED);
         if (runnable) {
             String firstRunId = EventsAppService.newRunId();
-            Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+            Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
                 try {
                     runDesignTrack(project, firstRunId);
                 }
@@ -362,7 +362,7 @@ public class DesignProcessAppService {
         }
         enqueueRevision(projectId, target, opinion, null);
         String firstRunId = EventsAppService.newRunId();
-        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
             try {
                 sweepQueuedRevisions(project, null, firstRunId);
             }
@@ -403,7 +403,7 @@ public class DesignProcessAppService {
             return null;
         }
         String firstRunId = EventsAppService.newRunId();
-        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
             try {
                 runRevision(project, item, feedback, divergence, firstRunId);
                 sweepQueuedRevisions(project, null, null);

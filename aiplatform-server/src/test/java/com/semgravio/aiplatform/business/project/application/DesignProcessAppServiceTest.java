@@ -169,6 +169,10 @@ class DesignProcessAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     /** 延迟执行器（轨道提交不即跑——在途窗口的排队用例形态）：手动 run 捕获件。 */
@@ -178,6 +182,10 @@ class DesignProcessAppServiceTest {
             submitted.add(invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            submitted.add(invocation.getArgument(1));
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         return submitted;
     }
 

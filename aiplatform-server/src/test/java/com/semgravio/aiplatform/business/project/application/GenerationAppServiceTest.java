@@ -197,6 +197,10 @@ class GenerationAppServiceTest {
             // submit 起返回 Future（#359 停止通道）：直通已同步跑完——已完成 future
             return java.util.concurrent.CompletableFuture.completedFuture(null);
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     /** 智能体边界正常收口脚本：converse 返回正常收口的 AgentReply（无挂起面）。 */
@@ -2252,6 +2256,10 @@ class GenerationAppServiceTest {
             submitted.add((Runnable) invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            submitted.add((Runnable) invocation.getArgument(1));
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.GENERATING);
@@ -4453,6 +4461,10 @@ class GenerationAppServiceTest {
             queued.add((Runnable) invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            queued.add((Runnable) invocation.getArgument(1));
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
@@ -4697,6 +4709,10 @@ class GenerationAppServiceTest {
             tracks.add((Runnable) invocation.getArgument(1));
             return java.util.concurrent.CompletableFuture.completedFuture(null);
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            tracks.add((Runnable) invocation.getArgument(1));
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }).when(sessionExecutor).submitGeneration(any(), any());
         return tracks;
     }
 

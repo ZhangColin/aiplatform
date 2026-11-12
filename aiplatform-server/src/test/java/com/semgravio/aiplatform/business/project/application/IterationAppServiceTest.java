@@ -144,6 +144,10 @@ class IterationAppServiceTest {
             tracks.add((Runnable) invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            tracks.add((Runnable) invocation.getArgument(1));
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         return tracks;
     }
 

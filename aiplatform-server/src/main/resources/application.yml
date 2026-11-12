@@ -90,6 +90,13 @@ app:
     # 超限按可重试失败进流层重试/外层尝试环；null/零/负可关——取值与依据见
     # AgentscopeProperties#modelStreamMaxDuration 注释（单点事实在此不重述）。
     model-stream-max-duration: 15m
+    # #475 · 会话执行器分池（ADR-0042）：生成车道（产出轨整场任务——生成/迭代
+    # 复演/设计轨）stripe 数＝跨项目并发上界，按单机容量调低（缺省 8＝共池时代
+    # 容量平移）；超宽排队可见（入队/出队滞留日志）。交互车道出队滞留超阈值即
+    # WARN——「排在队列里无痕迹」是 11-12 事故定位全靠 jstack 的根源。改动重启
+    # 生效（常驻线程组，非运营配置热面）。
+    generation-stripes: 8
+    session-queue-warn-threshold: 5s
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
   # #171 · 闲置休眠（ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照

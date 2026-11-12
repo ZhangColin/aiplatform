@@ -233,6 +233,10 @@ class SessionFormSwitchLiveTest {
             ((Runnable) invocation.getArgument(1)).run();
             return java.util.concurrent.CompletableFuture.completedFuture(null);
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     /** 运营面开关直写（live 面不发版切态的唯一通道）。 */

@@ -178,6 +178,10 @@ class MainAgentAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     /**
@@ -210,6 +214,15 @@ class MainAgentAppServiceTest {
             }
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            try {
+                ((Runnable) invocation.getArgument(1)).run();
+            }
+            catch (RuntimeException e) {
+                // 同上：生成车道同吞语义
+            }
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     /** 脚本化智能体边界（#46 收口以 finish_edit 事实为准）：主智能体正常回复；
@@ -1004,12 +1017,11 @@ class MainAgentAppServiceTest {
         Long projectId = persistedGeneratedProject("9744");
         List<Runnable> coderTracks = CollUtil.newArrayList();
         doAnswer(invocation -> {
-            Runnable task = (Runnable) invocation.getArgument(1);
-            if (((String) invocation.getArgument(0)).startsWith("coder-")) {
-                coderTracks.add(task); // 修正轨道挂起不跑（模拟首场在途）
-                return null;
-            }
-            task.run(); // 主智能体轮直通
+            coderTracks.add((Runnable) invocation.getArgument(1)); // 修正轨道挂起不跑（模拟首场在途）
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run(); // 主智能体轮直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -1410,12 +1422,11 @@ class MainAgentAppServiceTest {
         Long projectId = persistedGeneratedProject("9723");
         List<Runnable> tracks = CollUtil.newArrayList();
         doAnswer(invocation -> {
-            Runnable task = (Runnable) invocation.getArgument(1);
-            if (("coder-" + projectId).equals(invocation.getArgument(0))) {
-                tracks.add(task); // 修正轨道挂起不跑（模拟在途）
-                return null;
-            }
-            task.run(); // 主智能体轨道直通
+            tracks.add((Runnable) invocation.getArgument(1)); // 修正轨道挂起不跑（模拟在途）
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run(); // 主智能体轨道直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
         givenConverseMainRepliesAndExecutorFinishes("好的");
@@ -1447,14 +1458,13 @@ class MainAgentAppServiceTest {
         List<Runnable> mainTracks = CollUtil.newArrayList();
         List<Runnable> coderTracks = CollUtil.newArrayList();
         doAnswer(invocation -> {
-            Runnable task = (Runnable) invocation.getArgument(1);
-            if (((String) invocation.getArgument(0)).startsWith("main-")) {
-                mainTracks.add(task); // 主智能体轨道挂起不跑（模拟轮1 在途窗口）
-            } else {
-                coderTracks.add(task); // 修正轨道挂起不跑（模拟在途）
-            }
+            mainTracks.add((Runnable) invocation.getArgument(1)); // 主智能体轨道挂起不跑（模拟轮1 在途窗口）
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            coderTracks.add((Runnable) invocation.getArgument(1)); // 修正轨道挂起不跑（模拟在途）
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         givenConverseMainRepliesAndExecutorFinishes("好的");
 
         appService.runOpinionTurn(projectId, "意见一：加导出");
@@ -1563,12 +1573,10 @@ class MainAgentAppServiceTest {
         Long projectId = persistedGeneratedProject("9735");
         givenConverseMainRepliesAndExecutorFinishes("好的，会处理的");
         doAnswer(invocation -> {
-            String sessionId = invocation.getArgument(0);
-            Runnable task = invocation.getArgument(1);
-            if (sessionId.startsWith("coder-")) {
-                throw new IllegalStateException("修正轨道提交失败");
-            }
-            task.run(); // 主智能体轨道直通
+            throw new IllegalStateException("修正轨道提交失败");
+        }).when(sessionExecutor).submitGeneration(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run(); // 主智能体轨道直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
 

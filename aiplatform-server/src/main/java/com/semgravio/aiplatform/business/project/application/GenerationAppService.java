@@ -872,7 +872,7 @@ public class GenerationAppService {
         // 跑完收口绑本锚（此后新版记行不漂移旧版关联）；无版本记行（legacy/记行失败）
         // 为 null
         Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
-        Future<?> trackTask = sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId,
+        Future<?> trackTask = sessionExecutor.submitGeneration(CoderRunAttempts.SESSION_PREFIX + projectId,
                 () -> {
                     boolean trackReturned = false;
                     try {

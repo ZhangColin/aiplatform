@@ -52,6 +52,15 @@ public class WorkspaceProperties {
      */
     private Duration readinessTimeout = Duration.ofMinutes(10);
 
+    /**
+     * 置备线程池大小（#476 容量口径，默认 12＝eu-1 单机上限）：可并行置备的
+     * 工作区数，同时就是「同时冷启动无排队」的并发数。eu-1（8 vCPU/30G）标定：
+     * 12 路并发置备的 CPU/IO 尖峰无压力，且 12 个项目随后全活跃（各 ~1.25G）
+     * RAM 仍在墙内；再往上置备批时长退化、全活跃踩 OOM——换机器再调，别在本
+     * 机加数。常驻线程组，改动重启生效（非运营配置热面）。
+     */
+    private int provisionThreads = 12;
+
     public int getProvisionMaxAttempts() {
         return provisionMaxAttempts;
     }
@@ -114,5 +123,13 @@ public class WorkspaceProperties {
 
     public void setReadinessTimeout(Duration readinessTimeout) {
         this.readinessTimeout = readinessTimeout;
+    }
+
+    public int getProvisionThreads() {
+        return provisionThreads;
+    }
+
+    public void setProvisionThreads(int provisionThreads) {
+        this.provisionThreads = provisionThreads;
     }
 }

@@ -107,6 +107,11 @@ app:
   # 端口接口不动）与就绪等待超时（深度唤醒分钟级——解包＋依赖重装，3 分钟不够）。
   workspace:
     provision-max-attempts: 3
+    # #476 · 置备线程池大小＝可并行置备数＝「同时冷启动无排队」并发数。默认 12＝
+    # eu-1（8 vCPU/30G）单机标定上限：12 路并发置备 CPU/IO 尖峰无压力、12 项目
+    # 随后全活跃（各 ~1.25G）RAM 仍在墙内；再往上批时长退化、全活跃踩 OOM——
+    # 换机器再调，别在本机加数。常驻线程组，改动重启生效（非运营配置热面）。
+    provision-threads: 12
     idle-threshold: 60m
     hibernation-scan-interval: 5m
     hibernation-enabled: true

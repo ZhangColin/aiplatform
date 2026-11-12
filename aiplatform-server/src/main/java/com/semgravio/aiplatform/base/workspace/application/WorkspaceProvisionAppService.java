@@ -61,9 +61,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WorkspaceProvisionAppService implements DisposableBean {
 
-    /** 置备线程池大小（可并行置备的工作区数；后续切片可按负载外化配置）。 */
-    private static final int PROVISION_THREADS = 4;
-
     /** 置备提交队列容量（有界：满则拒绝提交转 failed，防无限排队）。 */
     private static final int PROVISION_QUEUE_CAPACITY = 100;
 
@@ -91,8 +88,11 @@ public class WorkspaceProvisionAppService implements DisposableBean {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
         this.maxAttempts = Math.max(1, properties.getProvisionMaxAttempts());
+        // 置备池大小可配（app.workspace.provision-threads，#476 容量口径：默认 12＝
+        // eu-1 单机「同时冷启动无排队」上限；标定依据见 WorkspaceProperties 注释）
+        int provisionThreads = Math.max(1, properties.getProvisionThreads());
         this.ownedExecutor = new ThreadPoolExecutor(
-                PROVISION_THREADS, PROVISION_THREADS,
+                provisionThreads, provisionThreads,
                 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<>(PROVISION_QUEUE_CAPACITY),
                 daemonThreadFactory("workspace-provision"),

@@ -29,7 +29,8 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
  * 用完即销毁）。#170 唤醒底座补两条：容器实态探查（唤醒触发判据，#176 起与
  * 观测面共用 {@link #containerState} 四态直判，布尔探查已删）/ startApp（8081
  * 应用拉起——平台职责）。#173 观测面补两条：
- * containerState（实态一瞥）/ volumeSizeBytes（卷用量）。#171 休眠器补一条：
+ * containerState（实态一瞥）/ volumeSizeBytes（卷用量）；#485 销毁三清校验补一条
+ * 轻量直查 volumeExists（卷在否）。#171 休眠器补一条：
  * hibernate（删容器保卷——唤醒走既有幂等重建）。#172 封存与深度唤醒补三条：
  * packVolume（卷瘦身快照打包）/ restoreVolume（封存包回卷）/ deleteVolume
  * （封存后删卷）。restore（#93 回滚）与 attachResource 按需随各自切片扩。</p>
@@ -115,6 +116,14 @@ public interface EnvironmentBackend {
      * ——只读探查不能有 resurrect 副作用）。
      */
     Long volumeSizeBytes(WorkspaceHandle handle);
+
+    /**
+     * 卷在否（#485 销毁三清校验）：{@code docker volume inspect} 直判，存在 =
+     * true；不在（已删/外部漂移）与探查失败（daemon 不可达等）一律 false——校验
+     * 是观测面，容缺不抛（残留对账兜底归扫描轮/#473 收编通道）。轻量直查，不起
+     * 旁路容器（与 {@link #volumeSizeBytes} 的 du 成本有意分工）。
+     */
+    boolean volumeExists(WorkspaceHandle handle);
 
     /**
      * 休眠（#171，ADR-0016 删容器保卷）：删掉沙箱容器、完整保留卷（数据不动）——

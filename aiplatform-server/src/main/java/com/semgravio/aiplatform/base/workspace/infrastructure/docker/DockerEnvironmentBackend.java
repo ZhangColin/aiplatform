@@ -407,6 +407,15 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
+    public boolean volumeExists(WorkspaceHandle handle) {
+        // 卷在否（#485 销毁三清校验）：volume inspect 直判（退出码 0 = 在），轻量
+        // 直查不起旁路容器（与 volumeSizeBytes 的 du 成本有意分工）。探查失败同
+        // 不在归 false——校验是观测面，容缺不抛（残留对账兜底归扫描轮/#473 收编）
+        return runCapture("docker", "volume", "inspect", volumeOf(handle.containerName()))
+                .exitCode() == 0;
+    }
+
+    @Override
     public void hibernate(WorkspaceHandle handle) {
         // 休眠 = 删容器保卷（#171，ADR-0016 单一语义）：只动容器，卷原样——唤醒走
         // 既有幂等重建路径（createWorkspace 对同名残留先清后建、卷续用）。删前对

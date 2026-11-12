@@ -181,7 +181,7 @@ public class ProjectLifecycleAppService {
         } catch (RuntimeException e) {
             // 落库失败：回收已落定的工作区，不留与记录脱节的容器/卷（照片1b 兜底）
             log.error("项目记录入库失败，回收工作区 {}", workspace.workspaceId(), e);
-            destroyWorkspaceQuietly(workspace.workspaceId());
+            destroyWorkspaceBestEffort(workspace.workspaceId());
             throw e;
         }
 
@@ -358,7 +358,7 @@ public class ProjectLifecycleAppService {
         // 反复自救 ~8 分钟（11-12 19:04 实录：僵尸烧 lane＋烧 token）。幂等：无在途
         // 即无操作（不误伤他项目）
         codingRunTrack.requestStop(projectId);
-        destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
+        destroyWorkspaceBestEffort(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
         // 派生 deleteBy 是「先查后 remove」，需在事务内执行（DesignProcessAppService
@@ -439,12 +439,18 @@ public class ProjectLifecycleAppService {
 
     // ---------- 内部 ----------
 
-    /** 工作区销毁（尽力而为）：失败记日志不阻断——真删级联优先，物理残留可重试销毁。 */
-    private void destroyWorkspaceQuietly(String workspaceId) {
+    /**
+     * 工作区销毁（尽力＋尾部三清校验留痕，#485/ADR-0045）：销毁与收敛互斥双向
+     * 串行（唤醒在途则等它落定再级联——交错不再留半删现场），尾部对容器/卷/注册行
+     * 三清校验照跑（有残留即 WARN 留痕）。{@code destroyWorkspaceQuietly} 的
+     * 「吞错即忘」口径退役：失败不再无声——残留可观测、归收编通道回收；本步异常
+     * 照旧不阻断真删级联（受理即删：项目记录照删、凭证即失效）。
+     */
+    private void destroyWorkspaceBestEffort(String workspaceId) {
         try {
             workspaceLifecycleAppService.destroy(workspaceId);
         } catch (RuntimeException e) {
-            log.warn("工作区 {} 物理销毁失败（记录照删，物理残留可重试销毁）：{}",
+            log.warn("工作区 {} 销毁未全成（尽力级联＋尾部三清校验已执行，残留可观测、归收编通道回收）：{}",
                     workspaceId, e.getMessage());
         }
     }

@@ -22,6 +22,7 @@ import com.semgravio.aiplatform.base.workspace.application.event.WorkspaceCreate
 import com.semgravio.aiplatform.base.workspace.application.event.WorkspaceDestroyed;
 import com.semgravio.aiplatform.base.workspace.application.mapper.WorkspaceMapper;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -323,23 +324,76 @@ public class WorkspaceLifecycleAppService {
      * （AFTER_COMMIT）。物理清理失败不阻断记录删除——Docker 侧残留以真实状态为准，
      * 可重建句柄后重试销毁。删记录的事务内重取一次包路径兜底清包：封存提交若与本
      * 方法取记录交错（取到的旧副本尚无包路径），按旧副本删会漏包留磁盘孤儿。
+     *
+     * <p><b>#485 销毁终态一致（ADR-0045）</b>：销毁并入收敛互斥（等待式）——与
+     * 唤醒/休眠/封存/触碰收敛双向串行，根除「唤醒胜出重建、销毁留半删现场」竞态
+     * （唤醒在途则等它落定再级联，刚重建的资源随后收走；销毁先行则收敛任务让路、
+     * 重取见行已删自然落空）。级联尾部对容器/卷/注册行做三清校验并 WARN 留痕
+     * （{@link #verifyThreeClean}）：未清残留即无主资源，可观测、归收编通道回收。</p>
      */
     public void destroy(String workspaceId) {
         Workspace workspace = requireWorkspace(workspaceId);
-        provisioner.cancel(workspace.workspaceId());
-        environmentBackend.destroyWorkspace(workspace.toHandle());
-        if (workspace.getArchivePath() != null) {
-            sealPackageStore.delete(workspace.getArchivePath());
+        // 级联＋三清校验都在互斥面内：校验时点无收敛任务能并发重建
+        convergence.runExclusivelyAwaiting(workspace.workspaceId(),
+                () -> destroyExclusively(workspace));
+    }
+
+    /** 互斥面内的销毁收口（#485）：尽力级联 → 尾部三清校验留痕（成败都跑）→ 异常上抛归调用方。 */
+    private void destroyExclusively(Workspace workspace) {
+        RuntimeException failure = null;
+        try {
+            provisioner.cancel(workspace.workspaceId());
+            environmentBackend.destroyWorkspace(workspace.toHandle());
+            if (workspace.getArchivePath() != null) {
+                sealPackageStore.delete(workspace.getArchivePath());
+            }
+            transactionTemplate.executeWithoutResult(status -> {
+                // 事务内重取：封存与销毁交错时以最新记录清包（尽力而为不抛，不阻断
+                // 删除）；并发销毁已删行则不重复删行/发事件（幂等收口）
+                Workspace fresh = workspaceRepository.findById(workspace.workspaceId().id())
+                        .orElse(null);
+                if (fresh == null) {
+                    return;
+                }
+                if (fresh.getArchivePath() != null) {
+                    sealPackageStore.delete(fresh.getArchivePath());
+                }
+                workspaceRepository.delete(fresh);
+                eventPublisher.publishApplicationEvent(
+                        WorkspaceDestroyed.of(workspace.workspaceId()));
+            });
+        } catch (RuntimeException e) {
+            failure = e;   // 先尾部校验留痕再上抛（调用方按「受理即删」收口）
+        } finally {
+            verifyThreeClean(workspace);
         }
-        transactionTemplate.executeWithoutResult(status -> {
-            // 事务内重取：封存与销毁交错时以最新记录清包（尽力而为不抛，不阻断删除）
-            workspaceRepository.findById(workspace.workspaceId().id())
-                    .map(Workspace::getArchivePath)
-                    .ifPresent(path -> sealPackageStore.delete(path));
-            workspaceRepository.delete(workspace);
-            eventPublisher.publishApplicationEvent(
-                    WorkspaceDestroyed.of(workspace.workspaceId()));
-        });
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    /**
+     * 销毁尾部三清校验（#485，ADR-0045「尽力＋留痕」）：容器/卷/注册行逐一复核——
+     * 全清即常态静默；任一仍在即 WARN 留痕（残留即无主资源，归扫描轮/#473 收编
+     * 通道回收，不在此重试）。校验在互斥面内、级联与删行之后；探查自身尽力而为
+     * （异常只记不抛——校验是观测面，不影响销毁收口）。
+     */
+    private void verifyThreeClean(Workspace workspace) {
+        try {
+            ContainerState container = environmentBackend.containerState(workspace.toHandle());
+            boolean volumeGone = !environmentBackend.volumeExists(workspace.toHandle());
+            boolean rowGone = workspaceRepository.findById(workspace.workspaceId().id()).isEmpty();
+            if (container == ContainerState.ABSENT && volumeGone && rowGone) {
+                return;
+            }
+            log.warn("[workspace] {} 销毁三清校验未过：容器实态={}、卷{}、注册行{}——"
+                            + "残留待收编（扫描轮/后台清扫）",
+                    workspace.workspaceId().value(), container,
+                    volumeGone ? "已清" : "仍在", rowGone ? "已清" : "仍在");
+        } catch (RuntimeException e) {
+            log.warn("[workspace] {} 销毁三清校验探查未成（残留状态未知，待收编通道对账）",
+                    workspace.workspaceId().value(), e);
+        }
     }
 
     private Workspace requireWorkspace(String workspaceId) {

@@ -4,9 +4,11 @@ import java.io.FileNotFoundException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -263,6 +265,20 @@ class WorkspaceConvergenceAppServiceTest {
         verify(provisioner).provisionForWake(ID, EnvKind.DEV);
         verify(environmentBackend, never()).startApp(any(WorkspaceHandle.class));
         verify(eventPublisher, never()).publishApplicationEvent(any(PreviewReady.class));
+    }
+
+    @Test
+    void given_deleted_row_when_touch_then_silent_noop_without_resurrect() {
+        // #485 重取守卫（纵深第二层）：销毁竞争下记录已删——触碰入口拨针事务内重取
+        // 落空即静默返回，不复活注册行、不提交探查（销毁持互斥时触碰入口不竞争行）
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.empty());
+        QueuedExecutor executor = new QueuedExecutor();
+
+        newService(executor).convergeAsync(ID, ConvergenceFace.TOUCH, true);
+
+        verify(workspaceRepository, never()).save(any(Workspace.class));
+        assertThat(executor.queued).isEmpty();
+        verify(environmentBackend, never()).containerState(any(WorkspaceHandle.class));
     }
 
     // ---------- TOUCH 面深度唤醒（封存态触碰 = 解包回卷 + 同一重建路径） ----------
@@ -730,6 +746,41 @@ class WorkspaceConvergenceAppServiceTest {
 
         // 全程只重建一次（让路不重复进内核）
         verify(provisioner, times(1)).provisionForWake(any(WorkspaceId.class), any(EnvKind.class));
+    }
+
+    // ---------- 等待式互斥（#485 销毁面：与收敛任务同面双向串行） ----------
+
+    @Test
+    void given_inflight_convergence_when_run_exclusively_awaiting_then_waits_then_runs_after()
+            throws Exception {
+        // #485 destroy 并入收敛互斥：收敛任务持锁在途——等待式调用不让路不抢占，
+        // 等它落定后才在当前线程执行（销毁级联严格在唤醒重建之后）；销毁执行期间
+        // 持同一张互斥面：新收敛任务让路（不排队，任务体重取见行已删自然落空）
+        QueuedExecutor executor = new QueuedExecutor();
+        WorkspaceConvergenceAppService service = newService(executor);
+        List<String> order = new CopyOnWriteArrayList<>();
+        service.runExclusively(ID, () -> order.add("converge"));   // 提交即持锁（未跑）
+        CountDownLatch awaitingDone = new CountDownLatch(1);
+        Thread destroyer = new Thread(() -> service.runExclusivelyAwaiting(ID, () -> {
+            order.add("destroy");
+            service.runExclusively(ID, () -> order.add("during-destroy"));   // 持锁中：应让路
+            awaitingDone.countDown();
+        }));
+        destroyer.start();
+        Thread.sleep(150);   // 等待式调用在等（锁被收敛任务持有——未放行不执行）
+        assertThat(order).isEmpty();
+
+        executor.runQueued();   // 收敛任务落定、释放锁
+        assertThat(awaitingDone.await(5, TimeUnit.SECONDS)).isTrue();
+        destroyer.join(5000);
+
+        // 双向串行：销毁级联严格在收敛任务之后；销毁持锁期间新收敛让路
+        assertThat(order).containsExactly("converge", "destroy");
+        assertThat(executor.queued).isEmpty();
+        // 释放后互斥面恢复可用
+        service.runExclusively(ID, () -> order.add("after-release"));
+        executor.runQueued();
+        assertThat(order).containsExactly("converge", "destroy", "after-release");
     }
 
     // ---------- 应用拉起轻路径（预览面自愈随迁入口） ----------

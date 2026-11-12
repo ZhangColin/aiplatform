@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,10 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
@@ -125,6 +130,22 @@ class ProjectLifecycleAppServiceTest {
     /** 知识端口 mock（删除级联清理验证）。 */
     @MockitoBean
     private KnowledgePort knowledgePort;
+
+    /** 销毁失败留痕的观测面（#485）：本服务日志挂 ListAppender 断言 WARN。 */
+    private final Logger lifecycleLogger =
+            (Logger) org.slf4j.LoggerFactory.getLogger(ProjectLifecycleAppService.class);
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+    @BeforeEach
+    void attachAppender() {
+        appender.start();   // AppenderBase 未 start 时 doAppend 静默丢弃
+        lifecycleLogger.addAppender(appender);
+    }
+
+    @AfterEach
+    void detachAppender() {
+        lifecycleLogger.detachAppender(appender);
+    }
 
     @AfterEach
     void tearDown() {
@@ -508,10 +529,17 @@ class ProjectLifecycleAppServiceTest {
 
         appService.delete(projectId);
 
-        // 物理销毁失败不阻断记录删除（真删级联优先，物理残留可重试）
+        // 物理销毁失败不阻断记录删除（受理即删：真删级联优先）；「吞错即忘」退役
+        // （#485）：失败 WARN 引尾部三清校验留痕——残留可观测、归收编通道回收
         verifyNoRows();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
+        assertThat(appender.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage())
+                    .contains("9201")
+                    .contains("三清校验已执行");
+        });
     }
 
     @Test

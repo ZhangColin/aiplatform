@@ -70,8 +70,10 @@ import lombok.extern.slf4j.Slf4j;
  * <p>唤醒内核 {@link #wakeUp} 与互斥执行对包内可见（不对外——新增重活路径无法
  * 绕开独占执行）：后台 {@code WorkspaceActionAppService#forceRebuild} 留在界外
  * （rm 先行＋守卫链不是探查梯子）继续直驱内核；向死收敛（封存/卷残留，归
- * {@code WorkspaceHibernationAppService}）经互斥面提交。互斥是进程内语义；跨进程
- * 由 PROVISIONING 态与幂等重建兜底。</p>
+ * {@code WorkspaceHibernationAppService}）经互斥面提交。销毁自 #485 起并入同一张
+ * 互斥面（{@link #runExclusivelyAwaiting} 等待式：销毁与唤醒/休眠/封存/触碰收敛
+ * 双向串行，根除「唤醒胜出留三残留」竞态）。互斥是进程内语义；跨进程由
+ * PROVISIONING 态与幂等重建兜底。</p>
  */
 @Service
 @Slf4j
@@ -79,6 +81,9 @@ public class WorkspaceConvergenceAppService implements DisposableBean {
 
     /** 收敛任务并发（单机小池：触碰探查秒级、重建分钟级，2 路并行够用）。 */
     private static final int CONVERGE_THREADS = 2;
+
+    /** 等待式互斥的轮询间隔（#485 销毁面等在途收敛落定；收敛任务秒~分钟级，200ms 足够不空转）。 */
+    private static final long MUTEX_AWAIT_POLL_MS = 200;
 
     private final EnvironmentBackend environmentBackend;
     private final WorkspaceRepository workspaceRepository;
@@ -170,12 +175,10 @@ public class WorkspaceConvergenceAppService implements DisposableBean {
     public void convergeAsync(WorkspaceId id, ConvergenceFace face, boolean startAppOnWake) {
         switch (face) {
             case TOUCH -> {
-                Workspace workspace = requirePresent(id);
-                workspace.markTouched(LocalDateTime.now());
-                transactionTemplate.executeWithoutResult(status ->
-                        workspaceRepository.save(workspace));
-                if (workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
-                    return;   // 忙（首次置备/唤醒已在途）：让路，不重复提交探查
+                Workspace workspace = pinTouch(id);
+                if (workspace == null
+                        || workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
+                    return;   // 行已删（销毁竞争，重取守卫不复活）或忙（置备/唤醒在途）：让路
                 }
                 runExclusively(id, () -> convergeIfNeeded(id, startAppOnWake));
             }
@@ -183,6 +186,24 @@ public class WorkspaceConvergenceAppService implements DisposableBean {
             case DOWNLOAD, ADMIN -> throw new IllegalArgumentException(
                     face + " 面走 convergeBlocking（面×式是固定配对，同步面要结果）");
         }
+    }
+
+    /**
+     * TOUCH 入口拨针（#485 重取守卫，纵深第二层）：事务内重取后拨 last-touch——
+     * 销毁竞争下记录已删则不落库不复活（触碰入口在互斥面外，拨针不与销毁删行竞争：
+     * 重取在事务内，行已删即静默落空）。返回拨针后的工作区（已删 = null，调用方
+     * 让路；用户来过的事实无处可记——行都不在了，自愈更无从谈起）。
+     */
+    private Workspace pinTouch(WorkspaceId id) {
+        return transactionTemplate.execute(status -> {
+            Workspace workspace = workspaceRepository.findById(id.id()).orElse(null);
+            if (workspace == null) {
+                return null;
+            }
+            workspace.markTouched(LocalDateTime.now());
+            workspaceRepository.save(workspace);
+            return workspace;   // 不取 save 回执：拨针后的在手实例即事实（mock 面也稳）
+        });
     }
 
     /**
@@ -443,6 +464,33 @@ public class WorkspaceConvergenceAppService implements DisposableBean {
             return true;
         } finally {
             inFlight.remove(id);
+        }
+    }
+
+    /**
+     * 独占执行（等待式，#485 销毁面）：同一张互斥面，但在途不让路——轮询等待在途
+     * 任务落定后当前线程持锁执行。销毁与唤醒/休眠/封存/触碰收敛双向串行（ADR-0045）：
+     * 收敛先持锁则销毁等它落定再级联（唤醒刚重建的资源随后被销毁收走，不留半删
+     * 现场）；销毁先持锁则收敛任务让路、任务体重取见行已删自然落空。等待不打断：
+     * 中断只记标志、锁到手照常执行（销毁要收口，收完恢复中断位归调用方）。任务体
+     * 异常原样上抛（收口语义归调用方），finally 释放互斥。
+     */
+    void runExclusivelyAwaiting(WorkspaceId id, Runnable task) {
+        boolean interrupted = false;
+        while (!inFlight.add(id)) {
+            try {
+                Thread.sleep(MUTEX_AWAIT_POLL_MS);
+            } catch (InterruptedException e) {
+                interrupted = true;   // 不弃销毁：等到锁、收完口再还中断位
+            }
+        }
+        try {
+            task.run();
+        } finally {
+            inFlight.remove(id);
+            if (interrupted) {
+                Thread.currentThread().interrupt();   // 级联收完才还中断位（不搅局 docker waitFor）
+            }
         }
     }
 

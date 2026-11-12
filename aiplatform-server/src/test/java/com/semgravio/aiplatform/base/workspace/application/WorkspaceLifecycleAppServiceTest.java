@@ -6,12 +6,16 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
@@ -47,6 +51,11 @@ import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -87,11 +96,28 @@ class WorkspaceLifecycleAppServiceTest {
     @MockitoBean
     private WorkspaceProvisionAppService provisioner;
 
+    /** 收敛模块取真件（#485 竞态用例：destroy 与收敛任务走同一张互斥面）。 */
+    @Autowired
+    private WorkspaceConvergenceAppService convergence;
+
     @Autowired
     private EventRecorder eventRecorder;
 
+    /** 销毁三清校验留痕的观测面（#485）：lifecycle 日志挂 ListAppender 断言 WARN。 */
+    private Logger lifecycleLogger;
+    private ListAppender<ILoggingEvent> appender;
+
+    @BeforeEach
+    void attachAppender() {
+        lifecycleLogger = (Logger) LoggerFactory.getLogger(WorkspaceLifecycleAppService.class);
+        appender = new ListAppender<>();
+        appender.start();   // AppenderBase 未 start 时 doAppend 静默丢弃
+        lifecycleLogger.addAppender(appender);
+    }
+
     @AfterEach
     void tearDown() {
+        lifecycleLogger.detachAppender(appender);
         eventRecorder.clear();
         // 独立事务清场（断言失败时不留脏行）；资源行有 FK，先子后父
         jdbcTemplate.update("DELETE FROM wsp_resources");
@@ -350,6 +376,7 @@ class WorkspaceLifecycleAppServiceTest {
     @Test
     void given_seeded_workspace_when_destroy_then_backend_cascade_then_records_deleted_and_event() {
         workspaceRepository.save(Workspace.register(devProvision("105")));
+        stubThreeCleanProbes();
 
         appService.destroy("105");
 
@@ -366,11 +393,14 @@ class WorkspaceLifecycleAppServiceTest {
         assertThat(eventRecorder.destroyed().get(0).workspaceId().value()).isEqualTo("105");
         // AFTER_COMMIT：销毁事件送达时记录已删
         assertThat(eventRecorder.workspacesAtDestroyedDelivery()).isEqualTo(0);
+        // 三清校验通过：常态路径零 WARN 噪音
+        assertThat(threeCleanWarns()).isEmpty();
     }
 
     @Test
     void given_pending_workspace_when_destroy_then_cancel_inflight_before_cascade() {
         workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("111"), EnvKind.DEV));
+        stubThreeCleanProbes();
 
         appService.destroy("111");
 
@@ -388,6 +418,129 @@ class WorkspaceLifecycleAppServiceTest {
         assertThatThrownBy(() -> appService.destroy("404"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("工作区不存在");
+    }
+
+    // ---------- #485 销毁终态一致：互斥串行 + 三清校验留痕 ----------
+
+    @Test
+    void given_wakeup_in_flight_when_destroy_then_cascade_after_rebuild_and_zero_residue()
+            throws Exception {
+        // #485 destroy×唤醒竞态（服务缝并发用例）：触碰触发的重建在途（provisionForWake
+        // 阻塞模拟）——销毁并入收敛互斥，等它落定再级联；交错收场零三残留（注册行删净、
+        // 唤醒重建落定的资源随后被销毁收走、级联严格在重建之后）
+        WorkspaceId id = WorkspaceId.of("120");
+        workspaceRepository.save(Workspace.dev(id,
+                WorkspaceNaming.containerName(id), WorkspaceNaming.PREVIEW_NETWORK));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);   // 容器实死：触碰触发唤醒重建
+        when(environmentBackend.volumeExists(any(WorkspaceHandle.class))).thenReturn(false);
+        CountDownLatch rebuildEntered = new CountDownLatch(1);
+        CountDownLatch releaseRebuild = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            rebuildEntered.countDown();
+            assertThat(releaseRebuild.await(10, TimeUnit.SECONDS)).isTrue();
+            return null;
+        }).when(provisioner).provisionForWake(any(WorkspaceId.class), eq(EnvKind.DEV));
+
+        convergence.convergeAsync(id, ConvergenceFace.TOUCH, true);
+        assertThat(rebuildEntered.await(10, TimeUnit.SECONDS)).isTrue();   // 唤醒重建在途（持互斥）
+
+        Thread destroyer = new Thread(() -> appService.destroy(id.value()));
+        destroyer.start();
+        Thread.sleep(300);   // 销毁在等（互斥被在途重建持有——级联未动）
+        verify(environmentBackend, never()).destroyWorkspace(any(WorkspaceHandle.class));
+
+        releaseRebuild.countDown();
+        destroyer.join(10_000);
+        assertThat(destroyer.isAlive()).isFalse();   // 销毁收口（未悬挂）
+
+        // 双向串行：级联严格在唤醒重建之后（重建资源随后收走，不留半删现场）
+        InOrder inOrder = inOrder(provisioner, environmentBackend);
+        inOrder.verify(provisioner).provisionForWake(any(WorkspaceId.class), eq(EnvKind.DEV));
+        inOrder.verify(environmentBackend).destroyWorkspace(any(WorkspaceHandle.class));
+        // 零三残留：注册行删净 + 三清校验通过（容器不在、卷不在，常态零 WARN）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 120", Integer.class)).isZero();
+        assertThat(threeCleanWarns()).isEmpty();
+        assertThat(eventRecorder.destroyed()).hasSize(1);
+    }
+
+    @Test
+    void given_destroy_in_flight_when_touch_then_gives_way_and_no_resurrect()
+            throws Exception {
+        // #485 destroy×触碰竞态（服务缝并发用例）：销毁级联在途（destroyWorkspace 阻塞
+        // 模拟）——触碰让路不重建；销毁收口后再触碰：行已删，拨针重取守卫不复活注册行
+        WorkspaceId id = WorkspaceId.of("121");
+        workspaceRepository.save(Workspace.dev(id,
+                WorkspaceNaming.containerName(id), WorkspaceNaming.PREVIEW_NETWORK));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);
+        when(environmentBackend.volumeExists(any(WorkspaceHandle.class))).thenReturn(false);
+        CountDownLatch cascadeEntered = new CountDownLatch(1);
+        CountDownLatch releaseCascade = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            cascadeEntered.countDown();
+            assertThat(releaseCascade.await(10, TimeUnit.SECONDS)).isTrue();
+            return null;
+        }).when(environmentBackend).destroyWorkspace(any(WorkspaceHandle.class));
+
+        Thread destroyer = new Thread(() -> appService.destroy(id.value()));
+        destroyer.start();
+        assertThat(cascadeEntered.await(10, TimeUnit.SECONDS)).isTrue();   // 销毁级联在途（持互斥）
+
+        convergence.convergeAsync(id, ConvergenceFace.TOUCH, true);   // 删除在途时触碰
+
+        releaseCascade.countDown();
+        destroyer.join(10_000);
+        assertThat(destroyer.isAlive()).isFalse();
+
+        // 让路收场：触碰未触发重建（销毁持互斥——探查任务不提交），注册行删净
+        verify(provisioner, never()).provisionForWake(any(), any());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 121", Integer.class)).isZero();
+        // 销毁后触碰：行已删——重取守卫静默落空，不复活注册行（零注册行残留）
+        convergence.convergeAsync(id, ConvergenceFace.TOUCH, true);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 121", Integer.class)).isZero();
+        verify(provisioner, never()).provisionForWake(any(), any());
+    }
+
+    @Test
+    void given_undeletable_volume_when_destroy_then_three_clean_warn_left() {
+        // #485 三清校验失败留痕：级联删卷失败（占用等）——尾部校验见卷仍在，WARN 可查
+        // （「吞错即忘」退役：残留进观测面，归收编通道回收）；注册行照删（受理即删）
+        WorkspaceId id = WorkspaceId.of("122");
+        workspaceRepository.save(Workspace.dev(id,
+                WorkspaceNaming.containerName(id), WorkspaceNaming.PREVIEW_NETWORK));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);
+        when(environmentBackend.volumeExists(any(WorkspaceHandle.class))).thenReturn(true);   // 卷删不动
+
+        appService.destroy(id.value());
+
+        assertThat(threeCleanWarns()).hasSize(1);
+        assertThat(threeCleanWarns().get(0).getLevel()).isEqualTo(Level.WARN);
+        assertThat(threeCleanWarns().get(0).getFormattedMessage())
+                .contains("122")
+                .contains("三清")
+                .contains("卷仍在");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 122", Integer.class)).isZero();
+    }
+
+    /** 三清校验 WARN（按「三清」关键语过滤，免无关 WARN 干扰断言）。 */
+    private List<ILoggingEvent> threeCleanWarns() {
+        return appender.list.stream()
+                .filter(event -> event.getLevel() == Level.WARN)
+                .filter(event -> event.getFormattedMessage().contains("三清"))
+                .toList();
+    }
+
+    /** 三清校验探针清态桩（常态路径：容器不在、卷不在——校验零噪音）。 */
+    private void stubThreeCleanProbes() {
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);
+        when(environmentBackend.volumeExists(any(WorkspaceHandle.class))).thenReturn(false);
     }
 
     // ---------- 测试监听器（A1 §5：三事件捕获，AFTER_COMMIT 语义） ----------

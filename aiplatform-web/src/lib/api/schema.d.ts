@@ -1118,7 +1118,7 @@ export interface paths {
         put?: never;
         /**
          * 激活草稿（人审采纳，原样升格不改稿）
-         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放在途名额；升格 knw_materials（段落分块入库＋混检注入）归 #465——本键先落审结终态，升格动作随 #465 落地。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
+         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放在途名额，并升格 knw_materials（#465——kind 随草稿、正文段落级分块入库、与来源项目脱钩成孤儿沉淀）。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 KNW_006 — 操作者不能为空
@@ -2089,7 +2089,7 @@ export interface paths {
         };
         /**
          * PRD 读（当前版 markdown，直读工作区）
-         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）＝「验收与待确认」章解析投影：{blocking, minor, dimensions}——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
+         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）＝「验收与待确认」章解析投影：{blocking, minor, dimensions}——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。未产出期短路（#478）：prd_produced_at 未落直回 404 PRJ_015（不触工作区，标志落点＝收口点，与前端 prdProducedAt 投影同口径），标志已落才 exec 直读；标志在而工作区无该文件同码兜底——均与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
         put?: never;
@@ -2608,6 +2608,7 @@ export interface paths {
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
+         *     - 400 KNW_011 — 沉淀物类别非法，合法取值：CASE（需求案例）/MODULE（功能模块）/RULE（业务规则）
          */
         get: operations["queue"];
         put?: never;
@@ -2815,7 +2816,7 @@ export interface paths {
         };
         /**
          * PRD 读（后台面，工作区直读）
-         * @description 口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，ISO-8601 秒精度）——了解交付物内容。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分。归档项目照读（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）500 WSP_002
+         * @description 口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，ISO-8601 秒精度）——了解交付物内容。未产出期短路（#478）：prd_produced_at 未落直回 404 PRJ_015（不触工作区），标志已落才 exec 直读、标志在而文件缺同码兜底——均与项目不存在的 PRJ_001 区分。归档项目照读（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）500 WSP_002
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在

@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 
 /**
@@ -69,9 +70,11 @@ public record UsageSummary(
     }
 
     /**
-     * 未配价标注项：该 (provider, model, 档位) 在窗口内有 token 用量，但事件时点
-     * 无生效单价行——对应成本分量缺失（null 语义），cost 分桶只含已配价部分。
+     * 未配价标注项：该 (provider, model, 档位, 带) 在窗口内有 token 用量，但事件
+     * 时点无生效单价行——对应成本分量缺失（null 语义），cost 分桶只含已配价部分。
+     * {@code band}＝事件时点归带（峰/谷，#499 读时归段）；{@code null}＝不区分时段
+     * （通道无生效规则行/按张档不受带影响）。
      */
-    public record UnpricedUsage(String provider, String model, TokenKind tokenKind) {
+    public record UnpricedUsage(String provider, String model, TokenKind tokenKind, Band band) {
     }
 }

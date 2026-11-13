@@ -223,6 +223,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // 四态投影回「生成中」（#222）：起跑即失效项目域——补产轮收口再派的
           // 轨道落库无对话面事件可搭，靠本失效收尾（点击路径的失效在 mutation）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+          // 构建基准记行失效（#462 去门化）：Demo 类 run 起跑自动记 PRD 版本行
+          // （服务端记行先于 run-start 发出）——documents 域只靠 document-updated
+          // 失效与记行存在竞态（savePrd 通知早于记行落库），阶段门「首个 Demo 在途」
+          // 事实源（prdVersions 非空）随本失效即时解锁，不卡到刷新
+          void queryClient.invalidateQueries({ queryKey: queryKeys.documents.all });
         } else if (payload.agent === "designer") {
           // 设计会话起锚（#290）：座席＝designer（计划区/活性行的呈现分岔锚）；
           // 起跑即失效项目域——清单落表（收口自动起设计的清单章解析）晚于
@@ -390,17 +395,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
-      case "part-hint": {
-        // 决策时微指令（#437）：每次注入一件入 parts 流水（堆叠上限服务端管）——
-        // 呈现归正文提示行（注入内容对用户可见）；平台侧产出（无 engine 字段）
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id },
-          { kind: "hint", hintKind: payload.kind, text: payload.text },
-        );
-        return;
-      }
+      // part-hint（#437 决策时微指令）2026-11-12 退役：微指令是模型面指引、用户面
+      // 只添噪（后端已停发）——历史存量事件按未知平台类型忽略（不进 parts 流水）
       case "part-plan": {
         // 步骤清单快照（#236）：整表替换落 `plan`（不进 parts 流水——不走动作行、
         // 不留动作痕、不单独播报）；断线补发按事件序重放，最后快照即终态

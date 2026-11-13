@@ -54,8 +54,9 @@ class ProjectLifecycleCreateRollbackTest {
                 new CreateProjectCommand("做一个官网", null)))
                 .isInstanceOf(IllegalStateException.class);
 
-        // 落库失败 → 回收已落定的工作区；不发射任何 SSE、不开主智能体对话、不取名
-        verify(workspaceLifecycleAppService).destroy("9300");
+        // 落库失败 → 回收已落定的工作区（#490 起经 destroyForReclaim 同内核——三清
+        // 事实弃之，回滚面只关心尽力级联）；不发射任何 SSE、不开主智能体对话、不取名
+        verify(workspaceLifecycleAppService).destroyForReclaim("9300");
         verifyNoInteractions(eventsAppService);
         verifyNoInteractions(mainAgentAppService);
         verify(eventsAppService, never()).publishNotification(any(), any());

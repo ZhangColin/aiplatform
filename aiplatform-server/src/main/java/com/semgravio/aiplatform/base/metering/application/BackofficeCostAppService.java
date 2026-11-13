@@ -15,6 +15,7 @@ import com.semgravio.aiplatform.base.metering.application.dto.response.Backoffic
 import com.semgravio.aiplatform.base.metering.application.dto.response.BackofficeProjectCostDetailResponse;
 import com.semgravio.aiplatform.base.metering.application.dto.response.BackofficeProjectCostResponse;
 import com.semgravio.aiplatform.base.metering.application.dto.response.BackofficeUnpricedUsageResponse;
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.model.GlobalUsageSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.UnpricedTierUsage;
@@ -71,6 +72,12 @@ public class BackofficeCostAppService {
                         .map(kind -> new BackofficeCostOverviewResponse.AgentKindUsage(
                                 kind.agentKind(), agentKindNames.displayNameOf(kind.agentKind()),
                                 kind.tokens()))
+                        .toList(),
+                summary.byModelCost().stream()
+                        .map(cost -> new BackofficeCostOverviewResponse.ModelBandCost(
+                                cost.provider(), cost.model(),
+                                bandCodeOf(cost.band()), bandNameOf(cost.band()),
+                                cost.costByCurrencyCode()))
                         .toList());
     }
 
@@ -86,7 +93,9 @@ public class BackofficeCostAppService {
                 tiers.stream()
                         .map(tier -> new BackofficeUnpricedUsageResponse.UnpricedTier(
                                 tier.provider(), tier.model(), tier.tokenKind().getCode(),
-                                tier.tokenKind().getName(), tier.tokens()))
+                                tier.tokenKind().getName(),
+                                bandCodeOf(tier.band()), bandNameOf(tier.band()),
+                                tier.tokens()))
                         .toList());
     }
 
@@ -132,7 +141,8 @@ public class BackofficeCostAppService {
                 summary.unpriced().stream()
                         .map(usage -> new BackofficeProjectCostDetailResponse.UnpricedTier(
                                 usage.provider(), usage.model(), usage.tokenKind().getCode(),
-                                usage.tokenKind().getName()))
+                                usage.tokenKind().getName(),
+                                bandCodeOf(usage.band()), bandNameOf(usage.band())))
                         .toList(),
                 summary.byModel().stream()
                         .map(model -> new BackofficeProjectCostDetailResponse.ModelUsage(
@@ -149,5 +159,14 @@ public class BackofficeCostAppService {
     /** 成本排序标量：币种桶金额直加（定序专用，不进响应呈现）。 */
     private static BigDecimal costScalarOf(SubjectCostSummary summary) {
         return summary.cost().values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** 带契约化两列（#499）：null（不区分时段）→ null，非空 → Integer code/中文名。 */
+    private static Integer bandCodeOf(Band band) {
+        return band == null ? null : band.getCode();
+    }
+
+    private static String bandNameOf(Band band) {
+        return band == null ? null : band.getName();
     }
 }

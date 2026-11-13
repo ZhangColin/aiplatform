@@ -56,13 +56,16 @@ public record BackofficeProjectCostDetailResponse(
 
     /**
      * 未配价标注项（tokenKind 为 Integer code + tokenKindName 随附，#34 收敛房规；
-     * bySubject 口径无 token 计数——档位用量汇总走全局 unpriced 端点）。
+     * bySubject 口径无 token 计数——档位用量汇总走全局 unpriced 端点）；band/
+     * bandName 随附 #499：事件时点归带，1=峰 2=谷，null＝不区分时段。
      */
     public record UnpricedTier(
             String provider,
             String model,
             Integer tokenKind,
-            String tokenKindName
+            String tokenKindName,
+            Integer band,
+            String bandName
     ) {
     }
 

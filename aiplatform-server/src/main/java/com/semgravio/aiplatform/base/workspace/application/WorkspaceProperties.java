@@ -37,8 +37,13 @@ public class WorkspaceProperties {
     /** 休眠器开关（#171，默认开；#197 内移——休眠扫描入口自持，test profile 关休眠扫描）。 */
     private boolean hibernationEnabled = true;
 
-    /** 封存阈值（#172，默认 30 天）：休眠满此即自动封存（删卷换包）。 */
-    private Duration sealThreshold = Duration.ofDays(30);
+    /**
+     * 封存阈值（#172，默认 1 天；#496 自 30 天收紧）：休眠满此即自动封存（删卷换包）。
+     * #496 决策理由：硬链种子候选 5 双环境 EXDEV 出局（ADR-0046），活跃项目基座
+     * 暂不可省、磁盘收敛全押封存——闲置项目卷存活窗口由 ~31 天（60m+30d）收紧至
+     * ~25 小时（60m+1d），封存唤醒分钟级代价已确认可接受。
+     */
+    private Duration sealThreshold = Duration.ofDays(1);
 
     /**
      * 封存包目录（#172，默认 {@code seal-archives} 工作目录下）：本地磁盘 v1 的
@@ -51,6 +56,15 @@ public class WorkspaceProperties {
      * 轮询上界——深度唤醒是分钟级（解包 + 依赖重装），旧 3 分钟不够。
      */
     private Duration readinessTimeout = Duration.ofMinutes(10);
+
+    /**
+     * 置备线程池大小（#476 容量口径，默认 12＝eu-1 单机上限）：可并行置备的
+     * 工作区数，同时就是「同时冷启动无排队」的并发数。eu-1（8 vCPU/30G）标定：
+     * 12 路并发置备的 CPU/IO 尖峰无压力，且 12 个项目随后全活跃（各 ~1.25G）
+     * RAM 仍在墙内；再往上置备批时长退化、全活跃踩 OOM——换机器再调，别在本
+     * 机加数。常驻线程组，改动重启生效（非运营配置热面）。
+     */
+    private int provisionThreads = 12;
 
     public int getProvisionMaxAttempts() {
         return provisionMaxAttempts;
@@ -114,5 +128,13 @@ public class WorkspaceProperties {
 
     public void setReadinessTimeout(Duration readinessTimeout) {
         this.readinessTimeout = readinessTimeout;
+    }
+
+    public int getProvisionThreads() {
+        return provisionThreads;
+    }
+
+    public void setProvisionThreads(int provisionThreads) {
+        this.provisionThreads = provisionThreads;
     }
 }

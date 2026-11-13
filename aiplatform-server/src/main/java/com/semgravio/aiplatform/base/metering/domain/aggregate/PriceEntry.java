@@ -18,20 +18,21 @@ import com.cartisan.data.jpa.id.TsidGenerator;
 import com.cartisan.core.stereotype.Aggregate;
 
 import com.semgravio.aiplatform.base.metering.domain.error.MeteringMessage;
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 import com.semgravio.aiplatform.base.metering.domain.model.Operator;
 
 /**
- * 单价行（{@code met_price_entries}，A6 §1）：provider × model × 档位 × 币种 ×
- * 生效区间的档位单价（token 档位每 token、按张档每张——#288 档位维度扩「token
- * 档位与按张」）——平台成本换算的匹配数据，base.metering 私有表（不经
- * 端口暴露，业务层零感知）。
+ * 单价行（{@code met_price_entries}，A6 §1）：provider × model × 档位 × 时段带 ×
+ * 币种 × 生效区间的档位单价（token 档位每 token、按张档每张——#288 档位维度扩「token
+ * 档位与按张」；时段带峰/谷——#498/ADR-0044，NULL＝不区分时段）——平台成本换算的
+ * 匹配数据，base.metering 私有表（不经端口暴露，业务层零感知）。
  *
  * <p><b>改价 = 关旧行开新行</b>（append 式不 UPDATE 单价）：{@code unitPrice} 等
  * 匹配列只插入不写，唯 {@code effectiveTo} 可落（关行）；事件按 ts 落
  * {@code [effectiveFrom, effectiveTo)} 区间匹配单价，历史成本不漂移。生效区间
- * 不得重叠——唯一约束只防同起点，重叠校验在管理写口服务端补（#160，已知维护
- * 事故口）。维护入口唯一＝后台管理 API（#160 改价/停用＋#165 开行；启动种子
+ * 不得重叠——唯一约束只防同键同带同起点（#498 扩带五元组），重叠校验在管理
+ * 写口服务端补（#160，已知维护事故口）。维护入口唯一＝后台管理 API（#160 改价/停用＋#165 开行；启动种子
  * 已随 #165 退役，初始化经幂等签名脚本走开行端点）。</p>
  *
  * <p><b>操作者两列（#160）</b>＝该行最近一次管理动作的操作者：开行者随行落
@@ -58,6 +59,10 @@ public class PriceEntry extends Auditable implements AggregateRoot<PriceEntry, L
     @Column(name = "token_kind", nullable = false, updatable = false)
     private TokenKind tokenKind;
 
+    /** 时段带（峰/谷；NULL＝不区分时段——#498/ADR-0044，存量语义零变动）。 */
+    @Column(name = "band", updatable = false)
+    private Band band;
+
     @Column(name = "unit_price", nullable = false, updatable = false, precision = 20, scale = 10)
     private BigDecimal unitPrice;
 
@@ -82,11 +87,13 @@ public class PriceEntry extends Auditable implements AggregateRoot<PriceEntry, L
     protected PriceEntry() {
     }
 
-    private PriceEntry(String provider, String model, TokenKind tokenKind, BigDecimal unitPrice,
-                       String currency, Instant effectiveFrom, Operator operator) {
+    private PriceEntry(String provider, String model, TokenKind tokenKind, Band band,
+                       BigDecimal unitPrice, String currency, Instant effectiveFrom,
+                       Operator operator) {
         this.provider = provider;
         this.model = model;
         this.tokenKind = tokenKind;
+        this.band = band;
         this.unitPrice = unitPrice;
         this.currency = currency;
         this.effectiveFrom = effectiveFrom;
@@ -94,11 +101,24 @@ public class PriceEntry extends Auditable implements AggregateRoot<PriceEntry, L
     }
 
     /**
+     * 开新行（不区分时段——NULL 带口径，#498 存量语义）：等同
+     * {@link #open(String, String, TokenKind, Band, BigDecimal, String, Instant, Operator)}
+     * 带 {@code band = null}。
+     */
+    public static PriceEntry open(String provider, String model, TokenKind tokenKind,
+                                  BigDecimal unitPrice, String currency, Instant effectiveFrom,
+                                  Operator operator) {
+        return open(provider, model, tokenKind, null, unitPrice, currency, effectiveFrom,
+                operator);
+    }
+
+    /**
      * 开新行（生效区间从此刻/指定时点起，敞口）。币种须为 ISO 4217 代码——聚合
      * 读面按币种分桶直读 {@code Currency.getInstance}，垃圾币种会炸所有含该键
      * 用量的查询，写口拦在最前。操作者可空（{@code null} = 种子/无头落空口径）。
+     * 时段带可空（{@code null} = 不区分时段；峰/谷带行 #498/ADR-0044）。
      */
-    public static PriceEntry open(String provider, String model, TokenKind tokenKind,
+    public static PriceEntry open(String provider, String model, TokenKind tokenKind, Band band,
                                   BigDecimal unitPrice, String currency, Instant effectiveFrom,
                                   Operator operator) {
         if (isBlank(provider) || isBlank(model) || tokenKind == null || unitPrice == null
@@ -110,8 +130,8 @@ public class PriceEntry extends Auditable implements AggregateRoot<PriceEntry, L
         } catch (IllegalArgumentException e) {
             throw new DomainException(MeteringMessage.PRICE_ENTRY_CURRENCY_UNKNOWN);
         }
-        return new PriceEntry(provider, model, tokenKind, unitPrice, currency, effectiveFrom,
-                operator);
+        return new PriceEntry(provider, model, tokenKind, band, unitPrice, currency,
+                effectiveFrom, operator);
     }
 
     /**

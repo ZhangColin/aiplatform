@@ -348,22 +348,6 @@ export type PlatformAgentEvent =
     }
   | {
       /**
-       * 决策时微指令部件（#437，#432 Step 3）：执行体 ReAct 循环每迭代的轻量分类器
-       * 注入——平台侧产出（不经引擎映射表，无 engine 字段）。每次注入一件（堆叠
-       * 上限 ≤3 服务端管），`kind` 封闭词表四键（failure_stop_loss 失败止损 /
-       * anti_mock 反 mock 数据 / context_economy 上下文经济 / parallel_tools 并行
-       * 工具调用）；`text` 为注入的微指令全文——注入内容对用户可见（过程呈现不
-       * 倒退），正文提示行呈现、逐件追加不留痕更新。
-       */
-      type: "part-hint";
-      payload: AgentPayload & {
-        sessionId: string;
-        kind: "failure_stop_loss" | "anti_mock" | "context_economy" | "parallel_tools";
-        text: string;
-      };
-    }
-  | {
-      /**
        * 步骤清单部件（#236）：run 级步骤清单的**全量快照**——agent 调 update_plan
        * 工具自产计划（步骤：稳定 id、标题、状态），不走动作行、不留动作痕（计划
        * 变化不进部件流水）。快照式：执行中再调即整表替换（已收口步骤不可变＝
@@ -387,7 +371,6 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "part-signal",
   "part-action",
   "part-check",
-  "part-hint",
   "part-plan",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 

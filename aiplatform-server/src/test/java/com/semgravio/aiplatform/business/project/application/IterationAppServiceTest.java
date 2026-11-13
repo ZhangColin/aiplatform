@@ -42,6 +42,8 @@ import com.cartisan.core.exception.ApplicationException;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
+import com.semgravio.aiplatform.base.agentscope.AgentTurnFailure;
+import com.semgravio.aiplatform.base.agentscope.StageDurations;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.FileChange;
@@ -81,6 +83,10 @@ class IterationAppServiceTest {
 
     @Autowired
     private IterationAppService appService;
+
+    /** 尝试环配置（#477 免预算重试上限的测试开关位）。 */
+    @Autowired
+    private GenerationProperties properties;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -144,6 +150,10 @@ class IterationAppServiceTest {
             tracks.add((Runnable) invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            tracks.add((Runnable) invocation.getArgument(1));
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         return tracks;
     }
 
@@ -426,6 +436,55 @@ class IterationAppServiceTest {
                         && dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
+    }
+
+    @Test
+    void given_instant_terminal_failure_when_queued_opinions_then_no_redispatch_merged_into_recovery() {
+        // #477 重派上限（修正轨「转终态→重派→秒败」循环的治）：整场 run 全尝试
+        // llmMs=0（通道全死、未发生真实模型调用）的终态失败后不再续派排队意见——
+        // 排队残局并入终态账（恢复出口「继续更新」一次带走，意见零丢失），不形成
+        // 秒败循环；有真实模型工作的失败不受影响（排队合并续派口径不变）
+        Long projectId = persistedGeneratedProject("9907");
+        List<Runnable> tracks = givenTrackQueued();
+        properties.setChannelInstantRetryMax(0); // 关免预算——直击预算烧尽口径
+        try {
+            AgentTurnFailure channelFail = new AgentTurnFailure(
+                    "智能体调用失败：Connection refused",
+                    new IllegalStateException("Connection refused"),
+                    List.of(), StageDurations.zero());
+            when(agentClient.converse(any(), any())).thenThrow(channelFail);
+
+            appService.startFixRun(projectId, "列表加筛选", null);
+            appService.startFixRun(projectId, "按钮改蓝色", null); // 在途排队
+            tracks.remove(0).run(); // 轨道执行：首场秒败×3 转终态
+
+            // 首场即停：排队意见不再作为续派 run 入场（旧口径：合并续派再烧 3 次秒败）
+            verify(agentClient, times(3)).converse(any(), any());
+            verify(eventsAppService, times(1))
+                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+
+            // 恢复出口可达且一次带走全部意见（首场＋排队）：通道恢复后「继续更新」
+            // 重派的交接物含两条意见原文（意见零丢失）
+            assertThat(appService.restartFixRun(projectId).runId()).isNotBlank();
+            AtomicBoolean channelRecovered = new AtomicBoolean(true);
+            doAnswer(invocation -> {
+                AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+                if (channelRecovered.get() && command.sessionId().startsWith("coder-")) {
+                    verifyRan(command);
+                    finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+                }
+                return new AgentReply(command.runId(), "已按意见修正");
+            }).when(agentClient).converse(any(), any());
+            tracks.remove(0).run();
+            ArgumentCaptor<AgentCommand> restarted = ArgumentCaptor.forClass(AgentCommand.class);
+            verify(agentClient, times(4)).converse(restarted.capture(), any());
+            assertThat(restarted.getAllValues().get(3).prompt())
+                    .contains("列表加筛选")
+                    .contains("按钮改蓝色");
+        }
+        finally {
+            properties.setChannelInstantRetryMax(3);
+        }
     }
 
     // ---------- 更新停止（#359 生成取消：失败账口径——终态账可达「继续更新」） ----------

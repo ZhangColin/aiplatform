@@ -88,7 +88,7 @@ class DockerEnvironmentBackendSealTest {
         assertThat(packed).isEqualTo("packed".getBytes());
         assertThat(backend.commands).contains("docker volume inspect vol-ws-42");
         assertThat(backend.binaryCommands).containsExactly(
-                "docker run --rm --entrypoint tar -v vol-ws-42:/workspace aiplatform/dev:0.16"
+                "docker run --rm --entrypoint tar -v vol-ws-42:/workspace aiplatform/dev:0.17"
                         + " czf - --exclude=./node_modules --exclude=./.pnpm-store"
                         + " --exclude=./.next -C /workspace .");
         // 数据库随包：排除清单只有三大可重建缓存（无 --exclude data/.env 等）
@@ -159,7 +159,7 @@ class DockerEnvironmentBackendSealTest {
                 "docker volume rm vol-ws-42",
                 "docker volume create vol-ws-42");
         assertThat(backend.binaryCommands).containsExactly(
-                "docker run --rm -i --entrypoint sh -v vol-ws-42:/workspace aiplatform/dev:0.16"
+                "docker run --rm -i --entrypoint sh -v vol-ws-42:/workspace aiplatform/dev:0.17"
                         + " -c tar xzf - -C /workspace && rm -f /workspace/data/pg/postmaster.pid");
     }
 

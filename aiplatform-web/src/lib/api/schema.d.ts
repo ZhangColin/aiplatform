@@ -848,6 +848,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/workspaces/{id}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 工作区级一键回收（单台三清，项目其余部分不动）
+         * @description 处置单点残留而不动整个项目（#473 故事 7）：单台工作区三清（容器/卷/注册表行，#485 销毁终态一致内核），<b>项目行与其余资产不动</b>（回执 projectRow＝UNTOUCHED 如实分示）；#488 在册失联行（lostAt 标记）的人工裁决出口——确认后经本端点回收，标记行随注册行级联消亡。所属项目有在飞 run 先级联停止（承 #477）；无所属（失联裁决/fork）无停止面可挂，runsStopped 如实 false。回执三面逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree（UNKNOWN 不算清）。运维通道不经用户会话凭证。操作者透传头落痕同项目级（未成动作不留痕）。工作区不存在（含畸形 id）404 WSP_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         */
+        post: operations["reclaimWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/skills/{id}/enable": {
         parameters: {
             query?: never;
@@ -1095,7 +1118,7 @@ export interface paths {
         put?: never;
         /**
          * 激活草稿（人审采纳，原样升格不改稿）
-         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放在途名额；升格 knw_materials（段落分块入库＋混检注入）归 #465——本键先落审结终态，升格动作随 #465 落地。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
+         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放在途名额，并升格 knw_materials（#465——kind 随草稿、正文段落级分块入库、与来源项目脱钩成孤儿沉淀）。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 KNW_006 — 操作者不能为空
@@ -1103,6 +1126,29 @@ export interface paths {
          *     - 409 KNW_009 — 沉淀草稿已审结（已激活/已拒绝），终态不可再审——重提为新草稿
          */
         post: operations["activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/resources/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动清扫（无主收编，逐项处置报告）
+         * @description 按需对账而不是等扫描轮（#473 故事 8）：手动触发一次无主收编，<b>复用 #486 扫描轮收编面同一实现同一准绳</b>——保留集＝注册表全量编号（在册一律不动，休眠保卷是用户数据 ADR-0016；在册但项目行已删＝在册失联只标记，裁决出口归 reclaim 一键回收）、宽限线＝触发时刻减 10 分钟（新建「资源已建、记录未落」窗口保护）、点名删非 prune（docker system df「可回收」不作判定、volume prune 永不进任何通道——红线）。回执＝逐项处置报告：收编了什么（SWEPT）、跳过什么为什么（SKIPPED：REGISTERED＝在册/GRACE_WINDOW＝宽限窗内/TIMESTAMP_UNREADABLE＝时刻解析不出）、删除未成什么（FAILED——下轮扫描再收）；库不可达（registryReachable=false）一刀未动（准绳无从构成绝不按「全部无主」动手）。手动清扫不受休眠总开关静默（管理员显式动作）。X-User-Id/X-User-Name 透传头落痕（append-only 留痕行＋报告 JSON 全量落档，缺头落空 NULL——照沙箱动作面口径）。docker CLI自身失败 500 WSP_002（未执行完的清扫不留痕不定格）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        post: operations["sweep"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1202,7 +1248,7 @@ export interface paths {
         put?: never;
         /**
          * 开行（空键首行——种子脚本通道）
-         * @description 对指定匹配键（provider × model × tokenKind）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         * @description 对指定匹配键（provider × model × tokenKind × band）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。band 时段带可空（1=峰 2=谷，缺省 null＝不区分时段——#498/ADR-0044 存量语义零变动）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键同带生效区间重叠校验（改价同款；同键同带同起点拒、不同带不误拒）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
          *     - 400 METER_004 — 单价行字段不完整
@@ -1227,7 +1273,7 @@ export interface paths {
         put?: never;
         /**
          * 原子改价（单调用关当前行＋开新行）
-         * @description 同事务两步：被关行落 effectiveTo＝新起点（保留其原开行操作者，不被改写），新行沿用匹配键、单价/币种取命令、敞口生效。effectiveFrom 可指定（ISO-8601 Instant，如 2026-09-14T16:00:00Z）——含未来时点＝预发布（对齐供应商凌晨调价，窗口前旧价仍生效）；缺省＝即时。服务端补同键生效区间重叠校验（唯一约束只防同起点、不防跨区间重叠——重叠行会重复计费）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空，#160）。中途任一守卫失败两行都不动。行不存在 404 METER_006；字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；起点早于被关行起点 400 METER_005；目标非当前行 409 METER_007；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         * @description 同事务两步：被关行落 effectiveTo＝新起点（保留其原开行操作者，不被改写），新行沿用匹配键（含时段带 band——带是匹配键成分，改价不漂移，#498）、单价/币种取命令、敞口生效。effectiveFrom 可指定（ISO-8601 Instant，如 2026-09-14T16:00:00Z）——含未来时点＝预发布（对齐供应商凌晨调价，窗口前旧价仍生效）；缺省＝即时。服务端补同键同带生效区间重叠校验（唯一约束只防同键同带同起点、不防跨区间重叠——重叠行会重复计费）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空，#160）。中途任一守卫失败两行都不动。行不存在 404 METER_006；字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；起点早于被关行起点 400 METER_005；目标非当前行 409 METER_007；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
          *     - 400 METER_004 — 单价行字段不完整
@@ -2043,7 +2089,7 @@ export interface paths {
         };
         /**
          * PRD 读（当前版 markdown，直读工作区）
-         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）＝「验收与待确认」章解析投影：{blocking, minor, dimensions}——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
+         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）＝「验收与待确认」章解析投影：{blocking, minor, dimensions}——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。未产出期短路（#478）：prd_produced_at 未落直回 404 PRJ_015（不触工作区，标志落点＝收口点，与前端 prdProducedAt 投影同口径），标志已落才 exec 直读；标志在而工作区无该文件同码兜底——均与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
         put?: never;
@@ -2562,6 +2608,7 @@ export interface paths {
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
+         *     - 400 KNW_011 — 沉淀物类别非法，合法取值：CASE（需求案例）/MODULE（功能模块）/RULE（业务规则）
          */
         get: operations["queue"];
         put?: never;
@@ -2587,6 +2634,29 @@ export interface paths {
          *     - 404 KNW_008 — 沉淀草稿不存在
          */
         get: operations["detail_4"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/resources/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 资源大盘（主机盘/docker 用量/无主计数）
+         * @description #473 资源回收通道的观测面：主机磁盘（平台进程所在文件系统，hostPath＝与 df 对账的路径锚）＋docker 四类用量（镜像/容器/本地卷/build cache 的计数与体量——体量按十进制单位换算与 docker 显示同基）＋无主资源计数（docker 侧 ws-<id>/vol-ws-<id> 对注册表求差，ADR-0045 准绳——「可回收」口径不进本面）＋在册失联计数（只标记待人工裁决，#488）＋最近一次手动清扫（收编结果面）。数据取扫描轮采样落库（#487 采样面轮末主机帧）与清扫留痕，<b>请求路径零 docker 调用、秒级返回</b>；sampledAt＝新鲜度标注（未采样的首个扫描窗内各面如实 null——「没有帧」≠「零」；docker 不可达轮 docker 面各列 null——「缺测」≠「零」）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 NOT_FOUND — Resource not found
+         */
+        get: operations["resourceOverview"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2665,6 +2735,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/projects/{id}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 项目级一键回收（删除＋清残＋四面报告）
+         * @description 删除＋清残＋三清校验报告一次完成（#473 故事 6）：在飞 run <b>先级联停止</b>（承 #477 停止面——置停＋cancel(true) 中断在途，不留僵尸任务对着已删容器自救）→ 工作区销毁（<b>复用 #485 销毁终态一致内核</b>：收敛互斥双向串行＋尾部三清校验，非另写一套）→ prj_* 真删级联（受理即删语义与用户面 DELETE 同内核）。回执＝四面（注册表行/项目行/容器/卷）逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree 零残留判据（UNKNOWN 不算清——销毁未全成/探查未成不冒充清，残留如实红、归收编通道）。物理销毁尽力而为不阻断记录删除（受理即删）。运维通道不经用户会话凭证——无凭证属主的账户项目照收（归属不查，签名面担保调用应用）。X-User-Id/X-User-Name 透传头落痕（append-only wsp_reclaim_actions，缺头落空 NULL——照 #489 清扫留痕口径；未成动作不留痕）。项目不存在 404 PRJ_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         */
+        post: operations["reclaimProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects/{id}/versions": {
         parameters: {
             query?: never;
@@ -2723,7 +2816,7 @@ export interface paths {
         };
         /**
          * PRD 读（后台面，工作区直读）
-         * @description 口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，ISO-8601 秒精度）——了解交付物内容。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分。归档项目照读（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）500 WSP_002
+         * @description 口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，ISO-8601 秒精度）——了解交付物内容。未产出期短路（#478）：prd_produced_at 未落直回 404 PRJ_015（不触工作区），标志已落才 exec 直读、标志在而文件缺同码兜底——均与项目不存在的 PRJ_001 区分。归档项目照读（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）500 WSP_002
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
@@ -4519,6 +4612,10 @@ export interface components {
             /** Format: int64 */
             volumeSizeBytes?: number;
             /** Format: date-time */
+            sampledAt?: string;
+            /** Format: date-time */
+            lostAt?: string;
+            /** Format: date-time */
             sealedAt?: string;
             archivePath?: string;
             /** Format: int64 */
@@ -4731,6 +4828,63 @@ export interface components {
              */
             reason?: string;
         };
+        ApiResponseBackofficeResourceSweepResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeResourceSweepResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeResourceSweepResponse: {
+            /** Format: date-time */
+            sweptAt?: string;
+            operatorId?: string;
+            operatorName?: string;
+            registryReachable?: boolean;
+            /** Format: date-time */
+            graceLine?: string;
+            /** Format: int32 */
+            sweptContainers?: number;
+            /** Format: int32 */
+            sweptVolumes?: number;
+            /** Format: int32 */
+            skippedCount?: number;
+            /** Format: int32 */
+            failedCount?: number;
+            items?: components["schemas"]["SweepItem"][];
+        };
+        SweepItem: {
+            kind?: string;
+            identifier?: string;
+            disposition?: string;
+            skipReason?: string;
+            /** Format: date-time */
+            resourceCreatedAt?: string;
+        };
+        ApiResponseBackofficeReclaimResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeReclaimResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeReclaimResponse: {
+            scope?: string;
+            projectId?: string;
+            workspaceId?: string;
+            runsStopped?: boolean;
+            container?: string;
+            volume?: string;
+            registryRow?: string;
+            projectRow?: string;
+            residueFree?: boolean;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            reclaimedAt?: string;
+        };
         UpdateProductionHandoffCommand: {
             contact?: string;
             nextStep?: string;
@@ -4791,6 +4945,11 @@ export interface components {
             /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理, 6=按张 */
             tokenKind?: number;
             /**
+             * @description 时段带（1=峰 2=谷；缺省或 null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）
+             * @example 1
+             */
+            band?: number;
+            /**
              * @description 每 token 单价（入参侧为 number；非负，0＝免费档。响应侧读回为十进制字符串——两侧类型有意不对称，照实各自呈现）
              * @example 0.00000132
              */
@@ -4814,6 +4973,12 @@ export interface components {
             /** Format: int32 */
             tokenKind?: number;
             tokenKindName?: string;
+            /**
+             * @description 时段带（1=峰 2=谷；null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）
+             * @example 1
+             */
+            band?: number;
+            bandName?: string;
             /**
              * @description 每 token 单价（响应侧为 string——精确十进制串交接，规避 BigDecimal 直出 JSON 落科学计数；开行/改价入参侧为 number，类型照实各自呈现、有意不做统一）
              * @example "0.00000132"
@@ -5407,6 +5572,10 @@ export interface components {
             /** Format: int64 */
             volumeSizeBytes?: number;
             /** Format: date-time */
+            sampledAt?: string;
+            /** Format: date-time */
+            lostAt?: string;
+            /** Format: date-time */
             sealedAt?: string;
             /** Format: int64 */
             archiveSizeBytes?: number;
@@ -5621,6 +5790,72 @@ export interface components {
             page?: number;
             /** Format: int32 */
             size?: number;
+        };
+        ApiResponseBackofficeResourceOverviewResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeResourceOverviewResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeResourceOverviewResponse: {
+            host?: components["schemas"]["HostFace"];
+            docker?: components["schemas"]["DockerFace"];
+            orphans?: components["schemas"]["OrphanFace"];
+            /** Format: int64 */
+            lostWorkspaceCount?: number;
+            /** Format: date-time */
+            sampledAt?: string;
+            lastSweep?: components["schemas"]["LastSweep"];
+        };
+        DockerFace: {
+            /** Format: int64 */
+            imageCount?: number;
+            /** Format: int64 */
+            imageSizeBytes?: number;
+            /** Format: int64 */
+            containerCount?: number;
+            /** Format: int64 */
+            containerSizeBytes?: number;
+            /** Format: int64 */
+            volumeCount?: number;
+            /** Format: int64 */
+            volumeSizeBytes?: number;
+            /** Format: int64 */
+            buildCacheCount?: number;
+            /** Format: int64 */
+            buildCacheSizeBytes?: number;
+        };
+        HostFace: {
+            path?: string;
+            /** Format: int64 */
+            totalBytes?: number;
+            /** Format: int64 */
+            usableBytes?: number;
+            /** Format: int64 */
+            usedBytes?: number;
+        };
+        LastSweep: {
+            /** Format: date-time */
+            sweptAt?: string;
+            operatorId?: string;
+            operatorName?: string;
+            registryReachable?: boolean;
+            /** Format: int32 */
+            sweptContainers?: number;
+            /** Format: int32 */
+            sweptVolumes?: number;
+            /** Format: int32 */
+            skippedCount?: number;
+            /** Format: int32 */
+            failedCount?: number;
+        };
+        OrphanFace: {
+            /** Format: int64 */
+            containerCount?: number;
+            /** Format: int64 */
+            volumeCount?: number;
         };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
@@ -6050,6 +6285,9 @@ export interface components {
             /** Format: int32 */
             tokenKind?: number;
             tokenKindName?: string;
+            /** Format: int32 */
+            band?: number;
+            bandName?: string;
             /** Format: int64 */
             tokens?: number;
         };
@@ -6137,6 +6375,17 @@ export interface components {
             };
             byModel?: components["schemas"]["ModelUsage"][];
             byAgentKind?: components["schemas"]["AgentKindUsage"][];
+            byModelCost?: components["schemas"]["ModelBandCost"][];
+        };
+        ModelBandCost: {
+            provider?: string;
+            model?: string;
+            /** Format: int32 */
+            band?: number;
+            bandName?: string;
+            cost?: {
+                [key: string]: number;
+            };
         };
         ApiResponsePageResponseBackofficeContractSummaryResponse: {
             /** Format: int32 */
@@ -7644,6 +7893,70 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
+    sweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeResourceSweepResponse"];
+                };
+            };
+        };
+    };
+    reclaimProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
+                };
+            };
+        };
+    };
+    reclaimWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
                 };
             };
         };
@@ -9190,6 +9503,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
+    resourceOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeResourceOverviewResponse"];
                 };
             };
         };

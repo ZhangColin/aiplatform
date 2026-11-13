@@ -336,7 +336,7 @@ public class DesignProcessAppService {
                 || item.getStatus() == DesignItemStatus.FAILED);
         if (runnable) {
             String firstRunId = EventsAppService.newRunId();
-            Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+            Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
                 try {
                     runDesignTrack(project, firstRunId);
                 }
@@ -344,6 +344,12 @@ public class DesignProcessAppService {
                     // 停止收口（#359 生成取消·设计轨同机制）：run-failed(stopped)
                     // 收口（残队不排空——同失败口径，随下次派发合并受理）
                     eventBridge.emitRunStopped(project, e.runId(), e.failure());
+                }
+                catch (RunShutdownException e) {
+                    // 关停收口（#477）：宽限窗内不拉起后续件——在途件保持待跑（中断
+                    // 可续跑态，不发终态事件），重启后重提意见续跑
+                    log.info("[design] 项目 {} 设计轨道因平台关停中断（runId={}）——在途件保持待跑",
+                            projectId, e.runId());
                 }
                 finally {
                     codingRunTrack.end(projectId);
@@ -362,13 +368,18 @@ public class DesignProcessAppService {
         }
         enqueueRevision(projectId, target, opinion, null);
         String firstRunId = EventsAppService.newRunId();
-        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
             try {
                 sweepQueuedRevisions(project, null, firstRunId);
             }
             catch (RunStoppedException e) {
                 // 停止收口（#359，同轨道位口径）
                 eventBridge.emitRunStopped(project, e.runId(), e.failure());
+            }
+            catch (RunShutdownException e) {
+                // 关停收口（#477）：中断可续跑态——不发终态事件，残队/在途件保持待受理
+                log.info("[design] 项目 {} 设计轨道因平台关停中断（runId={}）——残队保持待受理",
+                        projectId, e.runId());
             }
             finally {
                 codingRunTrack.end(projectId);
@@ -403,7 +414,7 @@ public class DesignProcessAppService {
             return null;
         }
         String firstRunId = EventsAppService.newRunId();
-        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
             try {
                 runRevision(project, item, feedback, divergence, firstRunId);
                 sweepQueuedRevisions(project, null, null);
@@ -411,6 +422,11 @@ public class DesignProcessAppService {
             catch (RunStoppedException e) {
                 // 停止收口（#359，同轨道位口径）
                 eventBridge.emitRunStopped(project, e.runId(), e.failure());
+            }
+            catch (RunShutdownException e) {
+                // 关停收口（#477）：中断可续跑态——不发终态事件，残队/在途件保持待受理
+                log.info("[design] 项目 {} 设计轨道因平台关停中断（runId={}）——残队保持待受理",
+                        projectId, e.runId());
             }
             finally {
                 codingRunTrack.end(projectId);

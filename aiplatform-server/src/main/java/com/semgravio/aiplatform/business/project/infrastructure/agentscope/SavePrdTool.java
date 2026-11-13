@@ -12,6 +12,9 @@ import reactor.core.publisher.Mono;
 
 import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem;
+import com.semgravio.aiplatform.base.agentscope.ReadinessAwaitingExecCommand;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
@@ -31,6 +34,11 @@ import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapt
  * （旧「确认此版 PRD 并生成 Demo」门退役）。仅随项目只读工作区注册（{@link
  * ProfileToolkitSupplier}，#86 主智能体对话姿态）。执行体阻塞（docker exec + 置位
  * 事务），框架 ToolExecutor 缺省 boundedElastic 调度，阻塞安全。</p>
+ *
+ * <p>落盘经 {@link ReadinessAwaitingExecCommand} 就绪感知执行（#62 同口径）：
+ * 工作区创建是异步置备（#58/#61「点创建即对话」），置备窗口期内调用本工具隐式
+ * 等待就绪再写——不裸撞「No such container」（2026-11-13 本地实录：镜像现场构建
+ * 拉长置备至 2m23s，savePrd 三连败判悬空）；置备失败/超时如实回错误结果。</p>
  */
 public class SavePrdTool extends ToolBase {
 
@@ -45,10 +53,11 @@ public class SavePrdTool extends ToolBase {
     private final DockerExecFilesystem.ExecCommand exec;
 
     public SavePrdTool(String artifactPath, String workspaceId, String containerName,
+            WorkspaceReadinessWaiter readinessWaiter,
             PrdArtifactAdapter artifactAdapter, PrdRevisionFacts prdRevisions) {
         this(artifactPath, workspaceId, artifactAdapter, prdRevisions,
-                new DockerExecFilesystem.DockerExecCommand(
-                        containerName, AgentWorkspace.ProjectDev.CONTAINER_ROOT));
+                ReadinessAwaitingExecCommand.dockerExec(containerName,
+                        WorkspaceId.of(workspaceId), readinessWaiter));
     }
 
     /** 执行缝注入构造（单测替身 ExecCommand）。 */

@@ -32,8 +32,9 @@ import io.agentscope.core.middleware.MiddlewareBase;
  * <p>verify 自决开关中间件（#442，#441-1）同只挂 <b>run 执行体</b>装配面：
  * 开关（executor 行 {@code verify_self_decision_enabled}，缺省 true＝自决开）
  * 经 {@link AgentConfigAppService#verifySelfDecisionEnabledOf} 每迭代动态查库——
- * 关闭态注入一条提示层收窄指令（每会话一次），生成过程中不自发委派 verify；
- * 缺省开＝零注入零扰动；fail-open 同 #437 口径。装配不进 agent 实例缓存键。</p>
+ * 关闭态注入一条提示层收窄指令（每轮〔派段/对话窗〕一次——判重载体 ctx 属性袋，
+ * #481），生成过程中不自发委派 verify；缺省开＝零注入零扰动；fail-open 同
+ * #437 口径。装配不进 agent 实例缓存键。</p>
  *
  * <p><b>每迭代配置读的短 TTL 进程内缓存（#453-2，两腿同挂）</b>：两个读腿
  * 各经一枚 {@link TtlCache}（TTL {@value #CONFIG_READ_TTL_SECONDS}s）——

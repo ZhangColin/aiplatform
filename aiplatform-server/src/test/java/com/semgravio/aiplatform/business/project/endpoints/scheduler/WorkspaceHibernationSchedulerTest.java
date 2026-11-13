@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -67,11 +68,16 @@ class WorkspaceHibernationSchedulerTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<Long, WorkspaceScanFact>> facts =
                 ArgumentCaptor.forClass(Map.class);
-        verify(hibernationAppService).scanOnce(facts.capture(), any(LocalDateTime.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Set<Long>> claimed = ArgumentCaptor.forClass(Set.class);
+        verify(hibernationAppService).scanOnce(facts.capture(), claimed.capture(),
+                any(LocalDateTime.class));
         assertThat(facts.getValue()).containsExactlyInAnyOrderEntriesOf(Map.of(
                 1L, new WorkspaceScanFact(false, true),
                 2L, new WorkspaceScanFact(false, false),
                 3L, new WorkspaceScanFact(true, true)));
+        // 认领集＝项目行在的工作区编号（#488 在册失联判定的正本，随扫描递入）
+        assertThat(claimed.getValue()).containsExactlyInAnyOrder(1L, 2L, 3L);
         // 同轮清扫闲置快照（同一闲置阈值）
         verify(snapshotAppService).sweepIdleViews(any(LocalDateTime.class),
                 eq(Duration.ofMinutes(60)));
@@ -83,7 +89,7 @@ class WorkspaceHibernationSchedulerTest {
 
         newScheduler().scanRound();
 
-        verify(hibernationAppService).scanOnce(anyMap(), any(LocalDateTime.class));
+        verify(hibernationAppService).scanOnce(anyMap(), any(), any(LocalDateTime.class));
         verify(snapshotAppService).sweepIdleViews(any(LocalDateTime.class),
                 eq(Duration.ofMinutes(60)));
     }
@@ -115,7 +121,7 @@ class WorkspaceHibernationSchedulerTest {
 
         newScheduler().run(mock(ApplicationArguments.class));
 
-        verify(hibernationAppService).scanOnce(anyMap(), any(LocalDateTime.class));
+        verify(hibernationAppService).scanOnce(anyMap(), any(), any(LocalDateTime.class));
     }
 
     // ---------- 测试数据 ----------

@@ -17,6 +17,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt
 import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
@@ -66,6 +67,7 @@ class ProfileToolkitSupplierTest {
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
             mock(WorkspaceLifecycleAppService.class);
+    private final WorkspaceReadinessWaiter readinessWaiter = mock(WorkspaceReadinessWaiter.class);
     private final ExternalContentFetcher externalContentFetcher = mock(ExternalContentFetcher.class);
     private final WebSearchProvider webSearchProvider = mock(WebSearchProvider.class);
     private final SkillProposalAdapter skillProposals = mock(SkillProposalAdapter.class);
@@ -85,7 +87,7 @@ class ProfileToolkitSupplierTest {
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
-                landedFiles, designSpecs, verificationFacts, agentConfigs);
+                landedFiles, designSpecs, verificationFacts, agentConfigs, readinessWaiter);
     }
 
     @Test
@@ -250,7 +252,8 @@ class ProfileToolkitSupplierTest {
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
-                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs);
+                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
+                readinessWaiter);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSedimentTool.NAME);
         String title = "缝测血统-" + slotKey;
@@ -322,7 +325,8 @@ class ProfileToolkitSupplierTest {
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
-                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs);
+                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
+                readinessWaiter);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;

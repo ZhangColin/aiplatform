@@ -18,6 +18,7 @@ import com.semgravio.aiplatform.base.workspace.application.dto.command.CreateWor
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
@@ -88,6 +89,7 @@ public class ProjectLifecycleAppService {
     private final OrderQueryAppService orderQueryAppService;
     private final GuestAppService guestAppService;
     private final TransactionTemplate transactionTemplate;
+    private final CodingRunTrack codingRunTrack;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                       WorkspaceConvergenceAppService workspaceConvergenceAppService,
@@ -108,7 +110,8 @@ public class ProjectLifecycleAppService {
                                       SedimentDraftAppService sedimentDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       GuestAppService guestAppService,
-                                      TransactionTemplate transactionTemplate) {
+                                      TransactionTemplate transactionTemplate,
+                                      CodingRunTrack codingRunTrack) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
         this.mainAgentAppService = mainAgentAppService;
@@ -129,6 +132,7 @@ public class ProjectLifecycleAppService {
         this.orderQueryAppService = orderQueryAppService;
         this.guestAppService = guestAppService;
         this.transactionTemplate = transactionTemplate;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -178,7 +182,7 @@ public class ProjectLifecycleAppService {
         } catch (RuntimeException e) {
             // 落库失败：回收已落定的工作区，不留与记录脱节的容器/卷（照片1b 兜底）
             log.error("项目记录入库失败，回收工作区 {}", workspace.workspaceId(), e);
-            destroyWorkspaceQuietly(workspace.workspaceId());
+            destroyWorkspaceForReclaim(workspace.workspaceId());
             throw e;
         }
 
@@ -342,15 +346,33 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 删除项目（真删级联）：工作区物理销毁（容器/卷，尽力而为）→ prj_* 行
-     * 删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用显式清，
-     * 尽力而为）→ 未终结技能草稿（#264 T6：只在途随删，终态留档、已晋升
-     * 库行是平台资产不动）与未终结沉淀草稿（#460 采集层不留僵尸行，同口径）清理
-     * → SSE workspace-destroyed。
+     * 删除项目（真删级联，用户面 DELETE——受理即删）：级联内核见
+     * {@link #deleteAndReport}（#490 起两级入口共用同一内核，回收事实弃之）。
      */
     public void delete(Long projectId) {
+        deleteAndReport(projectId);
+    }
+
+    /**
+     * 删除级联内核＋回收事实（#490 一键回收的项目级内核——用户面 {@link #delete}
+     * 与后台 reclaim 共用，非另写一套）：在飞 run 先级联停止（承 #477 停止面）
+     * → 工作区销毁（#485 终态一致内核尽力级联＋互斥面内三清校验，事实交回）
+     * → prj_* 行删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用
+     * 显式清，尽力而为）→ 未终结技能草稿（#264 T6）与未终结沉淀草稿（#460）清理
+     * → SSE workspace-destroyed → 项目行对账（四面之一）。
+     *
+     * @return 回收事实（在飞停止与否＋三清事实＋项目行清否＋工作区锚）——
+     *         {@code BackofficeReclaimAppService} 组报告与留痕的消费面
+     */
+    ReclaimFacts deleteAndReport(Long projectId) {
         Project project = requireProject(projectId);
-        destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
+        // 级联取消在飞任务（#477）：删除先经 #359 停止面置停＋cancel(true) 中断在途
+        // 执行——否则级联删库行＋容器后进程内任务仍存活，对着 No such container
+        // 反复自救 ~8 分钟（11-12 19:04 实录：僵尸烧 lane＋烧 token）。幂等：无在途
+        // 即无操作（不误伤他项目）
+        boolean runsStopped = codingRunTrack.requestStop(projectId);
+        ThreeCleanCheck threeClean =
+                destroyWorkspaceForReclaim(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
         // 派生 deleteBy 是「先查后 remove」，需在事务内执行（DesignProcessAppService
@@ -374,6 +396,17 @@ public class ProjectLifecycleAppService {
                 EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
                 EventsAppService.OWNER_GUEST_FIELD,
                 EventsAppService.ownerPayload(project.getOwnerGuestId())));
+        boolean projectRowClean = projectRepository.findById(projectId).isEmpty();
+        return new ReclaimFacts(runsStopped, threeClean, projectRowClean,
+                project.getWorkspaceId());
+    }
+
+    /**
+     * 回收面删除级联事实（#490）：四面报告与留痕行的原料——在飞停止、三清
+     * （销毁内核在互斥面内交回）、项目行清否、工作区锚。
+     */
+    record ReclaimFacts(boolean runsStopped, ThreeCleanCheck threeClean,
+            boolean projectRowClean, Long workspaceId) {
     }
 
     /**
@@ -431,13 +464,23 @@ public class ProjectLifecycleAppService {
 
     // ---------- 内部 ----------
 
-    /** 工作区销毁（尽力而为）：失败记日志不阻断——真删级联优先，物理残留可重试销毁。 */
-    private void destroyWorkspaceQuietly(String workspaceId) {
+    /**
+     * 工作区销毁（尽力＋尾部三清校验留痕，#485/ADR-0045；#490 起三清事实交回）：
+     * 销毁与收敛互斥双向串行（唤醒在途则等它落定再级联——交错不再留半删现场），
+     * 尾部对容器/卷/注册行三清校验照跑（有残留即 WARN 留痕，事实交回归调用方）。
+     * {@code destroyWorkspaceQuietly} 的「吞错即忘」口径退役：失败不再无声——
+     * 残留可观测、归扫描轮处置（项目行已删而注册行在 → #488 在册失联分级：物理
+     * 仍在只标记待人工裁决、物理已空卫生删行；注册行已删 → #486 无主收编）；本步
+     * 异常照旧不阻断真删级联（受理即删：项目记录照删、凭证即失效），三清以
+     * {@link ThreeCleanCheck#unprobed()} 交回（销毁未全成——状态未知不冒充清）。
+     */
+    private ThreeCleanCheck destroyWorkspaceForReclaim(String workspaceId) {
         try {
-            workspaceLifecycleAppService.destroy(workspaceId);
+            return workspaceLifecycleAppService.destroyForReclaim(workspaceId);
         } catch (RuntimeException e) {
-            log.warn("工作区 {} 物理销毁失败（记录照删，物理残留可重试销毁）：{}",
+            log.warn("工作区 {} 销毁未全成（尽力级联＋尾部三清校验已执行，残留可观测、归扫描轮处置——在册失联分级/无主收编）：{}",
                     workspaceId, e.getMessage());
+            return ThreeCleanCheck.unprobed();
         }
     }
 

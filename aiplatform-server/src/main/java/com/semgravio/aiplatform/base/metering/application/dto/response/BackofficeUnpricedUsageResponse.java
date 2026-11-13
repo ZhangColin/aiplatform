@@ -26,13 +26,17 @@ public record BackofficeUnpricedUsageResponse(
     }
 
     /**
-     * 未配价档位项（tokenKind 为 Integer code + tokenKindName 随附，#34 收敛房规）。
+     * 未配价档位项（tokenKind 为 Integer code + tokenKindName 随附，#34 收敛房规；
+     * band/bandName 随附 #499：事件时点归带，1=峰 2=谷，null＝不区分时段——通道无
+     * 生效规则行/按张档不受带影响）。
      */
     public record UnpricedTier(
             String provider,
             String model,
             Integer tokenKind,
             String tokenKindName,
+            Integer band,
+            String bandName,
             long tokens
     ) {
     }

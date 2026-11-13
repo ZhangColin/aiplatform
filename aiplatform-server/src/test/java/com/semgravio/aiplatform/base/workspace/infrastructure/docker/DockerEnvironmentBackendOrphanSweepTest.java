@@ -9,15 +9,19 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.OrphanSweepReport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 无主工作区容器清扫的 CLI 假面（#179 触发器）：「记录照删、物理尽力而为」的销毁
- * 撞 daemon 抖动窗留下的孤儿，休眠扫描只遍历注册表、永久不可见——清扫面按命名
- * 求差（在跑 {@code ws-<id>} 容器 ∩ 保留集外）、宽限线外才删（fork「先建容器、
- * 后落记录」窗口保护）。卷刻意不删（无主卷可能仍承载用户数据，人工/脚本处置）；
- * 快照容器（ws-*-snap-*）与命名形不符，天然不在本面。
+ * 无主工作区容器/卷收编的 CLI 假面（#179 触发器；#486 卷侧对称扩展，ADR-0045；
+ * #489 返回值扩为逐项处置报告）：「记录照删、物理尽力而为」的销毁撞 daemon
+ * 抖动窗留下的无主资源，休眠扫描只遍历注册表、永久不可见——收编面按命名求差
+ * （{@code ws-<id>} 容器／{@code vol-ws-<id>} 卷）、宽限线外才删（fork「先建
+ * 资源、后落记录」窗口保护）。准绳＝注册表唯一正本：在册（含休眠保卷，
+ * ADR-0016）跳过不入刀（报告内在册列示）；只按注册表准绳点名删（{@code
+ * docker volume rm <名>}），无 prune 类通配（红线）。快照容器（ws-*-snap-*）
+ * 与主命名形不符，天然不在本面。
  */
 class DockerEnvironmentBackendOrphanSweepTest {
 
@@ -63,16 +67,31 @@ class DockerEnvironmentBackendOrphanSweepTest {
     void given_orphan_containers_when_sweep_then_only_grace_expired_unregistered_removed() {
         ScriptedBackend backend = new ScriptedBackend();
 
-        int removed = backend.sweepOrphanWorkspaceContainers(
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceContainers(
                 List.of(42L), STARTED_BEFORE);
 
-        assertThat(removed).isEqualTo(1);
         // 宽限线外的无主容器删；宽限线内的、保留集内的、快照/非 ws 命名的不动
+        assertThat(report.sweptCount()).isEqualTo(1);
         assertThat(backend.commands).contains("docker rm -f ws-1");
         assertThat(backend.commands).noneMatch(c -> c.equals("docker rm -f ws-2"));
         assertThat(backend.commands).noneMatch(c -> c.equals("docker rm -f ws-42"));
         assertThat(backend.commands).noneMatch(c -> c.equals("docker rm -f ws-9-snap-1"));
         assertThat(backend.commands).noneMatch(c -> c.equals("docker rm -f other-app"));
+        // 逐项报告（#489）：主命名容器逐项列示——无主出窗已收编/无主在窗跳过/在册
+        // 跳过；快照与无关命名不进报告（不在本面）
+        assertThat(report.itemsOf(OrphanSweepReport.Kind.CONTAINER)).containsExactlyInAnyOrder(
+                new OrphanSweepReport.Item(OrphanSweepReport.Kind.CONTAINER, "ws-1",
+                        OrphanSweepReport.Disposition.SWEPT, null,
+                        STARTED_BEFORE.minusHours(4)),
+                new OrphanSweepReport.Item(OrphanSweepReport.Kind.CONTAINER, "ws-2",
+                        OrphanSweepReport.Disposition.SKIPPED,
+                        OrphanSweepReport.SkipReason.GRACE_WINDOW,
+                        STARTED_BEFORE.plusMinutes(30)),
+                new OrphanSweepReport.Item(OrphanSweepReport.Kind.CONTAINER, "ws-42",
+                        OrphanSweepReport.Disposition.SKIPPED,
+                        OrphanSweepReport.SkipReason.REGISTERED, null));
+        assertThat(report.items()).extracting(OrphanSweepReport.Item::identifier)
+                .doesNotContain("ws-9-snap-1", "other-app");
     }
 
     @Test
@@ -86,12 +105,17 @@ class DockerEnvironmentBackendOrphanSweepTest {
             }
         };
 
-        int removed = backend.sweepOrphanWorkspaceContainers(
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceContainers(
                 List.of(42L), STARTED_BEFORE);
 
-        assertThat(removed).isZero();
+        assertThat(report.sweptCount()).isZero();
         // 候选为空：连 inspect 都不发（静默轮询是常态，不给 daemon 加无谓负担）
         assertThat(backend.commands).noneMatch(c -> c.startsWith("docker inspect"));
+        // 在册项照常列示（跳过原因＝在册——报告解答「为什么这个容器还在」）
+        assertThat(report.items()).containsExactly(new OrphanSweepReport.Item(
+                OrphanSweepReport.Kind.CONTAINER, "ws-42",
+                OrphanSweepReport.Disposition.SKIPPED,
+                OrphanSweepReport.SkipReason.REGISTERED, null));
     }
 
     @Test
@@ -107,11 +131,16 @@ class DockerEnvironmentBackendOrphanSweepTest {
             }
         };
 
-        int removed = backend.sweepOrphanWorkspaceContainers(
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceContainers(
                 List.of(42L), STARTED_BEFORE);
 
-        assertThat(removed).isZero();
+        assertThat(report.sweptCount()).isZero();
         assertThat(backend.commands).noneMatch(c -> c.equals("docker rm -f ws-1"));
+        // 时刻解析不出＝如实跳过（报告给因，docker 回执原样不可判）
+        assertThat(report.items()).contains(new OrphanSweepReport.Item(
+                OrphanSweepReport.Kind.CONTAINER, "ws-1",
+                OrphanSweepReport.Disposition.SKIPPED,
+                OrphanSweepReport.SkipReason.TIMESTAMP_UNREADABLE, null));
     }
 
     @Test
@@ -129,22 +158,195 @@ class DockerEnvironmentBackendOrphanSweepTest {
             }
         };
 
-        int removed = backend.sweepOrphanWorkspaceContainers(
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceContainers(
                 List.of(42L), STARTED_BEFORE);
 
-        assertThat(removed).isEqualTo(1);
+        assertThat(report.sweptCount()).isEqualTo(1);
         assertThat(backend.commands).contains("docker rm -f ws-2");
         assertThat(backend.commands).noneMatch(c -> c.equals("docker rm -f ws-1"));
+        // 消失的候选如实不列（docker 无回执——不是被本面处置的）
+        assertThat(report.items()).extracting(OrphanSweepReport.Item::identifier)
+                .containsExactlyInAnyOrder("ws-2", "ws-42");
     }
 
     @Test
     void given_empty_registry_when_sweep_then_all_main_containers_are_orphans() {
         ScriptedBackend backend = new ScriptedBackend();
 
-        int removed = backend.sweepOrphanWorkspaceContainers(
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceContainers(
                 List.of(), STARTED_BEFORE);
 
-        assertThat(removed).isEqualTo(1);
+        assertThat(report.sweptCount()).isEqualTo(1);
         assertThat(backend.commands).contains("docker rm -f ws-1");
+    }
+
+    @Test
+    void given_remove_fails_when_sweep_then_item_marked_failed_not_swept() {
+        ScriptedBackend backend = new ScriptedBackend() {
+            @Override
+            ExecResult script(String command) {
+                if (command.equals("docker rm -f ws-1")) {
+                    // 点名删失败（占卷容器等）：如实记删除未成（下轮扫描再收），
+                    // 不虚报已收编
+                    return new ExecResult("", "Error: container is running", 1);
+                }
+                return super.script(command);
+            }
+        };
+
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceContainers(
+                List.of(42L), STARTED_BEFORE);
+
+        assertThat(report.sweptCount()).isZero();
+        assertThat(report.failedCount()).isEqualTo(1);
+        assertThat(report.items()).contains(new OrphanSweepReport.Item(
+                OrphanSweepReport.Kind.CONTAINER, "ws-1",
+                OrphanSweepReport.Disposition.FAILED, null,
+                STARTED_BEFORE.minusHours(4)));
+    }
+
+    // ---------- 无主卷收编（#486：#179 准绳对称扩卷侧，ADR-0045） ----------
+
+    /** 卷清单命令（假面锚点）：与容器清单同理，只列名。卷侧夹具复用容器侧的
+     * WS_1_STARTED/WS_2_STARTED 时刻串——同一 RFC3339 时刻形，卷回执同形可共用。 */
+    private static final String VOLUME_LS = "docker volume ls --format {{.Name}}";
+
+    /** 无主卷假面（两个无主＋保留集内＋无关卷）；inspect 回执＝卷名|创建时刻。 */
+    private static class VolumeScriptedBackend extends ScriptedBackend {
+        @Override
+        ExecResult script(String command) {
+            if (command.equals(VOLUME_LS)) {
+                // vol-ws-1（判删：宽限线前）＋vol-ws-2（判留：线后）＋保留集内
+                // vol-ws-42＋无关卷
+                return new ExecResult("vol-ws-1\nvol-ws-2\nvol-ws-42\nother-vol\n", "", 0);
+            }
+            if (command.startsWith("docker volume inspect")) {
+                return new ExecResult(
+                        "vol-ws-1|" + WS_1_STARTED + "\nvol-ws-2|" + WS_2_STARTED + "\n", "", 0);
+            }
+            return super.script(command);
+        }
+    }
+
+    @Test
+    void given_orphan_volumes_when_sweep_then_only_grace_expired_unregistered_removed() {
+        VolumeScriptedBackend backend = new VolumeScriptedBackend();
+
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceVolumes(List.of(42L), STARTED_BEFORE);
+
+        assertThat(report.sweptCount()).isEqualTo(1);
+        // 宽限线外的无主卷点名删；宽限线内的、保留集内的、非 vol-ws 命名的不动；
+        // 只按注册表准绳点名删——绝不 prune 类通配（AC 红线）
+        assertThat(backend.commands).contains("docker volume rm vol-ws-1");
+        assertThat(backend.commands).noneMatch(c -> c.equals("docker volume rm vol-ws-2"));
+        assertThat(backend.commands).noneMatch(c -> c.equals("docker volume rm vol-ws-42"));
+        assertThat(backend.commands).noneMatch(c -> c.contains("prune"));
+        assertThat(backend.commands).noneMatch(c -> c.contains("system df"));
+        // 逐项报告（#489）：无主出窗已收编/无主在窗跳过/在册跳过各列示
+        assertThat(report.itemsOf(OrphanSweepReport.Kind.VOLUME)).containsExactlyInAnyOrder(
+                new OrphanSweepReport.Item(OrphanSweepReport.Kind.VOLUME, "vol-ws-1",
+                        OrphanSweepReport.Disposition.SWEPT, null,
+                        STARTED_BEFORE.minusHours(4)),
+                new OrphanSweepReport.Item(OrphanSweepReport.Kind.VOLUME, "vol-ws-2",
+                        OrphanSweepReport.Disposition.SKIPPED,
+                        OrphanSweepReport.SkipReason.GRACE_WINDOW,
+                        STARTED_BEFORE.plusMinutes(30)),
+                new OrphanSweepReport.Item(OrphanSweepReport.Kind.VOLUME, "vol-ws-42",
+                        OrphanSweepReport.Disposition.SKIPPED,
+                        OrphanSweepReport.SkipReason.REGISTERED, null));
+    }
+
+    @Test
+    void given_created_at_with_local_zone_offset_when_volume_sweep_then_still_judged() {
+        // docker volume inspect 的 CreatedAt 在部分 daemon 上带本地时区偏移（Go
+        // time.String 形如 2026-11-03T16:00:00.5+08:00）——按带偏移 ISO-8601 解析，
+        // 不因「解析不出」误漏删（宽限线前 4 小时的真无主）
+        String offsetForm = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+                .withZone(ZoneId.systemDefault())
+                .format(STARTED_BEFORE.minusHours(4).atZone(ZoneId.systemDefault()).toInstant());
+        VolumeScriptedBackend backend = new VolumeScriptedBackend() {
+            @Override
+            ExecResult script(String command) {
+                if (command.startsWith("docker volume inspect")) {
+                    return new ExecResult("vol-ws-1|" + offsetForm + "\n", "", 0);
+                }
+                return super.script(command);
+            }
+        };
+
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceVolumes(List.of(42L), STARTED_BEFORE);
+
+        assertThat(report.sweptCount()).isEqualTo(1);
+        assertThat(backend.commands).contains("docker volume rm vol-ws-1");
+    }
+
+    @Test
+    void given_no_unregistered_volumes_when_sweep_then_no_inspect_no_remove() {
+        VolumeScriptedBackend backend = new VolumeScriptedBackend() {
+            @Override
+            ExecResult script(String command) {
+                return command.equals(VOLUME_LS)
+                        ? new ExecResult("vol-ws-42\nother-vol\n", "", 0)
+                        : super.script(command);
+            }
+        };
+
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceVolumes(List.of(42L), STARTED_BEFORE);
+
+        assertThat(report.sweptCount()).isZero();
+        // 候选为空：连 inspect 都不发（常态静默轮询，不给 daemon 加无谓负担）
+        assertThat(backend.commands).noneMatch(c -> c.startsWith("docker volume inspect"));
+        // 在册项照常列示（休眠保卷是用户数据 ADR-0016——跳过原因＝在册）
+        assertThat(report.items()).containsExactly(new OrphanSweepReport.Item(
+                OrphanSweepReport.Kind.VOLUME, "vol-ws-42",
+                OrphanSweepReport.Disposition.SKIPPED,
+                OrphanSweepReport.SkipReason.REGISTERED, null));
+    }
+
+    @Test
+    void given_unparseable_created_at_when_volume_sweep_then_skipped_not_removed() {
+        VolumeScriptedBackend backend = new VolumeScriptedBackend() {
+            @Override
+            ExecResult script(String command) {
+                if (command.startsWith("docker volume inspect")) {
+                    // 创建时刻解析不出：无从判宽限，宁可漏删不误杀窗口内新建资源
+                    return new ExecResult("vol-ws-1|<invalid>\n", "", 0);
+                }
+                return super.script(command);
+            }
+        };
+
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceVolumes(List.of(42L), STARTED_BEFORE);
+
+        assertThat(report.sweptCount()).isZero();
+        assertThat(backend.commands).noneMatch(c -> c.equals("docker volume rm vol-ws-1"));
+        assertThat(report.items()).contains(new OrphanSweepReport.Item(
+                OrphanSweepReport.Kind.VOLUME, "vol-ws-1",
+                OrphanSweepReport.Disposition.SKIPPED,
+                OrphanSweepReport.SkipReason.TIMESTAMP_UNREADABLE, null));
+    }
+
+    @Test
+    void given_candidate_vanished_between_ls_and_inspect_when_volume_sweep_then_others_removed() {
+        VolumeScriptedBackend backend = new VolumeScriptedBackend() {
+            @Override
+            ExecResult script(String command) {
+                if (command.startsWith("docker volume inspect")) {
+                    // vol-ws-1 在 ls 与 inspect 之间消失：docker 点名 stderr、stdout
+                    // 只含拿到的——幸存候选（vol-ws-2，线前）照常收编
+                    return new ExecResult("vol-ws-2|" + WS_1_STARTED + "\n",
+                            "Error: No such volume: vol-ws-1", 1);
+                }
+                return super.script(command);
+            }
+        };
+
+        OrphanSweepReport report = backend.sweepOrphanWorkspaceVolumes(List.of(42L), STARTED_BEFORE);
+
+        assertThat(report.sweptCount()).isEqualTo(1);
+        assertThat(backend.commands).contains("docker volume rm vol-ws-2");
+        assertThat(backend.commands).noneMatch(c -> c.equals("docker volume rm vol-ws-1"));
+        assertThat(report.items()).extracting(OrphanSweepReport.Item::identifier)
+                .containsExactlyInAnyOrder("vol-ws-2", "vol-ws-42");
     }
 }

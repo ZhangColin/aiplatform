@@ -11,7 +11,7 @@ import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
-import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceFreshReads;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -36,28 +36,44 @@ public class WorkspaceReadinessWaiter {
      */
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 
-    private final WorkspaceRepository workspaceRepository;
+    private final WorkspaceFreshReads freshReads;
     private final Duration timeout;
     private final Duration pollInterval;
 
     @Autowired
-    public WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository,
+    public WorkspaceReadinessWaiter(WorkspaceFreshReads freshReads,
             WorkspaceProperties properties) {
-        this(workspaceRepository, properties.getReadinessTimeout(), POLL_INTERVAL);
+        this(freshReads, properties.getReadinessTimeout(), POLL_INTERVAL);
     }
 
     /** 测试构造：注入短超时/间隔以验收收敛（生产走 readiness-timeout 配置/500ms）。 */
-    WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository,
+    WorkspaceReadinessWaiter(WorkspaceFreshReads freshReads,
                              Duration timeout, Duration pollInterval) {
-        this.workspaceRepository = workspaceRepository;
+        this.freshReads = freshReads;
         this.timeout = timeout;
         this.pollInterval = pollInterval;
+    }
+
+    /**
+     * 按标识取「已就绪」的工作区（只有 workspaceId 的入口——智能体工作区工具装配面）：
+     * 独立读装载后走 {@link #awaitReady(Workspace)} 同一收敛环。不存在抛 WSP_001。
+     * 独立命名不加 awaitReady 重载：既有调用/测试存在 {@code awaitReady(null)} 形态，
+     * 重载会引入 null 二义。
+     */
+    public Workspace awaitReadyById(WorkspaceId workspaceId) {
+        Workspace current = freshReads.findFreshById(workspaceId.id())
+                .orElseThrow(() -> new ApplicationException(WorkspaceMessage.WORKSPACE_NOT_FOUND));
+        return awaitReady(current);
     }
 
     /**
      * 取「已就绪」的工作区：READY 即回（句柄带真实端口）；PROVISIONING 轮询至 READY；
      * FAILED 抛 WSP_010（置备已败，不会就绪）；超时抛 WSP_011（不静默悬挂）。工作区在
      * 等待中被删则抛 WSP_001（404）。
+     *
+     * <p>轮询读必须走 {@link WorkspaceFreshReads 独立读}（#476）：普通
+     * {@code findById} 在调用方持久化上下文里命中一级缓存不发 SQL，等不到外部
+     * 翻转。机理与全史见 CONTEXT.md「独立读」词条。</p>
      */
     public Workspace awaitReady(Workspace workspace) {
         WorkspaceId workspaceId = workspace.workspaceId();
@@ -76,7 +92,7 @@ public class WorkspaceReadinessWaiter {
                 throw new ApplicationException(WorkspaceMessage.WORKSPACE_PROVISION_TIMEOUT);
             }
             sleep();
-            current = workspaceRepository.findById(workspaceId.id())
+            current = freshReads.findFreshById(workspaceId.id())
                     .orElseThrow(() -> new ApplicationException(WorkspaceMessage.WORKSPACE_NOT_FOUND));
         }
     }

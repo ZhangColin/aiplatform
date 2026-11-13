@@ -107,6 +107,10 @@ class DispatchAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     /** 脚本化分类（classify-* 会话回放标签；其余会话按普通回复）。同测重打桩时
@@ -417,6 +421,10 @@ class DispatchAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command == null) {

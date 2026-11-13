@@ -96,11 +96,11 @@ class WorkspacePropertiesTest {
         assertThat(bound.getPreviewScheme()).isEqualTo("https");
     }
 
-    /** #172 封存默认值：阈值 30 天、目录 seal-archives、就绪等待 10 分钟。 */
+    /** #172/#496 封存默认值：阈值 1 天（#496 自 30 天收紧）、目录 seal-archives、就绪等待 10 分钟。 */
     @Test
-    void given_default_properties_when_seal_then_30d_default_dir_and_10m_readiness() {
+    void given_default_properties_when_seal_then_1d_default_dir_and_10m_readiness() {
         WorkspaceProperties properties = new WorkspaceProperties();
-        assertThat(properties.getSealThreshold()).isEqualTo(Duration.ofDays(30));
+        assertThat(properties.getSealThreshold()).isEqualTo(Duration.ofDays(1));
         assertThat(properties.getSealArchiveDir()).isEqualTo("seal-archives");
         assertThat(properties.getReadinessTimeout()).isEqualTo(Duration.ofMinutes(10));
     }

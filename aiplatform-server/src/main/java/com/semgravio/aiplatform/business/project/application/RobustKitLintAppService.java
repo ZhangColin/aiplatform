@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
  * 执行、违规清单喂回执行体修一轮）：新基座工作区（健壮件在场探针判据，#421）的
  * 编码 run 收口扫描，判据两档——
  * <ul>
- * <li><b>强制档</b>（{@code mandatory}）：数据访问与外部调用的<b>裸客户端直用</b>
+ * <li><b>强制档</b>（{@code mandatory}）：数据访问与 HTTP 调用的<b>裸客户端直用</b>
  * ——裸 pg/redis 客户端（{@code new Pool/Client/Redis}、{@code createClient}）与
  * 裸 {@code fetch}。修不完走收口拒绝回路（尝试环结构性拒绝、段级自愈升档兜底
  * ——判定归 {@code CoderRunAttempts}，本件只出事实）。</li>
@@ -269,7 +269,7 @@ public class RobustKitLintAppService {
      */
     public static String rejectionReceipt(Map<String, Object> payload) {
         StringBuilder receipt = new StringBuilder(
-                "基座 lint 强制档未过（收口被拒）：数据访问与外部调用的裸客户端直用"
+                "基座 lint 强制档未过（收口被拒）：数据访问与 HTTP 调用（含页面调自家 /api）的裸客户端直用"
                         + "修不完——强制档违规是收口硬门（预置档不拦收口）。改走基座预置件"
                         + "（src/lib/robust，入口 src/lib/db.ts、src/lib/http.ts 已预置"
                         + "——件用法细则见工作区 AGENTS.md 本栈写法规则节）"
@@ -310,8 +310,9 @@ public class RobustKitLintAppService {
         }
         else if (content.contains("fetch(")) {
             rule = RULE_BARE_FETCH;
-            message = "裸 fetch——外部 HTTP 一律走 src/lib/robust/http 的 httpFetch/httpJson"
-                    + "（或预置入口 src/lib/http.ts；默认超时＋错误归一），不用裸 fetch";
+            message = "裸 fetch——任何 HTTP 调用（含页面调自家 /api）一律走 src/lib/robust/http"
+                    + " 的 httpFetch/httpJson（或预置入口 src/lib/http.ts；默认超时＋错误归一），"
+                    + "不用裸 fetch";
         }
         else {
             rule = RULE_BARE_DB_CLIENT;

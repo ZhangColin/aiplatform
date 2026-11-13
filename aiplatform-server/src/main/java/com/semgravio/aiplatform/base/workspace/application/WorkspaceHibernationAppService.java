@@ -2,10 +2,11 @@ package com.semgravio.aiplatform.base.workspace.application;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import cn.hutool.core.collection.CollUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -59,47 +60,63 @@ public class WorkspaceHibernationAppService {
     private final SealPackageStore sealPackageStore;
     private final TransactionTemplate transactionTemplate;
     private final WorkspaceProperties properties;
+    private final WorkspaceObservationSamplingAppService observationSampling;
+    private final WorkspaceDetachmentAppService detachment;
 
     /**
-     * 孤儿容器清扫宽限（#179 触发器）：新建资源可能尚在「容器已建、记录未落」窗口
-     * （fork 先建容器后落记录），早于「本轮时刻减本宽限」启动的无主容器才删——
-     * 与 clean-ws-residue.sh 的 GRACE_MINUTES 同口径（10 分钟）。
+     * 无主收编宽限窗（#179 容器侧先行、#486 卷侧对称，ADR-0045 双闸之一）：新建
+     * 资源可能尚在「资源已建、记录未落」窗口（fork 先建容器/卷后落记录），早于
+     * 「本轮时刻减本宽限」创建/启动的无主资源才收编——与 clean-ws-residue.sh 的
+     * GRACE_MINUTES 同口径（10 分钟）。#489 手动清扫面（resources/sweep）复用
+     * 同一收编实现与同一宽限（包内共享常量，准绳不两套）。
      */
-    private static final Duration ORPHAN_SWEEP_GRACE = Duration.ofMinutes(10);
+    static final Duration ORPHAN_SWEEP_GRACE = Duration.ofMinutes(10);
 
     public WorkspaceHibernationAppService(EnvironmentBackend environmentBackend,
             WorkspaceRepository workspaceRepository,
             WorkspaceConvergenceAppService convergence,
             SealPackageStore sealPackageStore,
             TransactionTemplate transactionTemplate,
-            WorkspaceProperties properties) {
+            WorkspaceProperties properties,
+            WorkspaceObservationSamplingAppService observationSampling,
+            WorkspaceDetachmentAppService detachment) {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
         this.convergence = convergence;
         this.sealPackageStore = sealPackageStore;
         this.transactionTemplate = transactionTemplate;
         this.properties = properties;
+        this.observationSampling = observationSampling;
+        this.detachment = detachment;
     }
 
     /**
      * 单轮扫描（定时器与启动对账直调；测试直调不等真实定时）：遍历全部工作区逐个
-     * 收敛，返回动作数（观测/日志用）；每轮末尾顺带无主容器清扫（#179 触发器——
-     * 销毁「记录照删、物理尽力而为」撞 daemon 抖动窗的泄漏，休眠面只看注册表，
-     * 无主容器永久不可见）。单条异常不炸整轮（尽力而为，下轮再试）。
-     * 总开关（{@link WorkspaceProperties#isHibernationEnabled()}）由本入口自持
-     * （#197）：关闭即静默返回——业务侧调度器不再跨域读此开关，只把消费方事实
-     * 随扫描递入。
+     * 收敛，返回动作数（观测/日志用）；每轮末尾顺带无主收编（#179 容器侧先行、
+     * #486 卷侧对称，ADR-0045——销毁「记录照删、物理尽力而为」撞 daemon 抖动窗
+     * 的泄漏，休眠面只看注册表，无主资源永久不可见）。双闸：新建宽限窗（{@link
+     * #ORPHAN_SWEEP_GRACE}）＋注册表不可达宁可漏删——{@code findAll} 抛出即整轮
+     * 中止（收编不发：保留集无从构成时绝不按「全部无主」动手）。单条异常不炸
+     * 整轮（尽力而为，下轮再试）。收编之后接在册失联分级处置（#488，ADR-0045：
+     * 「在册但项目行已删」形态 #486 明确留在保留集不动——本面按物理在场与否分级，
+     * 物理资源仍在只标记待人工裁决、物理已空删行做注册表卫生；认领集由组合方随
+     * 扫描递入，照 {@code WorkspaceScanFact} 先例 base 不反向依赖 business）。
+     * 轮末顺带请求占用采样轮（#487：实态/卷用量采样落库——观测读面零 docker
+     * 调用；采样后台旁路进行，不占本轮时序）。总开关（{@link
+     * WorkspaceProperties#isHibernationEnabled()}）由本入口自持（#197）：关闭即
+     * 静默返回——业务侧调度器不再跨域读此开关，只把消费方事实随扫描递入。
      */
-    public int scanOnce(Map<Long, WorkspaceScanFact> facts, LocalDateTime now) {
+    public int scanOnce(Map<Long, WorkspaceScanFact> facts, Set<Long> claimedWorkspaceIds,
+            LocalDateTime now) {
         if (!properties.isHibernationEnabled()) {
             return 0;   // 总开关关闭（#197 内移）
         }
         Duration threshold = properties.getIdleThreshold();
         Duration sealThreshold = properties.getSealThreshold();
         int acted = 0;
-        Set<Long> registeredIds = new HashSet<>();
+        List<Workspace> registered = CollUtil.newArrayList();
         for (Workspace workspace : workspaceRepository.findAll()) {
-            registeredIds.add(workspace.getId());
+            registered.add(workspace);
             if (workspace.getKind() != EnvKind.DEV
                     || workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
                 continue;   // 非 DEV 不入休眠面（TEST/PROD 占位）；在途置备/唤醒不扰
@@ -114,24 +131,51 @@ public class WorkspaceHibernationAppService {
                         workspace.workspaceId().value(), e);
             }
         }
+        Set<Long> registeredIds = CollUtil.newHashSet(
+                registered.stream().map(Workspace::getId).toList());
         sweepOrphanContainers(registeredIds, now);
+        sweepOrphanVolumes(registeredIds, now);
+        // #488 在册失联分级：收编之后（在册行不进收编面——两清单口径分离）
+        detachment.reconcileDetached(registered, claimedWorkspaceIds, now);
+        // #487 占用采样挂钩：末尾请求采样轮（提交即返回，后台单线程旁路进行——
+        // du 全卷是秒级重探查，绝不进主流程时序；在途让路不排队，下轮扫描再请求）
+        observationSampling.requestRound();
         return acted;
     }
 
     /**
-     * 孤儿容器清扫（#179 触发器）：保留集 = 本轮注册表全量编号（含非 DEV 行——保留
+     * 无主容器收编（#179 触发器）：保留集 = 本轮注册表全量编号（含非 DEV 行——保留
      * 集只看「容器有没有主」，与休眠判定无关）；宽限线 = 本轮时刻减 {@link
      * #ORPHAN_SWEEP_GRACE}。尽力而为：单轮失败记日志，下轮再收。
      */
     private void sweepOrphanContainers(Set<Long> registeredIds, LocalDateTime now) {
         try {
             int swept = environmentBackend.sweepOrphanWorkspaceContainers(
-                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE));
+                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE)).sweptCount();
             if (swept > 0) {
-                log.info("[workspace] 孤儿容器清扫：{} 个在跑容器库无记录已删（卷保留）", swept);
+                log.info("[workspace] 无主容器收编：{} 个在跑容器库无记录已删（卷按准绳另收）", swept);
             }
         } catch (RuntimeException e) {
-            log.warn("[workspace] 孤儿容器清扫未成（下轮再试）", e);
+            log.warn("[workspace] 无主容器收编未成（下轮再试）", e);
+        }
+    }
+
+    /**
+     * 无主卷收编（#486，ADR-0045：#179 准绳对称扩卷侧）：保留集 = 注册表全量编号
+     * ——在册一律不动（休眠保卷是用户数据 ADR-0016；「在册但项目行已删」形态归
+     * {@link WorkspaceDetachmentAppService} 轮末分级处置，#488）；宽限线与容器侧
+     * 同一口径。卷在容器之后收（占卷容器在场则卷本轮删不动，下轮再收——与销毁
+     * 级联同序）。尽力而为：单轮失败记日志，下轮再收。
+     */
+    private void sweepOrphanVolumes(Set<Long> registeredIds, LocalDateTime now) {
+        try {
+            int swept = environmentBackend.sweepOrphanWorkspaceVolumes(
+                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE)).sweptCount();
+            if (swept > 0) {
+                log.info("[workspace] 无主卷收编：{} 个卷库无记录已删（注册表准绳点名删，非 prune）", swept);
+            }
+        } catch (RuntimeException e) {
+            log.warn("[workspace] 无主卷收编未成（下轮再试）", e);
         }
     }
 

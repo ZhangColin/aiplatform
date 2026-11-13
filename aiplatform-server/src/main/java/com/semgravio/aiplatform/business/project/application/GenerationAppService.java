@@ -504,7 +504,7 @@ public class GenerationAppService {
             基座预置横切健壮件——行为契约内置、长相吃项目设计 token、文案可覆盖。这些能力直接用预置件，不自己手写；登录页面/流程/角色模型是功能域，自己写。
 
             - 数据访问（pg/redis）一律走 src/lib/robust/data-access：query（超时＋瞬时错误重试）、cacheGet / cacheSet（redis 恒降级——读挂了返回 null、写挂了返回 false，不抛不挂死）。不 new Pool、createClient 裸用客户端。入口 src/lib/db.ts 已预置（本件单例的 re-export——import 即用），不要自建数据访问文件。示例：const rows = await query('SELECT * FROM orders WHERE user_id = $1', [userId])。
-            - 外部 HTTP 一律走 src/lib/robust/http 的 httpFetch / httpJson：默认超时＋错误归一为 HttpError（kind: timeout / network / http / parse，按 kind 分流），GET 缺省重试一次、副作用方法不重试。不用裸 fetch。入口 src/lib/http.ts 已预置（本件的 re-export——import 即用），不要自建请求封装文件。
+            - 任何 HTTP 调用（含页面/组件调自家 /api 路由）一律走 src/lib/robust/http 的 httpFetch / httpJson：默认超时＋错误归一为 HttpError（kind: timeout / network / http / parse，按 kind 分流），GET 缺省重试一次、副作用方法不重试。不用裸 fetch——调自家 /api 也是 HTTP 调用、页面与组件代码里同样不出现裸 fetch。入口 src/lib/http.ts 已预置（本件的 re-export——import 即用），不要自建请求封装文件。
             - 页面加载/空/错三态用 src/components/robust/AsyncSection（status: loading / empty / error / ready，onRetry 挂重试），页面外层包 src/components/robust/ErrorBoundary（渲染崩溃兜底、resetKey 换路由自动复位）。文案默认可覆盖（loadingText / emptyText / errorTitle / retryText 等 props），样式只引用语义 token 类。
             - 会话与密码用 src/lib/robust/session：createSession（route handler / server action 语境）、getSession（redis 挂了降级 null——受保护页照常判未登录）、destroySession、hashPassword / verifyPassword（scrypt）。不手写 cookie 会话、不裸存密码。入口 src/lib/auth.ts 已预置（本件的 re-export——import 即用），不要自建会话存取文件。
             - 测试：测试跑道已预置（vitest），测试文件与源码同目录放 *.test.ts(x)，pnpm test 直跑——给业务功能补行为契约测试（成功路径与失败/降级路径都测）。""";
@@ -872,7 +872,7 @@ public class GenerationAppService {
         // 跑完收口绑本锚（此后新版记行不漂移旧版关联）；无版本记行（legacy/记行失败）
         // 为 null
         Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
-        Future<?> trackTask = sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId,
+        Future<?> trackTask = sessionExecutor.submitGeneration(CoderRunAttempts.SESSION_PREFIX + projectId,
                 () -> {
                     boolean trackReturned = false;
                     try {
@@ -887,6 +887,13 @@ public class GenerationAppService {
                         // 时消化，不自锁
                         terminalFailureScenes.put(projectId, STOP_SCENE);
                         eventBridge.emitRunStopped(project, e.runId(), e.failure());
+                    }
+                    catch (RunShutdownException e) {
+                        // 关停收口（#477）：宽限窗内不拉起后续片——在途段保持待跑
+                        //（中断可续跑态，不落失败、不发终态事件——进程正死，留痕只
+                        // 日志），重启后「继续生成」断点续跑
+                        log.info("[generate] 项目 {} 生成轨道因平台关停中断（runId={}，本场累计与逐尝试账见 failure 面）"
+                                + "——在途段保持待跑，重启后可断点续跑", projectId, e.runId());
                     }
                     finally {
                         codingRunTrack.end(projectId);
@@ -1302,6 +1309,10 @@ public class GenerationAppService {
                     // 有续派意义——整轨即呈生成中断（generated_at 不落位）
                     return;
                 }
+                // #477 重派上限：通道全死的秒败终态不续派后续片（停派判定单点）
+                if (stopTrackIfChannelDead(projectId, ord, result)) {
+                    return;
+                }
                 // #429 片失败不拖垮整轨：首片（界面先行）失败不返回——后续波里依赖
                 // 仍全收口的片照常续派；依赖本片的片被阻塞不派（波内依赖判定的事实源）
                 continue;
@@ -1367,6 +1378,10 @@ public class GenerationAppService {
                     eventBridge.emitRunFailed(project, runId, result.failure());
                     waveArchiveSerial(projectId, firstRunId, waveNo, runnable, wave.size(),
                             waveStartedAt, ord, runId, false);
+                    // #477 重派上限：通道全死的秒败终态不续派后续片（停派判定单点）
+                    if (stopTrackIfChannelDead(projectId, ord, result)) {
+                        return;
+                    }
                     // #429 片失败不拖垮整轨：不返回——后续波里依赖仍全收口的片照常
                     // 续派（与并行波同口径）；依赖本片的片被阻塞不派，全轨无可续派
                     // 时轨道尾呈「生成中断」
@@ -1487,6 +1502,10 @@ public class GenerationAppService {
                     // （generated_at 不落位），AC3「失败续跑语义不变」
                     return;
                 }
+                // #477 重派上限：通道全死的秒败终态不续派后续片（停派判定单点）
+                if (stopTrackIfChannelDead(projectId, ord, result)) {
+                    return;
+                }
                 // #429 片失败不拖垮整轨：不返回——后续依赖仍全收口的片照常续派；
                 // 依赖本片的片上方依赖判定跳过不派，全轨无可续派时轨道尾呈「生成中断」
                 continue;
@@ -1542,6 +1561,24 @@ public class GenerationAppService {
     /** 依赖是否全部已收口（#351 并行波的运行门槛：被失败片阻塞的片不进波）。 */
     private boolean depsAllClosed(int ord, BuildPlan plan, Set<Integer> closedOrds) {
         return plan.dependsOn(ord - 1).stream().allMatch(closedOrds::contains);
+    }
+
+    /**
+     * 通道全死的秒败终态停派判定（#477 重派上限，「转终态→重派→秒败」循环的治）
+     * ：整场 run 全尝试 {@code channelInstant}（AgentTurnFailure 且 llmMs=0——未发生
+     * 任何真实模型调用，见 {@link CoderRunAttempts#instantTerminalFailure}）即停派
+     * 后续片、返回 true（调用方整轨收工——后续片保持待跑，通道恢复后「继续生成」
+     * 续跑）；有真实模型工作的失败返回 false（#429 失败片跳过不拖垮整轨口径不变）。
+     * 单会话轨/序前段/串行波三派发环共用。
+     */
+    private boolean stopTrackIfChannelDead(Long projectId, int ord,
+            CoderRunAttempts.RunResult result) {
+        if (!CoderRunAttempts.instantTerminalFailure(result.failure())) {
+            return false;
+        }
+        log.info("[generate] 项目 {} 片 {} 通道级秒败终态（全尝试无真实模型调用）——"
+                + "整轨停派，后续片保持待跑（通道恢复后「继续生成」续跑）", projectId, ord);
+        return true;
     }
 
     /**

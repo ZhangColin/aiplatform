@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,10 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
@@ -35,8 +40,10 @@ import com.semgravio.aiplatform.base.skills.domain.repository.SkillStore;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
+import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
+import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.business.order.domain.aggregate.Order;
 import com.semgravio.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
@@ -77,6 +84,10 @@ class ProjectLifecycleAppServiceTest {
 
     @Autowired
     private ProjectLifecycleAppService appService;
+
+    /** 停止面（#477 删除级联取消的断言面——真 bean，begin/stopRequested 公开口）。 */
+    @Autowired
+    private CodingRunTrack codingRunTrack;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -121,6 +132,22 @@ class ProjectLifecycleAppServiceTest {
     /** 知识端口 mock（删除级联清理验证）。 */
     @MockitoBean
     private KnowledgePort knowledgePort;
+
+    /** 销毁失败留痕的观测面（#485）：本服务日志挂 ListAppender 断言 WARN。 */
+    private final Logger lifecycleLogger =
+            (Logger) org.slf4j.LoggerFactory.getLogger(ProjectLifecycleAppService.class);
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+    @BeforeEach
+    void attachAppender() {
+        appender.start();   // AppenderBase 未 start 时 doAppend 静默丢弃
+        lifecycleLogger.addAppender(appender);
+    }
+
+    @AfterEach
+    void detachAppender() {
+        lifecycleLogger.detachAppender(appender);
+    }
 
     @AfterEach
     void tearDown() {
@@ -255,7 +282,7 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.statusName()).isEqualTo("已归档");
         assertThat(response.archived()).isTrue();
         // 归档不清工作区
-        verify(workspaceLifecycleAppService, never()).destroy(anyString());
+        verify(workspaceLifecycleAppService, never()).destroyForReclaim(anyString());
     }
 
     @Test
@@ -402,8 +429,9 @@ class ProjectLifecycleAppServiceTest {
 
         appService.delete(projectId);
 
-        // 真删级联：工作区销毁（容器/网络/卷）+ prj_* 行删除 + knw_chunks 级联清理
-        verify(workspaceLifecycleAppService).destroy("9200");
+        // 真删级联：工作区销毁（容器/网络/卷，#490 起经 destroyForReclaim 同内核）
+        // + prj_* 行删除 + knw_chunks 级联清理
+        verify(workspaceLifecycleAppService).destroyForReclaim("9200");
         verify(knowledgePort).purgeByProject(projectId.toString());
         verifyNoRows();
         assertThat(jdbcTemplate.queryForObject(
@@ -480,17 +508,41 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
-    void given_workspace_destroy_failure_when_delete_then_rows_deleted_anyway() {
-        Long projectId = persistedProject("9201");
-        org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
-                .when(workspaceLifecycleAppService).destroy(anyString());
+    void given_inflight_run_when_delete_then_inflight_task_cancelled() {
+        // #477 删除级联取消（2026-11-12 19:04 实录：DELETE 级联删库行＋容器后，进程内
+        // 生成任务仍存活、对着 No such container 反复自救 ~8 分钟——僵尸烧 lane＋烧
+        // token）：删除先经 #359 停止面（置停＋Future cancel(true) 中断在途执行），
+        // 僵尸任务在下一安全点按停止收场，不顶着已删容器自愈
+        Long projectId = persistedProject("9206");
+        assertThat(codingRunTrack.begin(projectId)).isTrue(); // 模拟在途编码 run
+        assertThat(codingRunTrack.stopRequested(projectId)).isFalse();
 
         appService.delete(projectId);
 
-        // 物理销毁失败不阻断记录删除（真删级联优先，物理残留可重试）
+        assertThat(codingRunTrack.stopRequested(projectId))
+                .as("删除应置停止面——在途任务经 cancel(true) 中断、按停止收场")
+                .isTrue();
+    }
+
+    @Test
+    void given_workspace_destroy_failure_when_delete_then_rows_deleted_anyway() {
+        Long projectId = persistedProject("9201");
+        org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
+                .when(workspaceLifecycleAppService).destroyForReclaim(anyString());
+
+        appService.delete(projectId);
+
+        // 物理销毁失败不阻断记录删除（受理即删：真删级联优先）；「吞错即忘」退役
+        // （#485）：失败 WARN 引尾部三清校验留痕——残留可观测、归收编通道回收
         verifyNoRows();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
+        assertThat(appender.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage())
+                    .contains("9201")
+                    .contains("三清校验已执行");
+        });
     }
 
     @Test
@@ -498,6 +550,42 @@ class ProjectLifecycleAppServiceTest {
         assertThatThrownBy(() -> appService.delete(-1L))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+    }
+
+    // ---------- #490 一键回收：删除级联事实交回（回收报告/留痕的消费面） ----------
+
+    @Test
+    void given_inflight_run_and_clean_destroy_when_delete_and_report_then_reclaim_facts() {
+        // #490 项目级回收内核＝本删除级联：在飞先级联停止（承 #477）→ 销毁三清
+        // （#485 内核事实）→ 真删级联 → 四面之一项目行对账——事实随行交回
+        Long projectId = persistedProject("9207");
+        when(workspaceLifecycleAppService.destroyForReclaim("9207"))
+                .thenReturn(ThreeCleanCheck.of(ContainerState.ABSENT, false, false));
+        assertThat(codingRunTrack.begin(projectId)).isTrue();   // 模拟在飞编码 run
+
+        ProjectLifecycleAppService.ReclaimFacts facts = appService.deleteAndReport(projectId);
+
+        assertThat(facts.workspaceId()).isEqualTo(9207L);
+        assertThat(facts.runsStopped()).as("在飞 run 被级联停止").isTrue();
+        assertThat(codingRunTrack.stopRequested(projectId)).isTrue();
+        assertThat(facts.threeClean().allClean()).isTrue();
+        assertThat(facts.projectRowClean()).as("四面之一：项目行已清").isTrue();
+        verifyNoRows();
+    }
+
+    @Test
+    void given_destroy_failure_when_delete_and_report_then_unprobed_facts_rows_deleted_anyway() {
+        // 销毁未全成（受理即删：记录照删）：三清以 UNPROBED 呈报（状态未知不冒充清）
+        Long projectId = persistedProject("9208");
+        org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
+                .when(workspaceLifecycleAppService).destroyForReclaim(anyString());
+
+        ProjectLifecycleAppService.ReclaimFacts facts = appService.deleteAndReport(projectId);
+
+        assertThat(facts.threeClean().probed()).isFalse();
+        assertThat(facts.threeClean().allClean()).isFalse();
+        assertThat(facts.projectRowClean()).isTrue();
+        verifyNoRows();
     }
 
     @Test

@@ -21,6 +21,8 @@ import com.semgravio.aiplatform.base.metering.domain.aggregate.PriceEntry;
  * @param model          模型
  * @param tokenKind      token 档位 code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））
  * @param tokenKindName  token 档位名（直读展示）
+ * @param band           时段带 code（1=峰 2=谷；null＝不区分时段——#498/ADR-0044）
+ * @param bandName       时段带名（直读展示；同上落空口径）
  * @param unitPrice      每 token 单价（精确十进制串）
  * @param currency       币种（ISO 4217）
  * @param effectiveFrom  生效起点（含）
@@ -34,6 +36,10 @@ public record UnitPriceEntryResponse(
         String model,
         Integer tokenKind,
         String tokenKindName,
+        @Schema(description = "时段带（1=峰 2=谷；null＝不区分时段——无峰谷通道与"
+                + "按张行存量语义零变动，#498/ADR-0044）", example = "1")
+        Integer band,
+        String bandName,
         @Schema(description = "每 token 单价（响应侧为 string——精确十进制串交接，规避 "
                 + "BigDecimal 直出 JSON 落科学计数；开行/改价入参侧为 number，类型照实"
                 + "各自呈现、有意不做统一）",
@@ -54,6 +60,8 @@ public record UnitPriceEntryResponse(
                 entry.getModel(),
                 entry.getTokenKind().getCode(),
                 entry.getTokenKind().getName(),
+                entry.getBand() == null ? null : entry.getBand().getCode(),
+                entry.getBand() == null ? null : entry.getBand().getName(),
                 toPlain(entry.getUnitPrice()),
                 entry.getCurrency(),
                 entry.getEffectiveFrom(),

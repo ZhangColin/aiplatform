@@ -9,10 +9,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
+
 /**
  * 全平台聚合的用量读模型（#161 平台成本读面①：全局总览）——{@link UsageSummary}
  * （按 subject）的同族口径去掉归属维：总量 + 平台成本（币种分桶）+ 分模型 +
- * 分智能体。
+ * 分智能体＋分模型金额按带拆（#499 峰谷维度）。
  *
  * <p>{@code cost} = 平台成本（token × 事件时点生效单价的机械乘法，无加价/售价），
  * <b>按币种分桶不折算</b>（键 = ISO 4217 币种）；无生效单价的分量不进 cost
@@ -28,7 +30,8 @@ public record GlobalUsageSummary(
         TokenUsage total,
         Map<Currency, BigDecimal> cost,
         List<UsageSummary.ModelUsage> byModel,
-        List<AgentKindUsage> byAgentKind) {
+        List<AgentKindUsage> byAgentKind,
+        List<ModelBandCost> byModelCost) {
 
     public GlobalUsageSummary {
         // 保序拷贝：cost 键序 = 聚合 SQL 的币种码序（ORDER BY currency）
@@ -36,6 +39,7 @@ public record GlobalUsageSummary(
                 : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
         byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
+        byModelCost = byModelCost == null ? List.of() : List.copyOf(byModelCost);
     }
 
     /**
@@ -56,5 +60,31 @@ public record GlobalUsageSummary(
      * {@code AgentKindNames} 端口回解随行——#186）。
      */
     public record AgentKindUsage(String agentKind, TokenUsage tokens) {
+    }
+
+    /**
+     * 分模型金额按带拆项（#499 峰谷拆分维度）：{@code band} = 所配单价行时段带
+     * （{@code null}＝不区分时段分量——无规则行通道与按张行恒落此桶），{@code cost}
+     * ＝该 (provider, model, 带) 已配价分量按币种分桶（与全局 cost 同源不重叠）。
+     */
+    public record ModelBandCost(String provider, String model, Band band,
+                                Map<Currency, BigDecimal> cost) {
+
+        public ModelBandCost {
+            cost = cost == null ? Map.of()
+                    : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
+        }
+
+        /**
+         * cost 的币种码键化视图（Currency → ISO 码串）：REST 响应拼装的共享单点，
+         * 键序＝ISO 币种码字典序显式排定（同 {@link #costByCurrencyCode()} 口径）。
+         */
+        public Map<String, BigDecimal> costByCurrencyCode() {
+            Map<String, BigDecimal> codes = new LinkedHashMap<>();
+            cost.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey(Comparator.comparing(Currency::getCurrencyCode)))
+                    .forEach(entry -> codes.put(entry.getKey().getCurrencyCode(), entry.getValue()));
+            return Collections.unmodifiableMap(codes);
+        }
     }
 }

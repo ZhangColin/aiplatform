@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.base.workspace.application;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -23,6 +24,7 @@ import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceReposi
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * 闲置休眠活体验收（#171 AC，真 docker daemon + 真库 + 真编排——非假面）：
@@ -94,8 +96,10 @@ class WorkspaceHibernationLiveTest {
 
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore,
-                transactionTemplate, scanProperties())
-                .scanOnce(Map.of(), LocalDateTime.now());
+                transactionTemplate, scanProperties(),
+                mock(WorkspaceObservationSamplingAppService.class),
+                mock(WorkspaceDetachmentAppService.class))
+                .scanOnce(Map.of(), Set.of(workspaceId.id()), LocalDateTime.now());
 
         // 容器被删、卷保留、期望态置休眠（置备态保持 READY——实态以探查为准）
         assertThat(acted).isEqualTo(1);
@@ -164,7 +168,7 @@ class WorkspaceHibernationLiveTest {
         try {
             Process p = new ProcessBuilder("docker", "run", "--rm", "--entrypoint", "cat",
                     "-v", "vol-" + containerName + ":/workspace",
-                    "aiplatform/dev:0.16", "/workspace/.hibernate-probe")
+                    "aiplatform/dev:0.17", "/workspace/.hibernate-probe")
                     .redirectErrorStream(false).start();
             String out = new String(p.getInputStream().readAllBytes());
             p.waitFor();

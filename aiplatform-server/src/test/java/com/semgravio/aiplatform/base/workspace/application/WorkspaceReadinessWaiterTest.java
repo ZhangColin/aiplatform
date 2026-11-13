@@ -17,7 +17,7 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
-import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceFreshReads;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,14 +28,15 @@ import static org.mockito.Mockito.when;
 
 /**
  * 环境就绪等待（#62 文件操作级隐式等待）：READY 即回、PROVISIONING 轮询至 READY、
- * FAILED 抛失败、超时抛超时、等待中删除抛 404。mock 仓储返回状态序列 + 短超时/间隔，
- * 确定性验收收敛逻辑，不测真实时钟。
+ * FAILED 抛失败、超时抛超时、等待中删除抛 404。mock 独立读缝（{@code WorkspaceFreshReads}，
+ * #476）返回状态序列 + 短超时/间隔，确定性验收收敛逻辑，不测真实时钟。事务可见性
+ * （独立读真的独立）归集成测试 {@code WorkspaceReadinessWaiterIntegrationTest}。
  */
 @ExtendWith(MockitoExtension.class)
 class WorkspaceReadinessWaiterTest {
 
     @Mock
-    private WorkspaceRepository workspaceRepository;
+    private WorkspaceFreshReads freshReads;
 
     @Test
     void given_ready_workspace_when_awaitReady_then_returned_without_repository_call() {
@@ -44,14 +45,14 @@ class WorkspaceReadinessWaiterTest {
         Workspace result = waiter().awaitReady(ready);
 
         assertThat(result).isSameAs(ready);
-        verify(workspaceRepository, never()).findById(anyLong());
+        verify(freshReads, never()).findFreshById(anyLong());
     }
 
     @Test
     void given_provisioning_workspace_when_awaitReady_then_polls_until_ready() {
         Workspace pending = pending(id("42"));
         Workspace ready = ready(id("42"));
-        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(pending), Optional.of(ready));
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.of(pending), Optional.of(ready));
 
         Workspace result = waiter(Duration.ofSeconds(1), Duration.ofMillis(1)).awaitReady(pending);
 
@@ -66,13 +67,13 @@ class WorkspaceReadinessWaiterTest {
         assertThatThrownBy(() -> waiter().awaitReady(failed))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("环境置备失败");
-        verify(workspaceRepository, never()).findById(anyLong());
+        verify(freshReads, never()).findFreshById(anyLong());
     }
 
     @Test
     void given_workspace_becomes_failed_when_awaitReady_then_provision_failed() {
         Workspace pending = pending(id("42"));
-        when(workspaceRepository.findById(42L))
+        when(freshReads.findFreshById(42L))
                 .thenReturn(Optional.of(pending), Optional.of(failed(id("42"))));
 
         assertThatThrownBy(() -> waiter(Duration.ofSeconds(1), Duration.ofMillis(1)).awaitReady(pending))
@@ -83,7 +84,7 @@ class WorkspaceReadinessWaiterTest {
     @Test
     void given_still_provisioning_when_awaitReady_then_timeout_not_silent_hang() {
         Workspace pending = pending(id("42"));
-        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(pending));
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.of(pending));
 
         assertThatThrownBy(() -> waiter(Duration.ofMillis(30), Duration.ofMillis(5)).awaitReady(pending))
                 .isInstanceOf(ApplicationException.class)
@@ -93,9 +94,40 @@ class WorkspaceReadinessWaiterTest {
     @Test
     void given_workspace_deleted_when_awaitReady_then_not_found() {
         Workspace pending = pending(id("42"));
-        when(workspaceRepository.findById(42L)).thenReturn(Optional.empty());
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> waiter(Duration.ofSeconds(1), Duration.ofMillis(1)).awaitReady(pending))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+    }
+
+    @Test
+    void given_ready_workspace_when_awaitReady_by_id_then_returned() {
+        // 按标识入口（智能体工具面只有 workspaceId）：独立读装载后走同一收敛环
+        Workspace ready = ready(id("42"));
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.of(ready));
+
+        Workspace result = waiter().awaitReadyById(id("42"));
+
+        assertThat(result).isSameAs(ready);
+    }
+
+    @Test
+    void given_provisioning_workspace_when_awaitReady_by_id_then_polls_until_ready() {
+        Workspace pending = pending(id("42"));
+        Workspace ready = ready(id("42"));
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.of(pending), Optional.of(ready));
+
+        Workspace result = waiter(Duration.ofSeconds(1), Duration.ofMillis(1)).awaitReadyById(id("42"));
+
+        assertThat(result.getStatus()).isEqualTo(ProvisioningStatus.READY);
+    }
+
+    @Test
+    void given_absent_workspace_when_awaitReady_by_id_then_not_found() {
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> waiter().awaitReadyById(id("42")))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("工作区不存在");
     }
@@ -103,12 +135,12 @@ class WorkspaceReadinessWaiterTest {
     // ---------- 测试数据 ----------
 
     private WorkspaceReadinessWaiter waiter() {
-        return new WorkspaceReadinessWaiter(workspaceRepository,
+        return new WorkspaceReadinessWaiter(freshReads,
                 Duration.ofSeconds(1), Duration.ofMillis(1));
     }
 
     private WorkspaceReadinessWaiter waiter(Duration timeout, Duration interval) {
-        return new WorkspaceReadinessWaiter(workspaceRepository, timeout, interval);
+        return new WorkspaceReadinessWaiter(freshReads, timeout, interval);
     }
 
     private Workspace pending(WorkspaceId id) {

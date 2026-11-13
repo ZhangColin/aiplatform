@@ -348,8 +348,10 @@ public class ProjectController {
                     + "呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/"
                     + "功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」"
                     + "＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。"
-                    + "未产出（工作区无该文件）"
-                    + "404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。"
+                    + "未产出期短路（#478）：prd_produced_at 未落直回 404 PRJ_015"
+                    + "（不触工作区，标志落点＝收口点，与前端 prdProducedAt 投影同口径），"
+                    + "标志已落才 exec 直读；标志在而工作区无该文件同码兜底"
+                    + "——均与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。"
                     + "写出/更新时通知通道（/api/events?projectId=）发 document-updated"
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {

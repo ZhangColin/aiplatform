@@ -94,8 +94,8 @@ class MeteringCostAggregationTest {
         assertThat(summary.cost()).isEmpty();
         // unpriced 只标有用量的档位（cache_read 等零量档不标）
         assertThat(summary.unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-none", TokenKind.INPUT),
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-none", TokenKind.OUTPUT));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-none", TokenKind.INPUT, null),
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-none", TokenKind.OUTPUT, null));
     }
 
     @Test
@@ -110,8 +110,8 @@ class MeteringCostAggregationTest {
         // 已配价分量照算（不因部分缺价阻断），未配价分量不进 cost
         assertThat(summary.cost().get(USD)).isEqualByComparingTo(new BigDecimal("0.001"));
         assertThat(summary.unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-part", TokenKind.OUTPUT),
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-part", TokenKind.CACHE_WRITE));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-part", TokenKind.OUTPUT, null),
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-part", TokenKind.CACHE_WRITE, null));
     }
 
     @Test
@@ -145,7 +145,7 @@ class MeteringCostAggregationTest {
         assertThat(windowed.unpriced()).isEmpty();
         // 全窗口：窗口外无价事件进 unpriced
         assertThat(usageQueryPort.bySubject(SUBJ, null, null).unpriced())
-                .containsExactly(new UsageSummary.UnpricedUsage(PROVIDER, "m-none", TokenKind.INPUT));
+                .containsExactly(new UsageSummary.UnpricedUsage(PROVIDER, "m-none", TokenKind.INPUT, null));
     }
 
     @Test
@@ -177,7 +177,7 @@ class MeteringCostAggregationTest {
         // 只有 T3 事件有价：成本 = $0.001；T1 事件落未配价（同一匹配键逐事件按时点判定）
         assertThat(summary.cost().get(USD)).isEqualByComparingTo(new BigDecimal("0.001"));
         assertThat(summary.unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m1", TokenKind.INPUT));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m1", TokenKind.INPUT, null));
     }
 
     // ---------- fixture ----------

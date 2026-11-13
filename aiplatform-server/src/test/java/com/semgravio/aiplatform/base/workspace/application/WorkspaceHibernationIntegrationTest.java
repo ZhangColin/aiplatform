@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
@@ -29,6 +30,7 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceLostMarkRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.semgravio.aiplatform.base.workspace.infrastructure.archive.LocalDiskSealPackageStore;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
@@ -105,6 +107,9 @@ class WorkspaceHibernationIntegrationTest {
     private WorkspaceRepository workspaceRepository;
 
     @Autowired
+    private WorkspaceLostMarkRepository lostMarkRepository;
+
+    @Autowired
     private TransactionTemplate transactionTemplate;
 
     @Autowired
@@ -136,7 +141,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedReadyWorkspace(LocalDateTime.now().minusHours(2));
 
         int acted = newHibernationService(backend)
-                .scanOnce(Map.of(), LocalDateTime.now());
+                .scanOnce(Map.of(), Set.of(id.id()), LocalDateTime.now());
 
         assertThat(acted).isEqualTo(1);
         // 容器删、卷零删（保卷——整轮不发 docker volume rm）
@@ -163,7 +168,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedReadyWorkspace(LocalDateTime.now().minusMinutes(10));
 
         int acted = newHibernationService(backend)
-                .scanOnce(Map.of(), LocalDateTime.now());
+                .scanOnce(Map.of(), Set.of(id.id()), LocalDateTime.now());
 
         // 阈值内触碰过：不动（不删容器、不改意图）
         assertThat(acted).isZero();
@@ -181,7 +186,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedReadyWorkspace(LocalDateTime.now().minusHours(8));
 
         int acted = newHibernationService(backend).scanOnce(
-                Map.of(id.id(), new WorkspaceScanFact(true, false)), LocalDateTime.now());
+                Map.of(id.id(), new WorkspaceScanFact(true, false)), Set.of(id.id()), LocalDateTime.now());
 
         // run 在途恒活跃：即使闲置超阈值也不休眠；期望运行而实死 → 收敛重建回 READY
         assertThat(acted).isEqualTo(1);
@@ -203,7 +208,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedHibernatedWorkspace(LocalDateTime.now().minusDays(31));
 
         int acted = newHibernationService(backend)
-                .scanOnce(Map.of(), LocalDateTime.now());
+                .scanOnce(Map.of(), Set.of(id.id()), LocalDateTime.now());
 
         assertThat(acted).isEqualTo(1);
         // tar 命令收口（假面 seam 断言形状）：旁路容器整卷打包、仅排除三大可重建缓存
@@ -275,7 +280,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedHibernatedWorkspace(LocalDateTime.now().minusDays(31));
         WorkspaceConvergenceAppService convergence = newConvergenceService(backend);
 
-        newHibernationService(backend).scanOnce(Map.of(), LocalDateTime.now());   // 第一次封存
+        newHibernationService(backend).scanOnce(Map.of(), Set.of(id.id()), LocalDateTime.now());   // 第一次封存
         String firstPath = workspaceRepository.findById(id.id()).orElseThrow().getArchivePath();
 
         convergence.convergeAsync(id, ConvergenceFace.TOUCH, true);   // 深度唤醒（包保留）
@@ -287,7 +292,7 @@ class WorkspaceHibernationIntegrationTest {
         rewoken.markTouched(LocalDateTime.now().minusDays(32));
         workspaceRepository.save(rewoken.hibernate());
         backend.packResult = "second-archive".getBytes();
-        newHibernationService(backend).scanOnce(Map.of(), LocalDateTime.now());
+        newHibernationService(backend).scanOnce(Map.of(), Set.of(id.id()), LocalDateTime.now());
 
         Workspace resealed = workspaceRepository.findById(id.id()).orElseThrow();
         assertThat(resealed.getDesiredState()).isEqualTo(DesiredState.SEALED);
@@ -352,7 +357,16 @@ class WorkspaceHibernationIntegrationTest {
         // 直调扫描要真扫——用默认开启（hibernationEnabled 默认 true）的新实例
         return new WorkspaceHibernationAppService(
                 backend, workspaceRepository, newConvergenceService(backend),
-                sealPackageStore(), transactionTemplate, new WorkspaceProperties());
+                sealPackageStore(), transactionTemplate, new WorkspaceProperties(),
+                mock(WorkspaceObservationSamplingAppService.class),
+                newDetachmentService(backend));
+    }
+
+    /** 在册失联分级真实例（真库标记行；既有用例递全认领集不触失联面）。 */
+    private WorkspaceDetachmentAppService newDetachmentService(FakeDockerCli backend) {
+        return new WorkspaceDetachmentAppService(backend, workspaceRepository,
+                lostMarkRepository, sealPackageStore(), transactionTemplate,
+                newConvergenceService(backend));
     }
 
     /** 收敛模块真实例（直通执行器：提交即跑，次序可断言）。 */

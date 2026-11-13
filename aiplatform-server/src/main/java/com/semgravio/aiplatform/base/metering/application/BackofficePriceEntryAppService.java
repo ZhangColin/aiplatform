@@ -21,6 +21,7 @@ import com.semgravio.aiplatform.base.metering.application.dto.query.BackofficePr
 import com.semgravio.aiplatform.base.metering.application.dto.response.UnitPriceEntryRepriceResponse;
 import com.semgravio.aiplatform.base.metering.application.dto.response.UnitPriceEntryResponse;
 import com.semgravio.aiplatform.base.metering.domain.aggregate.PriceEntry;
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 import com.semgravio.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.semgravio.aiplatform.base.metering.domain.model.Operator;
@@ -33,12 +34,18 @@ import com.semgravio.aiplatform.base.metering.domain.repository.PriceEntryReposi
  * 收敛于本服务——启动 Seeder 已随 #165 退役（启动零写），初始化走幂等签名脚本
  * 经开行端点种入。
  *
- * <p><b>重叠校验</b>（已知维护事故口封口）：表上唯一约束只防同起点、不防跨区间
- * 重叠——换算 SQL 按 ts 区间匹配，重叠行会重复计费。本服务在同键全行上服务端
- * 校验：新开区间 {@code [F, ∞)} 须与除被关行外的既有区间皆不重叠，且起点不撞
- * 任何既有行（同起点被关行自身也拦——关行不改写 {@code effective_from}，直插
- * 会撞唯一约束出 500）。校验在事务内读后判，并发双写的残余竞态由唯一约束兜底
- * 同起点一档（跨区间并发重叠 v1 不设防：单管理员操作面，非开放写口）。</p>
+ * <p><b>重叠校验</b>（已知维护事故口封口）：表上唯一约束只防同键同带同起点、不
+ * 防跨区间重叠（#498 时段带扩带五元组；PG NULL 唯一值互不相等，NULL 带同起点
+ * 由本校验兜）——换算 SQL 按 ts 区间匹配，重叠行会重复计费。本服务在同键同带
+ * 全行上服务端校验：新开区间 {@code [F, ∞)} 须与除被关行外的既有区间皆不重叠，
+ * 且起点不撞任何既有行（同起点被关行自身也拦——关行不改写 {@code effective_from}，
+ * 直插会撞唯一约束出 500）。校验在事务内读后判，并发双写的残余竞态由唯一约束
+ * 兜底同起点一档（跨区间并发重叠 v1 不设防：单管理员操作面，非开放写口）。</p>
+ *
+ * <p><b>时段带（#498/ADR-0044）</b>：匹配键扩可空 band（峰/谷，NULL＝不区分
+ * 时段）——开行走命令 band（缺省 NULL），改价新行沿用被关行 band（带是匹配键
+ * 成分、不随改价漂移），停用语义不变（关行不接新行）。NULL 带行行为与存量
+ * 完全一致。</p>
  */
 @Service
 public class BackofficePriceEntryAppService {
@@ -69,8 +76,9 @@ public class BackofficePriceEntryAppService {
 
     /**
      * 开行（空键首行，#165 种子脚本通道）：对指定匹配键新开一行敞口区间。字段
-     * 合法性由聚合守卫先行裁决（METER_004/METER_010），再过同键区间重叠校验
-     * （改价同款口径，METER_008）。{@code effectiveFrom} 可回溯（种子敞口
+     * 合法性由聚合守卫先行裁决（METER_004/METER_010），再过同键同带区间重叠
+     * 校验（改价同款口径，METER_008——同键同带同起点拒、不同带不误拒，#498）。
+     * {@code effectiveFrom} 可回溯（种子敞口
      * 2026-01-01 覆盖存量事件）、可未来（预发布），缺省即时；操作者随行落
      * （种子脚本不传操作者头 → 落空，同存量行口径）。
      *
@@ -82,18 +90,19 @@ public class BackofficePriceEntryAppService {
         Instant effectiveFrom = command.effectiveFrom() == null
                 ? Instant.now() : command.effectiveFrom();
         PriceEntry opened = PriceEntry.open(command.provider(), command.model(),
-                command.tokenKind(), command.unitPrice(), command.currency(), effectiveFrom,
-                operator);
+                command.tokenKind(), command.band(), command.unitPrice(), command.currency(),
+                effectiveFrom, operator);
         assertIntervalFree(command.provider(), command.model(), command.tokenKind(),
-                effectiveFrom, null);
+                command.band(), effectiveFrom, null);
         priceEntryRepository.save(opened);
         return UnitPriceEntryResponse.of(opened);
     }
 
     /**
-     * 原子改价（单调用关当前行＋开新行，同事务）：新行沿用被关行匹配键，单价/
-     * 币种取命令；{@code effectiveFrom} 可指定（含未来＝预发布，对齐供应商凌晨
-     * 调价），缺省即时。中途任一守卫失败两行都不动（事务回滚）。
+     * 原子改价（单调用关当前行＋开新行，同事务）：新行沿用被关行匹配键（provider/
+     * model/tokenKind，#498 起含时段带 band），单价/币种取命令；{@code effectiveFrom}
+     * 可指定（含未来＝预发布，对齐供应商凌晨调价），缺省即时。中途任一守卫失败
+     * 两行都不动（事务回滚）。
      *
      * @throws ApplicationException METER_006 行不存在；METER_004 字段不完整/
      *                              单价负数；METER_010 币种非 ISO 4217；METER_005
@@ -108,12 +117,12 @@ public class BackofficePriceEntryAppService {
                 ? Instant.now() : command.effectiveFrom();
 
         assertIntervalFree(current.getProvider(), current.getModel(), current.getTokenKind(),
-                effectiveFrom, current.getId());
+                current.getBand(), effectiveFrom, current.getId());
 
         current.close(effectiveFrom); // METER_005 起点倒挂 / METER_007 非当前行
         PriceEntry opened = PriceEntry.open(current.getProvider(), current.getModel(),
-                current.getTokenKind(), command.unitPrice(), command.currency(), effectiveFrom,
-                operator);
+                current.getTokenKind(), current.getBand(), command.unitPrice(),
+                command.currency(), effectiveFrom, operator);
         priceEntryRepository.save(current);
         priceEntryRepository.save(opened);
         return new UnitPriceEntryRepriceResponse(UnitPriceEntryResponse.of(current),
@@ -141,15 +150,21 @@ public class BackofficePriceEntryAppService {
     }
 
     /**
-     * 同键区间校验：拟开区间 {@code [F, ∞)} 与既有行两查——同起点（含被关行
+     * 同键同带区间校验：拟开区间 {@code [F, ∞)} 与既有行两查——同起点（含被关行
      * 自身：关行不改写起点，直插撞唯一约束）与跨区间重叠（除改价被关行外，任一
      * 行敞口或终点晚于 F 即重叠——半开区间 [a, b) 与 [F, ∞) 相交当且仅当
      * {@code F < b}）。{@code excludedId} 为改价被关行（开行传 null＝全行计入）。
+     * #498 时段带：校验行集＝同键同带各行——NULL 带与带行各成独立区间序列，
+     * 不同带互不重叠（派生查询空带单列方法，见 {@link PriceEntryRepository}）。
      */
     private void assertIntervalFree(String provider, String model, TokenKind tokenKind,
-                                    Instant effectiveFrom, Long excludedId) {
-        List<PriceEntry> rows = priceEntryRepository.findByProviderAndModelAndTokenKindOrderByEffectiveFromAsc(
-                provider, model, tokenKind);
+                                    Band band, Instant effectiveFrom, Long excludedId) {
+        List<PriceEntry> rows = band == null
+                ? priceEntryRepository.findByProviderAndModelAndTokenKindOrderByEffectiveFromAsc(
+                        provider, model, tokenKind)
+                : priceEntryRepository
+                        .findByProviderAndModelAndTokenKindAndBandOrderByEffectiveFromAsc(
+                                provider, model, tokenKind, band);
         for (PriceEntry row : rows) {
             if (effectiveFrom.equals(row.getEffectiveFrom())) {
                 throw new ApplicationException(MeteringMessage.PRICE_ENTRY_INTERVAL_OVERLAPPED);

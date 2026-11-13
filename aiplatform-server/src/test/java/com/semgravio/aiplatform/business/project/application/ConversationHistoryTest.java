@@ -136,6 +136,10 @@ class ConversationHistoryTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
@@ -289,6 +293,7 @@ class ConversationHistoryTest {
         // 用户的话已在库（「落库 ⟺ 说过」；刷新不丢已发送的话）
         Long projectId = persistedGeneratedProject("9801");
         doAnswer(invocation -> null).when(sessionExecutor).submit(any(), any()); // 轨道挂起不跑
+        doAnswer(invocation -> null).when(sessionExecutor).submitGeneration(any(), any()); // 同挂起
 
         mainAgentAppService.runOpinionTurn(projectId, "把主色调改成绿色");
 
@@ -354,6 +359,15 @@ class ConversationHistoryTest {
             }
             return null;
         }).when(sessionExecutor).submit(any(), any());
+        doAnswer(invocation -> {
+            try {
+                ((Runnable) invocation.getArgument(1)).run();
+            }
+            catch (RuntimeException ignored) {
+                // 同上：生成车道同吞语义
+            }
+            return null;
+        }).when(sessionExecutor).submitGeneration(any(), any());
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("对话轮失败"));
 

@@ -229,4 +229,48 @@ class DecisionHintsOtherRulesTest {
                 DecisionHintKind.ANTI_MOCK,
                 DecisionHintKind.PARALLEL_TOOLS);
     }
+
+    // ---------- 渲染回归：真实理由片段嵌真实模板须读成通顺句子 ----------
+    // 生产实案（2026-11-12 用户报）：PARALLEL_TOOLS 注入文案复读成「近 连续 4 步
+    // 每次只发起一个工具调用 步每次只发起一个工具调用」——规则理由是整句、模板
+    // 又自带同一句式，{0} 整句嵌整句。本节把「渲染输出必须是通顺完整句」钉进
+    // 测试：各规则用<b>生产真实形态的理由</b>渲染，断言成品无嵌套复读。
+
+    @Test
+    void given_single_call_streak_when_decide_then_instruction_reads_naturally() {
+        TrajectorySnapshot snapshot = new TrajectorySnapshot(List.of(
+                text("", ok("write_file", 300)),
+                text("", ok("write_file", 300)),
+                text("", ok("write_file", 300)),
+                text("", ok("write_file", 300))),
+                List.of());
+
+        java.util.Optional<HintDecision> decision =
+                DecisionHints.decide(snapshot, HintPolicy.defaults());
+
+        assertThat(decision).isPresent();
+        assertThat(decision.get().instruction())
+                .startsWith("【平台提示】连续 4 步每次只发起一个工具调用。")
+                .doesNotContain("近 连续")
+                .doesNotContain("工具调用 步");
+    }
+
+    @Test
+    void given_error_streak_when_decide_then_instruction_reads_naturally() {
+        ToolCallOutcome boom =
+                new ToolCallOutcome("execute", true, "Error: pnpm build failed", 30);
+        TrajectorySnapshot snapshot = new TrajectorySnapshot(List.of(
+                text("", boom),
+                text("", boom),
+                text("", boom)),
+                List.of());
+
+        java.util.Optional<HintDecision> decision =
+                DecisionHints.decide(snapshot, HintPolicy.defaults());
+
+        assertThat(decision).isPresent();
+        assertThat(decision.get().instruction())
+                .startsWith("【平台提示】同类错误连续失败 3 次（error: pnpm build failed）。")
+                .doesNotContain("连续失败 同类错误");
+    }
 }

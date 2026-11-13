@@ -397,6 +397,24 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
   });
 
+  it("run-start(agent=executor) 失效 projects＋documents 双域（#462：记行先于事件落库——阶段门即时解锁，不卡到刷新）；main 轮不失效 documents", () => {
+    const invalidate = vi.spyOn(agentQc, "invalidateQueries");
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统", agent: "executor" }, "run1:1",
+    ));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.projects.all });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.documents.all });
+
+    invalidate.mockClear();
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start", { projectId: "p1", runId: "run2", prompt: "需求", agent: "main" }, "run2:1",
+    ));
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.documents.all });
+
+    invalidate.mockRestore();
+  });
+
   it("无中途闪错（#84 AC④）：失败终态前每一拍都无错误 UI——状态恒 running、对话面零错误气泡", () => {
     // 事件序列断言（与服务端脚本化用例同源）：run-start → 部件生长 →（中间错误
     // 与重试信号不进用户面事件流）→ run-failed 唯一失败终态。逐拍断言错误 UI
@@ -915,11 +933,10 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
   });
 
   /**
-   * 决策时微指令（#437 part-hint）：执行体每迭代注入一条——每次注入一件入流水
-   * （不原位更新，重放同 id 去重）；平台侧产出（无 engine 字段）；堆叠上限服务
-   * 端管、桥不判。
+   * part-hint 退役钉（2026-11-12）：决策时微指令不再进用户面——后端已停发，
+   * 桥对存量/未知 part-hint 事件按未知平台类型忽略（不进部件流水、不报错）。
    */
-  it("part-hint：微指令入流水（每次注入一件），重放同 id 去重", () => {
+  it("part-hint（已退役）：桥忽略该类型事件，不进部件流水", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1" };
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
@@ -933,23 +950,10 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       { ...base, kind: "failure_stop_loss", text: "同一错误已连续失败 3 次，请换用别的策略。" },
       "run1:3",
     ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "part-hint",
-      { ...base, kind: "parallel_tools", text: "本轮可并行的工具调用请一次发出，不要排成串。" },
-      "run1:4",
-    ));
-    // 断线补发重放同 id：去重
-    dispatchAgentEvent(agentQc, agentEvent(
-      "part-hint",
-      { ...base, kind: "failure_stop_loss", text: "同一错误已连续失败 3 次，请换用别的策略。" },
-      "run1:3",
-    ));
 
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.parts).toEqual([
       { kind: "text", id: "run1:2", source: undefined, text: "先跑一遍验证。" },
-      { kind: "hint", id: "run1:3", hintKind: "failure_stop_loss", text: "同一错误已连续失败 3 次，请换用别的策略。" },
-      { kind: "hint", id: "run1:4", hintKind: "parallel_tools", text: "本轮可并行的工具调用请一次发出，不要排成串。" },
     ]);
   });
 });

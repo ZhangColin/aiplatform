@@ -5,6 +5,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Currency;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
@@ -17,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.metering.domain.aggregate.PriceEntry;
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UsageEvent;
@@ -50,6 +52,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 操作者两列落新行（无头落空）；</li>
  * <li><b>停用</b>：即时关行不接新行，此后窗口用量进 unpriced（聚合口径验证）；
  * 停用操作者落被关行（停用唯一落点）；预发布行停用钳成空区间（从未生效）。</li>
+ * <li><b>时段带（#498，ADR-0044 峰谷 2/4）</b>：开行带 band（缺省 NULL）落库
+ * code 真库断言钉死（防 ORDINAL 错位）；同键不同带同起点不误拒、同带同起点/
+ * 跨区间照拒（METER_008 按同键同带各查各的）；原子改价新行沿用被关行 band、
+ * NULL 带行改价新行 band 仍 NULL；响应带 band/bandName 两列。</li>
  * </ul>
  */
 @BackofficeSeamTest
@@ -199,12 +205,15 @@ class BackofficePriceEntrySeamTest {
                 .andExpect(jsonPath("$.data.currency").value("USD"))
                 .andExpect(jsonPath("$.data.effectiveFrom").value("2026-01-01T00:00:00Z"))
                 .andExpect(jsonPath("$.data.effectiveTo").value(nullValue()))
+                .andExpect(jsonPath("$.data.band").value(nullValue()))
+                .andExpect(jsonPath("$.data.bandName").value(nullValue()))
                 .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID))
                 .andExpect(jsonPath("$.data.operatorName").value(OPERATOR_NAME));
 
-        // 库内事实（JdbcTemplate）：敞口行落库、操作者两列落值
+        // 库内事实（JdbcTemplate）：敞口行落库、操作者两列落值、band 落空（缺省
+        // 不区分时段——存量语义零变动）
         Map<String, Object> row = jdbcTemplate.queryForMap(
-                "SELECT unit_price, effective_from, effective_to, operator_id, operator_name "
+                "SELECT unit_price, effective_from, effective_to, band, operator_id, operator_name "
                         + "FROM met_price_entries WHERE provider = ? AND model = ?",
                 PROVIDER, "m-o1");
         assertThat((BigDecimal) row.get("unit_price"))
@@ -212,6 +221,7 @@ class BackofficePriceEntrySeamTest {
         assertThat(((Timestamp) row.get("effective_from")).toInstant())
                 .isEqualTo(Instant.parse("2026-01-01T00:00:00Z"));
         assertThat(row.get("effective_to")).isNull();
+        assertThat(row.get("band")).isNull();
         assertThat(row.get("operator_id")).isEqualTo(OPERATOR_ID);
         assertThat(row.get("operator_name")).isEqualTo(OPERATOR_NAME);
     }
@@ -329,6 +339,8 @@ class BackofficePriceEntrySeamTest {
                 .andExpect(jsonPath("$.data.opened.unitPrice").value("0.000002"))
                 .andExpect(jsonPath("$.data.opened.effectiveFrom").isNotEmpty())
                 .andExpect(jsonPath("$.data.opened.effectiveTo").value(nullValue()))
+                .andExpect(jsonPath("$.data.opened.band").value(nullValue()))
+                .andExpect(jsonPath("$.data.opened.bandName").value(nullValue()))
                 .andExpect(jsonPath("$.data.opened.operatorId").value(OPERATOR_ID))
                 .andExpect(jsonPath("$.data.opened.operatorName").value(OPERATOR_NAME));
 
@@ -540,7 +552,7 @@ class BackofficePriceEntrySeamTest {
         assertThat(summary.cost()).containsOnlyKeys(USD);
         assertThat(summary.cost().get(USD)).isEqualByComparingTo(new BigDecimal("0.001"));
         assertThat(summary.unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-d", TokenKind.INPUT));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-d", TokenKind.INPUT, null));
     }
 
     @Test
@@ -566,7 +578,7 @@ class BackofficePriceEntrySeamTest {
 
         report("evt-beyond", futureFrom.plusSeconds(3600), "m-d2", 100);
         assertThat(usageQueryPort.bySubject(SUBJ, null, null).unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-d2", TokenKind.INPUT));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-d2", TokenKind.INPUT, null));
     }
 
     @Test
@@ -600,6 +612,146 @@ class BackofficePriceEntrySeamTest {
                 .andExpect(jsonPath("$.message").value("单价行不存在"));
     }
 
+    // ---------- 时段带（#498，ADR-0044 峰谷 2/4）：开行带 band＋重叠按带分流＋改价沿用 ----------
+
+    @Test
+    void given_no_row_when_signed_open_with_band_then_persisted_and_band_code_pinned()
+            throws Exception {
+        // 峰行开行：响应 band/bandName 两列；库内 band 落 1（BaseEnum code 真库
+        // 断言钉死，防 ORDINAL 错位——同 #497 Band 枚举口径）
+        String peakBody = "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-bd1\","
+                + "\"tokenKind\":1,\"band\":1,\"unitPrice\":0.000002,\"currency\":\"USD\","
+                + "\"effectiveFrom\":\"2026-01-01T00:00:00Z\"}";
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(peakBody),
+                        "/api/backoffice/price-entries", peakBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.band").value(1))
+                .andExpect(jsonPath("$.data.bandName").value("峰"));
+
+        Integer peakBand = jdbcTemplate.queryForObject(
+                "SELECT band FROM met_price_entries WHERE provider = ? AND model = ?",
+                Integer.class, PROVIDER, "m-bd1");
+        assertThat(peakBand).isEqualTo(Band.PEAK.getCode());
+
+        // 谷行开行：band 落 2
+        String valleyBody = "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-bd1\","
+                + "\"tokenKind\":1,\"band\":2,\"unitPrice\":0.000001,\"currency\":\"USD\","
+                + "\"effectiveFrom\":\"2026-01-01T00:00:00Z\"}";
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(valleyBody),
+                        "/api/backoffice/price-entries", valleyBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.band").value(2))
+                .andExpect(jsonPath("$.data.bandName").value("谷"));
+
+        List<Integer> bands = jdbcTemplate.queryForList(
+                "SELECT band FROM met_price_entries WHERE provider = ? AND model = ? "
+                        + "ORDER BY band", Integer.class, PROVIDER, "m-bd1");
+        assertThat(bands).containsExactly(Band.PEAK.getCode(), Band.OFF_PEAK.getCode());
+    }
+
+    @Test
+    void given_same_key_when_open_then_overlap_guarded_per_band() throws Exception {
+        // 夹具：NULL 带行 [T0,∞)（存量形制）
+        plantOpenRow("m-bd2", T0, "0.000001");
+
+        // 不同带不误拒：同键同起点开峰行、谷行各一 → 皆 200（唯一约束含带五元组、
+        // 服务端校验按同键同带各查各的）
+        String peakAtT0 = openBandBody("m-bd2", 1, "0.000002", T0.toString());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(peakAtT0),
+                        "/api/backoffice/price-entries", peakAtT0))
+                .andExpect(status().isOk());
+        String valleyAtT0 = openBandBody("m-bd2", 2, "0.000001", T0.toString());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(valleyAtT0),
+                        "/api/backoffice/price-entries", valleyAtT0))
+                .andExpect(status().isOk());
+        assertThat(rowCountOfKey("m-bd2")).isEqualTo(3);
+
+        // 同带同起点拒：峰带再来同起点 → 409 METER_008，不落行
+        String duplicatePeak = openBandBody("m-bd2", 1, "0.000003", T0.toString());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(duplicatePeak),
+                        "/api/backoffice/price-entries", duplicatePeak))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("同匹配键生效区间重叠（跨区间或同起点）"));
+        assertThat(rowCountOfKey("m-bd2")).isEqualTo(3);
+
+        // 同带跨区间拒：F 落既有同带行敞口区间内 → 409——峰/谷各拒各的（两带
+        // 序列独立，峰被拦与谷无涉）
+        String crossPeak = openBandBody("m-bd2", 1, "0.000003", T2.toString());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(crossPeak),
+                        "/api/backoffice/price-entries", crossPeak))
+                .andExpect(status().isConflict());
+        String crossValley = openBandBody("m-bd2", 2, "0.0000015", T2.toString());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(crossValley),
+                        "/api/backoffice/price-entries", crossValley))
+                .andExpect(status().isConflict());
+        assertThat(rowCountOfKey("m-bd2")).isEqualTo(3);
+
+        // NULL 带序列独立：NULL 带 F 落既有 NULL 行敞口区间 → 409（存量校验语义
+        // 不因带行存在而漂移）
+        String nullAtT2 = openBody("m-bd2", 1, "0.0000015", T2.toString());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(nullAtT2),
+                        "/api/backoffice/price-entries", nullAtT2))
+                .andExpect(status().isConflict());
+        assertThat(rowCountOfKey("m-bd2")).isEqualTo(3);
+    }
+
+    @Test
+    void given_band_row_when_reprice_then_new_row_inherits_band() throws Exception {
+        // 改价 band 沿用：带是匹配键成分、不随改价漂移——新行 band＝被关行 band，
+        // 被关行 band 原样保留；NULL 带行改价新行 band 仍 NULL（存量语义）
+        PriceEntry peak = plantBandRow("m-bd3", T0, "0.000002", Band.PEAK);
+        String path = "/api/backoffice/price-entries/" + peak.getId() + "/reprice";
+        String body = "{\"unitPrice\":0.000003,\"currency\":\"USD\"}";
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post(path).contentType(MediaType.APPLICATION_JSON).content(body),
+                        path, body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.closed.band").value(1))
+                .andExpect(jsonPath("$.data.opened.band").value(1))
+                .andExpect(jsonPath("$.data.opened.bandName").value("峰"));
+
+        // 库内事实：被关行 band 保留 1；新行 band 沿用 1
+        Map<String, Object> closedRow = jdbcTemplate.queryForMap(
+                "SELECT band, effective_to FROM met_price_entries WHERE id = ?", peak.getId());
+        assertThat(closedRow.get("band")).isEqualTo(Band.PEAK.getCode());
+        assertThat(closedRow.get("effective_to")).isNotNull();
+
+        Map<String, Object> openedRow = jdbcTemplate.queryForMap(
+                "SELECT band FROM met_price_entries WHERE provider = ? AND model = ? "
+                        + "AND id != ?", PROVIDER, "m-bd3", peak.getId());
+        assertThat(openedRow.get("band")).isEqualTo(Band.PEAK.getCode());
+
+        // NULL 带行改价：新行 band 仍 NULL（缺省不区分时段语义不变）
+        PriceEntry plain = plantOpenRow("m-bd4", T0, "0.000001");
+        String plainPath = "/api/backoffice/price-entries/" + plain.getId() + "/reprice";
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post(plainPath).contentType(MediaType.APPLICATION_JSON).content(body),
+                        plainPath, body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.opened.band").value(nullValue()));
+        Map<String, Object> plainOpened = jdbcTemplate.queryForMap(
+                "SELECT band FROM met_price_entries WHERE provider = ? AND model = ? "
+                        + "AND id != ?", PROVIDER, "m-bd4", plain.getId());
+        assertThat(plainOpened.get("band")).isNull();
+    }
+
     // ---------- 夹具 ----------
 
     /** 库植敞口行（起点可未来＝预发布形制），存量形制无操作者。 */
@@ -608,10 +760,23 @@ class BackofficePriceEntrySeamTest {
                 new BigDecimal(unitPrice), "USD", from, null));
     }
 
+    /** 库植带行（#498：峰/谷带形制，存量无操作者）。 */
+    private PriceEntry plantBandRow(String model, Instant from, String unitPrice, Band band) {
+        return priceEntryRepository.save(PriceEntry.open(PROVIDER, model, TokenKind.INPUT,
+                band, new BigDecimal(unitPrice), "USD", from, null));
+    }
+
     /** 开行请求体（provider 固定夹具值）。 */
     private String openBody(String model, int tokenKind, String unitPrice, String effectiveFrom) {
         return "{\"provider\":\"" + PROVIDER + "\",\"model\":\"" + model + "\",\"tokenKind\":"
                 + tokenKind + ",\"unitPrice\":" + unitPrice + ",\"currency\":\"USD\","
+                + "\"effectiveFrom\":\"" + effectiveFrom + "\"}";
+    }
+
+    /** 带行开行请求体（#498：band 为 Band code）。 */
+    private String openBandBody(String model, int band, String unitPrice, String effectiveFrom) {
+        return "{\"provider\":\"" + PROVIDER + "\",\"model\":\"" + model + "\",\"tokenKind\":1,"
+                + "\"band\":" + band + ",\"unitPrice\":" + unitPrice + ",\"currency\":\"USD\","
                 + "\"effectiveFrom\":\"" + effectiveFrom + "\"}";
     }
 

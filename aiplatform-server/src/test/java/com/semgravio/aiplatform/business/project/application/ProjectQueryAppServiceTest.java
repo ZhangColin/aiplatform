@@ -506,7 +506,7 @@ class ProjectQueryAppServiceTest {
                         Map.of(Currency.getInstance("USD"), new BigDecimal("0.003"),
                                 Currency.getInstance("CNY"), new BigDecimal("1.5")),
                         List.of(new UsageSummary.UnpricedUsage("testprov", "m-none",
-                                TokenKind.INPUT)),
+                                TokenKind.INPUT, null)),
                         List.of(new UsageSummary.ModelUsage("deepseek", "deepseek-v4-pro",
                                 tokens)),
                         List.of(new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "main", tokens),
@@ -553,11 +553,23 @@ class ProjectQueryAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
-    // ---------- PRD 读（直读工作区，文件是事实源） ----------
+    // ---------- PRD 读（未产出期标志短路，#478；产出后直读工作区，文件是事实源） ----------
+
+    @Test
+    void given_prd_flag_not_landed_when_prd_then_prj_015_without_exec() {
+        Long projectId = persistedProject(8406L, "未产 PRD 项目").getId();
+
+        // 未产出期短路（#478）：prd_produced_at 未落（savePrd 未收口）＝PRJ_015 直回
+        // ——不触工作区（创建后首请求不再因容器未起进 awaitReady，少一次 exec）
+        assertThatThrownBy(() -> appService.prd(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PRD_NOT_PRODUCED.message());
+        verify(workspaceLifecycleAppService, never()).exec(anyString(), any(WorkspaceExecCommand.class));
+    }
 
     @Test
     void given_workspace_prd_file_when_prd_then_content_and_file_mtime_returned() {
-        Long projectId = persistedProject(8401L, "PRD 项目").getId();
+        Long projectId = prdMarkedProject(8401L, "PRD 项目").getId();
         when(workspaceLifecycleAppService.exec(eq("8401"), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("1756100000\n# 官网 PRD\n\n目标：三页官网。\n",
                         "", 0));
@@ -575,12 +587,14 @@ class ProjectQueryAppServiceTest {
     }
 
     @Test
-    void given_no_prd_file_when_prd_then_prj_015_not_produced() {
-        Long projectId = persistedProject(8402L, "PRD 项目").getId();
+    void given_flag_landed_but_file_missing_when_prd_then_prj_015_still() {
+        // 反向漂移形：标志在、文件没（工作区卷丢失等）
+        Long projectId = prdMarkedProject(8402L, "PRD 项目").getId();
         when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("", "stat: 无法取文件状态", 1));
 
-        // 文件缺（test -f 失败，退出码 1）= 未产出口径：404 PRJ_015（前端区分「还没产出」）
+        // 标志已落才走到 exec：文件缺（test -f 失败，退出码 1）＝PRJ_015 兜底同码
+        //（前端区分「还没产出」——标志短路与文件缺同应答面）
         assertThatThrownBy(() -> appService.prd(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PRD_NOT_PRODUCED.message());
@@ -588,7 +602,7 @@ class ProjectQueryAppServiceTest {
 
     @Test
     void given_dead_container_when_prd_then_wsp_002_environment_fault() {
-        Long projectId = persistedProject(8403L, "PRD 项目").getId();
+        Long projectId = prdMarkedProject(8403L, "PRD 项目").getId();
         when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("", "docker: No such container", 125));
 
@@ -734,6 +748,13 @@ class ProjectQueryAppServiceTest {
 
     private Project persistedProject(long workspaceId, String name) {
         return persistedProject(workspaceId, name, null);
+    }
+
+    /** 已产 PRD 项目（标志位落库——文件只能经 savePrd 存在〔置位同回调〕，#478 exec 路径前提）。 */
+    private Project prdMarkedProject(long workspaceId, String name) {
+        Project project = persistedProject(workspaceId, name);
+        project.markPrdProduced();
+        return projectRepository.save(project);
     }
 
     /** 携归属的项目夹具（#325 owner 过滤测试用）。 */

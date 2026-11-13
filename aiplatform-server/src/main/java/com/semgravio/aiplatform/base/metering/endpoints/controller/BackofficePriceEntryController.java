@@ -29,7 +29,8 @@ import com.semgravio.aiplatform.support.Tsid;
 /**
  * 后台单价表 REST 面（#160 成本运营＋#165 写口唯一化，机机签名——五头 HMAC
  * 强制闸，见 {@link com.semgravio.aiplatform.config.WebMvcConfig}）：单价表＝
- * 平台成本换算用单价数据（模型 × token 档位 × 币种 × 生效区间）。错误码前缀
+ * 平台成本换算用单价数据（模型 × token 档位 × 时段带 × 币种 × 生效区间，
+ * 时段带 #498/ADR-0044 可空）。错误码前缀
  * METER_（行不存在 METER_006、非当前行 METER_007、区间重叠 METER_008、字段/
  * 币种 METER_004/010、关行时点 METER_005）。启动 Seeder 已随 #165 退役——单价
  * 表写路径全部收在本面（初始化经开行端点＋幂等签名脚本）。
@@ -68,9 +69,12 @@ public class BackofficePriceEntryController {
             description = "对指定匹配键（provider × model × tokenKind）新开一行敞口"
                     + "区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子"
                     + "数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行"
-                    + "即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口"
+                    + "即不再开行）。band 时段带可空（1=峰 2=谷，缺省 null＝不区分"
+                    + "时段——#498/ADR-0044 存量语义零变动）。effectiveFrom 可回溯"
+                    + "（种子口径 2026-01-01 敞口"
                     + "覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补"
-                    + "同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer"
+                    + "同键同带生效区间重叠校验（改价同款；同键同带同起点拒、不同带"
+                    + "不误拒）。tokenKind 契约为 Integer"
                     + " code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。"
                     + "X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本"
                     + "即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217"
@@ -84,11 +88,13 @@ public class BackofficePriceEntryController {
     @PostMapping("/{id}/reprice")
     @Operation(summary = "原子改价（单调用关当前行＋开新行）",
             description = "同事务两步：被关行落 effectiveTo＝新起点（保留其原开行操作者，"
-                    + "不被改写），新行沿用匹配键、单价/币种取命令、敞口生效。"
+                    + "不被改写），新行沿用匹配键（含时段带 band——带是匹配键成分，"
+                    + "改价不漂移，#498）、单价/币种取命令、敞口生效。"
                     + "effectiveFrom 可指定（ISO-8601 Instant，如 2026-09-14T16:00:00Z）"
                     + "——含未来时点＝预发布（对齐供应商凌晨调价，窗口前旧价仍生效）；"
-                    + "缺省＝即时。服务端补同键生效区间重叠校验（唯一约束只防同起点、"
-                    + "不防跨区间重叠——重叠行会重复计费）。X-User-Id/X-User-Name 透传头"
+                    + "缺省＝即时。服务端补同键同带生效区间重叠校验（唯一约束只防同键"
+                    + "同带同起点、不防跨区间重叠——重叠行会重复计费）。X-User-Id/"
+                    + "X-User-Name 透传头"
                     + "自动落痕新行（缺头落空，#160）。中途任一守卫失败两行都不动。"
                     + "行不存在 404 METER_006；字段不完整/单价负数 400 METER_004；"
                     + "币种非 ISO 4217 400 METER_010；起点早于被关行起点 400 METER_005；"

@@ -29,7 +29,17 @@ public enum MeteringMessage implements CodeMessage {
 
     // METER_011 曾是「无效的成本查询参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
 
-    USAGE_IMAGES_NEGATIVE(400, "METER_012", "用量张数不能为负数");
+    USAGE_IMAGES_NEGATIVE(400, "METER_012", "用量张数不能为负数"),
+
+    TIME_BAND_RULE_FIELDS_INCOMPLETE(400, "METER_013", "时段规则行字段不完整"),
+
+    TIME_BAND_RULE_CLOSE_INVALID(400, "METER_014", "关行时点非法（空或早于生效起点）"),
+
+    TIME_BAND_RULE_NOT_FOUND(404, "METER_015", "时段规则行不存在"),
+
+    TIME_BAND_RULE_NOT_CURRENT(409, "METER_016", "时段规则行非当前行（已关行不可改或停用）");
+
+    // 时段规则同通道生效区间重叠沿用 METER_008（#497 对称单价表口径，码位不另立）
 
     private final int httpStatus;
     private final String code;

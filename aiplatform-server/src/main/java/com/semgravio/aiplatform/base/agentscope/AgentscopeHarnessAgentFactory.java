@@ -7,18 +7,23 @@ import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ModelCreationContext;
 import io.agentscope.core.model.ModelRegistry;
+import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.AgentTool;
+import io.agentscope.core.tool.ToolCallParam;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import io.agentscope.harness.agent.middleware.HarnessSkillMiddleware;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -73,6 +78,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     private final AgentStateStore stateStore;
     private final AgentToolkitSupplier toolkitSupplier;
     private final EdgeModelSupplier edgeModels;
+
+    /** 内核内置件名（wait_async_results）与坑参数名（timeout_seconds，#482）。 */
+    private static final String WAIT_ASYNC_RESULTS_TOOL = "wait_async_results";
+    private static final String TIMEOUT_SECONDS_PARAM = "timeout_seconds";
+    private static final String REQUIRED_SCHEMA_KEY = "required";
 
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
@@ -239,6 +249,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         }
         HarnessAgent agent = builder.build();
         realignBuiltinWebTools(toolkit, agent);
+        // #482：内置等待屏障件 schema 覆写（见 relaxWaitBarrierTimeoutSchema）
+        relaxWaitBarrierTimeoutSchema(agent.getToolkit());
         // #363：项目容器姿态抑制框架宿主物化面（见 suppressHostSkillStaging——
         // 容器根 /workspace 对纯 NIO 物化是宿主路径，写了必错处）
         if (containerFs != null) {
@@ -320,6 +332,107 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .abstractFilesystem(filesystem)
                 .disableMemoryHooks()
                 .disableMemoryTools();
+    }
+
+    /**
+     * 内置等待屏障件 schema 覆写（#482）：agentscope 2.0.1 把 {@code wait_async_results}
+     * 的 {@code timeout_seconds} 声明为<b>必填</b>（{@code @ToolParam} 缺省
+     * {@code required=true}——对比 {@code task_ids}/{@code wait_all} 显式
+     * {@code required=false}），而内核描述文本自称 "Default 60, max 120"、实现
+     * {@code normalizeTimeout(null)→60} 兜底完备——schema 声明与描述/实现自相矛盾：
+     * 模型按描述省略参数即 {@code ToolValidator} 参数校验失败（错误以
+     * {@code ToolResultBlock.error} 回模型、日志仅 debug 级——#480 同族形态，取证
+     * 依赖读码实证）。内核件经 {@code HarnessAgent.Builder.build()} 内置件面进入
+     * （messageBus 非空即注册，与 {@code disableSubagents()} 无关——只读/设计面同在），
+     * 声明 allowlist 管不到它的 schema 面（#260 遗留口径）。
+     *
+     * <p>修法＝构建后 schema 覆写（镜像 {@link #realignBuiltinWebTools}/#266 后置校正
+     * 先例）：取在册件包 {@link RelaxedSchemaAgentTool 委托件}——唯一改写面是
+     * {@code getParameters()}（required 列表摘 {@code timeout_seconds}，仅剩即移除
+     * key），执行面全委托内核件；同名后写胜覆盖注册（{@code ToolRegistry} 后写胜）。
+     * 校验面（ToolExecutor）与模型面（ToolSchemaProvider）同源
+     * {@code AgentTool.getParameters()}——一覆两得。properties 定义保留（模型可显式
+     * 传，>120 由内核 clamp）。幂等：required 本不含（上游修版/重复调用）即不动原件
+     * ——agentscope 升级修掉此坑后本覆写自动退化为 no-op，届时可撤（回归测试
+     * {@code AgentscopeWaitBarrierSchemaTest} 缝 A 断言红即撤除信号）。不选
+     * {@code updateToolPresetParameters} 注默认：preset 合并在校验<b>之后</b>
+     * （ToolExecutor 字节码序），救不了校验前置失败。</p>
+     *
+     * <p>主装配（{@link #buildAgent}，realignBuiltinWebTools 旁）与子智能体工厂
+     * （{@link #subagentFactory}，#266 stripUndeclared 后——声明放行即在面）两处接线。</p>
+     */
+    static void relaxWaitBarrierTimeoutSchema(Toolkit toolkit) {
+        AgentTool waitTool = toolkit.getTool(WAIT_ASYNC_RESULTS_TOOL);
+        if (waitTool == null) {
+            return;
+        }
+        Map<String, Object> schema = waitTool.getParameters();
+        Object required = schema == null ? null : schema.get(REQUIRED_SCHEMA_KEY);
+        if (!(required instanceof List<?> requiredNames)
+                || !requiredNames.contains(TIMEOUT_SECONDS_PARAM)) {
+            return;
+        }
+        List<?> remaining = requiredNames.stream()
+                .filter(name -> !TIMEOUT_SECONDS_PARAM.equals(name))
+                .toList();
+        Map<String, Object> relaxed = new LinkedHashMap<>(schema);
+        if (remaining.isEmpty()) {
+            relaxed.remove(REQUIRED_SCHEMA_KEY);
+        } else {
+            relaxed.put(REQUIRED_SCHEMA_KEY, remaining);
+        }
+        toolkit.registerAgentTool(new RelaxedSchemaAgentTool(waitTool, relaxed));
+    }
+
+    /**
+     * schema 覆写委托件（#482）：唯一改写面＝{@link #getParameters()}（构建时固化的
+     * 改写后 schema），name/描述/strict/outputSchema/只读标记/执行全委托原内核件
+     * ——平台只放宽声明面，行为零变化。
+     */
+    private static final class RelaxedSchemaAgentTool implements AgentTool {
+
+        private final AgentTool delegate;
+        private final Map<String, Object> parameters;
+
+        RelaxedSchemaAgentTool(AgentTool delegate, Map<String, Object> parameters) {
+            this.delegate = delegate;
+            this.parameters = parameters;
+        }
+
+        @Override
+        public String getName() {
+            return delegate.getName();
+        }
+
+        @Override
+        public String getDescription() {
+            return delegate.getDescription();
+        }
+
+        @Override
+        public Map<String, Object> getParameters() {
+            return parameters;
+        }
+
+        @Override
+        public Boolean getStrict() {
+            return delegate.getStrict();
+        }
+
+        @Override
+        public Map<String, Object> getOutputSchema() {
+            return delegate.getOutputSchema();
+        }
+
+        @Override
+        public boolean isReadOnly() {
+            return delegate.isReadOnly();
+        }
+
+        @Override
+        public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return delegate.callAsync(param);
+        }
     }
 
     /**
@@ -406,6 +519,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             // build() 之后才是完整事实面；技能装载件 load_skill_through_path 由中间
             // 件每轮运行时挂载，不在此处、不受影响）
             stripUndeclared(child.getToolkit(), declaration.getTools());
+            // #482：内置等待屏障件 schema 覆写（声明放行即在面——同主装配口径）
+            relaxWaitBarrierTimeoutSchema(child.getToolkit());
             // #363：容器面同款抑制——子级隔离根同样是容器路径（物化面纯宿主 NIO，
             // 见 suppressHostSkillStaging）；Local 姿态不抑制
             if (isolatedRoot != null) {

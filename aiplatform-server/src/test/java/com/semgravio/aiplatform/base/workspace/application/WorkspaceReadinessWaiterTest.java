@@ -101,6 +101,37 @@ class WorkspaceReadinessWaiterTest {
                 .hasMessageContaining("工作区不存在");
     }
 
+    @Test
+    void given_ready_workspace_when_awaitReady_by_id_then_returned() {
+        // 按标识入口（智能体工具面只有 workspaceId）：独立读装载后走同一收敛环
+        Workspace ready = ready(id("42"));
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.of(ready));
+
+        Workspace result = waiter().awaitReadyById(id("42"));
+
+        assertThat(result).isSameAs(ready);
+    }
+
+    @Test
+    void given_provisioning_workspace_when_awaitReady_by_id_then_polls_until_ready() {
+        Workspace pending = pending(id("42"));
+        Workspace ready = ready(id("42"));
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.of(pending), Optional.of(ready));
+
+        Workspace result = waiter(Duration.ofSeconds(1), Duration.ofMillis(1)).awaitReadyById(id("42"));
+
+        assertThat(result.getStatus()).isEqualTo(ProvisioningStatus.READY);
+    }
+
+    @Test
+    void given_absent_workspace_when_awaitReady_by_id_then_not_found() {
+        when(freshReads.findFreshById(42L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> waiter().awaitReadyById(id("42")))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+    }
+
     // ---------- 测试数据 ----------
 
     private WorkspaceReadinessWaiter waiter() {

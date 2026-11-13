@@ -55,6 +55,18 @@ public class WorkspaceReadinessWaiter {
     }
 
     /**
+     * 按标识取「已就绪」的工作区（只有 workspaceId 的入口——智能体工作区工具装配面）：
+     * 独立读装载后走 {@link #awaitReady(Workspace)} 同一收敛环。不存在抛 WSP_001。
+     * 独立命名不加 awaitReady 重载：既有调用/测试存在 {@code awaitReady(null)} 形态，
+     * 重载会引入 null 二义。
+     */
+    public Workspace awaitReadyById(WorkspaceId workspaceId) {
+        Workspace current = freshReads.findFreshById(workspaceId.id())
+                .orElseThrow(() -> new ApplicationException(WorkspaceMessage.WORKSPACE_NOT_FOUND));
+        return awaitReady(current);
+    }
+
+    /**
      * 取「已就绪」的工作区：READY 即回（句柄带真实端口）；PROVISIONING 轮询至 READY；
      * FAILED 抛 WSP_010（置备已败，不会就绪）；超时抛 WSP_011（不静默悬挂）。工作区在
      * 等待中被删则抛 WSP_001（404）。

@@ -7,6 +7,7 @@ import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
 import com.semgravio.aiplatform.base.agentscope.LandedFileFacts;
 import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.BuildPlanFacts;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
@@ -83,6 +84,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final DesignSpecAppService designSpecs;
     private final VerificationFacts verificationFacts;
     private final AgentConfigAppService agentConfigs;
+    private final WorkspaceReadinessWaiter readinessWaiter;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
@@ -91,7 +93,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
             ImageGenerationAppService imageGeneration,
             LandedFileFacts landedFiles, DesignSpecAppService designSpecs,
-            VerificationFacts verificationFacts, AgentConfigAppService agentConfigs) {
+            VerificationFacts verificationFacts, AgentConfigAppService agentConfigs,
+            WorkspaceReadinessWaiter readinessWaiter) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -107,6 +110,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.designSpecs = designSpecs;
         this.verificationFacts = verificationFacts;
         this.agentConfigs = agentConfigs;
+        this.readinessWaiter = readinessWaiter;
     }
 
     @Override
@@ -116,10 +120,12 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {
             toolkit.registerAgentTool(new AskUserTool());
             toolkit.registerAgentTool(new SavePrdTool(prdArtifacts.workspacePath(),
-                    ro.workspaceId(), ro.containerName(), prdArtifacts, prdRevisions));
+                    ro.workspaceId(), ro.containerName(), readinessWaiter, prdArtifacts, prdRevisions));
             toolkit.registerAgentTool(new SaveBuildPlanTool(ro.workspaceId(), buildPlanFacts));
-            toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.containerName()));
-            toolkit.registerAgentTool(new ReadWorkspaceFileTool(ro.containerName()));
+            toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.workspaceId(),
+                    ro.containerName(), readinessWaiter));
+            toolkit.registerAgentTool(new ReadWorkspaceFileTool(ro.workspaceId(),
+                    ro.containerName(), readinessWaiter));
             toolkit.registerAgentTool(new ProjectFactsTool(ro.workspaceId(),
                     projectRepository, workspaceLifecycleAppService));
             // #213 抓取闭环：贴 URL 读外部资料（只读 GET + 四条安全底线在取数口兑现）

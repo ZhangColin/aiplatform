@@ -4,8 +4,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
-import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem;
+import com.semgravio.aiplatform.base.agentscope.ReadinessAwaitingExecCommand;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 
 import io.agentscope.core.message.ToolResultBlock;
@@ -35,9 +37,10 @@ public class ReadWorkspaceFileTool extends ToolBase {
 
     private final DockerExecFilesystem.ExecCommand exec;
 
-    public ReadWorkspaceFileTool(String containerName) {
-        this(new DockerExecFilesystem.DockerExecCommand(containerName,
-                AgentWorkspace.ProjectDev.CONTAINER_ROOT));
+    public ReadWorkspaceFileTool(String workspaceId, String containerName,
+            WorkspaceReadinessWaiter readinessWaiter) {
+        this(ReadinessAwaitingExecCommand.dockerExec(containerName,
+                WorkspaceId.of(workspaceId), readinessWaiter));
     }
 
     /** 执行缝注入构造（单测替身 ExecCommand）。 */

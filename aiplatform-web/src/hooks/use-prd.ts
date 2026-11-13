@@ -43,8 +43,9 @@ export function usePrd(
 /**
  * PRD 版本清单（#330 成行制，#462 去门化语义顺延，ADR-0039）：versionNo 倒序、
  * 空列表＝尚无构建基准记行。阶段门「首个 Demo 在途」事实源（#343 验收闭合）
- * ——版本行由 Demo 类 run 起跑自动记行（首次 savePrd 触发首个 run，本域经
- * document-updated/轮询自然失效，无确认动作可失效）。
+ * ——版本行由 Demo 类 run 起跑自动记行（首次 savePrd 触发首个 run）；失效源两路：
+ * document-updated（savePrd 写出）与 run-start(agent=executor)（记行落库后必达，
+ * 桥内失效——savePrd 通知与记行存在竞态，单靠前者阶段门会卡到刷新）。
  */
 export function usePrdVersions(projectId: string | undefined) {
   return useQuery({

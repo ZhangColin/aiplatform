@@ -397,6 +397,24 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
   });
 
+  it("run-start(agent=executor) 失效 projects＋documents 双域（#462：记行先于事件落库——阶段门即时解锁，不卡到刷新）；main 轮不失效 documents", () => {
+    const invalidate = vi.spyOn(agentQc, "invalidateQueries");
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统", agent: "executor" }, "run1:1",
+    ));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.projects.all });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.documents.all });
+
+    invalidate.mockClear();
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start", { projectId: "p1", runId: "run2", prompt: "需求", agent: "main" }, "run2:1",
+    ));
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.documents.all });
+
+    invalidate.mockRestore();
+  });
+
   it("无中途闪错（#84 AC④）：失败终态前每一拍都无错误 UI——状态恒 running、对话面零错误气泡", () => {
     // 事件序列断言（与服务端脚本化用例同源）：run-start → 部件生长 →（中间错误
     // 与重试信号不进用户面事件流）→ run-failed 唯一失败终态。逐拍断言错误 UI

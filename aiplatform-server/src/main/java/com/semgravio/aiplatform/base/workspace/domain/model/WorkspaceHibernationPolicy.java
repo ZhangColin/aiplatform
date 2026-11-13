@@ -35,7 +35,7 @@ public final class WorkspaceHibernationPolicy {
     /**
      * 封存判定（#172）：期望休眠 ∧ 无 run 在途 ∧ 休眠满期——闲置时长严格逾
      * {@code idleThreshold + sealThreshold}（休眠自闲置满 idleThreshold 起算，
-     * 再满 sealThreshold 即「休眠满 30 天」口径）。
+     * 再满 sealThreshold 即「休眠满封存阈值」口径；#496 起配置缺省 1 天）。
      */
     public static boolean shouldSeal(LocalDateTime lastTouchAt, LocalDateTime now,
             boolean runInFlight, DesiredState desiredState,

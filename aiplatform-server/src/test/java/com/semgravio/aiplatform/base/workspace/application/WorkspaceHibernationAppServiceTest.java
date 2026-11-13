@@ -375,7 +375,7 @@ class WorkspaceHibernationAppServiceTest {
     @Test
     void given_hibernated_over_seal_threshold_when_scan_then_sealed_package_saved_volume_deleted() {
         Workspace workspace = readyWorkspace();
-        workspace.markTouched(NOW.minusDays(31));   // 闲置 31 天：休眠满期（60m + 30d 之上）
+        workspace.markTouched(NOW.minusDays(31));   // 闲置 31 天：休眠满期（60m + 1d 之上，#496）
         workspace.hibernate();   // 先拨时刻后落休眠（markTouched 会把休眠意图翻回运行）
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
         when(workspaceRepository.findById(42L)).thenReturn(Optional.of(workspace));
@@ -408,7 +408,7 @@ class WorkspaceHibernationAppServiceTest {
     @Test
     void given_hibernated_but_under_seal_threshold_when_scan_then_not_sealed() {
         Workspace workspace = readyWorkspace();
-        workspace.markTouched(NOW.minusDays(10));   // 闲置 10 天：休眠未满期
+        workspace.markTouched(NOW.minusHours(24));   // 闲置 24 小时：贴 25h 判定线（60m+1d）未满期，#496
         workspace.hibernate();
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
 

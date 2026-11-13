@@ -37,8 +37,13 @@ public class WorkspaceProperties {
     /** 休眠器开关（#171，默认开；#197 内移——休眠扫描入口自持，test profile 关休眠扫描）。 */
     private boolean hibernationEnabled = true;
 
-    /** 封存阈值（#172，默认 30 天）：休眠满此即自动封存（删卷换包）。 */
-    private Duration sealThreshold = Duration.ofDays(30);
+    /**
+     * 封存阈值（#172，默认 1 天；#496 自 30 天收紧）：休眠满此即自动封存（删卷换包）。
+     * #496 决策理由：硬链种子候选 5 双环境 EXDEV 出局（ADR-0046），活跃项目基座
+     * 暂不可省、磁盘收敛全押封存——闲置项目卷存活窗口由 ~31 天（60m+30d）收紧至
+     * ~25 小时（60m+1d），封存唤醒分钟级代价已确认可接受。
+     */
+    private Duration sealThreshold = Duration.ofDays(1);
 
     /**
      * 封存包目录（#172，默认 {@code seal-archives} 工作目录下）：本地磁盘 v1 的

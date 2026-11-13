@@ -1248,7 +1248,7 @@ export interface paths {
         put?: never;
         /**
          * 开行（空键首行——种子脚本通道）
-         * @description 对指定匹配键（provider × model × tokenKind）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         * @description 对指定匹配键（provider × model × tokenKind × band）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。band 时段带可空（1=峰 2=谷，缺省 null＝不区分时段——#498/ADR-0044 存量语义零变动）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键同带生效区间重叠校验（改价同款；同键同带同起点拒、不同带不误拒）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
          *     - 400 METER_004 — 单价行字段不完整
@@ -1273,7 +1273,7 @@ export interface paths {
         put?: never;
         /**
          * 原子改价（单调用关当前行＋开新行）
-         * @description 同事务两步：被关行落 effectiveTo＝新起点（保留其原开行操作者，不被改写），新行沿用匹配键、单价/币种取命令、敞口生效。effectiveFrom 可指定（ISO-8601 Instant，如 2026-09-14T16:00:00Z）——含未来时点＝预发布（对齐供应商凌晨调价，窗口前旧价仍生效）；缺省＝即时。服务端补同键生效区间重叠校验（唯一约束只防同起点、不防跨区间重叠——重叠行会重复计费）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空，#160）。中途任一守卫失败两行都不动。行不存在 404 METER_006；字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；起点早于被关行起点 400 METER_005；目标非当前行 409 METER_007；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         * @description 同事务两步：被关行落 effectiveTo＝新起点（保留其原开行操作者，不被改写），新行沿用匹配键（含时段带 band——带是匹配键成分，改价不漂移，#498）、单价/币种取命令、敞口生效。effectiveFrom 可指定（ISO-8601 Instant，如 2026-09-14T16:00:00Z）——含未来时点＝预发布（对齐供应商凌晨调价，窗口前旧价仍生效）；缺省＝即时。服务端补同键同带生效区间重叠校验（唯一约束只防同键同带同起点、不防跨区间重叠——重叠行会重复计费）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空，#160）。中途任一守卫失败两行都不动。行不存在 404 METER_006；字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；起点早于被关行起点 400 METER_005；目标非当前行 409 METER_007；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
          *     - 400 METER_004 — 单价行字段不完整
@@ -4944,6 +4944,11 @@ export interface components {
             /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理, 6=按张 */
             tokenKind?: number;
             /**
+             * @description 时段带（1=峰 2=谷；缺省或 null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）
+             * @example 1
+             */
+            band?: number;
+            /**
              * @description 每 token 单价（入参侧为 number；非负，0＝免费档。响应侧读回为十进制字符串——两侧类型有意不对称，照实各自呈现）
              * @example 0.00000132
              */
@@ -4967,6 +4972,12 @@ export interface components {
             /** Format: int32 */
             tokenKind?: number;
             tokenKindName?: string;
+            /**
+             * @description 时段带（1=峰 2=谷；null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）
+             * @example 1
+             */
+            band?: number;
+            bandName?: string;
             /**
              * @description 每 token 单价（响应侧为 string——精确十进制串交接，规避 BigDecimal 直出 JSON 落科学计数；开行/改价入参侧为 number，类型照实各自呈现、有意不做统一）
              * @example "0.00000132"

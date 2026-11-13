@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import com.cartisan.core.domain.BaseEnum;
 
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 import com.semgravio.aiplatform.base.metering.domain.model.GlobalUsageSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.SubjectCostSummary;
@@ -37,9 +39,11 @@ import com.semgravio.aiplatform.base.metering.domain.repository.UsageEventAggreg
  *
  * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张，#288）经
  * {@code CROSS JOIN LATERAL VALUES} 展开后与单价表按 (provider, model, kind) + ts 落
- * {@code [effective_from, effective_to)} 区间匹配，金额按币种分桶不折算；有用量
- * 无生效单价行的 (provider, model, 档位) 进 unpriced（分量不进 cost，不伪装 0、
- * 不阻断查询）。</p>
+ * {@code [effective_from, effective_to)} 区间匹配；时段带维（#499，ADR-0044 读时归段）
+ * ＝事件 ts 经时段规则表归带（峰/谷，epoch 数学派生 UTC 星期/分钟、免会话时区坑）
+ * 后按带选价——无规则行通道回落 NULL 带行（存量语义）、按张档不受带影响。金额按
+ * 币种分桶不折算；有用量无生效单价行的 (provider, model, 档位, 带) 进 unpriced
+ * （分量不进 cost，不伪装 0、不阻断查询）。</p>
  */
 @Component
 public class UsageEventAggregationsImpl implements UsageEventAggregations {
@@ -73,10 +77,64 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
             .map(kindColumn -> "(" + kindColumn.getKey().getCode() + ", e." + kindColumn.getValue() + ")")
             .collect(Collectors.joining(", "));
 
-    /** 事件时点生效区间匹配（单价表别名恒为 p；与事件 ts 落 [from, to) 半开同口径）。 */
+    /** 事件 ts 的 epoch 秒（UTC 绝对口径）：星期/分钟派生不走数据库会话时区。 */
+    private static final String EVENT_EPOCH = "FLOOR(EXTRACT(EPOCH FROM e.ts))";
+
+    /** 事件 ts 的 ISO 星期 bitmask 位（Mon=1…Sun=64，与规则 day_mask 同口径；
+     *  epoch 日 0＝1970-01-01 周四，+3 对齐 ISO 周一余数起点）。 */
+    private static final String EVENT_DOW_BIT =
+            "(1 << (((FLOOR(" + EVENT_EPOCH + " / 86400) + 3)::int % 7)))";
+
+    /** 事件 ts 的 UTC 日分钟（0..1439，与规则 start_minute/end_minute 同口径）。 */
+    private static final String EVENT_MINUTE = "(FLOOR(" + EVENT_EPOCH + " / 60)::int % 1440)";
+
+    /** 时段规则行在事件 ts 时点生效（别名恒为 r；[from, to) 半开与单价表同口径）。 */
+    private static final String RULE_OPEN =
+            "r.provider = e.provider AND r.effective_from <= e.ts"
+                    + " AND (r.effective_to IS NULL OR e.ts < r.effective_to)";
+
+    /** 事件 ts 命中规则窗口行：ts 星期 ∈ day_mask ∧ ts UTC 分钟 ∈ [start, end)。 */
+    private static final String RULE_HIT =
+            RULE_OPEN + " AND (r.day_mask & " + EVENT_DOW_BIT + ") <> 0"
+                    + " AND " + EVENT_MINUTE + " >= r.start_minute"
+                    + " AND " + EVENT_MINUTE + " < r.end_minute";
+
+    /**
+     * 事件 ts 归带（读时归段单点）：通道无生效规则行 → NULL（不看时段，存量语义）；
+     * 命中窗口行 → 该行带（多行命中取 MIN(band) 确定性兜底）；有规则行但无窗口命中
+     * → 补带——声明了峰窗 → 谷、只声明谷窗 → 峰（DeepSeek 峰窗显式声明、其余谷，
+     * 谷不种行）。带码单点取自 {@link Band}。
+     */
+    private static final String EVENT_BAND =
+            "CASE WHEN NOT EXISTS (SELECT 1 FROM met_time_band_rules r WHERE " + RULE_OPEN + ")"
+                    + " THEN NULL"
+                    + " ELSE COALESCE("
+                    + "(SELECT MIN(r.band) FROM met_time_band_rules r WHERE " + RULE_HIT + "), "
+                    + "CASE WHEN EXISTS (SELECT 1 FROM met_time_band_rules r WHERE " + RULE_OPEN
+                    + " AND r.band = " + Band.PEAK.getCode() + ")"
+                    + " THEN " + Band.OFF_PEAK.getCode()
+                    + " ELSE " + Band.PEAK.getCode() + " END)"
+                    + " END";
+
+    /** 未配价警示的归带维：token 档按事件归带分组；按张档不受带影响（落空）。 */
+    private static final String UNPRICED_BAND =
+            "CASE WHEN part.kind = " + TokenKind.IMAGE.getCode() + " THEN NULL"
+                    + " ELSE " + EVENT_BAND + " END";
+
+    /**
+     * 事件时点生效区间匹配（单价表别名恒为 p；与事件 ts 落 [from, to) 半开同口径）。
+     * 时段带维（#499，ADR-0044 读时归段）：token 档按 {@link #EVENT_BAND} 归带匹配
+     * 对应带单价行、无规则行通道回落 NULL 带行（存量语义）；按张档不受 band 影响
+     * （只匹配 NULL 带行——#288 按张行不带维度）。
+     */
     private static final String PRICE_MATCH =
             "p.provider = e.provider AND p.model = e.model AND p.token_kind = part.kind"
-                    + " AND e.ts >= p.effective_from AND (p.effective_to IS NULL OR e.ts < p.effective_to)";
+                    + " AND e.ts >= p.effective_from AND (p.effective_to IS NULL OR e.ts < p.effective_to)"
+                    + " AND (part.kind = " + TokenKind.IMAGE.getCode() + " AND p.band IS NULL"
+                    + " OR part.kind <> " + TokenKind.IMAGE.getCode() + " AND ("
+                    + " (p.band IS NULL AND NOT EXISTS (SELECT 1 FROM met_time_band_rules r"
+                    + " WHERE " + RULE_OPEN + "))"
+                    + " OR p.band = " + EVENT_BAND + "))";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -91,20 +149,22 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
         TokenUsage total = totalOf(where, args.toArray());
         // 平台成本：五档展开 × 时点生效单价，币种分桶不折算（A6 §2）
         Map<Currency, BigDecimal> cost = costBuckets(from, to, subject);
-        // 未配价标注：有 token 但事件时点无生效单价行的 (provider, model, 档位)
+        // 未配价标注：有 token 但事件时点无生效单价行的 (provider, model, 档位, 带)
+        // ——带维归因事件归带（按张档不受带影响落空），峰行有谷行无时谷段分量进此面
         List<Object> unpricedArgs = CollUtil.newArrayList();
         String unpricedWhere = whereOf(unpricedArgs, subject, from, to, "part.tokens > 0",
                 "NOT EXISTS (SELECT 1 FROM met_price_entries p WHERE " + PRICE_MATCH + ")");
         List<UsageSummary.UnpricedUsage> unpriced = jdbcTemplate.query(
-                "SELECT e.provider, e.model, part.kind"
+                "SELECT e.provider, e.model, part.kind, " + UNPRICED_BAND
                         + " FROM met_usage_events e"
                         + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
                         + unpricedWhere
-                        + " GROUP BY e.provider, e.model, part.kind"
-                        + " ORDER BY e.provider, e.model, part.kind",
+                        + " GROUP BY e.provider, e.model, part.kind, " + UNPRICED_BAND
+                        + " ORDER BY e.provider, e.model, part.kind, " + UNPRICED_BAND,
                 unpricedArgs.toArray(), (rs, rowNum) -> new UsageSummary.UnpricedUsage(
                         rs.getString(1), rs.getString(2),
-                        BaseEnum.requireByCode(TokenKind.class, rs.getInt(3))));
+                        BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)),
+                        readBand(rs, 4)));
         List<UsageSummary.ModelUsage> byModel = byModelOf(where, args.toArray());
         // jsonb_each_text 展开事件 dims：每个 (key, value) 各成一桶；无维度行不参与
         List<UsageSummary.DimUsage> byDims = jdbcTemplate.query(
@@ -126,6 +186,9 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
         TokenUsage total = totalOf(where, args.toArray());
         Map<Currency, BigDecimal> cost = costBuckets(from, to, null);
         List<UsageSummary.ModelUsage> byModel = byModelOf(where, args.toArray());
+        // 分模型金额按带拆（#499 峰谷拆分维度）：行键 (provider, model, 带) × 币种分桶，
+        // 带 = 所配单价行 band（NULL＝不区分时段分量，按张行恒落此桶）
+        List<GlobalUsageSummary.ModelBandCost> byModelCost = byModelCostOf(from, to);
         // 分智能体：dims 只取 agentKind 键（写侧终态口径），无维度的事件不参与
         List<Object> dimArgs = CollUtil.newArrayList();
         List<GlobalUsageSummary.AgentKindUsage> byAgentKind = jdbcTemplate.query(
@@ -137,7 +200,7 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                         + " GROUP BY kv.dim_value ORDER BY kv.dim_value",
                 dimArgs.toArray(), (rs, rowNum) -> new GlobalUsageSummary.AgentKindUsage(
                         rs.getString(1), readTokens(rs, 2)));
-        return new GlobalUsageSummary(from, to, total, cost, byModel, byAgentKind);
+        return new GlobalUsageSummary(from, to, total, cost, byModel, byAgentKind, byModelCost);
     }
 
     @Override
@@ -145,16 +208,17 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
         // 用量驱动：窗口内有用量且事件时点无生效价的档位汇总 token（只计无价分量）
         List<Object> args = CollUtil.newArrayList();
         return jdbcTemplate.query(
-                "SELECT e.provider, e.model, part.kind, SUM(part.tokens)"
+                "SELECT e.provider, e.model, part.kind, " + UNPRICED_BAND + ", SUM(part.tokens)"
                         + " FROM met_usage_events e"
                         + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
                         + whereOf(args, null, from, to, "part.tokens > 0",
                         "NOT EXISTS (SELECT 1 FROM met_price_entries p WHERE " + PRICE_MATCH + ")")
-                        + " GROUP BY e.provider, e.model, part.kind"
-                        + " ORDER BY e.provider, e.model, part.kind",
+                        + " GROUP BY e.provider, e.model, part.kind, " + UNPRICED_BAND
+                        + " ORDER BY e.provider, e.model, part.kind, " + UNPRICED_BAND,
                 args.toArray(), (rs, rowNum) -> new UnpricedTierUsage(
                         rs.getString(1), rs.getString(2),
-                        BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)), rs.getLong(4)));
+                        BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)), readBand(rs, 4),
+                        rs.getLong(5)));
     }
 
     @Override
@@ -235,9 +299,49 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                 });
     }
 
+    /**
+     * 分模型金额按带拆查询（全局总览峰/谷拆分维度）：(provider, model, 带) × 币种
+     * 分桶——只含已配价分量（无价分量走 unpriced 面，互补不重叠）；带取所配单价行
+     * {@code band}（NULL＝不区分时段分量；按张行不受带影响、恒落 NULL 桶）。
+     */
+    private List<GlobalUsageSummary.ModelBandCost> byModelCostOf(Instant from, Instant to) {
+        List<Object> args = CollUtil.newArrayList();
+        Map<List<Object>, Map<Currency, BigDecimal>> grouped = jdbcTemplate.query(
+                "SELECT e.provider, e.model, p.band, p.currency, SUM(part.tokens * p.unit_price)"
+                        + " FROM met_usage_events e"
+                        + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
+                        + " JOIN met_price_entries p ON " + PRICE_MATCH
+                        + whereOf(args, null, from, to, "part.tokens > 0")
+                        + " GROUP BY e.provider, e.model, p.band, p.currency"
+                        + " ORDER BY e.provider, e.model, p.band, p.currency",
+                args.toArray(), rs -> {
+                    Map<List<Object>, Map<Currency, BigDecimal>> rows = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        // 键容 null 带（不区分时段分量）——Arrays.asList 许 null（List.of 不容）
+                        rows.computeIfAbsent(Arrays.asList(rs.getString(1), rs.getString(2),
+                                        (Integer) rs.getObject(3)), key -> new LinkedHashMap<>())
+                                .put(Currency.getInstance(rs.getString(4)), rs.getBigDecimal(5));
+                    }
+                    return rows;
+                });
+        return grouped.entrySet().stream()
+                .map(entry -> new GlobalUsageSummary.ModelBandCost(
+                        (String) entry.getKey().get(0), (String) entry.getKey().get(1),
+                        entry.getKey().get(2) == null ? null
+                                : BaseEnum.requireByCode(Band.class, (Integer) entry.getKey().get(2)),
+                        entry.getValue()))
+                .toList();
+    }
+
     private static TokenUsage readTokens(ResultSet rs, int base) throws SQLException {
         return new TokenUsage(rs.getLong(base), rs.getLong(base + 1), rs.getLong(base + 2),
                 rs.getLong(base + 3), rs.getLong(base + 4));
+    }
+
+    /** 可空带列读枚举：NULL → null（不区分时段），非空经 code 回解（防 ORDINAL 错位）。 */
+    private static Band readBand(ResultSet rs, int index) throws SQLException {
+        Integer code = (Integer) rs.getObject(index);
+        return code == null ? null : BaseEnum.requireByCode(Band.class, code);
     }
 
     /**

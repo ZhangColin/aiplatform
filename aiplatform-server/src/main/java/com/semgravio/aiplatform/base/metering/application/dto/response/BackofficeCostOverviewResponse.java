@@ -25,6 +25,8 @@ import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
  * @param byModel     分模型聚合（provider + model 为单价表匹配键）
  * @param byAgentKind 分智能体聚合（dims.agentKind 原值 + agentKindName 中文名随行；
  *                    无维度的事件不参与该分桶）
+ * @param byModelCost 分模型金额按带拆（#499 峰谷维度：band/bandName 随附，null＝
+ *                    不区分时段分量；cost 按币种分桶与全局 cost 同源不重叠）
  */
 public record BackofficeCostOverviewResponse(
         Instant from,
@@ -35,7 +37,8 @@ public record BackofficeCostOverviewResponse(
                 example = "{\"USD\": 12.34}")
         Map<String, BigDecimal> cost,
         List<ModelUsage> byModel,
-        List<AgentKindUsage> byAgentKind
+        List<AgentKindUsage> byAgentKind,
+        List<ModelBandCost> byModelCost
 ) {
 
     public BackofficeCostOverviewResponse {
@@ -44,6 +47,7 @@ public record BackofficeCostOverviewResponse(
                 : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
         byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
+        byModelCost = byModelCost == null ? List.of() : List.copyOf(byModelCost);
     }
 
     /**
@@ -58,5 +62,24 @@ public record BackofficeCostOverviewResponse(
      * 经 {@code AgentKindNames} 端口回解正本 AgentProfile，辅助标记为 null）。
      */
     public record AgentKindUsage(String agentKind, String agentKindName, TokenUsage tokens) {
+    }
+
+    /**
+     * 分模型金额按带拆项（#499 峰谷维度）：band 为 Integer code＋bandName 随附
+     * （1=峰 2=谷，#34 收敛房规；{@code null}＝不区分时段分量——无规则行通道与
+     * 按张行恒落此桶）；cost＝该 (provider, model, 带) 已配价分量按币种分桶。
+     */
+    public record ModelBandCost(
+            String provider,
+            String model,
+            Integer band,
+            String bandName,
+            Map<String, BigDecimal> cost
+    ) {
+
+        public ModelBandCost {
+            cost = cost == null ? Map.of()
+                    : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
+        }
     }
 }

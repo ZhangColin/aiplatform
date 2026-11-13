@@ -14,11 +14,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.metering.domain.aggregate.PriceEntry;
+import com.semgravio.aiplatform.base.metering.domain.aggregate.TimeBandRule;
+import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UsageEvent;
 import com.semgravio.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.semgravio.aiplatform.base.metering.domain.repository.PriceEntryRepository;
+import com.semgravio.aiplatform.base.metering.domain.repository.TimeBandRuleRepository;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
@@ -68,6 +71,9 @@ class BackofficeCostSeamTest {
     private PriceEntryRepository priceEntryRepository;
 
     @Autowired
+    private TimeBandRuleRepository timeBandRuleRepository;
+
+    @Autowired
     private UsageEventSink usageEventSink;
 
     @Autowired
@@ -77,9 +83,10 @@ class BackofficeCostSeamTest {
     @AfterEach
     void cleanUsageEvents() {
         // 全局聚合的断言面是全表和数：事件表前后全清（单价行只清本类 provider，
-        // 他类测试的单价夹具不动）
+        // 他类测试的单价夹具不动）；时段规则行同属本类夹具，前后全清
         jdbcTemplate.update("DELETE FROM met_usage_events");
         jdbcTemplate.update("DELETE FROM met_price_entries WHERE provider = ?", PROVIDER);
+        jdbcTemplate.update("DELETE FROM met_time_band_rules WHERE provider = ?", PROVIDER);
     }
 
     // ---------- 全局总览：跨 subject 聚合＋币种分桶＋byModel/byAgentKind ----------
@@ -257,6 +264,57 @@ class BackofficeCostSeamTest {
                         get("/api/backoffice/costs/overview"), "/api/backoffice/costs/overview", null))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.cost.USD").value(0.001));
+    }
+
+    // ---------- 读时归段选价（#499）：峰谷拆分＋缺价带维 ----------
+
+    @Test
+    void given_time_band_rules_when_overview_then_by_model_cost_split_and_unpriced_banded()
+            throws Exception {
+        // DeepSeek 型峰窗：工作日 06:00–10:00 UTC、自 2026-08-16 敞口；周一 2026-11-09
+        timeBandRuleRepository.save(TimeBandRule.open(PROVIDER, Band.PEAK, 31, 360, 600,
+                Instant.parse("2026-08-16T00:00:00Z"), null));
+        Instant mon = Instant.parse("2026-11-09T00:00:00Z");
+        Instant peakTime = mon.plusSeconds(7 * 3600);    // 07:00 UTC 周一 → 峰
+        Instant valleyTime = mon.plusSeconds(12 * 3600); // 12:00 UTC 周一 → 谷（无窗命中补带）
+        // m-band 峰/谷两行全配；m-peakonly 只配峰行（谷段事件进缺价面带维）
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-band",
+                TokenKind.INPUT, Band.PEAK, new BigDecimal("0.0000020"), "CNY",
+                Instant.parse("2026-08-16T00:00:00Z"), null));
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-band",
+                TokenKind.INPUT, Band.OFF_PEAK, new BigDecimal("0.0000010"), "CNY",
+                Instant.parse("2026-08-16T00:00:00Z"), null));
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-peakonly",
+                TokenKind.INPUT, Band.PEAK, new BigDecimal("0.0000020"), "CNY",
+                Instant.parse("2026-08-16T00:00:00Z"), null));
+        report("evt-peak", peakTime, SUBJ_A, "m-band", Map.of(), 1000);
+        report("evt-valley", valleyTime, SUBJ_A, "m-band", Map.of(), 2000);
+        report("evt-valley-unpriced", valleyTime, SUBJ_A, "m-peakonly", Map.of(), 500);
+
+        // 总览：峰段 ¥0.002＋谷段 ¥0.002；分模型金额按带拆两行（带码序 1→2）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/costs/overview"), "/api/backoffice/costs/overview", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cost.CNY").value(0.004))
+                .andExpect(jsonPath("$.data.byModelCost", hasSize(2)))
+                .andExpect(jsonPath("$.data.byModelCost[0].model").value("m-band"))
+                .andExpect(jsonPath("$.data.byModelCost[0].band").value(1))
+                .andExpect(jsonPath("$.data.byModelCost[0].bandName").value("峰"))
+                .andExpect(jsonPath("$.data.byModelCost[0].cost.CNY").value(0.002))
+                .andExpect(jsonPath("$.data.byModelCost[1].band").value(2))
+                .andExpect(jsonPath("$.data.byModelCost[1].bandName").value("谷"))
+                .andExpect(jsonPath("$.data.byModelCost[1].cost.CNY").value(0.002));
+
+        // 缺价警示：峰行有谷行无 → 谷段分量按 band=谷 单列（不伪装 0、不阻断聚合）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/costs/unpriced"), "/api/backoffice/costs/unpriced", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items", hasSize(1)))
+                .andExpect(jsonPath("$.data.items[0].model").value("m-peakonly"))
+                .andExpect(jsonPath("$.data.items[0].tokenKind").value(1))
+                .andExpect(jsonPath("$.data.items[0].band").value(2))
+                .andExpect(jsonPath("$.data.items[0].bandName").value("谷"))
+                .andExpect(jsonPath("$.data.items[0].tokens").value(500));
     }
 
     // ---------- 空窗口/无数据：空结构不炸＋unpriced 窗口收窄 ----------

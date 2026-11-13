@@ -552,7 +552,7 @@ class BackofficePriceEntrySeamTest {
         assertThat(summary.cost()).containsOnlyKeys(USD);
         assertThat(summary.cost().get(USD)).isEqualByComparingTo(new BigDecimal("0.001"));
         assertThat(summary.unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-d", TokenKind.INPUT));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-d", TokenKind.INPUT, null));
     }
 
     @Test
@@ -578,7 +578,7 @@ class BackofficePriceEntrySeamTest {
 
         report("evt-beyond", futureFrom.plusSeconds(3600), "m-d2", 100);
         assertThat(usageQueryPort.bySubject(SUBJ, null, null).unpriced()).containsExactly(
-                new UsageSummary.UnpricedUsage(PROVIDER, "m-d2", TokenKind.INPUT));
+                new UsageSummary.UnpricedUsage(PROVIDER, "m-d2", TokenKind.INPUT, null));
     }
 
     @Test

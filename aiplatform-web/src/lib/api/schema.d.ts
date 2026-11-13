@@ -6284,6 +6284,9 @@ export interface components {
             /** Format: int32 */
             tokenKind?: number;
             tokenKindName?: string;
+            /** Format: int32 */
+            band?: number;
+            bandName?: string;
             /** Format: int64 */
             tokens?: number;
         };
@@ -6371,6 +6374,17 @@ export interface components {
             };
             byModel?: components["schemas"]["ModelUsage"][];
             byAgentKind?: components["schemas"]["AgentKindUsage"][];
+            byModelCost?: components["schemas"]["ModelBandCost"][];
+        };
+        ModelBandCost: {
+            provider?: string;
+            model?: string;
+            /** Format: int32 */
+            band?: number;
+            bandName?: string;
+            cost?: {
+                [key: string]: number;
+            };
         };
         ApiResponsePageResponseBackofficeContractSummaryResponse: {
             /** Format: int32 */

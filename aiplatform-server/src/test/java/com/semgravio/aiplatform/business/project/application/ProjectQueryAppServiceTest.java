@@ -506,7 +506,7 @@ class ProjectQueryAppServiceTest {
                         Map.of(Currency.getInstance("USD"), new BigDecimal("0.003"),
                                 Currency.getInstance("CNY"), new BigDecimal("1.5")),
                         List.of(new UsageSummary.UnpricedUsage("testprov", "m-none",
-                                TokenKind.INPUT)),
+                                TokenKind.INPUT, null)),
                         List.of(new UsageSummary.ModelUsage("deepseek", "deepseek-v4-pro",
                                 tokens)),
                         List.of(new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "main", tokens),

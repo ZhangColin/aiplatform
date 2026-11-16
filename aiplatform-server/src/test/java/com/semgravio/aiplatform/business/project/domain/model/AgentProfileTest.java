@@ -124,6 +124,39 @@ class AgentProfileTest {
     }
 
     @Test
+    void given_executor_prompt_when_complexity_governance_then_three_hard_lines_and_deferral_clause() {
+        // ADR-0050 执行体工作协议改写：条 1 待定项最小可用缺省＋推迟清单消费句
+        //（清单内不做、不自行加回）；条 3 收口判据＝三硬底线（撤「真实应用」厚度
+        // 指令、带数据库降为手段）＋演示数据一轮建成＋真实感反 placeholder；
+        // 机器探活三件套仍是唯一收口硬判据（回归不破）
+        String prompt = AgentProfile.EXECUTOR.systemPrompt();
+        assertThat(prompt)
+                .contains("最小可用缺省")
+                .contains("清单内不做、不自行加回")
+                .contains("无此章")
+                .contains("三硬底线")
+                .contains("能打开不白屏")
+                .contains("刷新不丢")
+                .contains("核心路径可点")
+                .contains("演示数据一轮建成")
+                .contains("placeholder")
+                .contains("唯一的收口硬要件")
+                .doesNotContain("真实应用")
+                .doesNotContain("拿不准的片建议验");
+    }
+
+    @Test
+    void given_executor_prompt_when_verify_self_decision_then_neutral_wording() {
+        // ADR-0050 条 9 撤回「拿不准的片建议验」自决建议（避免与运营开关关停打架）：
+        // 验证不是收口要件、用不用由执行体自决——不自报建议、不劝验
+        assertThat(AgentProfile.EXECUTOR.systemPrompt())
+                .contains("验证不是收口要件")
+                .contains("用不用由你自决")
+                .doesNotContain("建议验")
+                .doesNotContain("别省这一步");
+    }
+
+    @Test
     void given_main_prompt_when_new_interview_strategy_then_must_answer_completion_convergence_present() {
         // #461 新访谈策略（#449 设计定案）：必答收窄为两类口径（缺了会建错方向／涉用户
         // 独特事实与偏好）、补全以专业身份直陈（禁假设/自问自答字眼、集中落 PRD、

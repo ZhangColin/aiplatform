@@ -37,6 +37,7 @@ import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
+import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationPlanDeferral;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationPlanJourney;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -48,6 +49,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanDeferralRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanJourneyRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -537,6 +539,7 @@ public class GenerationAppService {
     private final CodingRunTrack codingRunTrack;
     private final GenerationSegmentRepository generationSegments;
     private final GenerationPlanJourneyRepository generationPlanJourneys;
+    private final GenerationPlanDeferralRepository generationPlanDeferrals;
     private final DesignItemRepository designItems;
     private final TransactionTemplate transactionTemplate;
     private final MainAgentAppService mainAgentAppService;
@@ -604,6 +607,7 @@ public class GenerationAppService {
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
             GenerationSegmentRepository generationSegments,
             GenerationPlanJourneyRepository generationPlanJourneys,
+            GenerationPlanDeferralRepository generationPlanDeferrals,
             DesignItemRepository designItems,
             TransactionTemplate transactionTemplate,
             @Lazy MainAgentAppService mainAgentAppService,
@@ -632,6 +636,7 @@ public class GenerationAppService {
         this.codingRunTrack = codingRunTrack;
         this.generationSegments = generationSegments;
         this.generationPlanJourneys = generationPlanJourneys;
+        this.generationPlanDeferrals = generationPlanDeferrals;
         this.designItems = designItems;
         this.transactionTemplate = transactionTemplate;
         this.mainAgentAppService = mainAgentAppService;
@@ -1009,7 +1014,13 @@ public class GenerationAppService {
                                         journey.getEntry(), journey.getKeyActions()))
                                 .toList()
                         : List.of();
-        return new BuildPlan(descriptions, dependsOn, journeys, sizes);
+        List<GenerationPlanDeferral> deferralRows =
+                generationPlanDeferrals.findByProjectIdOrderByOrdAsc(project.getId());
+        List<String> deferredItems =
+                GenerationPlanDeferral.planMatchesPrd(deferralRows, project.getPrdProducedAt())
+                        ? deferralRows.stream().map(GenerationPlanDeferral::getItem).toList()
+                        : List.of();
+        return new BuildPlan(descriptions, dependsOn, journeys, sizes, deferredItems);
     }
 
     /**
@@ -1040,6 +1051,8 @@ public class GenerationAppService {
             generationSegments.flush();
             generationPlanJourneys.deleteByProjectId(projectId);
             generationPlanJourneys.flush();
+            generationPlanDeferrals.deleteByProjectId(projectId);
+            generationPlanDeferrals.flush();
             GenerationSegment stage0 = GenerationSegment.pending(projectId, 0, STAGE0_TITLE, prdAnchor);
             markLegacyClosed(stage0, legacyClosed);
             generationSegments.save(stage0);
@@ -1054,6 +1067,10 @@ public class GenerationAppService {
                 BuildPlan.CoreJourney journey = plan.coreJourneys().get(index);
                 generationPlanJourneys.save(GenerationPlanJourney.of(projectId, index + 1,
                         journey.role(), journey.entry(), journey.keyActions(), prdAnchor));
+            }
+            for (int index = 0; index < plan.deferredItems().size(); index++) {
+                generationPlanDeferrals.save(GenerationPlanDeferral.of(projectId, index + 1,
+                        plan.deferredItems().get(index), prdAnchor));
             }
         });
         if (!legacyClosed.isEmpty()) {

@@ -51,7 +51,7 @@ public record PrdReadiness(List<PendingItem> blocking, List<PendingItem> minor,
     public record DimensionState(ReadinessDimension dimension, Status status) {
     }
 
-    /** 章名（PRD 固定七章节之末——「待定项」章升级形）。 */
+    /** 章名（PRD 固定章节模板之末——「待定项」章升级形；系统形八章节、设计形七章节）。 */
     static final String CHAPTER_TITLE = "验收与待确认";
 
     /** 章内任意层级标题行（章界与子标题界标的候选形态）。 */

@@ -1250,6 +1250,21 @@ class MainAgentAppServiceTest {
     }
 
     @Test
+    void given_build_plan_request_prompt_when_inspect_then_deferral_segment_required() {
+        // ADR-0050 计划补产兜底同口径：补产指令面与主智能体工作协议（第 5 条）对
+        // deferredItems 推迟清单一并要求（业务向默认集口径、与 PRD「推迟清单」章
+        // 同内容、无显式推迟项可省略）
+        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT)
+                .contains("deferredItems")
+                .contains("支付停在不真扣款")
+                .contains("没有显式推迟项可省略");
+        assertThat(AgentProfile.MAIN.systemPrompt())
+                .contains("deferredItems")
+                .contains("推迟清单")
+                .contains("典型 3-5 片");
+    }
+
+    @Test
     void given_generation_in_flight_when_opinion_turn_closes_then_dispatch_skipped() {
         // 场景矩阵（#101 在途守卫；去门化 #462 后取「PRD 已产出＋在途」形）：生成
         // 进行中，意见轮收口静默跳过（不派不报错）——已产出 PRD（版本行在场）、但

@@ -41,7 +41,7 @@ class ProfileSkillRepositorySupplierTest {
     private ProfileSkillRepositorySupplier supplier() {
         return new ProfileSkillRepositorySupplier(
                 new StubBuiltinCatalog(List.of(new BuiltinSkill("prd-writing",
-                        "撰写或修订 PRD 时使用——固定七章节模板与平实写法规范。",
+                        "撰写或修订 PRD 时使用——固定章节模板与平实写法规范。",
                         Map.of("name", "prd-writing"), "# PRD 写作技能\n七章节模板。"))),
                 skillStore);
     }
@@ -193,19 +193,20 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(designerSkill.getResources()).isEmpty();
     }
 
-    // ---------- 行为回归锚：内置七章节（#94 起保持） ----------
+    // ---------- 行为回归锚：内置章节模板（#94 起保持） ----------
 
     @Test
-    void builtin_repository_contains_prd_writing_skill_with_seven_chapters() throws IOException {
-        // 七章节模板不再活在角色卡 prompt，而在此内置技能资产——加载真目录断言
-        // 正文仍含七章节（PRD 仍按七章节产出）；内置目录经端口适配进装配与后台
+    void builtin_repository_contains_prd_writing_skill_with_chapter_template() throws IOException {
+        // 章节模板不再活在角色卡 prompt，而在此内置技能资产——加载真目录断言
+        // 正文仍含全部固定章节（系统形八章节含推迟清单，ADR-0050；PRD 按模板产出）；
+        // 内置目录经端口适配进装配与后台
         // 清单同源（#249 装配缝归一），真目录断言保持直读
         try (ClasspathSkillRepository repo = new ClasspathSkillRepository("skills")) {
             AgentSkill skill = repo.getSkill("prd-writing");
             assertThat(skill).isNotNull();
             assertThat(skill.getSkillContent())
                     .contains("需求背景", "目标用户", "核心场景", "范围边界",
-                            "关键约束", "功能清单", "验收与待确认")
+                            "关键约束", "功能清单", "推迟清单", "验收与待确认")
                     // #331 两级门：第七章由「待定项」升级为「验收与待确认」分级
                     //（判定语义归提示词——五维词表随技能正文钉住）；
                     // #461 新访谈策略：两级拦门写法退役（必答题访谈期问掉、收敛令后

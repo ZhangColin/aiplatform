@@ -186,6 +186,7 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
+        jdbcTemplate.update("DELETE FROM prj_generation_plan_deferrals");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
@@ -302,6 +303,14 @@ class GenerationAppServiceTest {
         return jdbcTemplate.queryForList(
                 "SELECT role, entry, key_actions, prd_produced_at"
                         + " FROM prj_generation_plan_journeys WHERE project_id = ? ORDER BY ord",
+                projectId);
+    }
+
+    /** 计划推迟行读口（ADR-0050 断言面：item / prd_produced_at）。 */
+    private List<Map<String, Object>> deferralRows(Long projectId) {
+        return jdbcTemplate.queryForList(
+                "SELECT item, prd_produced_at"
+                        + " FROM prj_generation_plan_deferrals WHERE project_id = ? ORDER BY ord",
                 projectId);
     }
 
@@ -1569,6 +1578,66 @@ class GenerationAppServiceTest {
                 .extracting(row -> row.get("size_label"))
                 .containsExactly(null, 2, 3, 3);
         // 读回 = 新计划全量（旧两件不沿用）
+        assertThat(appService.planOf(projectId)).isEqualTo(replan);
+    }
+
+    @Test
+    void given_plan_with_deferred_items_when_recorded_then_deferrals_persisted_with_prd_anchor() {
+        // ADR-0050 推迟段落库随 PRD 版本走：推迟行落计划推迟表（锚 = 项目
+        // prd_produced_at）；planOf 读回全量五件（表即事实源——进程重启不丢）
+        Long projectId = persistedProject("9845");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
+
+        BuildPlan plan = new BuildPlan(
+                List.of("用户能注册登录"),
+                BuildPlan.sequentialDependencies(List.of("用户能注册登录")),
+                List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付")),
+                List.of(SliceSizeLabel.SMALL),
+                List.of("支付：下单结算界面走通，停在不真扣款", "通知：站内呈现，不发真实推送"));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        List<Map<String, Object>> deferrals = deferralRows(projectId);
+        assertThat(deferrals).extracting(row -> row.get("item"))
+                .containsExactly("支付：下单结算界面走通，停在不真扣款", "通知：站内呈现，不发真实推送");
+        assertThat((java.sql.Timestamp) deferrals.get(0).get("prd_produced_at"))
+                .isEqualTo(projectPrdAnchor(projectId));
+        // 读回（轨道表还原 BuildPlan 全量五件）
+        assertThat(appService.planOf(projectId)).isEqualTo(plan);
+    }
+
+    @Test
+    void given_prd_revised_when_replan_then_deferrals_replaced_no_residue() {
+        // ADR-0050 演进重产：PRD 演进（锚换新）后重产计划——推迟行整组替换（旧推迟
+        // 项无残留）、锚 = 修订后 PRD 版本
+        Long projectId = persistedProject("9846");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(
+                List.of("旧切片一"),
+                BuildPlan.sequentialDependencies(List.of("旧切片一")),
+                List.of(new BuildPlan.CoreJourney("旧角色", "旧首页", "旧动作串")),
+                List.of(SliceSizeLabel.SMALL),
+                List.of("旧推迟项")));
+        revisePrd(projectId);
+
+        BuildPlan replan = new BuildPlan(
+                List.of("新切片一"),
+                BuildPlan.sequentialDependencies(List.of("新切片一")),
+                List.of(new BuildPlan.CoreJourney("新角色", "新首页", "新动作串")),
+                List.of(SliceSizeLabel.MEDIUM),
+                List.of("新推迟项一", "新推迟项二"));
+        appService.dispatchGenerationOnTurnClose(projectId, replan);
+
+        List<Map<String, Object>> deferrals = deferralRows(projectId);
+        assertThat(deferrals).extracting(row -> row.get("item"))
+                .containsExactly("新推迟项一", "新推迟项二");
+        assertThat((java.sql.Timestamp) deferrals.get(0).get("prd_produced_at"))
+                .isEqualTo(projectPrdAnchor(projectId));
+        // 读回 = 新计划全量（旧推迟项不沿用）
         assertThat(appService.planOf(projectId)).isEqualTo(replan);
     }
 

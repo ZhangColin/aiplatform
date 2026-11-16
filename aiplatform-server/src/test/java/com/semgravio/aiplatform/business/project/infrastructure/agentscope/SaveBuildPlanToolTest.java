@@ -239,6 +239,60 @@ class SaveBuildPlanToolTest {
         assertThat(plan.dependsOn(2)).containsExactlyInAnyOrder(1, 2);
     }
 
+    // ---------- 结构化推迟段（ADR-0050：推迟清单随计划同批落库、无结构校验硬门） ----------
+
+    @Test
+    void given_deferred_items_when_called_then_plan_carries_deferral_list() {
+        // ADR-0050 合法径：deferredItems 随计划同批结构化产出（与 PRD「推迟清单」
+        // 章同内容）——事实登记取全量，不解析自由文本
+        Map<String, Object> input = new java.util.HashMap<>(fullInput(
+                List.of("用户能注册登录"), List.of("小")));
+        input.put("deferredItems", List.of(
+                "支付：下单结算界面走通，停在不真扣款", "通知：站内呈现，不发真实推送"));
+
+        ToolResultBlock result = callFull(input);
+
+        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
+        BuildPlan plan = facts.consume("42");
+        assertThat(plan).isNotNull();
+        assertThat(plan.deferredItems()).containsExactly(
+                "支付：下单结算界面走通，停在不真扣款", "通知：站内呈现，不发真实推送");
+    }
+
+    @Test
+    void given_absent_deferred_items_when_called_then_plan_recorded_with_empty_deferral() {
+        // ADR-0050 软形态：推迟段缺省＝本期无显式推迟项（或主智能体未产）——
+        // 计划照常受理（推迟段非收口硬契约，与 coreJourneys/sliceSizes 的必传硬校验不同）
+        ToolResultBlock result = callFull(fullInput(List.of("用户能注册登录"), List.of("小")));
+
+        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
+        BuildPlan plan = facts.consume("42");
+        assertThat(plan).isNotNull();
+        assertThat(plan.deferredItems()).isEmpty();
+    }
+
+    @Test
+    void given_malformed_deferred_items_when_called_then_soft_dropped_and_plan_recorded() {
+        // ADR-0050 无结构校验硬门：推迟段形态不整不拒计划——非列表整体作废按未设处理、
+        // 列表内空白/非字符串项剔除，其余照常登记（模型可见结果文本如实告知收录数）
+        Map<String, Object> nonList = new java.util.HashMap<>(fullInput(
+                List.of("用户能注册登录"), List.of("小")));
+        nonList.put("deferredItems", "支付不真扣款");
+        Map<String, Object> dirtyList = new java.util.HashMap<>(fullInput(
+                List.of("用户能注册登录"), List.of("小")));
+        dirtyList.put("deferredItems", List.of("通知：站内呈现", " ", 42));
+
+        ToolResultBlock nonListResult = callFull(nonList);
+
+        assertThat(nonListResult.getState()).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(facts.consume("42").deferredItems()).isEmpty();
+
+        ToolResultBlock dirtyResult = callFull(dirtyList);
+
+        assertThat(dirtyResult.getState()).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(facts.consume("42").deferredItems()).containsExactly("通知：站内呈现");
+    }
+
     // ---------- 内部 ----------
 
     private ToolResultBlock call(List<?> slices) {

@@ -158,6 +158,12 @@ app:
   session:
     ttl: 14d
     cleanup-interval: 1h
+  # #534 · business.billing 模拟收银台（ADR-0047）：充值准入码——固定码起步，
+  # 形态与发放属运营面调参（改档即生效，环境变量覆盖，不发版）；机制面见
+  # CheckoutProperties。渠道真接后只换通道、流程形态不变。
+  billing:
+    checkout:
+      access-code: ${CHECKOUT_ACCESS_CODE:DEMO-2026}
   # #213 · business.project 外部资料抓取：响应大小上限（字节，超此截断——缺省
   # 1 MiB）。纯 HTTP 只读 GET，四条安全底线见 HttpExternalContentFetcher。
   # #372 · 请求超时（秒——跨境慢源如 GitHub 实测 200 但 15s+，钉死 15s 必挂，

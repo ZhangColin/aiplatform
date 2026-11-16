@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronsUpDown, LogOut, Monitor, Moon, Sun } from "lucide-react";
+import { Check, ChevronsUpDown, LogOut, Monitor, Moon, Sun, Wallet } from "lucide-react";
+import Link from "next/link";
 import { useTheme } from "next-themes";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,8 +12,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * 左下角个人菜单（#72 定稿 / #76 落地）：账户信息 + 主题三态（浅色/深色/
- * 跟随系统，next-themes localStorage 持久、刷新保持）+ 退出登录（form POST
- * /auth/logout 杀 identity 会话）。侧栏收起态（collapsed）只显头像。
+ * 跟随系统，next-themes localStorage 持久、刷新保持）+「我的账户」（#534 计费④
+ * 账单页入口）+ 退出登录（form POST /auth/logout 杀 identity 会话）。
+ * 侧栏收起态（collapsed）只显头像。
  */
 
 const THEMES = [
@@ -72,6 +74,15 @@ export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
               {mounted && theme === t.value ? <Check className="size-3.5 text-primary" /> : null}
             </button>
           ))}
+        </div>
+        <Separator className="my-1" />
+        <div className="px-1 pb-1">
+          <Link
+            href="/account"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/60"
+          >
+            <Wallet className="size-3.5" /> 我的账户
+          </Link>
         </div>
         <Separator className="my-1" />
         <form action="/auth/logout" method="post">

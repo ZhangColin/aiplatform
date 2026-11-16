@@ -41,7 +41,11 @@ public enum BillingMessage implements CodeMessage {
 
     INTERCEPT_NOT_PENDING(409, "BILL_017", "没有待确认的拦截卡（输入可能已被更新的拦截取代）"),
 
-    INTERCEPT_FIELDS_INCOMPLETE(400, "BILL_018", "拦截留存字段不完整");
+    INTERCEPT_FIELDS_INCOMPLETE(400, "BILL_018", "拦截留存字段不完整"),
+
+    ACCESS_CODE_INVALID(400, "BILL_019", "充值准入码不正确（无码用户请联系平台索取）"),
+
+    TOPUP_TARGET_NOT_SOURCE_POOL(409, "BILL_020", "只能充值当前扣减源池（向非源池充值无法用于本项目扣减）");
 
     private final int httpStatus;
     private final String code;

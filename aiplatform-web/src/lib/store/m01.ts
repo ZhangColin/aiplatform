@@ -10,7 +10,7 @@ import { create } from "zustand";
  * （下单入口）在收到 ORD_017 时携重试回调开门，弹窗验码成功即回调续跑，免用户
  * 二次点击；无续跑语义的来路（顶栏「登录」、401 出口）不传。</p>
  */
-export type M01Trigger = "save-project" | "stage-gate" | "topbar-login";
+export type M01Trigger = "save-project" | "stage-gate" | "topbar-login" | "checkout-login";
 
 export type M01State = {
   open: boolean;

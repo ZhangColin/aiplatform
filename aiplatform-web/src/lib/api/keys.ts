@@ -93,4 +93,16 @@ export const queryKeys = {
     /** 项目对话史（全量有序）。 */
     of: (id: string) => ["conversation", id] as const,
   },
+  /**
+   * 账单域（#534 计费④「我的账户」）：账户池余额＋流水（/api/me/billing）与
+   * 项目账单（/api/projects/{id}/billing——池余额/计费态/流水/充值目标）。充值
+   * 到账即失效（余额与流水append-only——充值动作是唯一写面，无 SSE 桥）。
+   */
+  billing: {
+    all: ["billing"] as const,
+    /** 我的账户账单（账户池余额＋流水）。 */
+    account: () => ["billing", "account"] as const,
+    /** 项目账单（项目池余额＋计费态＋流水＋充值目标）。 */
+    project: (id: string) => ["billing", "project", id] as const,
+  },
 } as const;

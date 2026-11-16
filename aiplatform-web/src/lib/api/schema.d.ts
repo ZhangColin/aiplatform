@@ -666,6 +666,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/billing/topup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 项目上下文充值（充项目池——只充当前扣减源池）
+         * @description 准入码＋金额（分）——入账即时到账＋append-only 流水（备注「模拟收银台充值」）。源未选（试用项目）＝入账即选定项目源（动作即选择，拦截卡回读即显源池余额）；项目源＝直充；<b>账户源拒绝 409 BILL_020</b>（死钱防线——该上下文源池是账户池，前端按 checkoutTarget 不呈现本选项、引导「我的账户」充值）。须先登录：无账户会话 401；码错 400 BILL_019；金额非正整数 400 BILL_002。归属守卫同读面。
+         */
+        post: operations["topup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/archive": {
         parameters: {
             query?: never;
@@ -754,6 +774,46 @@ export interface paths {
          * @description 自待报价/已报价可达：取消后项目回迭代态（对话区恢复受理意见），同项目可再下新单（新单重新冻结下单时快照）。已支付或已终结 409 ORD_005；订单不存在 404 ORD_001
          */
         post: operations["cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checkout/topup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 账户上下文充值（充「我的账户」余额池）
+         * @description 准入码＋金额（分）——入账即时到账：源池余额立变＋append-only 流水行（备注「模拟收银台充值」、无操作者＝自助形态）。须先登录：无账户会话 401（前端 M01 先行）；码错 400 BILL_019；金额非正整数 400 BILL_002。项目池充值走 /api/projects/{id}/billing/topup（owner 守卫面）。
+         */
+        post: operations["topup_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checkout/access-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 充值准入码校验（第一步：正确码进入金额选择）
+         * @description 码错误/缺失 400 BILL_019（信封数字码 8019——message 指路联系平台索取，如实引导）；正确 200。本端点本身不要求登录态（码非机密——充值入账口才要求先登录）；入账端点对码复校验（独立校验端点可被绕过，入账以复校验为准）。
+         */
+        post: operations["accessCode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2405,6 +2465,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目账单（项目池余额＋计费态＋流水＋充值目标）
+         * @description pool＝项目池现值（从未入账 null）；sourceSelected/deductionSource/deductionSourceName＝扣减源投影（两轨判定单读点）；paid＝付费状态（不可逆）；checkoutTarget/checkoutTargetName＝收银台充值目标（码位与扣减源对齐：1=我的账户 2=本项目——「只充当前扣减源池」服务端推导：源未选或项目源＝充项目池；账户源＝引导充我的账户）；entries＝项目池流水（新先序）。归属守卫同单项目寻址统一口径（先于控制器）；项目不存在 404 PRJ_001
+         */
+        get: operations["billing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orders/{id}": {
         parameters: {
             query?: never;
@@ -2505,6 +2585,26 @@ export interface paths {
          * @description 凭 aiplatform_session 会话返回 accountId + displayName；无会话 401（统一信封）。
          */
         get: operations["me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的账户账单（账户池余额＋流水）
+         * @description accountPool＝账户池现值（从未充值 null——零态呈现归前端）；entries＝账户池流水（新先序：金额带符号〔分〕＋行后余额＋种类中文名＋备注）。账户池扣减行带 projectId（段归属）——前端可并联项目名呈现「某项目消耗」。项目余额＋项目池流水＋项目充值入口走 /api/projects/{id}/billing。无账户会话 401（账户端点口径，同 /api/me）。
+         */
+        get: operations["myBilling"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4610,6 +4710,29 @@ export interface components {
             /** Format: date-time */
             confirmedAt?: string;
         };
+        CheckoutTopupCommand: {
+            accessCode?: string;
+            /** Format: int64 */
+            amountFen?: number;
+        };
+        ApiResponseCheckoutReceipt: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["CheckoutReceipt"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        CheckoutReceipt: {
+            pool?: components["schemas"]["PoolView"];
+            /** Format: int64 */
+            entryId?: number;
+        };
+        PoolView: {
+            poolId?: string;
+            /** Format: int64 */
+            balance?: number;
+        };
         ApiResponsePaymentPlanResponse: {
             /** Format: int32 */
             code?: number;
@@ -4707,6 +4830,9 @@ export interface components {
             partyBSignedAt?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        CheckoutAccessCodeCommand: {
+            code?: string;
         };
         ApiResponseBackofficeWorkspaceDetailResponse: {
             /** Format: int32 */
@@ -5763,6 +5889,53 @@ export interface components {
             answered?: boolean;
             /** Format: date-time */
             at?: string;
+        };
+        ApiResponseProjectBillingView: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["ProjectBillingView"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BillingEntryView: {
+            entryId?: string;
+            /** Format: int32 */
+            kind?: number;
+            kindName?: string;
+            projectId?: string;
+            /** Format: int64 */
+            amount?: number;
+            /** Format: int64 */
+            balanceAfter?: number;
+            note?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        ProjectBillingView: {
+            pool?: components["schemas"]["PoolView"];
+            sourceSelected?: boolean;
+            /** Format: int32 */
+            deductionSource?: number;
+            deductionSourceName?: string;
+            paid?: boolean;
+            /** Format: int32 */
+            checkoutTarget?: number;
+            checkoutTargetName?: string;
+            entries?: components["schemas"]["BillingEntryView"][];
+        };
+        AccountBillingView: {
+            accountPool?: components["schemas"]["PoolView"];
+            entries?: components["schemas"]["BillingEntryView"][];
+        };
+        ApiResponseAccountBillingView: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["AccountBillingView"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
         };
         SseEmitter: {
             /** Format: int64 */
@@ -7740,6 +7913,32 @@ export interface operations {
             };
         };
     };
+    topup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CheckoutTopupCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCheckoutReceipt"];
+                };
+            };
+        };
+    };
     archive: {
         parameters: {
             query?: never;
@@ -7832,6 +8031,54 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
+    topup_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CheckoutTopupCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCheckoutReceipt"];
+                };
+            };
+        };
+    };
+    accessCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CheckoutAccessCodeCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
         };
@@ -9532,6 +9779,28 @@ export interface operations {
             };
         };
     };
+    billing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseProjectBillingView"];
+                };
+            };
+        };
+    };
     detail_1: {
         parameters: {
             query?: never;
@@ -9636,6 +9905,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseMeResponse"];
+                };
+            };
+        };
+    };
+    myBilling: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAccountBillingView"];
                 };
             };
         };

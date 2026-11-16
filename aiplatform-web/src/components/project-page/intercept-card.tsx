@@ -2,13 +2,14 @@
 
 import { CircleAlert, Check, Wallet, X } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useConfirmIntercept } from "@/hooks/use-intercept";
 import { useMe } from "@/hooks/use-me";
 import { useChatStore, type ChatMessage } from "@/lib/store/chat";
+import { useCheckoutStore } from "@/lib/store/checkout";
+import { useM01Store } from "@/lib/store/m01";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,8 +17,8 @@ import { cn } from "@/lib/utils";
  * （迭代期）意见/兜底输入被拦下的平台侧卡——被拦原文随卡留存（服务端
  * bil_intercepts 待决行），卡上显源池（扣减源未定随卡首次选源——「本项目余额／
  * 我的账户」，第一笔付费选择永远最先选）。确认扣减＝翻转门②（付费状态不可逆）
- * 并立即受理原被拦输入（不重输）；「先去充值」/中途关闭后输入不丢失、卡可回
- * （GET 读面重载重建）。后台已充项目池的项目源已选定——免登录直接确认（销售
+ * 并立即受理原被拦输入（不重输）；「先去充值」开模拟收银台（#534）——充值后卡
+ * 回读即显源池余额可直确认；中途关闭后输入不丢失、卡可回（GET 读面重载重建）。后台已充项目池的项目源已选定——免登录直接确认（销售
  * 演示动线）。文案为平台定型文案（代码承载，非 LLM 产）。
  */
 
@@ -64,10 +65,16 @@ export function InterceptCard({
   }
 
   function rechargeGuide() {
-    // 充值引导：收银台随 #534 落位——本票引导为定型文案出口（联系平台），
-    // 卡可回（读面仍在，重载重建）
-    dismiss();
-    toast.info("充值通道即将上线，如需充值请联系平台");
+    // 收银台（#534）已落地：项目上下文开模拟收银台——只充当前扣减源池；
+    // 卡不关闭（被拦输入随服务端留存，充值后卡回读显源池余额可直确认）；
+    // 未登录先 M01（checkout-login 来路），登录成功 resume 重开收银台
+    if (loggedIn) {
+      useCheckoutStore.getState().openCheckout(projectId);
+    } else {
+      useM01Store.getState().openM01("checkout-login", () => {
+        useCheckoutStore.getState().openCheckout(projectId);
+      });
+    }
   }
 
   return (

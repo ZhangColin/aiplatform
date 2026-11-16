@@ -42,8 +42,11 @@
  *       （段收口结算＋固定单价项按次直记）、TrialInterceptAppService（拦截留存/
  *       确认扣减＝门②——编排归 project 侧 DispatchAppService）</li>
  *   <li>infrastructure：MeteringPricingAdapter（UsagePricingPort 进程内适配器）</li>
- *   <li>endpoints：本 BC 零端点（服务层机制交付——前台端点挂 project 控制器
- *       〔拦截卡读面/确认〕；派发门/收银台/后台运营端点随系列后续票落位）</li>
+ *   <li>endpoints：模拟收银台与账单读面（#534 计费④——准入码校验/账户上下文
+ *       充值/我的账户视图走本 BC 控制器；项目账单读面与项目上下文充值挂
+ *       /api/projects/{id}/billing 复用 project owner 守卫）；拦截卡读面/确认
+ *       挂 project 控制器（#533 编排归 DispatchAppService）；后台运营端点随
+ *       #535 落位</li>
  * </ul>
  *
  * @since 0.1.0

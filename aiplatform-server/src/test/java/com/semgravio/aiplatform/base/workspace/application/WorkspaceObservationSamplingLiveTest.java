@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class WorkspaceObservationSamplingLiveTest {
 
     /** 旁路容器镜像：与 DockerEnvironmentBackend.DEV_IMAGE 同源（本地必有，不另拉）。 */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.17";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
 
     /** 种入卷内的已知负载：8 MiB（dd 整块写，du 与 ls 尺寸同源无碎片口径分歧）。 */
     private static final String LOAD_BYTES = "8388608";

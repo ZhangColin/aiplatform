@@ -62,18 +62,22 @@ class AgentProfileTest {
                 .contains("DESIGN.md")
                 .contains("token 优先")
                 .contains("禁裸色")
-                // #425 执行体工作协议「用基座件、禁裸客户端」条目＋件用法指路
-                //（细则正本住工作区 AGENTS.md 本栈写法规则节——栈规则集随基座
-                // tag 换版；lint 两档口径：强制档收口被拒、预置档如实标注）
+                // #425 执行体工作协议「用基座件、禁裸客户端」条目；#540 起单源化
+                //（ADR-0051）：协议只留指针句——件清单/用法/纪律唯一正本＝工作区
+                // AGENTS.md 本栈写法规则节（栈规则集随基座 tag 换版），不再重复
+                // 枚举预置件路径（双正本必漂移）；lint 两档口径句维持（语义改写归
+                // #541 lint 让路票）
                 .contains("禁裸客户端")
-                .contains("src/lib/robust/data-access")
-                .contains("src/lib/robust/http")
-                .contains("src/lib/robust/session")
-                .contains("不用裸 fetch")
-                // 「预约通」实测（11-12）：prompt 写「外部 HTTP」而 lint 拦一切裸 fetch——
-                // 页面调自家 /api 被判内部调用裸写，7+4 处两段升档。语义边界对齐：规则
-                // 文本必须点名「含页面调自家 /api」，与 lint 判定边界（不分内外）一致。
-                .contains("含页面调自家 /api")
+                .contains("唯一正本＝工作区 AGENTS.md 的本栈写法规则节")
+                .contains("开工先读该节")
+                .contains("不重造轮子")
+                .contains("照常自建")
+                .doesNotContain("src/lib/robust")
+                .doesNotContain("src/components/robust")
+                .doesNotContain("httpFetch")
+                .doesNotContain("AsyncSection")
+                // 「预约通」实测（11-12）的语义边界对齐句随枚举移除一并归栈规则集
+                //（节内断言见 StackRulesEntryPathsTest——「含页面/组件调自家 /api 路由」）
                 .contains("本栈写法规则节")
                 .contains("强制档")
                 .contains("预置档");

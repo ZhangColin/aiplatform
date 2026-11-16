@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class WorkspaceOrphanSweepLiveTest {
 
     /** 无主现场容器镜像：与 DockerEnvironmentBackend.DEV_IMAGE 同源（本地必有，不另拉）。 */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.17";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
 
     /** 容器侧既有现场命名（含快照/fork 等一切 ws-<digits> 前缀资源）。 */
     private static final Pattern WS_NAMED_RESOURCE = Pattern.compile("^ws-(\\d+).*$");

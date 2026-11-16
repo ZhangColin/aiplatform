@@ -5,9 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 /**
- * 栈规则集入口点名回归（#471 P1-b）：AGENTS.md 本栈写法规则节必须点名预置入口
- * （{@code src/lib/db.ts}、{@code src/lib/http.ts}）——预置件与规则指路是双轮：
- * 件在场而规则不指路，run 执行体仍按训练习惯自建入口文件（11-11 两项目＋11-12
+ * 栈规则集入口点名回归（#471 P1-b；#540 扩容至模式件/纪律句/应用壳惯用法）：
+ * AGENTS.md 本栈写法规则节必须点名预置入口（{@code src/lib/db.ts}、
+ * {@code src/lib/http.ts}、模式件两件）——预置件与规则指路是双轮：件在场而
+ * 规则不指路，run 执行体仍按训练习惯自建入口文件（11-11 两项目＋11-12
  * 易记单词本三连中的实测形态：教学在协议里、规则在 AGENTS.md 里，仍先写了裸
  * 客户端才被收口拦下）。点名口径与正文纪律同节正本：无用户可控片段、无内嵌
  * 双引号（Windows argv fail-fast 面）。
@@ -46,6 +47,46 @@ class StackRulesEntryPathsTest {
         assertThat(GenerationAppService.AGENTS_MD_STACK_RULES_SECTION)
                 .as("会话与密码规则应点名预置入口 src/lib/auth.ts（件＋指路双轮）")
                 .contains("src/lib/auth.ts");
+    }
+
+    @Test
+    void given_stack_rules_section_when_pattern_components_present_then_entries_pointed() {
+        // #540 模式件指路（件＋指路双轮同律）：首批两件必须在节内点名路径与用法
+        // ——件在场而规则不指路，run 执行体仍按训练习惯自写表单/列表的状态骨架
+        assertThat(GenerationAppService.AGENTS_MD_STACK_RULES_SECTION)
+                .as("表单模式件应点名 src/components/patterns/ValidatedForm")
+                .contains("src/components/patterns/ValidatedForm")
+                .as("列表模式件应点名 src/components/patterns/FilterableList")
+                .contains("src/components/patterns/FilterableList");
+    }
+
+    /**
+     * #540 纪律句（ADR-0051 复用纪律）：基座件不改约＋定制三通道封顶——
+     * 告知通道单源的机械防线在检测落地（#541 路径清单拦截）之前先住在规则
+     * 正本里；漏写＝执行体无从知晓「预置件内部不得编辑」的边界。
+     */
+    @Test
+    void given_stack_rules_section_when_reuse_discipline_then_no_edit_covenant_present() {
+        assertThat(GenerationAppService.AGENTS_MD_STACK_RULES_SECTION)
+                .as("纪律句应含基座件不改约与三通道定制口径")
+                .contains("基座件不改约")
+                .contains("不得编辑或删除")
+                .contains("三通道");
+    }
+
+    /**
+     * #540 应用壳惯用法（ADR-0051：布局/导航不预置整壳——单一化防线画在结构
+     * 之下，只教做法不给件）：三类典型壳的组装指引进节，缺＝执行体无从参考
+     * 而倾向重造整壳或千篇一律。
+     */
+    @Test
+    void given_stack_rules_section_when_app_shell_idioms_then_three_kinds_present() {
+        assertThat(GenerationAppService.AGENTS_MD_STACK_RULES_SECTION)
+                .as("应用壳惯用法应覆盖仪表盘壳/营销页/内容站三类")
+                .contains("仪表盘壳")
+                .contains("营销页")
+                .contains("内容站")
+                .contains("不预置整件");
     }
 
     @Test

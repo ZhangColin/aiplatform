@@ -55,7 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BackofficeResourceFaceLiveTest {
 
     /** 无主现场容器镜像：与 DockerEnvironmentBackend.DEV_IMAGE 同源（本地必有，不另拉）。 */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.17";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
 
     private static final Pattern MAIN_CONTAINER_NAME = Pattern.compile("^ws-(\\d+)$");
     private static final Pattern WORKSPACE_VOLUME_NAME = Pattern.compile("^vol-ws-(\\d+)$");

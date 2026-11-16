@@ -496,23 +496,29 @@ public class GenerationAppService {
             本项目带设计规范正本：工作区根的 DESIGN.md（随设计定稿刷新、平台维护）——每轮开工先读，系统界面的颜色、字体、圆角与组件风格照它对齐（视觉正源＝定稿设计稿）。src/app/globals.css 的 :root 是 token 生效位，其中平台维护的「平台设计规范」@theme 块已收窄默认调色板（bg-red-500 等裸色工具类不可用）：样式一律引用语义 token 或品牌色 token（bg-brand-1 等），禁裸色、禁任意值（p-[13px]）、禁 inline style；需要新颜色时在 :root 定义 token 并在 @theme 暴露，不写死色值。token 清单与细则见 DESIGN.md。""";
 
     /**
-     * AGENTS.md 本栈写法规则节（#421 栈规则集）：基座健壮件的件用法示例与「用
-     * 预置件、不裸写」规则——平台维护、随基座 tag 换版（节内容描述的件与
-     * {@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS} 判据锚同批就位）。只在
-     * 新基座工作区拼入（件在场）；存量项目不回补、节不拼入。正文纪律与平台约定
-     * 正文同：无用户可控片段、无内嵌双引号（Windows argv fail-fast 面），单引号
-     * 经 heredoc 单引号定界为字面量、安全。
+     * AGENTS.md 本栈写法规则节（#421 栈规则集；#540 扩容＝基座能力清单唯一
+     * 正本，ADR-0051）：基座预置件（横切健壮件＋通用模式件）的件清单、用法
+     * 示例与复用纪律——平台维护、随基座 tag 换版（节内容描述的件与
+     * {@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS} 判据锚同批就位，模式件
+     * 同镜像同批）。只在新增容工作区拼入（件在场）；存量项目不回补、节不拼入。
+     * 纪律句＝基座件不改约（预置件内部不得编辑、定制三通道封顶）＋应用壳不
+     * 预置整壳（三类惯用法只教做法不给件——单一化防线画在结构之下）。正文纪律
+     * 与平台约定正文同：无用户可控片段、无内嵌双引号（Windows argv fail-fast
+     * 面），单引号经 heredoc 单引号定界为字面量、安全。
      */
     static final String AGENTS_MD_STACK_RULES_SECTION = """
 
             ## 本栈写法规则（栈规则集）
 
-            基座预置横切健壮件——行为契约内置、长相吃项目设计 token、文案可覆盖。这些能力直接用预置件，不自己手写；登录页面/流程/角色模型是功能域，自己写。
+            基座预置件两族——横切健壮件与通用模式件（src/components/patterns）：行为契约内置、长相吃项目设计 token、文案可覆盖。这些能力直接用预置件，不自己手写；登录页面/流程/角色模型是功能域，自己写。基座件不改约：src/lib/robust、src/components/robust、src/components/patterns 下的预置件文件不得编辑或删除——定制只走三通道（参数 props、文案覆盖 props、外层 wrapper 包一层），三通道满足不了就另写新件，不动基座件内部。
 
             - 数据访问（pg/redis）一律走 src/lib/robust/data-access：query（超时＋瞬时错误重试）、cacheGet / cacheSet（redis 恒降级——读挂了返回 null、写挂了返回 false，不抛不挂死）。不 new Pool、createClient 裸用客户端。入口 src/lib/db.ts 已预置（本件单例的 re-export——import 即用），不要自建数据访问文件。示例：const rows = await query('SELECT * FROM orders WHERE user_id = $1', [userId])。
             - 任何 HTTP 调用（含页面/组件调自家 /api 路由）一律走 src/lib/robust/http 的 httpFetch / httpJson：默认超时＋错误归一为 HttpError（kind: timeout / network / http / parse，按 kind 分流），GET 缺省重试一次、副作用方法不重试。不用裸 fetch——调自家 /api 也是 HTTP 调用、页面与组件代码里同样不出现裸 fetch。入口 src/lib/http.ts 已预置（本件的 re-export——import 即用），不要自建请求封装文件。
             - 页面加载/空/错三态用 src/components/robust/AsyncSection（status: loading / empty / error / ready，onRetry 挂重试），页面外层包 src/components/robust/ErrorBoundary（渲染崩溃兜底、resetKey 换路由自动复位）。文案默认可覆盖（loadingText / emptyText / errorTitle / retryText 等 props），样式只引用语义 token 类。
             - 会话与密码用 src/lib/robust/session：createSession（route handler / server action 语境）、getSession（redis 挂了降级 null——受保护页照常判未登录）、destroySession、hashPassword / verifyPassword（scrypt）。不手写 cookie 会话、不裸存密码。入口 src/lib/auth.ts 已预置（本件的 re-export——import 即用），不要自建会话存取文件。
+            - 表单（登录/注册/下单/设置等一切提交形界面）用 src/components/patterns/ValidatedForm：fields 传字段定义（name/label/type/required/validate），校验流程（必填＋自定义校验、有错即拦并聚焦首个错字段）与提交态（提交中防连点、失败提示、成功反馈）骨架内置，onSubmit 收字段值对象（值全字符串）。文案可覆盖（submitText / errorText / requiredMessage 等 props），样式只吃语义 token 类。示例：<ValidatedForm fields={[{ name: 'phone', label: '手机号', required: true }]} onSubmit={save} />。
+            - 列表（订单/商品/内容等列表页）用 src/components/patterns/FilterableList：筛选状态管理与分页数据流内置——全量数据传 items 即客户端筛选分页（文本搜索默认命中条目全部字符串字段、select 按同名字段等值匹配，筛选变更自动回第 1 页）；服务端分页传 total＋onQueryChange（翻页/筛选上抛、调用方回填当页 items）。条目渲染 renderItem，表格等整块标记用 children 函数接管。示例：<FilterableList items={rows} filters={[{ name: 'status', label: '状态', type: 'select', options }]} renderItem={rowCard} />。
+            - 应用壳不预置整件（布局/导航结构随 PRD，防千篇一律）：用 shadcn 原语自行组装，三类惯用法——仪表盘壳＝侧栏导航（shadcn add sidebar，或 aside＋nav 组合）＋顶栏＋内容卡片区；营销页＝顶部导航条＋hero 大字区＋特性网格＋页脚；内容站＝顶栏＋列表区（FilterableList 可复用）＋详情页排版。布局搭一次放 layout.tsx 与组件目录，页面只填内容。
             - 测试：测试跑道已预置（vitest），测试文件与源码同目录放 *.test.ts(x)，pnpm test 直跑——给业务功能补行为契约测试（成功路径与失败/降级路径都测）。""";
 
     /**
@@ -2378,8 +2384,9 @@ public class GenerationAppService {
 
     /**
      * 基座健壮件在场探针（#421）：{@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS}
-     * 在场＝新基座工作区（四件套随镜像就位），栈规则集拼入；不在场＝存量工作区
-     * （不回补，节不拼入）。命令全常量、单引号形态（①族纪律）。
+     * 在场＝新基座工作区（健壮件四件套与模式件两件同镜像同批就位，#540），栈规则集
+     * 拼入；不在场＝存量工作区（不回补，节不拼入）。命令全常量、单引号形态（①族
+     * 纪律）。
      */
     static String robustKitProbeCommand() {
         return "test -f '" + WorkspaceLayout.absolute(ProjectFiles.BASELINE_ROBUST_DATA_ACCESS) + "'";

@@ -191,6 +191,9 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     // （#44 尽早起、增量演进）+ 收口判据 + 直播自述口径（解说生产 = 智能体自述
     // 为主，解说部件承载）+ 命令纪律（#440：容器命令一律单引号、禁内嵌双引号与
     // $()——执行层 fail-fast 正本在 DockerExecFilesystem ①族守卫，提示层先行）。
+    // #540 基座能力清单单源化（ADR-0051）：条 2 对预置件只留指针句——件清单、
+    // 用法示例与纪律的唯一正本＝工作区 AGENTS.md 本栈写法规则节（栈规则集随
+    // 基座 tag 换版），协议不再重复枚举预置件路径（双正本必漂移）。
     // #341 Demo 阶段快模型档：本座承载 Demo 阶段全部任务——首 Demo（PRD 确认触发
     // 的首个生成 run）与迭代（更新 run）——缺省档＝快模型档（spec⑤「Demo 阶段激进
     // 用快模型，质量靠验证兜底」；Demo 与正式生产同轨同协议，档位在既有智能体运营
@@ -209,15 +212,12 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "Next.js / React 19 / pnpm / shadcn / PostgreSQL / Redis，依赖已预装）——在基座上"
                     + "增量实现，不换栈、不重选型、不重新搭骨架，基座覆盖不了的依赖才现场 pnpm add；"
                     + "数据库用容器内 PostgreSQL（连接串读工作区 .env 的 DATABASE_URL，表结构与数据"
-                    + "都在库内落定）；需要缓存可用容器内 Redis（.env 的 REDIS_URL）。基座预置的"
-                    + "横切健壮件一律用件、禁裸客户端（新基座工作区开箱预置）：数据访问（pg/redis）"
-                    + "走 src/lib/robust/data-access 的 query/cacheGet/cacheSet、任何 HTTP 调用"
-                    + "（含页面调自家 /api）走 src/lib/robust/http 的 httpFetch/httpJson、"
-                    + "会话与密码走 src/lib/robust/"
-                    + "session 的 createSession/hashPassword 等、页面加载/空/错三态与错误边界走"
-                    + " src/components/robust 的 AsyncSection/ErrorBoundary——不 new Pool/"
-                    + "Client/Redis、不 createClient、不用裸 fetch、不手写 cookie 会话与密码"
-                    + "哈希；件用法示例见工作区 AGENTS.md 的本栈写法规则节。收口 lint 会拦违规："
+                    + "都在库内落定）；需要缓存可用容器内 Redis（.env 的 REDIS_URL）。基座预置件"
+                    + "（横切健壮件＋高频通用模式件，新基座工作区开箱在场）一律用件、禁裸客户端、"
+                    + "不自建同能实现——件清单、用法示例与复用纪律的唯一正本＝工作区 AGENTS.md 的"
+                    + "本栈写法规则节（#540 起单源——协议不重复清单，防双正本漂移）：开工先读该节、"
+                    + "照节用件，表单/列表等通用界面模式先看件再动手、不重造轮子；AGENTS.md 无该节的"
+                    + "存量工作区没有这些件，照常自建。收口 lint 会拦违规："
                     + "强制档（裸客户端直用）修不完＝收口被拒、自动重跑；预置档（会话件自写）"
                     + "＝收尾如实标注。工作区根的"
                     + " AGENTS.md 是这些约定的正本，遵守它。工作区根若有 DESIGN.md（设计规范正本，"

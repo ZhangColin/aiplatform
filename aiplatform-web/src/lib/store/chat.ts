@@ -32,6 +32,27 @@ export type InterceptCardFact = {
 };
 
 /**
+ * 余额提醒卡事实（#537 计费③段间硬门）：SSE 事件与 GET 读面同形的卡面——被拦
+ * 输入引用＋当前负额显式素材。充值到账服务端自动放行（留存认领恢复／run 场
+ * intent 排空重派），卡随读面熄灭（无确认动作——区别于拦截卡的「确认扣减」）。
+ */
+export type BalanceReminderCardFact = {
+  /** 留存 id（卡锚；run 场拦截无留存缺省）。 */
+  holdId?: string;
+  /** 被拦车道：OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿。 */
+  lane?: string;
+  /** 被拦输入原文（卡上引用呈现；用户气泡由恢复受理的 run-start 落——卡不
+   *  重建气泡，避免双写）。 */
+  prompt?: string;
+  /** 作用域改稿目标件序（仅 DESIGN_REVISION）。 */
+  designItem?: number;
+  /** 源池余额快照（分；显负额素材——卡显当前负额）。 */
+  sourcePoolBalance?: number;
+  /** 余额提醒卡事件锚。 */
+  runId?: string;
+};
+
+/**
  * 对话面 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
  * ADR 0003 状态三分法）：按项目累积对话面（用户发言 / 智能体回复增量 / 问答卡 /
  * 收尾卡 / 平台轻引导 / 受理动作卡），对话史跨 run 常驻。<b>#89 起对话史落库</b>：闭史以 REST 水合为准（hydrate 按库序
@@ -254,6 +275,19 @@ export type ChatMessage =
       card: InterceptCardFact;
       settled: boolean;
     }
+  | {
+      /**
+       * 余额提醒卡（#537 计费③段间硬门）：付费项目段边界源池≤0 被拦的平台侧卡
+       * ——live 经 balance-reminder 事件到达、回访/重载经 GET 读面（同形，桥外
+       * 由 hook 同步入流）。一项目一卡：新拦取代旧卡（服务端顶替旧待决）；充值
+       * 到账自动放行——卡无确认动作，随读面熄灭（读面 null → 本面移除）；中途
+       * 关闭＝本地面移除（有留存的卡可回：重载重建；run 场卡一次性呈现）。卡不
+       * 重建用户气泡——恢复受理时由该轮 run-start 落（原文卡内引用）。
+       */
+      kind: "balance-reminder";
+      id: string;
+      card: BalanceReminderCardFact;
+    }
   | (RaisedQuestion & { kind: "question"; answered: boolean });
 
 export type ProjectChat = {
@@ -313,6 +347,14 @@ export type ChatState = {
   settleIntercept: (projectId: string, interceptId: string) => void;
   /** 拦截卡中途关闭（#533：本地面移除；卡可回——GET 读面仍在、重载重建）。 */
   dismissIntercept: (projectId: string, interceptId: string) => void;
+  /** 余额提醒卡落卡（#537）：SSE 事件（eventId 在场，只收一次）与 GET 读面重建
+   *  （messageId 自持）同口——一项目一卡，新卡取代旧卡（待决被顶替；run 场卡
+   *  无留存——新事件取代旧卡）。 */
+  noteBalanceReminder: (projectId: string, card: BalanceReminderCardFact, messageId: string,
+    eventId?: string) => void;
+  /** 余额提醒卡熄灭（#537：读面 null＝充值回正已放行/试用态——本面移除；或中途
+   *  关闭。一项目一卡，幂等）。 */
+  dismissBalanceReminder: (projectId: string) => void;
   /** 对话史水合（#89）：库条目增量应用（新 run 原位退位 live 片段，开放轮跳过；
    *  无 run 归属条目——报价卡 #203——恒应用，按库条目 id 原位退位不双卡）。 */
   hydrate: (projectId: string, entries: HydratedEntry[]) => void;
@@ -669,6 +711,37 @@ export const useChatStore = create<ChatState>((set) => ({
       messages: chat.messages.filter(
         (message) =>
           !(message.kind === "intercept" && message.card.interceptId === interceptId)),
+    })),
+
+  noteBalanceReminder: (projectId, card, messageId, eventId) =>
+    updateChat(set, projectId, (chat) => {
+      // 一项目一卡：同留存幂等（GET 重查/事件回声不双卡）；run 场卡无留存——事件
+      // id 去重后新卡取代旧卡（服务端暂存顶替口径同构）
+      if (card.holdId && chat.messages.some(
+          (message) => message.kind === "balance-reminder"
+            && message.card.holdId === card.holdId)) {
+        return chat;
+      }
+      if (eventId && chat.seenEventIds.includes(eventId)) return chat;
+      const base: ProjectChat = {
+        ...chat,
+        messages: chat.messages.filter((message) => message.kind !== "balance-reminder"),
+      };
+      const seen = eventId
+        ? { ...base, seenEventIds: pushCapped(base.seenEventIds, eventId) }
+        : base;
+      // 拦下即收口（同拦截卡——受理前的拦下不产生在途轮）
+      return appendMessage({ ...seen, turnActive: false }, {
+        kind: "balance-reminder",
+        id: eventId ?? messageId,
+        card,
+      });
+    }),
+
+  dismissBalanceReminder: (projectId) =>
+    updateChat(set, projectId, (chat) => ({
+      ...chat,
+      messages: chat.messages.filter((message) => message.kind !== "balance-reminder"),
     })),
 
   hydrate: (projectId, entries) =>

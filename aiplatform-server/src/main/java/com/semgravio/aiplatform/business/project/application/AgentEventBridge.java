@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 
@@ -221,6 +222,40 @@ public class AgentEventBridge {
             payload.put(AgentEventTypes.INTERCEPT_POOL_BALANCE_FIELD, card.sourcePoolBalance());
         }
         publishQuietly(AgentEventTypes.INTERCEPT_CARD, payload);
+    }
+
+    /**
+     * balance-reminder 发射（#537 计费③段间硬门）：余额提醒卡的平台侧呈现——
+     * 被拦输入留存已落库（bil_balance_holds 待决行）／run 场派发 intent 已暂存
+     * （本事件即该次拦截的全部呈现）；载荷＝卡面（留存 id/车道/原文/当前负额）。
+     * 发射走 {@link #publishQuietly}——读面承载卡可回，呈现失败不断拦截事实
+     * （同拦截卡取舍）。run 场拦截无留存：holdId/lane/prompt 可空不携带。
+     */
+    public void emitBalanceReminder(Project project,
+            BalanceReminderAppService.BalanceReminderCard card) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
+        payload.put(EventsAppService.OWNER_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerAccountId()));
+        payload.put(EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
+        payload.put(EventsAppService.RUN_FIELD, card.runId());
+        if (card.holdId() != null) {
+            payload.put(AgentEventTypes.BALANCE_HOLD_ID_FIELD, card.holdId());
+        }
+        if (card.lane() != null) {
+            payload.put(AgentEventTypes.BALANCE_LANE_FIELD, card.lane());
+        }
+        if (card.prompt() != null) {
+            payload.put(AgentEventTypes.BALANCE_PROMPT_FIELD, card.prompt());
+        }
+        if (card.designItem() != null) {
+            payload.put(AgentEventTypes.BALANCE_DESIGN_ITEM_FIELD, card.designItem());
+        }
+        if (card.sourcePoolBalance() != null) {
+            payload.put(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD, card.sourcePoolBalance());
+        }
+        publishQuietly(AgentEventTypes.BALANCE_REMINDER, payload);
     }
 
     /**

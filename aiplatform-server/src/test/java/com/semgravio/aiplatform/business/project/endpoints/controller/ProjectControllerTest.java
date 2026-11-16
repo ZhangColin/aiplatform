@@ -27,6 +27,7 @@ import com.cartisan.web.config.BaseEnumConverter;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
 import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
@@ -1145,8 +1146,35 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_no_pending_when_get_intercept_then_null_data() throws Exception {
-        // 无待决/已付费：data=null（卡随翻转熄灭）
+    void given_pending_when_get_balance_reminder_then_card_returned() throws Exception {
+        // 余额提醒卡读面（#537 计费③，卡可回）：SSE 事件与 GET 同形的卡面
+        when(dispatchAppService.pendingBalanceReminder(100L)).thenReturn(Optional.of(
+                new BalanceReminderAppService.BalanceReminderCard(
+                        "8890123456789", "OPINION", "把报表加个导出",
+                        null, -500L, "run-b")));
+
+        performAsUser(get("/api/projects/100/balance-reminder"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.holdId").value("8890123456789"))
+                .andExpect(jsonPath("$.data.lane").value("OPINION"))
+                .andExpect(jsonPath("$.data.prompt").value("把报表加个导出"))
+                .andExpect(jsonPath("$.data.sourcePoolBalance").value(-500))
+                .andExpect(jsonPath("$.data.runId").value("run-b"));
+    }
+
+    @Test
+    void given_no_pending_when_get_balance_reminder_then_null_data() throws Exception {
+        when(dispatchAppService.pendingBalanceReminder(100L)).thenReturn(Optional.empty());
+
+        performAsUser(get("/api/projects/100/balance-reminder"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void given_no_pending_when_get_intercept_then_null_data() throws Exception {        // 无待决/已付费：data=null（卡随翻转熄灭）
         when(dispatchAppService.pendingIntercept(100L)).thenReturn(Optional.empty());
 
         performAsUser(get("/api/projects/100/intercept"))

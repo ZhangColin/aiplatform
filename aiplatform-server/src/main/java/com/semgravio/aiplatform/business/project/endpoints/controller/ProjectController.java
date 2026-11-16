@@ -43,6 +43,7 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Conver
 import com.semgravio.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStopResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.BalanceReminderCardResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterceptCardResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
@@ -191,6 +192,20 @@ public class ProjectController {
     public ApiResponse<InterceptCardResponse> pendingIntercept(@PathVariable String id) {
         return ApiResponse.ok(dispatchAppService.pendingIntercept(parseId(id))
                 .map(InterceptCardResponse::of)
+                .orElse(null));
+    }
+
+    @GetMapping("/{id}/balance-reminder")
+    @Operation(summary = "待决余额提醒卡（计费③段间硬门，卡可回）",
+            description = "付费项目（迭代期）段边界源池≤0 时被拦输入随卡留存"
+                    + "（bil_balance_holds 待决行）——本端点是卡的可回读面：重载/回访重建"
+                    + "余额提醒卡（显当前负额＋充值入口〔先登录＋准入码〕）。无待决（充值回正"
+                    + "已放行/试用项目门恒放行）返回 data=null。run 场派发拦截（生成/修正/"
+                    + "设计）不留存——卡面经 SSE 一次性呈现，本读面不回。"
+                    + "归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 404 PRJ_001")
+    public ApiResponse<BalanceReminderCardResponse> pendingBalanceReminder(@PathVariable String id) {
+        return ApiResponse.ok(dispatchAppService.pendingBalanceReminder(parseId(id))
+                .map(BalanceReminderCardResponse::of)
                 .orElse(null));
     }
 

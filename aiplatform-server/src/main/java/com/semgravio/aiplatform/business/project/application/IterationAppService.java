@@ -15,6 +15,10 @@ import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
+import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
@@ -125,6 +129,7 @@ public class IterationAppService {
     private final VerificationPresenceGate verificationPresence;
     private final RobustKitLintAppService robustKitLint;
     private final TrackFinalVerificationAppService finalVerification;
+    private final BalanceGateAppService balanceGate;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -134,6 +139,14 @@ public class IterationAppService {
      * 意见（既有兜底不变）。
      */
     private final Map<Long, FixHandoff> terminallyFailedHandoffs = new ConcurrentHashMap<>();
+    /**
+     * 余额闸暂存的修正 intent（#537 段边界余额门，projectId → 被拦交接物）：段
+     * 边界源池≤0 时派发/恢复出口被拦的交接物暂存于此，充值回正经
+     * {@link #drainBalanceBlocked} 自动重派（不手动重试）。进程内锚形态（同
+     * 轨道状态口径）——重启丢账属既有兜底哲学。多场被拦合并暂存（交接物
+     * {@link FixHandoff#merge} 口径——不丢轮）。
+     */
+    private final Map<Long, FixHandoff> balanceBlockedFixRuns = new ConcurrentHashMap<>();
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
@@ -147,7 +160,8 @@ public class IterationAppService {
             ProofOfOutputGate proofGate,
             VerificationPresenceGate verificationPresence,
             RobustKitLintAppService robustKitLint,
-            TrackFinalVerificationAppService finalVerification) {
+            TrackFinalVerificationAppService finalVerification,
+            BalanceGateAppService balanceGate) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -163,6 +177,7 @@ public class IterationAppService {
         this.verificationPresence = verificationPresence;
         this.robustKitLint = robustKitLint;
         this.finalVerification = finalVerification;
+        this.balanceGate = balanceGate;
     }
 
     /**
@@ -209,10 +224,27 @@ public class IterationAppService {
             if (codingRunTrack.isInFlight(projectId)) {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_IN_FLIGHT);
             }
-            handoff = terminallyFailedHandoffs.remove(projectId);
+            handoff = terminallyFailedHandoffs.get(projectId);
             if (handoff == null) {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE);
             }
+            // 段边界余额门（#537 计费③）：恢复出口同守段间硬门——欠费不空翻终态账
+            // （PRJ_026 账保留），交接物转余额闸暂存（充值回正 drainBalanceBlocked
+            // 自动重派〔不手动重试〕），BILL_025 指路充值
+            BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
+            if (gate.blocked()) {
+                terminallyFailedHandoffs.remove(projectId, handoff);
+                balanceBlockedFixRuns.merge(projectId, handoff,
+                        (oldHeld, newHeld) -> FixHandoff.merge(List.of(oldHeld, newHeld)));
+                String blockedRunId = EventsAppService.newRunId();
+                eventBridge.emitBalanceReminder(project,
+                        BalanceReminderAppService.BalanceReminderCard.forRunBlock(
+                                gate.blockedBalanceFen(), blockedRunId));
+                log.info("[fix] 项目 {} 余额提醒（run 场）：恢复出口被拦，交接物已暂存，充值回正自动重派",
+                        projectId);
+                throw new ApplicationException(BillingMessage.BALANCE_BLOCKED);
+            }
+            terminallyFailedHandoffs.remove(projectId);
             codingRunTrack.begin(projectId);
             firstRunId = EventsAppService.newRunId();
         }
@@ -271,6 +303,22 @@ public class IterationAppService {
     /** 迭代态守卫过后的派发：空闲即起跑，在途即排队。 */
     private FixDispatch dispatch(Project project, FixHandoff handoff) {
         Long projectId = project.getId();
+        // 段边界余额门（#537 计费③，ADR-0047 段间硬门）：修正 run 起跑前查门——
+        // 源池≤0 拦下暂存（多场被拦合并不丢轮）＋余额提醒卡直达对话面（显负额＋
+        // 充值入口），充值回正经 drainBalanceBlocked 自动重派（不手动重试）；试用
+        // 恒放行。段内绝不检查绝不中断——本门只在此（段起跑前）被消费。
+        BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
+        if (gate.blocked()) {
+            balanceBlockedFixRuns.merge(projectId, handoff,
+                    (oldHeld, newHeld) -> FixHandoff.merge(List.of(oldHeld, newHeld)));
+            String runId = EventsAppService.newRunId();
+            eventBridge.emitBalanceReminder(project,
+                    BalanceReminderAppService.BalanceReminderCard.forRunBlock(
+                            gate.blockedBalanceFen(), runId));
+            log.info("[fix] 项目 {} 余额提醒（run 场）：修正 intent 已暂存，充值回正自动重派",
+                    projectId);
+            return new FixDispatch(runId, false);
+        }
         String firstRunId;
         synchronized (codingRunTrack) {
             if (!codingRunTrack.begin(projectId)) {
@@ -281,6 +329,37 @@ public class IterationAppService {
         }
         beginFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
+    }
+
+    /**
+     * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
+     * 余额闸暂存的修正 intent 逐项目重派（触发时门已过〔入账事件〕，重派自然再守
+     * 全守卫与在途口径）。重派失败（项目已归档等）intent 丢弃并记日志——用户重提
+     * 即新段（段边界门判定自然接管）。入账事件（AFTER_COMMIT 监听）触发。
+     */
+    public void drainBalanceBlocked() {
+        for (Map.Entry<Long, FixHandoff> entry : balanceBlockedFixRuns.entrySet()) {
+            Long projectId = entry.getKey();
+            if (balanceGate.assess(projectId).blocked()) {
+                continue; // 未回正——暂存保持待下一次入账（入账的可能是别项目的池）
+            }
+            if (!balanceBlockedFixRuns.remove(projectId, entry.getValue())) {
+                continue; // 并发已被排空——不重复重派
+            }
+            try {
+                Project project = projectRepository.findById(projectId)
+                        .orElseThrow(() -> new ApplicationException(
+                                ProjectMessage.PROJECT_NOT_FOUND));
+                FixHandoff handoff = entry.getValue();
+                log.info("[fix] 项目 {} 余额回正：暂存修正 intent 自动重派（交接 {} 轮）",
+                        projectId, handoff.rounds().size());
+                dispatch(project, handoff);
+            }
+            catch (RuntimeException e) {
+                log.warn("[fix] 项目 {} 余额回正排空重派失败（intent 丢弃，重提即新段）：{}",
+                        projectId, e.toString());
+            }
+        }
     }
 
     /**
@@ -334,7 +413,7 @@ public class IterationAppService {
                             (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
                                     currentHandoff, prdVersionNo, proof),
                             "fix", true, CoderRunAttempts.RunSeat.executor(),
-                            RunHeading.titled(FIX_TITLE));
+                            RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN);
                     if (result.succeeded()) {
                         // #427 更新轨收口后复走整轨终验（防修 A 坏 B）：以现行计划的
                         // 核心旅程清单为轴复验——fail 自动起终验修复 run 修→复走，

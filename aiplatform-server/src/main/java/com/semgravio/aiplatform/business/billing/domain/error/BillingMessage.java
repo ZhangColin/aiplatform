@@ -53,7 +53,13 @@ public enum BillingMessage implements CodeMessage {
 
     OPERATOR_ACTION_INVALID(400, "BILL_023", "后台运营动作非法"),
 
-    SOURCE_CODE_INVALID(400, "BILL_024", "扣减源码无效（1=账户余额 2=项目余额）");
+    SOURCE_CODE_INVALID(400, "BILL_024", "扣减源码无效（1=账户余额 2=项目余额）"),
+
+    BALANCE_BLOCKED(409, "BILL_025", "源池余额不足（请先充值，到账后自动继续）"),
+
+    BALANCE_HOLD_FIELDS_INCOMPLETE(400, "BILL_026", "余额提醒留存字段不完整"),
+
+    BALANCE_HOLD_NOT_PENDING(409, "BILL_027", "余额提醒留存不在待决态（可能已被更新的提醒取代或已放行）");
 
     private final int httpStatus;
     private final String code;

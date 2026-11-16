@@ -211,6 +211,33 @@ public final class AgentEventTypes {
     /** 拦截卡的源池余额快照键（分；池未建不携带——充值引导的判定素材）。 */
     public static final String INTERCEPT_POOL_BALANCE_FIELD = "sourcePoolBalance";
 
+    /**
+     * 余额提醒卡（#537 计费③段间硬门，ADR-0047）：付费项目段边界源池余额&le;0 时
+     * 段起跑被拦的事实呈现——平台侧卡片（显当前负额＋充值入口〔先登录＋准入码〕），
+     * 非智能体 run（本事件即该次派发的全部，无 run-start）；runId 为派发锚（随派发
+     * 响应同值返回）。被拦输入原文随卡留存（bil_balance_holds 待决行）——充值回正
+     * 自动放行（恢复受理不重输），或走充值引导/中途关闭（卡可回，读面＝
+     * GET /projects/{id}/balance-reminder）。run 场派发的余额拦截（无被拦输入）也
+     * 经本事件呈现——holdId/lane/prompt 缺省不携带。段内绝不检查绝不中断：本事件
+     * 只可能在段边界出现（时序断言的呈现面）。
+     */
+    public static final String BALANCE_REMINDER = "balance-reminder";
+
+    /** 余额提醒卡的留存 id 键（卡锚；run 场拦截不留存，缺省不携带）。 */
+    public static final String BALANCE_HOLD_ID_FIELD = "holdId";
+
+    /** 余额提醒卡的被拦车道键（OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿）。 */
+    public static final String BALANCE_LANE_FIELD = "lane";
+
+    /** 余额提醒卡的被拦输入原文键（卡上引用呈现；run 场拦截不携带）。 */
+    public static final String BALANCE_PROMPT_FIELD = "prompt";
+
+    /** 余额提醒卡的作用域改稿目标件序键（仅 DESIGN_REVISION 车道携带）。 */
+    public static final String BALANCE_DESIGN_ITEM_FIELD = "designItem";
+
+    /** 余额提醒卡的源池余额快照键（分；显负额素材——负额渲染客户端分转元）。 */
+    public static final String BALANCE_POOL_BALANCE_FIELD = "sourcePoolBalance";
+
     // ---------- 消息部件（parts 契约，词根 = agentscope 原生 part 族） ----------
     // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具
     // 动作部件），收口定格。由 base.agentscope 的部件映射表产出。步骤分组已退役

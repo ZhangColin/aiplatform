@@ -7,7 +7,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.event.ApplicationEventPublisher;
 
+import com.semgravio.aiplatform.business.billing.application.event.PoolToppedUp;
 import com.semgravio.aiplatform.business.billing.domain.aggregate.BillingEntry;
 import com.semgravio.aiplatform.business.billing.domain.aggregate.BillingPool;
 import com.semgravio.aiplatform.business.billing.domain.aggregate.ProjectBilling;
@@ -32,13 +34,16 @@ public class PoolTopupAppService {
     private final BillingPoolRepository poolRepository;
     private final BillingEntryRepository entryRepository;
     private final ProjectBillingRepository projectBillingRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public PoolTopupAppService(BillingPoolRepository poolRepository,
             BillingEntryRepository entryRepository,
-            ProjectBillingRepository projectBillingRepository) {
+            ProjectBillingRepository projectBillingRepository,
+            ApplicationEventPublisher eventPublisher) {
         this.poolRepository = poolRepository;
         this.entryRepository = entryRepository;
         this.projectBillingRepository = projectBillingRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -72,6 +77,10 @@ public class PoolTopupAppService {
         if (!accountTarget) {
             selectProjectSource(projectId, operator);
         }
+        // 入账事件（#537 段边界余额门排空面）：事务内发布、订阅方 AFTER_COMMIT 送达
+        // ——余额提醒放行/被拦 run intent 的「充值回正自动继续」触发信号
+        eventPublisher.publishApplicationEvent(PoolToppedUp.of(pool.getId(), accountId, projectId,
+                amountFen, pool.getBalance()));
         return new TopupReceipt(pool.getId(), pool.getBalance(), entry.getId());
     }
 

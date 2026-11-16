@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
 import { usePendingIntercept } from "@/hooks/use-intercept";
+import { usePendingBalanceReminder } from "@/hooks/use-balance-reminder";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import {
@@ -36,6 +37,7 @@ import { useWorkMessageStore } from "@/lib/store/work-message";
 import { ChatMarkdown } from "./chat-markdown";
 import { ClosingCard } from "./closing-card";
 import { InterceptCard } from "./intercept-card";
+import { BalanceReminderCard } from "./balance-reminder-card";
 import { QuestionCard } from "./question-card";
 import { QuoteCard } from "./quote-card";
 import { WorkMessage } from "./work-message";
@@ -179,6 +181,24 @@ export function CommandArea({
       runId: interceptCard.runId ?? undefined,
     }, `ic-${interceptCard.interceptId}`);
   }, [projectId, interceptCard]);
+  // 待决余额提醒卡读面（#537 计费③段间硬门，卡可回）：live 经 SSE 桥直写
+  // store，本读面补重载缺口；读面 null＝充值回正已放行（卡随熄灭，本面移除）
+  const pendingBalanceReminder = usePendingBalanceReminder(projectId);
+  const balanceReminderCard = pendingBalanceReminder.data;
+  useEffect(() => {
+    if (balanceReminderCard) {
+      useChatStore.getState().noteBalanceReminder(projectId, {
+        holdId: balanceReminderCard.holdId ?? undefined,
+        lane: balanceReminderCard.lane ?? undefined,
+        prompt: balanceReminderCard.prompt ?? undefined,
+        designItem: balanceReminderCard.designItem ?? undefined,
+        sourcePoolBalance: balanceReminderCard.sourcePoolBalance ?? undefined,
+        runId: balanceReminderCard.runId ?? undefined,
+      }, `br-${balanceReminderCard.holdId ?? balanceReminderCard.runId ?? "pending"}`);
+    } else if (pendingBalanceReminder.isSuccess) {
+      useChatStore.getState().dismissBalanceReminder(projectId);
+    }
+  }, [projectId, balanceReminderCard, pendingBalanceReminder.isSuccess]);
 
   const [input, setInput] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
@@ -456,6 +476,15 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
     return (
       <div className="flex w-full justify-start">
         <InterceptCard projectId={projectId} message={message} />
+      </div>
+    );
+  }
+  if (message.kind === "balance-reminder") {
+    // 余额提醒卡（#537 计费③段间硬门）：欠费暂停卡——显负额＋充值引导（到账
+    // 自动放行，无确认动作）
+    return (
+      <div className="flex w-full justify-start">
+        <BalanceReminderCard projectId={projectId} message={message} />
       </div>
     );
   }

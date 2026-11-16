@@ -1,5 +1,6 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,6 +20,8 @@ import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
+import com.semgravio.aiplatform.business.billing.application.SegmentSettlementAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -109,6 +112,7 @@ public class MainAgentAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final MainAgentProperties mainAgentProperties;
     private final SedimentProposalFacts sedimentProposals;
+    private final SegmentSettlementAppService segmentSettlement;
 
     /**
      * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
@@ -158,6 +162,11 @@ public class MainAgentAppService {
                     + "可随时调 propose_sediment 写入采集层草稿；没有就忽略本提醒，"
                     + "继续本轮工作。）";
 
+    /** 入口分类调用的计量锚（#537 段收口接线）：projectId → 本次派发的分类 runId——
+     * 翻转后判定轮同计费边界，随该轮的主智能体轮结算入账（收口消费即清，同
+     * {@code opinionExchanges} 的进程内锚形态）。 */
+    private final Map<Long, String> classifyRuns = new ConcurrentHashMap<>();
+
     /** 悬空补救文案（ADR-0032）：判死/失败收口形——点名「本轮被中断」。 */
     static final String DANGLING_REMEDY_INTERRUPTED =
             "本轮被中断了，需求梳理还没有完成。你可以说「继续」，我们接着梳理。";
@@ -179,7 +188,8 @@ public class MainAgentAppService {
             DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ConversationHistoryAppService conversationHistory,
-            MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals) {
+            MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
+            SegmentSettlementAppService segmentSettlement) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -196,6 +206,7 @@ public class MainAgentAppService {
         this.conversationHistory = conversationHistory;
         this.mainAgentProperties = mainAgentProperties;
         this.sedimentProposals = sedimentProposals;
+        this.segmentSettlement = segmentSettlement;
     }
 
     /**
@@ -296,10 +307,15 @@ public class MainAgentAppService {
         AgentCommand command = mainCommand(project, runId, annotated);
         // 零产物：仅对话（答询协议在主智能体配置内——查证只读工具 + 据实作答）
         sessionExecutor.submit(sessionId, () -> {
-            ConversationHistoryAppService.TurnRecorder recorder =
-                    conversationHistory.recorder(projectId, eventBridge.sink(project));
-            AgentReply reply = agentClient.converse(command, recorder);
-            recorder.settle(runId, reply);
+            try {
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
+                AgentReply reply = agentClient.converse(command, recorder);
+                recorder.settle(runId, reply);
+            }
+            finally {
+                settleTurn(projectId, runId); // #537 段收口结算：咨询轮翻转后计费——成败/停止都结算
+            }
         });
         return new MainAgentRun(runId);
     }
@@ -359,6 +375,7 @@ public class MainAgentAppService {
             catch (RuntimeException e) {
                 // 续跑失败同轮失败口径（#83 起 resume 失败上抛）：清锚不派发——error
                 // 事件已由 resume 内发出，用户重提即兜底（不自动重试）
+                settleTurn(projectId, runId); // 失败也扣（#537 段收口结算——用量已实耗）
                 failUserTurn(projectId, sessionId, runId);
                 throw e;
             }
@@ -660,6 +677,7 @@ public class MainAgentAppService {
             catch (RuntimeException e) {
                 // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，
                 // 不自动重试；error 事件已由 converse 内发出（异常上抛由会话执行器吞）
+                settleTurn(projectId, runId); // 失败也扣（#537 段收口结算——用量已实耗）
                 failUserTurn(projectId, sessionId, runId);
                 throw e;
             }
@@ -816,8 +834,11 @@ public class MainAgentAppService {
                 // 解除（访谈重获推进抓手，入口恢复分类）
                 danglingInterviews.remove(sessionId);
                 sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
-                return;
+                return; // 挂起即段未收口：不结算（答复续跑同 runId 用量随真收口入账）
             }
+            // #537 段收口结算：主智能体轮真收口即结算（失败/停止/平台轮同扣——失败也扣）；
+            // 在挂起判定之后——问答续跑的用量同段同锚，幂等不重扣
+            settleTurn(projectId, runId);
             if (project.getArchivedAt() != null) {
                 clearTurnAnchors(sessionId, workspaceId); // 归档竞态守卫：静默不派
                 danglingInterviews.remove(sessionId); // 归档即对话区关闭：标记随清（终态）
@@ -1081,6 +1102,53 @@ public class MainAgentAppService {
         opinionExchanges.remove(sessionId);
         suspendedQuestions.remove(sessionId);
         remedyFailedInterviewTurn(projectId, runId);
+    }
+
+    /**
+     * 记录本次派发的分类 runId（#537 段收口接线）：入口分类判定翻转后同计费边界
+     * ——runId 随该轮的主智能体轮结算入账（收口消费即清；派发分岔后调用，被拦/
+     * 兜底路径不记——兜底走 {@link #settleStandaloneClassify} 单独结算）。
+     */
+    public void noteClassifyRun(Long projectId, String classifyRunId) {
+        classifyRuns.put(projectId, classifyRunId);
+    }
+
+    /**
+     * 兜底路径的判定轮单独结算（#537 段收口接线）：兜底不起轮——分类调用按自身
+     * 锚单独结算（不落会漏；试用项目结算服务空过）。
+     */
+    public void settleStandaloneClassify(Long projectId, String classifyRunId) {
+        settleSegment(projectId, SegmentType.MAIN_TURN,
+                classifyRunId, List.of(classifyRunId));
+    }
+
+    /**
+     * 主智能体轮收口结算（#537 段收口接线，ADR-0047「段收口即结算」）：段＝一轮，
+     * 收口即结算一次——判定轮（在场时）与本轮用量合落一条扣减行；试用项目零扣减
+     * （计费边界＝翻转时点）、零用量/未配价空过（结算服务口径）、同段址重试幂等。
+     */
+    private void settleTurn(Long projectId, String runId) {
+        String classifyRunId = classifyRuns.remove(projectId);
+        List<String> usageRunIds = new ArrayList<>(2);
+        if (classifyRunId != null) {
+            usageRunIds.add(classifyRunId);
+        }
+        usageRunIds.add(runId);
+        settleSegment(projectId,
+                SegmentType.MAIN_TURN,
+                runId, usageRunIds);
+    }
+
+    /** 段结算尽力而为口径（失败也扣——收口/失败/停止都结算；结算异常只记日志不反噬收口轨道）。 */
+    private void settleSegment(Long projectId,
+            SegmentType segmentType,
+            String segmentRef, List<String> usageRunIds) {
+        try {
+            segmentSettlement.settleSegment(projectId, segmentType, segmentRef, usageRunIds);
+        }
+        catch (RuntimeException e) {
+            log.warn("[main-settle] 项目 {} 段结算失败（不反噬收口轨道）：{}", projectId, e.toString());
+        }
     }
 
     /**

@@ -30,6 +30,8 @@ import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.semgravio.aiplatform.business.billing.application.SegmentSettlementAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
@@ -281,6 +283,7 @@ class CoderRunAttempts {
     private final VerificationFacts verificationFacts;
     private final ModelRoutingAppService modelRouting;
     private final CodingRunTrack codingRunTrack;
+    private final SegmentSettlementAppService segmentSettlement;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
@@ -288,7 +291,8 @@ class CoderRunAttempts {
             GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
             ProjectVersionAppService versions, VerificationFacts verificationFacts,
-            ModelRoutingAppService modelRouting, CodingRunTrack codingRunTrack) {
+            ModelRoutingAppService modelRouting, CodingRunTrack codingRunTrack,
+            SegmentSettlementAppService segmentSettlement) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
@@ -300,6 +304,7 @@ class CoderRunAttempts {
         this.verificationFacts = verificationFacts;
         this.modelRouting = modelRouting;
         this.codingRunTrack = codingRunTrack;
+        this.segmentSettlement = segmentSettlement;
     }
 
     /**
@@ -336,9 +341,10 @@ class CoderRunAttempts {
      */
     RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
-            boolean injectKnowledge, RunSeat seat, RunHeading heading) {
+            boolean injectKnowledge, RunSeat seat, RunHeading heading,
+            SegmentType segmentType) {
         return run(project, project.getWorkspaceId(), firstRunId, sessionId, prompts, onSuccess,
-                what, injectKnowledge, seat, heading);
+                what, injectKnowledge, seat, heading, segmentType);
     }
 
     /**
@@ -347,14 +353,15 @@ class CoderRunAttempts {
      */
     RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
-            String what, boolean injectKnowledge, RunSeat seat, RunHeading heading) {
+            String what, boolean injectKnowledge, RunSeat seat, RunHeading heading,
+            SegmentType segmentType) {
         return run(project, workspaceId, firstRunId, sessionId, prompts, onSuccess, what,
                 injectKnowledge, seat, ModelRoutingAppService.SegmentSignals.none(), heading,
-                null);
+                null, segmentType);
     }
 
     /**
-     * 全参形（#353 段失败回滚；#354 路由信号）：{@code rollback} 在场时，首轮尝试环
+     * 全参形（#353 段失败回滚；#354 路由信号；#537 段收口接线）：{@code rollback} 在场时，首轮尝试环
      * 耗尽 → 回调轨道层留账＋回滚本段起点 → 以原首试 prompt（干净起点重放——不携
      * 错误现场、知识注入不重复）换会话重跑一轮；重跑轮所有尝试走重试投影（attemptRunId
      * 全新——计量幂等键不撞首轮；run-start 滤掉、事件归锚首试 runId，用户面零感知）。
@@ -363,12 +370,52 @@ class CoderRunAttempts {
      * {@code signals} = 模型路由的段级信号（轨道层拼装：片规模标签——计划自报的
      * 实现面积，#426 起替换枚举密度信号；修正/设计/合并裁决轨经便捷形传空信号；
      * 路由只对 executor 座生效，#354）。
+     *
+     * <p><b>段收口结算（#537 计费③，ADR-0047「段收口即结算」）</b>：一场 run 的
+     * 尝试环（含重试/回滚重跑轮——全场合计量锚随收）收口即结算一条扣减行——
+     * 成败/停止/异常都结算（失败也扣），{@code finally} 挂载保证异常路径不漏；
+     * 结算尽力而为（异常只记日志不反噬收口轨道）。{@code segmentType}＝段型
+     * （run 场/设计会话轮——调用方按轨道语义传入）。</p>
      */
     RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
             String what, boolean injectKnowledge, RunSeat seat,
             ModelRoutingAppService.SegmentSignals signals, RunHeading heading,
-            SegmentRollback rollback) {
+            SegmentRollback rollback,
+            SegmentType segmentType) {
+        List<String> meterRunIds = new ArrayList<>();
+        try {
+            return runLoop(project, workspaceId, firstRunId, sessionId, prompts, onSuccess,
+                    what, injectKnowledge, seat, signals, heading, rollback, meterRunIds);
+        }
+        finally {
+            settleRun(project.getId(), segmentType, firstRunId, meterRunIds);
+        }
+    }
+
+    /** run 段收口结算（#537）：零尝试（秒止/关停旁路在首尝试生成前抛出）无计量锚空过。 */
+    private void settleRun(Long projectId,
+            SegmentType segmentType,
+            String firstRunId, List<String> meterRunIds) {
+        if (meterRunIds.isEmpty()) {
+            return;
+        }
+        try {
+            segmentSettlement.settleSegment(projectId, segmentType, firstRunId, meterRunIds);
+        }
+        catch (RuntimeException e) {
+            log.warn("[run-settle] 项目 {} run 段结算失败（不反噬收口轨道）：{}", projectId, e.toString());
+        }
+    }
+
+    /**
+     * 尝试环本体（{@link #run} 全参形的实现——结算挂在调用方 {@code finally}）。
+     */
+    private RunResult runLoop(Project project, Long workspaceId, String firstRunId, String sessionId,
+            Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
+            String what, boolean injectKnowledge, RunSeat seat,
+            ModelRoutingAppService.SegmentSignals signals, RunHeading heading,
+            SegmentRollback rollback, List<String> meterRunIds) {
         Long projectId = project.getId();
         String knowledgePrefix = injectKnowledge
                 ? knowledgeAppService.dispatchInjection(prompts.first()) : "";
@@ -462,6 +509,9 @@ class CoderRunAttempts {
                 // 首轮，且投影层按「重试尝试」滤 run-start、归锚（用户面零感知）
                 String attemptRunId = round == 1 && attempt == 1 && iteration == 1
                         ? firstRunId : EventsAppService.newRunId();
+                // 段计量锚收集（#537 段收口接线）：每次尝试的全场合锚随收——
+                // 成败/停止/异常全扣（「失败也扣、停止也扣」，结算挂 run finally）
+                meterRunIds.add(attemptRunId);
                 AgentConfigAppService.EffectiveConfig agent =
                         agentConfigs.effectiveOf(seat.profile());
                 // 模型路由判定（#354）：只对 run 执行体座生效（Demo 阶段模型档＝run

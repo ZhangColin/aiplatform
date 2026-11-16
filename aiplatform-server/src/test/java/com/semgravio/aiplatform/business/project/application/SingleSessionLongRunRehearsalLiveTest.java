@@ -34,6 +34,7 @@ import com.semgravio.aiplatform.base.workspace.application.dto.command.Workspace
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.project.application.CoderRunAttempts.ClosingJudgment;
 import com.semgravio.aiplatform.business.project.application.CoderRunAttempts.Prompts;
 import com.semgravio.aiplatform.business.project.application.CoderRunAttempts.RunResult;
@@ -212,7 +213,7 @@ class SingleSessionLongRunRehearsalLiveTest {
                             : ModelRoutingAppService.SegmentSignals.slice(SIZE_LABELS.get(ord - 1)),
                     stage0 ? RunHeading.titled(GenerationAppService.STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, SLICES.size()),
-                    null);
+                    null, SegmentType.GENERATION_RUN);
             long segmentWallMs = Duration.between(segmentStartedAt, Instant.now()).toMillis();
             int attempts = 1 + retryInvocations.get();
             segmentLogs.add(new SegmentLog(ord, runId, segmentWallMs, attempts,

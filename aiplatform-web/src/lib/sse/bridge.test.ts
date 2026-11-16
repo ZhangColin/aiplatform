@@ -312,6 +312,63 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     expect(chat?.turnActive).toBe(false); // 拦下即收口
   });
 
+  it("balance-reminder（#537 段间硬门）→ 余额提醒卡落对话流（显负额、重放只收一次、新卡取代旧卡；run 场卡无留存）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      {
+        projectId: "p1",
+        runId: "run-b1",
+        holdId: "bh-1",
+        lane: "OPINION",
+        prompt: "把报表加个导出",
+        sourcePoolBalance: -500,
+      },
+      "b1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      {
+        projectId: "p1",
+        runId: "run-b1",
+        holdId: "bh-1",
+        lane: "OPINION",
+        prompt: "把报表加个导出",
+        sourcePoolBalance: -500,
+      },
+      "b1:1", // 重放同事件（GET 回声同形）——不双卡
+    ));
+    // 新拦顶替旧待决（服务端取代）——新卡取代旧卡，只留最新
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      {
+        projectId: "p1",
+        runId: "run-b2",
+        holdId: "bh-2",
+        lane: "DESIGN_REVISION",
+        prompt: "把首页改大气些",
+        designItem: 2,
+        sourcePoolBalance: -1200,
+      },
+      "b2:1",
+    ));
+    // run 场拦截（生成/修正/设计派发）——无留存无原文，取代上一张卡
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      { projectId: "p1", runId: "run-b3", sourcePoolBalance: -300 },
+      "b3:1",
+    ));
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      {
+        kind: "balance-reminder",
+        id: "b3:1",
+        card: { runId: "run-b3", sourcePoolBalance: -300 },
+      },
+    ]);
+    expect(chat?.turnActive).toBe(false); // 拦下即收口
+  });
+
   it("question-raised(QUESTION + data.questions) → 问答卡（engineRef 随卡，作答回传面）", () => {
     // 问答挂起先有对话面 run 登记（run-start agent=main——runId 锚定判定）
     dispatchAgentEvent(agentQc, agentEvent(

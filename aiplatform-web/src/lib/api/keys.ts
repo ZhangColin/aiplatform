@@ -104,5 +104,8 @@ export const queryKeys = {
     account: () => ["billing", "account"] as const,
     /** 项目账单（项目池余额＋计费态＋流水＋充值目标）。 */
     project: (id: string) => ["billing", "project", id] as const,
+    /** 待决余额提醒卡读面（#537 计费③——挂 billing 命名空间下吃充值成功
+     *  billing.all 失效：到账即放行，卡随读面熄灭）。 */
+    balanceReminder: (id: string) => ["billing", "balance-reminder", id] as const,
   },
 } as const;

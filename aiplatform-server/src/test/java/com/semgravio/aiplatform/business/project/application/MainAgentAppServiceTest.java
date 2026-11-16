@@ -53,6 +53,9 @@ import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.business.billing.application.BillingAppService;
+import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -108,6 +111,12 @@ class MainAgentAppServiceTest {
     private PrdRevisionFacts prdRevisions;
 
     @Autowired
+    private BillingAppService billingAppService;
+
+    @Autowired
+    private PoolTopupAppService poolTopupAppService;
+
+    @Autowired
     private BuildPlanFacts buildPlanFacts;
 
     /** 沉淀自荐事实登记口（#460 兜底盘问豁免判定：模拟轮内 propose_sediment 工具执行）。 */
@@ -145,6 +154,11 @@ class MainAgentAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // 计费闸用例行清理（bil_ 弱引用直落，随测试项目一并清）
+        jdbcTemplate.update("DELETE FROM bil_balance_holds");
+        jdbcTemplate.update("DELETE FROM bil_entries");
+        jdbcTemplate.update("DELETE FROM bil_project_billing");
+        jdbcTemplate.update("DELETE FROM bil_pools");
     }
 
     @BeforeEach
@@ -587,8 +601,28 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_question_answer_when_resume_then_rebuilt_from_project_facts() {
-        // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/配置/计量），
+    void given_paid_exhausted_when_answer_question_then_resume_not_blocked() {
+        // 段中绝不检查绝不中断（#537 编排缝断言时序面）：问答答复＝在途段（挂起轮）
+        // 的续跑——不是段起跑，段边界余额门不消费此缝：负余额下答复照 resume，
+        // 零余额提醒事件、零 BILL_025
+        Long projectId = persistedProject("9704");
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        jdbcTemplate.update("UPDATE bil_pools SET balance = -500 WHERE project_id = ?", projectId);
+        givenSessionExecutorRunsInline();
+        List<Map<String, Object>> pendingToolCalls = List.of(Map.of(
+                "id", "tc-1", "name", "ask_user",
+                "input", Map.of("question", "目标用户是谁？")));
+
+        appService.answerQuestion(projectId, "run-q", "reply-9", pendingToolCalls, "海外企业客户");
+
+        verify(agentClient).resume(any(), any()); // 负余额不阻断段内续跑
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.BALANCE_REMINDER), anyMap());
+    }
+
+    @Test
+    void given_question_answer_when_resume_then_rebuilt_from_project_facts() {        // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/配置/计量），
         // 待确认工具来自挂起事件载荷——不信前端回传的恢复私货
         Long projectId = persistedProject("9703");
         givenSessionExecutorRunsInline();

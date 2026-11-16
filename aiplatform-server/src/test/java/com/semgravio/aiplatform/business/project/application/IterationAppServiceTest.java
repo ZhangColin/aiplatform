@@ -56,6 +56,10 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.business.billing.application.BillingAppService;
+import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
+import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
@@ -105,6 +109,12 @@ class IterationAppServiceTest {
     @Autowired
     private CodingRunTrack codingRunTrack;
 
+    @Autowired
+    private BillingAppService billingAppService;
+
+    @Autowired
+    private PoolTopupAppService poolTopupAppService;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -141,6 +151,11 @@ class IterationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // 计费闸用例行清理（bil_ 弱引用直落，随测试项目一并清）
+        jdbcTemplate.update("DELETE FROM bil_balance_holds");
+        jdbcTemplate.update("DELETE FROM bil_entries");
+        jdbcTemplate.update("DELETE FROM bil_project_billing");
+        jdbcTemplate.update("DELETE FROM bil_pools");
     }
 
     /** 轨道任务排队不跑（起跑侧只登记在途）；手动 run 模拟异步轨道执行。 */
@@ -436,6 +451,63 @@ class IterationAppServiceTest {
                         && dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
+    }
+
+    /** 付费项目＋指定余额（负余额软模型——测试直接置池值，不经结算）。 */
+    private void toPaidWithBalance(Long projectId, long balanceFen) {
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        jdbcTemplate.update("UPDATE bil_pools SET balance = ? WHERE project_id = ?",
+                balanceFen, projectId);
+    }
+
+    @Test
+    void given_paid_exhausted_when_start_fix_run_then_stashed_with_card_and_zero_run() {
+        // 段边界门拦下修正派发（#537 计费③）：intent 暂存＋余额提醒卡（run 场无留存
+        // ——holdId 不携带）＋零 run 起跑；充值回正 drain 自动重派（不手动重试）
+        Long projectId = persistedGeneratedProject("9950");
+        toPaidWithBalance(projectId, -500);
+        List<Runnable> tracks = givenTrackQueued();
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
+                "把列表加导出", null);
+
+        assertThat(dispatch.queued()).isFalse();
+        assertThat(dispatch.runId()).isNotBlank(); // 卡事件锚（无 run 起跑）
+        verify(agentClient, never()).converse(any(), any()); // 零 run
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), argThat(
+                payload -> payload.get(AgentEventTypes.BALANCE_HOLD_ID_FIELD) == null
+                        && Long.valueOf(-500)
+                                .equals(payload.get(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD))));
+        assertThat(tracks).isEmpty(); // 暂存未起跑
+
+        // 充值回正自动重派（drain 直调断言恢复事实；事件→AFTER_COMMIT 监听同链）
+        poolTopupAppService.topup(null, projectId, 10_000, null, null);
+        appService.drainBalanceBlocked();
+
+        assertThat(tracks).hasSize(1); // 暂存 intent 已重派（轨道任务已提交）
+    }
+
+    @Test
+    void given_terminal_handoff_when_paid_exhausted_restart_then_bill_025_and_auto_redispatch_on_topup() {
+        // 恢复出口同守段间硬门：欠费不空翻终态账——BILL_025 指路充值，交接物转
+        // 余额闸暂存；充值回正自动重派（不手动重试）
+        Long projectId = persistedGeneratedProject("9951");
+        List<Runnable> tracks = givenTrackQueued();
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("持续失败"));
+        appService.startFixRun(projectId, "修不动", null);
+        tracks.remove(0).run(); // 超限终态（终态账在案）
+        toPaidWithBalance(projectId, -500);
+
+        assertThatThrownBy(() -> appService.restartFixRun(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(BillingMessage.BALANCE_BLOCKED.message());
+
+        poolTopupAppService.topup(null, projectId, 10_000, null, null);
+        appService.drainBalanceBlocked();
+
+        assertThat(tracks).hasSize(1); // 终态账已转暂存并自动重派
     }
 
     @Test

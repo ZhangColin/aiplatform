@@ -117,6 +117,7 @@ class DispatchAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         // 计费闸用例行清理（bil_ 弱引用直落，随测试项目一并清）
+        jdbcTemplate.update("DELETE FROM bil_balance_holds");
         jdbcTemplate.update("DELETE FROM bil_intercepts");
         jdbcTemplate.update("DELETE FROM bil_entries");
         jdbcTemplate.update("DELETE FROM bil_project_billing");
@@ -614,7 +615,190 @@ class DispatchAppServiceTest {
         assertThat(trialInterceptAppService.pendingCard(projectId)).isPresent();
     }
 
+    // ---------- #537 段边界余额门：余额提醒（段间硬门，段中绝不中断） ----------
+
+    /** 付费项目＋指定余额（负余额软模型——测试直接置池值，不经结算）。 */
+    private void toPaidWithBalance(Long projectId, long balanceFen) {
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        jdbcTemplate.update("UPDATE bil_pools SET balance = ? WHERE project_id = ?",
+                balanceFen, projectId);
+    }
+
+    @Test
+    void given_paid_exhausted_when_opinion_then_balance_reminder_hold_and_zero_run() {
+        // 段边界门拦下意见车道：零受理轮（除分类判定）＋留存 bil_balance_holds＋
+        // balance-reminder 事件（显负额）；对话史零落（受理前的拦下不进对话面）
+        Long projectId = persistedGeneratedProject("9840");
+        toPaidWithBalance(projectId, -500);
+        givenClassification("OPINION", "不该到");
+
+        DispatchAppService.DispatchRun run = appService.dispatch(projectId, "把报表加个导出");
+
+        verify(agentClient, times(1)).converse(any(), any()); // 仅分类判定
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), payload.capture());
+        assertThat(payload.getValue())
+                .containsEntry(EventsAppService.PROJECT_FIELD, projectId.toString())
+                .containsEntry(EventsAppService.RUN_FIELD, run.runId())
+                .containsEntry(AgentEventTypes.BALANCE_LANE_FIELD, "OPINION")
+                .containsEntry(AgentEventTypes.BALANCE_PROMPT_FIELD, "把报表加个导出")
+                .containsEntry(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD, -500L);
+        assertThat(payload.getValue().get(AgentEventTypes.BALANCE_HOLD_ID_FIELD)).isNotNull();
+        // 留存落库：待决行原文可查（卡可回的恢复面）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT prompt FROM bil_balance_holds WHERE project_id = ? AND status = 1",
+                String.class, projectId)).isEqualTo("把报表加个导出");
+        // 读面同形（卡可回：重载/回访经 GET 重建）
+        assertThat(appService.pendingBalanceReminder(projectId)).isPresent()
+                .get().extracting("prompt").isEqualTo("把报表加个导出");
+        // 对话史零落（受理前的拦下不进对话面——原文随卡呈现与恢复）
+        assertThat(conversationHistory.read(projectId)).isEmpty();
+    }
+
+    @Test
+    void given_paid_positive_balance_when_opinion_then_unblocked() {
+        // 正额不受影响：付费＋源池>0 门放行，意见轮照常
+        Long projectId = persistedGeneratedProject("9841");
+        poolTopupAppService.topup(null, projectId, 10_000, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.FORK);
+        givenSessionExecutorRunsInline();
+        givenClassification("OPINION", "好的");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(true);  // 意见轮收口观测：挂起问答（合法收口）
+
+        appService.dispatch(projectId, "把主色调改成绿色");
+
+        verify(agentClient, times(2)).converse(any(), any()); // 分类 + 意见轮
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), anyMap());
+    }
+
+    @Test
+    void given_trial_project_when_opinion_then_gate_always_passes() {
+        // 试用恒放行（计费边界＝翻转时点）：无池无账项目门照过，意见链照常
+        Long projectId = persistedProject("9842");
+        givenSessionExecutorRunsInline();
+        givenClassification("OPINION", "好的");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)
+                .thenReturn(true);
+
+        appService.dispatch(projectId, "做一个官网");
+
+        verify(agentClient, times(2)).converse(any(), any()); // 分类 + 意见轮
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), anyMap());
+    }
+
+    @Test
+    void given_paid_exhausted_when_fallback_then_guide_reply_not_blocked() {
+        // 兜底零调用天然免费——永不因余额被拦：引导照常出、零余额提醒
+        Long projectId = persistedGeneratedProject("9843");
+        toPaidWithBalance(projectId, -500);
+        givenClassification("FALLBACK", "不该出现");
+
+        appService.dispatch(projectId, "你好呀");
+
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), anyMap());
+        assertThat(appService.pendingBalanceReminder(projectId)).isEmpty();
+    }
+
+    @Test
+    void given_paid_exhausted_when_design_item_scope_then_balance_reminder_with_design_item() {
+        // 作用域改稿＝设计会话段的起跑：欠费拦下留存（件序随留存承载），零分类零改稿
+        Long projectId = persistedDesignScopeProject("9844", 2, 2); // 件 2 已收口＝可改稿
+        toPaidWithBalance(projectId, -500);
+
+        appService.dispatch(projectId, "把首页改大气些", null, 2, DesignDivergence.EXPLORE);
+
+        verify(agentClient, never()).converse(any(), any()); // 零分类（作用域直达被拦在门前）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), argThat(
+                payload -> "DESIGN_REVISION".equals(payload.get(AgentEventTypes.BALANCE_LANE_FIELD))
+                        && Integer.valueOf(2)
+                                .equals(payload.get(AgentEventTypes.BALANCE_DESIGN_ITEM_FIELD))));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT design_item FROM bil_balance_holds WHERE project_id = ? AND status = 1",
+                Integer.class, projectId)).isEqualTo(2);
+        assertThat(conversationHistory.read(projectId)).isEmpty(); // 幽灵发言零落（守卫先于落库）
+    }
+
+    @Test
+    void given_dangling_marker_when_paid_exhausted_then_takeover_balance_blocked() {
+        // 悬空接管同守段间硬门：欠费照样拦下留存（OPINION 车道）——零接管轮
+        Long projectId = persistedProject("9845");
+        poolTopupAppService.topup(null, projectId, 10_000, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        givenSessionExecutorRunsInline();
+        givenClassification("OPINION", "好的"); // 首轮分类意见 → 意见轮悬空收口置标记
+        // #445：首轮意见轮双失格走完纠偏链才置标记
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(false)  // 意见轮收口观测：悬空（进纠偏链）
+                .thenReturn(false)  // 纠偏轮①判据：失格
+                .thenReturn(false); // 纠偏轮②判据：失格（置标记）
+
+        appService.dispatch(projectId, "做一个官网"); // 分类 + 意见轮 + 纠偏①②＝4 调用
+        jdbcTemplate.update("UPDATE bil_pools SET balance = -500 WHERE project_id = ?", projectId);
+        appService.dispatch(projectId, "OK"); // 悬空接管——余额门拦下
+
+        verify(agentClient, times(4)).converse(any(), any()); // 接管轮零提交
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), argThat(
+                payload -> "OPINION".equals(payload.get(AgentEventTypes.BALANCE_LANE_FIELD))
+                        && "OK".equals(payload.get(AgentEventTypes.BALANCE_PROMPT_FIELD))));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT prompt FROM bil_balance_holds WHERE project_id = ? AND status = 1",
+                String.class, projectId)).isEqualTo("OK");
+    }
+
+    @Test
+    void given_balance_blocked_when_topped_up_then_auto_resume_without_manual_retry() {
+        // 「充值到账后下一段自动放行（不手动重试）」：入账落定→认领恢复受理（本测
+        // 直调排空口断言恢复事实；事件→监听链由 AFTER_COMMIT 编排承载）
+        Long projectId = persistedGeneratedProject("9846");
+        toPaidWithBalance(projectId, -500);
+        givenSessionExecutorRunsInline();
+        givenClassification("OPINION", "已受理");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(true);  // 意见轮收口观测：挂起问答（合法收口）
+
+        appService.dispatch(projectId, "把字号调大");
+        assertThat(appService.pendingBalanceReminder(projectId)).isPresent();
+        verify(agentClient, times(1)).converse(any(), any()); // 拦下时仅分类
+
+        poolTopupAppService.topup(null, projectId, 10_000, null, null);
+        appService.resumeBalanceHolds();
+
+        verify(agentClient, times(2)).converse(any(), any()); // 分类 + 恢复受理的意见轮
+        assertThat(appService.pendingBalanceReminder(projectId)).isEmpty(); // 卡随放行熄灭
+        assertThat(conversationHistory.read(projectId))
+                .anySatisfy(entry -> assertThat(entry.text()).contains("把字号调大")); // 不重输
+    }
+
+    @Test
+    void given_balance_blocked_when_resume_rejected_then_discard_without_stuck_card() {
+        // 恢复受理失败（项目已归档）：留存退场——不滞留卡（用户重发即新段）
+        Long projectId = persistedGeneratedProject("9847");
+        toPaidWithBalance(projectId, -500);
+        givenClassification("OPINION", "不该到");
+        appService.dispatch(projectId, "再加一个导出");
+
+        Project archived = projectRepository.findById(projectId).orElseThrow();
+        archived.archive();
+        projectRepository.save(archived);
+        poolTopupAppService.topup(null, projectId, 10_000, null, null);
+        appService.resumeBalanceHolds();
+
+        assertThat(appService.pendingBalanceReminder(projectId)).isEmpty(); // 退场不滞留
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM bil_balance_holds WHERE project_id = ? AND status = 1",
+                Integer.class, projectId)).isZero();
+    }
+
     // ---------- #291 设计物作用域：直达改稿（跨件回溯的会话路由） ----------
+
 
     @Test
     void given_design_item_scope_when_dispatched_then_direct_revision_without_classification() {

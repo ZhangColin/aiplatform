@@ -36,6 +36,10 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
+import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationPlanDeferral;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationPlanJourney;
@@ -586,6 +590,8 @@ public class GenerationAppService {
      */
     private final Map<Long, List<TurnOpinion>> firstDemoTurnOpinions = new ConcurrentHashMap<>();
 
+    private final BalanceGateAppService balanceGate;
+
     /**
      * 一条在途意见轮的排队载荷（#360）：意见原文＋该轮需求侧判定（savePrd 修订
      * 说明，null = 未修订）＋意见轮 runId（明示回执的对话面锚）——排空时逐轮
@@ -593,6 +599,15 @@ public class GenerationAppService {
      */
     record TurnOpinion(String opinion, String prdRevisionSummary, String turnRunId) {
     }
+
+    /**
+     * 余额闸暂存的生成派发 intent（#537 段边界余额门，projectId 集）：段边界源池
+     * ≤0 时生成/收口派发被拦的项目暂存于此，充值回正经 {@link #drainBalanceBlocked}
+     * 自动重派（被拦意见轮已并入 {@link #firstDemoTurnOpinions} 排队面——按既有在途
+     * 口径消化：生成成功收口后合并补派更新 run）。进程内锚形态（同排队态口径）——
+     * 重启丢账属既有兜底哲学。
+     */
+    private final Set<Long> balanceBlockedGeneration = ConcurrentHashMap.newKeySet();
 
     /**
      * @param mainAgentAppService 计划补产口（{@link MainAgentAppService#requestBuildPlan}）。
@@ -626,7 +641,8 @@ public class GenerationAppService {
             TrackFinalVerificationAppService finalVerification,
             ClosingProbes closingProbes,
             AgentConfigAppService agentConfigs,
-            IterationAppService iterationAppService) {
+            IterationAppService iterationAppService,
+            BalanceGateAppService balanceGate) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -656,6 +672,7 @@ public class GenerationAppService {
         this.closingProbes = closingProbes;
         this.agentConfigs = agentConfigs;
         this.iterationAppService = iterationAppService;
+        this.balanceGate = balanceGate;
     }
 
     /**
@@ -783,6 +800,36 @@ public class GenerationAppService {
     private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight,
             BuildPlan plan, TurnOpinion turnOpinion) {
         Long projectId = project.getId();
+        boolean hasTurnOpinion = turnOpinion != null && turnOpinion.opinion() != null
+                && !turnOpinion.opinion().isBlank();
+        // 段边界余额门（#537 计费③，ADR-0047 段间硬门）：生成 run 起跑前查门——
+        // 源池≤0 拦下：项目入暂存集（充值回正经 drainBalanceBlocked 自动重派〔不手动
+        // 重试〕）＋余额提醒卡直达对话面（显负额＋充值入口）；意见轮载荷按在途口径
+        // 入队 firstDemoTurnOpinions＋明示回执（同 #360 不静默丢——重派收口后合并
+        // 补派更新 run）。按钮路径（rejectInFlight）同步抛 BILL_025 指路充值；
+        // 收口自动路径静默返回 null（同静默跳过口径）。试用恒放行。段内绝不检查
+        // 绝不中断——本门只在此（段起跑前）被消费。
+        BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
+        if (gate.blocked()) {
+            if (hasTurnOpinion) {
+                // 入队与 begin 同临界区口径（#360 锁序——此处不占轨道，仅队列锁序）
+                synchronized (codingRunTrack) {
+                    firstDemoTurnOpinions.computeIfAbsent(projectId, key -> new ArrayList<>())
+                            .add(turnOpinion);
+                }
+                notifyTurnOpinionQueued(project, turnOpinion);
+            }
+            balanceBlockedGeneration.add(projectId);
+            eventBridge.emitBalanceReminder(project,
+                    BalanceReminderAppService.BalanceReminderCard.forRunBlock(
+                            gate.blockedBalanceFen(), EventsAppService.newRunId()));
+            log.info("[generate] 项目 {} 余额提醒（run 场）：生成派发 intent 已暂存，充值回正自动重派",
+                    projectId);
+            if (rejectInFlight) {
+                throw new ApplicationException(BillingMessage.BALANCE_BLOCKED);
+            }
+            return null;
+        }
         // 设计类终点收口（#285 立门、#289 立语义、#291 定稿放行）：设计主线交付
         // 设计资产包、系统＋设计设计先行——构建只从定稿设计稿长出（ADR-0024）：
         // 清单全部定稿即门开（定稿触发与计划补产链双路可达，起跑上下文携定稿稿
@@ -800,8 +847,6 @@ public class GenerationAppService {
                     projectId, project.getEndpointType().getName());
             return null;
         }
-        boolean hasTurnOpinion = turnOpinion != null && turnOpinion.opinion() != null
-                && !turnOpinion.opinion().isBlank();
         if (hasTurnOpinion) {
             // #360 首 Demo 在途的反馈不静默丢：入队判定与 begin 同临界区（修正轨排队
             // 锁序同款——begin 失败 ⟹ end 未发生 ⟹ 排空 remove 未发生，add 不落在
@@ -965,6 +1010,39 @@ public class GenerationAppService {
         catch (RuntimeException e) {
             log.warn("[generate] 项目 {} 在途意见排空补派失败（用户重提即兜底）：{}",
                     projectId, e.toString());
+        }
+    }
+
+    /**
+     * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
+     * 余额闸暂存的生成派发 intent 逐项目重派（未回正的项目保持暂存待下一次入账）。
+     * 已生成（生成在拦下窗口外竞态收口）的项目不重演生成——只在途意见队列排空
+     * （合并补派更新 run）；未生成的重派生成（被拦意见轮随 firstDemoTurnOpinions
+     * 既有口径消化）。重派失败记日志——用户重提即兜底。入账事件（AFTER_COMMIT
+     * 监听）触发。
+     */
+    public void drainBalanceBlocked() {
+        for (Long projectId : Set.copyOf(balanceBlockedGeneration)) {
+            if (balanceGate.assess(projectId).blocked()) {
+                continue; // 未回正——暂存保持待下一次入账
+            }
+            if (!balanceBlockedGeneration.remove(projectId)) {
+                continue; // 并发已被排空——不重复重派
+            }
+            try {
+                log.info("[generate] 项目 {} 余额回正：暂存生成派发 intent 自动重派", projectId);
+                dispatchFirstDemoTurnOpinions(projectId); // 已生成：在途意见合并补派更新 run
+                Project current = projectRepository.findById(projectId).orElse(null);
+                if (current != null && current.getArchivedAt() == null
+                        && current.getGeneratedAt() == null) {
+                    dispatchGeneration(current, /* rejectInFlight= */ false, /* plan= */ null,
+                            /* turnOpinion= */ null);
+                }
+            }
+            catch (RuntimeException e) {
+                log.warn("[generate] 项目 {} 余额回正排空重派失败（intent 丢弃，重提即兜底）：{}",
+                        projectId, e.toString());
+            }
         }
     }
 
@@ -1314,7 +1392,7 @@ public class GenerationAppService {
                             : ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, slices.size()),
-                    rollback);
+                    rollback, SegmentType.GENERATION_RUN);
             if (!result.succeeded()) {
                 failSegment(projectId, ord, runId);
                 if (result.lastError() != null) {
@@ -1386,7 +1464,7 @@ public class GenerationAppService {
                         CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                         ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                         RunHeading.slice(slice, ord, slices.size()),
-                        rollback);
+                        rollback, SegmentType.GENERATION_RUN);
                 if (!result.succeeded()) {
                     failSegment(projectId, ord, runId);
                     if (result.lastError() != null) {
@@ -1506,7 +1584,7 @@ public class GenerationAppService {
                             : ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, slices.size()),
-                    /* rollback= */ null); // 单会话：段级自愈＝同会话返工提示，不回滚重跑
+                    /* rollback= */ null, SegmentType.GENERATION_RUN); // 单会话：段级自愈＝同会话返工提示，不回滚重跑
             if (!result.succeeded()) {
                 failSegment(projectId, ord, runId);
                 if (result.lastError() != null) {
@@ -1899,7 +1977,7 @@ public class GenerationAppService {
                     CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                     ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                     RunHeading.slice(slice, ord, plan.slices().size()),
-                    rollback);
+                    rollback, SegmentType.GENERATION_RUN);
             if (result.succeeded()) {
                 return ForkSliceOutcome.ok(ord, slice, runId, forkWorkspaceId, result.closingText());
             }
@@ -2105,7 +2183,7 @@ public class GenerationAppService {
                                     project.getWorkspaceId()));
                 },
                 CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
-                RunHeading.titled("解决合并冲突"));
+                RunHeading.titled("解决合并冲突"), SegmentType.GENERATION_RUN);
         if (!result.succeeded()) {
             failSegment(projectId, outcome.ord(), outcome.runId());
             if (result.lastError() != null) {

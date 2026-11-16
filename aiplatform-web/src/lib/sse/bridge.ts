@@ -357,6 +357,26 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
+      case "balance-reminder": {
+        // 余额提醒卡（#537 计费③段间硬门）：被拦输入已留存（bil_balance_holds）／
+        // run 场 intent 已暂存——本事件即该次拦截的全部呈现（零 run）；充值回正
+        // 服务端自动放行，卡随 GET 读面熄灭（hook 同步本口，读面 null → 本面移除）
+        const { payload } = platform;
+        chat.noteBalanceReminder(
+          payload.projectId,
+          {
+            holdId: payload.holdId,
+            lane: payload.lane,
+            prompt: payload.prompt,
+            designItem: payload.designItem,
+            sourcePoolBalance: payload.sourcePoolBalance,
+            runId: payload.runId,
+          },
+          event.id,
+          event.id,
+        );
+        return;
+      }
       // ---- 消息部件（parts 契约）→ 工作消息 store ----
       // 部件全事件流恒挂（主智能体对话轮也产部件）——store 侧锚定守卫只收编码 run。
       case "part-text": {

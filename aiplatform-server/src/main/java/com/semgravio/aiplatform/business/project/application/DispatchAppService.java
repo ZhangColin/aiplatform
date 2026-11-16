@@ -18,8 +18,11 @@ import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.application.BillingAppService;
 import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.BalanceHoldLane;
 import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
 import com.semgravio.aiplatform.business.billing.domain.enums.InterceptLane;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
@@ -69,6 +72,18 @@ import lombok.extern.slf4j.Slf4j;
  * 充值引导/中途关闭——卡可回（读面 {@code GET /projects/{id}/intercept}）。咨询
  * 零产物短路天然放行、下单意图维持旧轨。车道误判偏差面（票内声明）：咨询误判
  * 意见＝多弹一次卡（可改口），意见误判咨询＝漏一次费（demo 阶段容忍）。</p>
+ *
+ * <p><b>段边界余额门（#537 计费③，ADR-0047「段间硬门段中自由」）</b>：余额检查
+ * 只发生在段边界——分类之后、受理之前，付费项目（两轨判定单读点）源池余额&le;0
+ * 拦下可计费车道（意见/咨询；兜底零调用天然免费不拦），被拦输入留存
+ * （{@code bil_balance_holds} 待决行，原文＋附件不丢失），余额提醒卡事件直达
+ * 对话面（显当前负额＋充值入口〔先登录＋准入码〕）；充值回正自动放行（恢复受理
+ * 不重输——入账事件编排监听触发认领）；作用域改稿（设计会话段）同门同留存
+ * （件序＋发散度随留存承载）；悬空接管路径同守本门。试用项目门恒放行（计费
+ * 边界＝翻转时点）。段内绝不检查绝不中断（扣成负照跑——结算段收口才结算）。</p>
+ *
+ * <p><b>判定轮结算（#537 段收口接线）</b>：分类调用的 runId 随可计费车道的轮
+ * 结算入账（翻转后判定轮同计费边界）；兜底路径不起轮——判定调用单独结算。</p>
  */
 @Service
 @Slf4j
@@ -131,6 +146,8 @@ public class DispatchAppService {
     private final DesignProcessAppService designProcessAppService;
     private final BillingAppService billingAppService;
     private final TrialInterceptAppService trialInterceptAppService;
+    private final BalanceGateAppService balanceGate;
+    private final BalanceReminderAppService balanceReminderService;
 
     public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
@@ -138,7 +155,9 @@ public class DispatchAppService {
             ConversationHistoryAppService conversationHistory,
             DesignProcessAppService designProcessAppService,
             BillingAppService billingAppService,
-            TrialInterceptAppService trialInterceptAppService) {
+            TrialInterceptAppService trialInterceptAppService,
+            BalanceGateAppService balanceGate,
+            BalanceReminderAppService balanceReminderService) {
         this.mainAgentAppService = mainAgentAppService;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
@@ -148,6 +167,8 @@ public class DispatchAppService {
         this.designProcessAppService = designProcessAppService;
         this.billingAppService = billingAppService;
         this.trialInterceptAppService = trialInterceptAppService;
+        this.balanceGate = balanceGate;
+        this.balanceReminderService = balanceReminderService;
     }
 
     /**
@@ -186,19 +207,53 @@ public class DispatchAppService {
         if (mainAgentAppService.interviewDangling(projectId)) {
             log.info("[dispatch] 项目 {} 访谈悬空接管：跳过入口分类，直达意见轮（ADR-0032）",
                     projectId);
+            // 段边界余额门（#537）：悬空接管同守段间硬门——欠费照样拦下留存
+            BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
+            if (gate.blocked()) {
+                return blockBalanceReminder(project, prompt, attachments,
+                        BalanceHoldLane.OPINION, null, null);
+            }
             return new DispatchRun(
                     mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
         }
-        Classification classified = classify(projectId, prompt);
-        if (interceptable(classified) && interceptGateOn(project)) {
-            return blockIntercept(project, prompt, attachments, laneOf(classified));
+        ClassifyOutcome classified = classify(projectId, prompt);
+        if (interceptable(classified.classification()) && interceptGateOn(project)) {
+            // 判定轮单独结算（#537 段收口接线——拦下＝判定调用已发生、无轮跟随，
+            // 同兜底口径「不落会漏」；试用空过）
+            mainAgentAppService.settleStandaloneClassify(projectId, classified.runId());
+            return blockIntercept(project, prompt, attachments, laneOf(classified.classification()));
         }
-        return switch (classified.type()) {
-            case OPINION -> new DispatchRun(
-                    mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
-            case INQUIRY -> new DispatchRun(
-                    mainAgentAppService.answerInquiry(project, prompt, attachments).runId());
-            case FALLBACK -> guideReply(project, prompt, classified.orderIntent(), attachments);
+        // 段边界余额门（#537 计费③，ADR-0047 段间硬门）：余额检查只发生在段边界——
+        // 付费项目源池≤0 拦下可计费车道（意见/咨询；兜底零调用天然免费不拦），被拦
+        // 输入留存 bil_balance_holds＋余额提醒卡直达对话面（显负额＋充值入口），充值
+        // 回正自动放行（恢复受理不重输）；试用项目门恒放行（计费边界＝翻转时点）。
+        // 段内绝不检查绝不中断——本门只在派发入口（段起跑前）被消费。
+        BalanceGateAppService.Verdict gate = balanceGate.assess(project.getId());
+        if (gate.blocked() && billable(classified.classification())) {
+            // 判定轮单独结算（同拦截拦下口径——判定调用已发生无轮跟随）
+            mainAgentAppService.settleStandaloneClassify(projectId, classified.runId());
+            return blockBalanceReminder(project, prompt, attachments,
+                    classified.classification().type() == MessageClass.OPINION
+                            ? BalanceHoldLane.OPINION : BalanceHoldLane.INQUIRY,
+                    null, null);
+        }
+        return switch (classified.classification().type()) {
+            case OPINION -> {
+                // 判定轮随本轮结算（#537 段收口接线——翻转后判定调用同计费边界）
+                mainAgentAppService.noteClassifyRun(projectId, classified.runId());
+                yield new DispatchRun(
+                        mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
+            }
+            case INQUIRY -> {
+                mainAgentAppService.noteClassifyRun(projectId, classified.runId());
+                yield new DispatchRun(
+                        mainAgentAppService.answerInquiry(project, prompt, attachments).runId());
+            }
+            case FALLBACK -> {
+                // 兜底不起轮：判定调用单独结算（不落会漏——翻转后判定轮同计费边界）
+                mainAgentAppService.settleStandaloneClassify(projectId, classified.runId());
+                yield guideReply(project, prompt, classified.classification().orderIntent(), attachments);
+            }
         };
     }
 
@@ -208,6 +263,79 @@ public class DispatchAppService {
      */
     public Optional<TrialInterceptAppService.InterceptCard> pendingIntercept(Long projectId) {
         return trialInterceptAppService.pendingCard(projectId);
+    }
+
+    /**
+     * 待决余额提醒卡读面（#537 计费③，卡可回）：无待决返回空（卡随放行熄灭）。
+     * 重载/回访经 GET 重建——前端无需事件在场。
+     */
+    public Optional<BalanceReminderAppService.BalanceReminderCard> pendingBalanceReminder(
+            Long projectId) {
+        return balanceReminderService.pendingCard(projectId);
+    }
+
+    /**
+     * 充值回正放行（#537——「充值到账后下一段自动放行〔不手动重试〕」）：认领全部
+     * 过门的待决留存并恢复受理（意见回意见轮／咨询回答询轮／作用域改稿回设计会话，
+     * 恢复受理的天然守卫〔归档/订单冻结/挂起问答/件状态〕照拦不误）；恢复受理失败
+     * 的留存退场（discard——用户重发即新段，段边界门判定自然接管）。入账事件
+     * （AFTER_COMMIT 监听）触发。
+     */
+    public void resumeBalanceHolds() {
+        for (BalanceReminderAppService.ResumableHold hold : balanceReminderService.claimPassable()) {
+            try {
+                Project project = mainAgentAppService.requireDispatchableProject(hold.projectId());
+                switch (hold.lane()) {
+                    case OPINION -> mainAgentAppService.runOpinionTurn(hold.projectId(),
+                            hold.prompt(), attachmentsOf(hold.attachments()));
+                    case INQUIRY -> mainAgentAppService.answerInquiry(project,
+                            hold.prompt(), attachmentsOf(hold.attachments()));
+                    case DESIGN_REVISION -> {
+                        // 对话史补落（对齐派发直路 dispatchDesignRevision——被拦改稿
+                        // 输入恢复受理后用户面照见原文气泡；OPINION/INQUIRY 车道由
+                        // runOpinionTurn/answerInquiry 自带落史）
+                        conversationHistory.recordUserUtterance(hold.projectId(),
+                                hold.runId(), hold.prompt(), attachmentsOf(hold.attachments()));
+                        designProcessAppService.reviseDesignItem(
+                                hold.projectId(), hold.designItem(), hold.prompt(),
+                                hold.divergence() == null ? null
+                                        : DesignDivergence.valueOf(hold.divergence()));
+                    }
+                }
+                log.info("[dispatch] 项目 {} 余额提醒放行：被拦输入已恢复受理（{}，holdId={}）",
+                        hold.projectId(), hold.lane(), hold.holdId());
+            }
+            catch (RuntimeException e) {
+                // 恢复受理失败（项目已归档/订单冻结/挂起问答/件状态失位）：留存退场，
+                // 输入不自动恢复——用户重发即新段（门判定自然接管，不滞留卡）
+                balanceReminderService.discard(hold.holdId());
+                log.warn("[dispatch] 项目 {} 余额提醒放行恢复受理失败（留存退场，用户重发即新段）：{}",
+                        hold.projectId(), e.toString());
+            }
+        }
+    }
+
+    /** 被拦输入落留存＋余额提醒卡事件（本事件即该次派发的全部：零 run、零对话史——
+     *  受理前的拦下不进对话面，原文随卡呈现与恢复；充值回正自动放行〔不手动重试〕）。 */
+    private DispatchRun blockBalanceReminder(Project project, String prompt,
+            List<MessageAttachment> attachments, BalanceHoldLane lane,
+            Integer designItem, DesignDivergence divergence) {
+        String runId = EventsAppService.newRunId();
+        BalanceReminderAppService.BalanceReminderCard card = balanceReminderService.hold(
+                project.getId(), lane, prompt,
+                ConversationHistoryAppService.toJsonMaps(attachments), designItem,
+                divergence == null ? null : divergence.name(), runId);
+        eventBridge.emitBalanceReminder(project, card);
+        log.info("[dispatch] 项目 {} 余额提醒（{}）：输入已留存待决，充值回正自动放行",
+                project.getId(), lane);
+        return new DispatchRun(runId);
+    }
+
+    /** 可计费车道判定（#537 余额门消费面）：意见与咨询翻转后计费（对话轮）；兜底
+     *  （含下单意图引导）零调用天然免费，永不因余额被拦。 */
+    private static boolean billable(Classification classified) {
+        return classified.type() == MessageClass.OPINION
+                || classified.type() == MessageClass.INQUIRY;
     }
 
     /**
@@ -298,6 +426,13 @@ public class DispatchAppService {
             List<MessageAttachment> attachments, int designItem, DesignDivergence divergence) {
         // 守卫先于落库（对齐意见轮口径）：拒绝即零副作用——不落幽灵发言
         designProcessAppService.requireRevisionableItem(project.getId(), designItem);
+        // 段边界余额门（#537 计费③）：作用域改稿＝设计会话段的起跑——欠费拦下留存
+        // （件序＋发散度随留存承载，充值回正自动恢复受理）
+        BalanceGateAppService.Verdict gate = balanceGate.assess(project.getId());
+        if (gate.blocked()) {
+            return blockBalanceReminder(project, prompt, attachments,
+                    BalanceHoldLane.DESIGN_REVISION, designItem, divergence);
+        }
         String runId = EventsAppService.newRunId();
         conversationHistory.recordUserUtterance(project.getId(), runId, prompt, attachments);
         DesignProcessAppService.DesignRun run = designProcessAppService.reviseDesignItem(
@@ -323,6 +458,10 @@ public class DispatchAppService {
     record Classification(MessageClass type, boolean orderIntent) {
 
         static final Classification OPINION_FALLBACK = new Classification(MessageClass.OPINION, false);
+    }
+
+    /** 分类调用结果：分类判定＋本次判定的 runId（#537 段收口接线——判定轮随段结算）。 */
+    private record ClassifyOutcome(Classification classification, String runId) {
     }
 
     // ---------- 内部 ----------
@@ -354,9 +493,11 @@ public class DispatchAppService {
      * {@link AgentConfigAppService#effectiveEdgeModelId} → 解析单点
      * {@link ModelTierAppService#resolve} 产模型串＋通道注入，后台改档下一轮派发
      * 即生效）、空 sink（无 SSE 事件）、不触项目工作区、计量 agentKind=classify。
-     * 失败 / 超时 / 输出不可解析一律回落意见链（见类注释的定向取舍）。
+     * 返回分类结果＋本次判定的 runId（#537 段收口接线：判定轮翻转后计费，随可计费
+     * 车道的轮结算／兜底路径单独结算）。失败 / 超时 / 输出不可解析一律回落意见链
+     * （见类注释的定向取舍）。
      */
-    private Classification classify(Long projectId, String prompt) {
+    private ClassifyOutcome classify(Long projectId, String prompt) {
         String runId = EventsAppService.newRunId();
         String sessionId = CLASSIFY_SESSION_PREFIX + runId;
         ModelTierAppService.ResolvedModel model = modelTiers.resolve(
@@ -386,14 +527,14 @@ public class DispatchAppService {
             });
             Classification parsed = parse(reply.text());
             if (parsed != null) {
-                return parsed;
+                return new ClassifyOutcome(parsed, runId);
             }
             log.warn("[dispatch] 项目 {} 分类输出不可解析（回落意见链）：{}", projectId, reply.text());
         }
         catch (RuntimeException e) {
             log.warn("[dispatch] 项目 {} 分类调用失败（回落意见链）：{}", projectId, e.toString());
         }
-        return Classification.OPINION_FALLBACK;
+        return new ClassifyOutcome(Classification.OPINION_FALLBACK, runId);
     }
 
     /**

@@ -5,11 +5,14 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Currency;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 按 subject 的成本汇总读模型（#164 平台成本读面②：项目成本清单）——窗口内
- * 该 subject 的总量 + 平台成本（币种分桶）+ 全未配价标记。
+ * 该 subject 的总量 + 平台成本（币种分桶）+ 全未配价标记＋成本观测切片桶
+ * （#536：获客成本/用户费用两桶，按切片锚对事件时间戳分桶——行内两桶互补
+ * 不重叠、并集＝行总量）。
  *
  * <p>口径同 {@link UsageSummary}（按 subject 聚合）去掉分模型/分维度展开：
  * {@code cost} = token × 事件时点生效单价的机械乘法，按币种分桶不折算（键 =
@@ -21,12 +24,14 @@ public record SubjectCostSummary(
         String subject,
         TokenUsage total,
         Map<Currency, BigDecimal> cost,
-        boolean allUnpriced) {
+        boolean allUnpriced,
+        List<CostBucketUsage> byBucket) {
 
     public SubjectCostSummary {
         // 保序拷贝：cost 键序 = 聚合 SQL 的币种码序（GROUP BY ... ORDER BY currency）
         cost = cost == null ? Map.of()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
+        byBucket = byBucket == null ? List.of() : List.copyOf(byBucket);
     }
 
     /**

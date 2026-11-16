@@ -27,6 +27,10 @@ import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
  *                    无维度的事件不参与该分桶）
  * @param byModelCost 分模型金额按带拆（#499 峰谷维度：band/bandName 随附，null＝
  *                    不区分时段分量；cost 按币种分桶与全局 cost 同源不重叠）
+ * @param byBucket    成本观测切片桶（#536 ADR-0047：获客成本/用户费用两桶——按切片
+ *                    锚〔billing 侧＝付费状态翻转时点〕对事件时间戳分桶，ts &lt; 锚
+ *                    ＝获客成本、ts &gt;= 锚＝用户费用；未翻转项目全量获客成本桶。
+ *                    两桶互补不重叠、并集＝total/cost；与用户账 bil_ 流水分记同可查）
  */
 public record BackofficeCostOverviewResponse(
         Instant from,
@@ -38,7 +42,8 @@ public record BackofficeCostOverviewResponse(
         Map<String, BigDecimal> cost,
         List<ModelUsage> byModel,
         List<AgentKindUsage> byAgentKind,
-        List<ModelBandCost> byModelCost
+        List<ModelBandCost> byModelCost,
+        List<BucketCost> byBucket
 ) {
 
     public BackofficeCostOverviewResponse {
@@ -48,6 +53,7 @@ public record BackofficeCostOverviewResponse(
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
         byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
         byModelCost = byModelCost == null ? List.of() : List.copyOf(byModelCost);
+        byBucket = byBucket == null ? List.of() : List.copyOf(byBucket);
     }
 
     /**
@@ -78,6 +84,26 @@ public record BackofficeCostOverviewResponse(
     ) {
 
         public ModelBandCost {
+            cost = cost == null ? Map.of()
+                    : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
+        }
+    }
+
+    /**
+     * 成本观测切片桶项（#536）：bucket 为 Integer code＋bucketName 随附
+     * （1=获客成本 2=用户费用，#34 收敛房规）——按切片锚（billing 侧＝付费状态
+     * 翻转时点）对事件时间戳分桶；tokens＝该桶用量、cost＝该桶已配价分量按币种
+     * 分桶（与全局 cost 同源不重叠）。未翻转项目全量落获客成本桶；窗口内无锚后
+     * 用量时用户费用桶缺席（用量驱动，不伪装 0）。
+     */
+    public record BucketCost(
+            Integer bucket,
+            String bucketName,
+            TokenUsage tokens,
+            Map<String, BigDecimal> cost
+    ) {
+
+        public BucketCost {
             cost = cost == null ? Map.of()
                     : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
         }

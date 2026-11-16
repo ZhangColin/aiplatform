@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,12 +17,14 @@ import com.semgravio.aiplatform.base.metering.application.dto.response.Backoffic
 import com.semgravio.aiplatform.base.metering.application.dto.response.BackofficeProjectCostResponse;
 import com.semgravio.aiplatform.base.metering.application.dto.response.BackofficeUnpricedUsageResponse;
 import com.semgravio.aiplatform.base.metering.domain.enums.Band;
+import com.semgravio.aiplatform.base.metering.domain.model.CostBucketUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.GlobalUsageSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.UnpricedTierUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UsageEvent;
 import com.semgravio.aiplatform.base.metering.domain.model.UsageSummary;
 import com.semgravio.aiplatform.base.metering.domain.port.AgentKindNames;
+import com.semgravio.aiplatform.base.metering.domain.port.SubjectSliceAnchors;
 import com.semgravio.aiplatform.base.metering.domain.repository.UsageEventAggregations;
 
 /**
@@ -33,7 +36,10 @@ import com.semgravio.aiplatform.base.metering.domain.repository.UsageEventAggreg
  * 成本是伪粒度、已裁不做（订单→成本经项目）。成本换算同 bySubject 口径：事件
  * 时点生效单价现算不物化，历史成本不随改价漂移。subject 不透明（底座不解释
  * 存在性）：清单用量驱动（无用量项目不出现），下钻无用量＝全零空态非错误；
- * 行不带项目名等档案（base 不依赖 business，名称互查归 admin 侧按 id 自理）。</p>
+ * 行不带项目名等档案（base 不依赖 business，名称互查归 admin 侧按 id 自理）。
+ * 成本观测切片桶（#536）：获客成本/用户费用两桶按切片锚（{@link SubjectSliceAnchors}
+ * 端口供给，billing 侧＝付费状态翻转时点）对事件时间戳分桶，总览与项目清单
+ * 两读面呈现——与用户账（bil_ 流水）分记、两边同项目可查。</p>
  */
 @Service
 public class BackofficeCostAppService {
@@ -46,22 +52,26 @@ public class BackofficeCostAppService {
 
     private final UsageEventAggregations usageEventAggregations;
     private final AgentKindNames agentKindNames;
+    private final SubjectSliceAnchors sliceAnchors;
 
     public BackofficeCostAppService(UsageEventAggregations usageEventAggregations,
-            AgentKindNames agentKindNames) {
+            AgentKindNames agentKindNames, SubjectSliceAnchors sliceAnchors) {
         this.usageEventAggregations = usageEventAggregations;
         this.agentKindNames = agentKindNames;
+        this.sliceAnchors = sliceAnchors;
     }
 
     /**
      * 全局总览（全平台跨项目）：时间窗半开区间 {@code [from, to)}（null 侧不限），
-     * 总量 + 平台成本（币种分桶）+ 分模型 + 分智能体。只读事务快照：四条聚合 SQL
-     * 落在同一一致性视图，并发上报不破坏 total = ΣbyModel、cost = 窗口内已配价
-     * 分量和 的自洽（同 {@link MeteringAppService#bySubject} 口径）。
+     * 总量 + 平台成本（币种分桶）+ 分模型 + 分智能体＋切片桶两桶（#536）。只读事务
+     * 快照：各聚合 SQL 落在同一一致性视图，并发上报不破坏 total = ΣbyModel、
+     * cost = 窗口内已配价分量和 的自洽（同 {@link MeteringAppService#bySubject} 口径）。
+     * 切片锚聚合内一次经端口读取（小表全量），与用量聚合同事务快照。
      */
     @Transactional(readOnly = true)
     public BackofficeCostOverviewResponse overview(Instant from, Instant to) {
-        GlobalUsageSummary summary = usageEventAggregations.aggregateGlobal(from, to);
+        GlobalUsageSummary summary = usageEventAggregations.aggregateGlobal(
+                from, to, sliceAnchors.anchorsBySubject());
         return new BackofficeCostOverviewResponse(summary.from(), summary.to(), summary.total(),
                 summary.costByCurrencyCode(),
                 summary.byModel().stream()
@@ -78,7 +88,8 @@ public class BackofficeCostAppService {
                                 cost.provider(), cost.model(),
                                 bandCodeOf(cost.band()), bandNameOf(cost.band()),
                                 cost.costByCurrencyCode()))
-                        .toList());
+                        .toList(),
+                summary.byBucket().stream().map(BackofficeCostAppService::bucketCostOf).toList());
     }
 
     /**
@@ -113,10 +124,12 @@ public class BackofficeCostAppService {
     public PageResponse<BackofficeProjectCostResponse> projectCosts(Instant from, Instant to,
                                                                     Pagination pagination) {
         List<BackofficeProjectCostResponse> rows = usageEventAggregations
-                .aggregateSubjectCosts(from, to).stream()
+                .aggregateSubjectCosts(from, to, sliceAnchors.anchorsBySubject()).stream()
                 .sorted(ROW_ORDER)
                 .map(summary -> new BackofficeProjectCostResponse(summary.subject(),
-                        summary.total(), summary.costByCurrencyCode(), summary.allUnpriced()))
+                        summary.total(), summary.costByCurrencyCode(), summary.allUnpriced(),
+                        summary.byBucket().stream()
+                                .map(BackofficeCostAppService::bucketCostOf).toList()))
                 .toList();
         // offset() 出 long，先与 rows.size() 取 min 再收窄——min 结果被行数上界
         // 封顶，收窄无损；超尾页（含极端大页码 long 承载）落 rows.size()＝空页
@@ -159,6 +172,12 @@ public class BackofficeCostAppService {
     /** 成本排序标量：币种桶金额直加（定序专用，不进响应呈现）。 */
     private static BigDecimal costScalarOf(SubjectCostSummary summary) {
         return summary.cost().values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** 切片桶行 → 响应形态（枚举出口两列＋币种码键化 cost，#34 收敛房规）。 */
+    private static BackofficeCostOverviewResponse.BucketCost bucketCostOf(CostBucketUsage bucket) {
+        return new BackofficeCostOverviewResponse.BucketCost(bucket.bucket().getCode(),
+                bucket.bucket().getName(), bucket.tokens(), bucket.costByCurrencyCode());
     }
 
     /** 带契约化两列（#499）：null（不区分时段）→ null，非空 → Integer code/中文名。 */

@@ -250,7 +250,7 @@ class MeteringBandCostAggregationTest {
         report("evt-plain", at(MON, 7, 0, 0), PLAINPROV, "m-plain",
                 new TokenUsage(1000, 0, 0, 0, 0));
 
-        GlobalUsageSummary global = usageEventAggregations.aggregateGlobal(null, null);
+        GlobalUsageSummary global = usageEventAggregations.aggregateGlobal(null, null, Map.of());
 
         // 三行：bandprov 峰/谷各一行＋plainprov NULL 带一行（金额 NUMERIC 标度走 compare）
         assertThat(global.byModelCost()).hasSize(3);

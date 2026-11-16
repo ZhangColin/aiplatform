@@ -6,6 +6,13 @@
 > `install-nginx-conf.sh`，conf.d 目录挂载热更）：生产模板 `nginx.prod.conf.template`
 > 随之退役（TLS 切换口径见 `deploy/部署文档.md` §12）；dev 本地预览网关（`*.localhost`）
 > 不变。手工 `docker run` 网关容器在部署面不再有。
+>
+> **演进注记（#539，不改正文决议）**：注入块承载的第二件平台脚本＝试用体验提示
+> （trial-notice.js，商业化一期②）——与圈注并列同缝注入（单 sub_filter 规则
+> 双标签，仍每文档恰一次），「不进用户源码、不在容器内」决议直接覆盖。提示判定
+> 经网关同源反代（`/.aiplatform/trial-notice`，X-Preview-Workspace 头由子域捕获
+> 注入、上游 `$platform_api` 由各消费方 server 块派生——同 `$upstream_host` 单源
+> 先例），零 CORS；快照路由维持不注入（「只逛不换」）。
 
 系统预览从「Docker 随机宿主端口（`localhost:随机端口`）直接暴露」改为「平台级 nginx 网关按子域路由 + 注入圈注脚本」。每个工作区一个稳定子域 `{workspaceId}.preview.{domain}`（开发 `{workspaceId}.localhost`），网关按 Host 子域路由到对应容器 `ws-{id}:8081`，并在 HTML 响应注入平台标注脚本（annotation.js）。一套配置吃开发与生产两个 profile（只差 base 域名与 TLS）。
 

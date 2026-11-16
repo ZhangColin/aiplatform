@@ -57,6 +57,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * ②客户端侧 gzip——上游恒收 identity（Accept-Encoding 剥除是 sub_filter 注入依赖
  * 不动），nginx 注入后压缩发客户端（1MB 级 dev 资产 5.75× 实测，跨境单流下未压缩
  * 传输是预览体感慢的主因）。断言仍只看外部可观测的请求/响应头到达与否。
+ * #539 试用体验提示注入：HTML 含提示脚本引用（与圈注并列、sub_filter 单规则
+ * 双标签恰一次）、trial-notice.js 资产网关自持可访问（内容＝平台提示脚本）、
+ * 判定端点 {@code /.aiplatform/trial-notice} 走反代 location（不被 location / 吞成
+ * 应用 200——后端缺席如实 5xx＋提示页、dev 机后端在跑回真 JSON，两种环境断言同一
+ * 判据：响应绝不是用户应用页）。快照「只逛不换」不含提示引用（沿用既有
+ * doesNotContain("data-aiplatform") 断言）。
  */
 @Tag("live")
 class PreviewGatewaySmokeTest {
@@ -156,6 +162,29 @@ class PreviewGatewaySmokeTest {
             ExecResult script = curlHost(gatewayPort, id + ".localhost", "/.aiplatform/annotation.js");
             assertThat(script.exitCode()).isZero();
             assertThat(script.stdout()).contains("__aiplatform__").contains("postMessage");
+
+            // #539 试用体验提示：HTML 含提示脚本引用（与圈注并列、单规则双标签恰一次）
+            assertThat(routed.stdout())
+                    .contains("data-aiplatform=\"trial-notice\"");
+            assertThat(countOccurrences(routed.stdout(), "data-aiplatform=\"trial-notice\""))
+                    .as("试用提示注入应恰一次（与圈注并列单规则双标签）").isEqualTo(1);
+
+            // 提示脚本资产网关自持、可访问，内容是平台 trial-notice.js
+            // （「只是体验」语义文案＋判定端点引用在场）
+            ExecResult noticeScript = curlHost(gatewayPort, id + ".localhost", "/.aiplatform/trial-notice.js");
+            assertThat(noticeScript.exitCode()).isZero();
+            assertThat(noticeScript.stdout())
+                    .contains("data-aiplatform")
+                    .contains("试用体验")
+                    .contains("/.aiplatform/trial-notice");
+
+            // 判定端点走反代 location（workspaceId 头由子域捕获注入、上游 $platform_api
+            // 派生）——核心判据：绝不落回用户应用的 200 页（location / 未吞本路径）；
+            // 本测试环境无平台后端 → 5xx＋提示页（dev 机 8888 在跑则回真 JSON，同断言）
+            ExecResult noticeEndpoint = curlFull(gatewayPort, id + ".localhost", "/.aiplatform/trial-notice");
+            assertThat(noticeEndpoint.stdout())
+                    .as("判定端点应反代平台后端，不被 location / 吞成应用页")
+                    .doesNotContain("hello gateway");
 
             // WebSocket 升级透传（next dev 的 /_next/hmr）：nginx 默认剥 hop-by-hop 头
             // 且以 HTTP/1.0 转发，升级头到不了上游——浏览器侧 HMR 连接 failed 无限重试。

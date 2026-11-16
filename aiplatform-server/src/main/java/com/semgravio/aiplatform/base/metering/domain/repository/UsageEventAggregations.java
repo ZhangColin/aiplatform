@@ -1,9 +1,11 @@
 package com.semgravio.aiplatform.base.metering.domain.repository;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 import com.semgravio.aiplatform.base.metering.domain.model.GlobalUsageSummary;
+import com.semgravio.aiplatform.base.metering.domain.model.PricedUsageLine;
 import com.semgravio.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.UnpricedTierUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UsageSummary;
@@ -44,4 +46,15 @@ public interface UsageEventAggregations {
      * 排序/分页归应用层。
      */
     List<SubjectCostSummary> aggregateSubjectCosts(Instant from, Instant to);
+
+    /**
+     * 按 run 寻址的已配价线集（#531 计费段结算读面）：subject 名下、run_id ∈
+     * runIds 的事件按 (provider, model, 档位, 时点生效单价, 币种) 归并——同键
+     * 改价跨区间出多线（各按各时点单价）。只含已配价分量（未配价分量走
+     * unpriced 观测面不进本线集）；runIds 空返回空清单。{@code from} 非 null 时
+     * 只计 {@code ts >= from} 的事件（计费边界＝付费状态翻转时间点的机制面过滤
+     * ——翻转前事件＝平台获客成本，不进用户账）；null 侧不限。
+     */
+    List<PricedUsageLine> aggregatePricedLinesByRuns(String subject, Collection<String> runIds,
+            Instant from);
 }

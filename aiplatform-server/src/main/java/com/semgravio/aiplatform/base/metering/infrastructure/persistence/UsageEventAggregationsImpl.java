@@ -5,7 +5,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +25,7 @@ import com.cartisan.core.domain.BaseEnum;
 import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
 import com.semgravio.aiplatform.base.metering.domain.model.GlobalUsageSummary;
+import com.semgravio.aiplatform.base.metering.domain.model.PricedUsageLine;
 import com.semgravio.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UnpricedTierUsage;
@@ -37,7 +41,8 @@ import com.semgravio.aiplatform.base.metering.domain.repository.UsageEventAggreg
  * 各组数字自洽（总量 = 各分模型之和 = 各分维度之和；cost = 窗口内已配价分量的
  * 币种分桶和）。
  *
- * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张，#288）经
+ * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张 #288＋按件
+ * #531 固定单价项族）经
  * {@code CROSS JOIN LATERAL VALUES} 展开后与单价表按 (provider, model, kind) + ts 落
  * {@code [effective_from, effective_to)} 区间匹配；时段带维（#499，ADR-0044 读时归段）
  * ＝事件 ts 经时段规则表归带（峰/谷，epoch 数学派生 UTC 星期/分钟、免会话时区坑）
@@ -59,15 +64,25 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     + "COALESCE(SUM(e.cache_read), 0), COALESCE(SUM(e.cache_write), 0), "
                     + "COALESCE(SUM(e.reasoning), 0)";
 
-    /** 档位 ↔ 用量列（VALUES 展开素材）：token 五档与 TokenUsage 五档同序，末位
-     *  按张档（#288）对应 images 列——成本换算与未配价对六档同一公式。 */
+    /** 档位 ↔ 用量列（VALUES 展开素材）：token 五档与 TokenUsage 五档同序，末两位
+     *  计件档——按张（#288，images 列）与按件（#531 固定单价项族，units 列）
+     *  ——成本换算与未配价对各档同一公式。 */
     private static final List<Map.Entry<TokenKind, String>> KIND_COLUMNS = List.of(
             Map.entry(TokenKind.INPUT, "input"),
             Map.entry(TokenKind.OUTPUT, "output"),
             Map.entry(TokenKind.CACHE_READ, "cache_read"),
             Map.entry(TokenKind.CACHE_WRITE, "cache_write"),
             Map.entry(TokenKind.REASONING, "reasoning"),
-            Map.entry(TokenKind.IMAGE, "images"));
+            Map.entry(TokenKind.IMAGE, "images"),
+            Map.entry(TokenKind.UNIT, "units"));
+
+    /** 计件档（按张/按件）的 kind 码清单：单点派生自 {@link TokenKind#isCountBased()}
+     *  ——不受时段带影响（带维恒落 NULL、单价只匹配 NULL 带行），与 token 五档的
+     *  带匹配分支分流。 */
+    private static final String COUNT_BASED_KINDS = KIND_COLUMNS.stream()
+            .filter(kindColumn -> kindColumn.getKey().isCountBased())
+            .map(kindColumn -> kindColumn.getKey().getCode().toString())
+            .collect(Collectors.joining(", "));
 
     /**
      * 档位展开 VALUES 子句（表别名恒为 e）：(kind code, 该档用量列)——成本换算与
@@ -116,22 +131,22 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     + " ELSE " + Band.PEAK.getCode() + " END)"
                     + " END";
 
-    /** 未配价警示的归带维：token 档按事件归带分组；按张档不受带影响（落空）。 */
+    /** 未配价警示的归带维：token 档按事件归带分组；计件档（按张/按件）不受带影响（落空）。 */
     private static final String UNPRICED_BAND =
-            "CASE WHEN part.kind = " + TokenKind.IMAGE.getCode() + " THEN NULL"
+            "CASE WHEN part.kind IN (" + COUNT_BASED_KINDS + ") THEN NULL"
                     + " ELSE " + EVENT_BAND + " END";
 
     /**
      * 事件时点生效区间匹配（单价表别名恒为 p；与事件 ts 落 [from, to) 半开同口径）。
      * 时段带维（#499，ADR-0044 读时归段）：token 档按 {@link #EVENT_BAND} 归带匹配
-     * 对应带单价行、无规则行通道回落 NULL 带行（存量语义）；按张档不受 band 影响
-     * （只匹配 NULL 带行——#288 按张行不带维度）。
+     * 对应带单价行、无规则行通道回落 NULL 带行（存量语义）；计件档（按张/按件）
+     * 不受 band 影响（只匹配 NULL 带行——计件行不带维度）。
      */
     private static final String PRICE_MATCH =
             "p.provider = e.provider AND p.model = e.model AND p.token_kind = part.kind"
                     + " AND e.ts >= p.effective_from AND (p.effective_to IS NULL OR e.ts < p.effective_to)"
-                    + " AND (part.kind = " + TokenKind.IMAGE.getCode() + " AND p.band IS NULL"
-                    + " OR part.kind <> " + TokenKind.IMAGE.getCode() + " AND ("
+                    + " AND (part.kind IN (" + COUNT_BASED_KINDS + ") AND p.band IS NULL"
+                    + " OR part.kind NOT IN (" + COUNT_BASED_KINDS + ") AND ("
                     + " (p.band IS NULL AND NOT EXISTS (SELECT 1 FROM met_time_band_rules r"
                     + " WHERE " + RULE_OPEN + "))"
                     + " OR p.band = " + EVENT_BAND + "))";
@@ -261,6 +276,40 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     return new SubjectCostSummary(entry.getKey(), entry.getValue(), cost, cost.isEmpty());
                 })
                 .toList();
+    }
+
+    @Override
+    public List<PricedUsageLine> aggregatePricedLinesByRuns(String subject, Collection<String> runIds,
+            Instant from) {
+        if (subject == null || subject.isBlank() || runIds == null || runIds.isEmpty()) {
+            return List.of();
+        }
+        // run 寻址的段用量线集（#531 计费结算）：与 costBuckets 同一展开/匹配机器，
+        // 差异＝run_id IN 过滤（可叠加翻转时点下界——计费边界机制面）、分组细化到
+        // 单价行（快照粒度——同键改价跨区间出多线，各按各时点单价不混价）。
+        // run_id 重复/乱序无害（IN 语义）。
+        String placeholders = String.join(",", Collections.nCopies(runIds.size(), "?"));
+        List<Object> args = new ArrayList<>();
+        args.add(subject);
+        args.addAll(runIds);
+        String lowerBound = from == null ? "" : " AND e.ts >= ?";
+        if (from != null) {
+            args.add(Timestamp.from(from));
+        }
+        return jdbcTemplate.query(
+                "SELECT e.provider, e.model, part.kind, p.unit_price, p.currency, SUM(part.tokens)"
+                        + " FROM met_usage_events e"
+                        + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
+                        + " JOIN met_price_entries p ON " + PRICE_MATCH
+                        + " WHERE e.subject = ? AND e.run_id IN (" + placeholders + ")"
+                        + lowerBound
+                        + " AND part.tokens > 0"
+                        + " GROUP BY e.provider, e.model, part.kind, p.unit_price, p.currency"
+                        + " ORDER BY e.provider, e.model, part.kind, p.unit_price, p.currency",
+                args.toArray(), (rs, rowNum) -> new PricedUsageLine(
+                        rs.getString(1), rs.getString(2),
+                        BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)),
+                        rs.getLong(6), rs.getBigDecimal(4), rs.getString(5)));
     }
 
     /** 总量查询（按 subject/全局两口径共用，差异全在 where）。 */

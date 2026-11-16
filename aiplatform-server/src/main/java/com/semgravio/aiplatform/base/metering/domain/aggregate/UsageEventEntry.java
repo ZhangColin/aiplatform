@@ -82,6 +82,10 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
     @Column(name = "images", nullable = false, updatable = false)
     private long images;
 
+    /** 按件用量（#531 固定单价项族——联网搜索按次等）：按件事件件数 > 0、五档 token 与张数均为零。 */
+    @Column(name = "units", nullable = false, updatable = false)
+    private long units;
+
     protected UsageEventEntry() {
     }
 
@@ -101,6 +105,7 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
         this.cacheWrite = tokens.cacheWrite();
         this.reasoning = tokens.reasoning();
         this.images = event.images();
+        this.units = event.units();
     }
 
     /**

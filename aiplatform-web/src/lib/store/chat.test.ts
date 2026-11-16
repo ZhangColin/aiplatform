@@ -713,3 +713,95 @@ describe("chat store · 收尾卡稿清单（#289 扩载、#290 呈现：live �
     expect(toWorkClosing({ ...designClosing, designLint: "nope" })?.designLint).toBeUndefined();
   });
 });
+
+describe("chat store · 试用拦截卡（#533 计费②门②）", () => {
+  beforeEach(() => {
+    useChatStore.setState({ chats: {} });
+  });
+
+  const card = (interceptId: string) => ({
+    interceptId,
+    lane: "OPINION",
+    prompt: "把主色调改成绿色",
+    sourceSelected: false,
+  });
+
+  it("noteIntercept：一项目一卡——GET 重建幂等（同卡不双卡），新卡取代旧卡", () => {
+    const s = useChatStore.getState();
+    s.noteIntercept("p1", card("ic-1"), "ic-ic-1");
+    s.noteIntercept("p1", card("ic-1"), "ic-ic-1"); // GET 重查回声——同卡幂等
+    s.noteIntercept("p1", card("ic-2"), "ic-ic-2"); // 新拦顶替旧待决
+
+    const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      kind: "intercept",
+      id: "ic-ic-2",
+      settled: false,
+      card: { interceptId: "ic-2" },
+    });
+  });
+
+  it("noteIntercept：拦下即收轮（乐观起轮的对称收口）；不重建用户气泡（恢复受理轮落）", () => {
+    useChatStore.getState().startTurn("p1");
+    useChatStore.getState().appendUserMessage("p1", "把主色调改成绿色");
+    useChatStore.getState().noteIntercept("p1", card("ic-1"), "ic-ic-1");
+
+    const chat = useChatStore.getState().chats["p1"];
+    // 乐观气泡原样在位 + 卡尾落；卡内引用原文（不双写气泡）
+    expect(chat?.messages.map((m) => m.kind)).toEqual(["user", "intercept"]);
+    expect(chat?.turnActive).toBe(false);
+  });
+
+  it("noteIntercept：SSE 事件按事件 id 只收一次", () => {
+    const s = useChatStore.getState();
+    s.noteIntercept("p1", card("ic-1"), "evt-1", "evt-1");
+    s.noteIntercept("p1", card("ic-1"), "evt-1", "evt-1"); // 重放
+
+    expect(useChatStore.getState().chats["p1"]?.messages).toHaveLength(1);
+  });
+
+  it("settleIntercept：确认落定卡转只读回执（幂等）", () => {
+    const s = useChatStore.getState();
+    s.noteIntercept("p1", card("ic-1"), "ic-ic-1");
+    s.settleIntercept("p1", "ic-1");
+    s.settleIntercept("p1", "ic-1"); // 幂等
+
+    const message = useChatStore.getState().chats["p1"]?.messages[0];
+    expect(message).toMatchObject({ kind: "intercept", settled: true });
+  });
+
+  it("dismissIntercept：中途关闭本地面移除（卡可回——读面仍在、重载重建）", () => {
+    const s = useChatStore.getState();
+    s.noteIntercept("p1", card("ic-1"), "ic-ic-1");
+    s.appendUserMessage("p1", "另一句");
+    s.dismissIntercept("p1", "ic-1");
+
+    const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
+    expect(messages.map((m) => m.kind)).toEqual(["user"]);
+  });
+
+  it("恢复受理去重：SSE run-start 先于确认响应到达（尾条卡引用同文）不再落同文气泡", () => {
+    const s = useChatStore.getState();
+    s.startTurn("p1");
+    s.appendUserMessage("p1", "把主色调改成绿色"); // 乐观气泡（发送侧）
+    s.noteIntercept("p1", card("ic-1"), "ic-ic-1");
+    s.noteChatRun("p1", "run-resume"); // 确认恢复：runId 回声登记前的竞态径
+    s.ingestRunStart("p1", "run-resume", "把主色调改成绿色");
+
+    const chat = useChatStore.getState().chats["p1"];
+    // 原文只呈现一次（乐观气泡）——卡是呈现位，恢复轮不重复落气泡
+    expect(chat?.messages.map((m) => m.kind)).toEqual(["user", "intercept"]);
+    expect(chat?.turnActive).toBe(true);
+    expect(chat?.ingestedRunIds).toContain("run-resume");
+  });
+
+  it("恢复受理去重：兜底车道 guide-reply 恢复（尾条卡引用同文）不再落同文气泡", () => {
+    const s = useChatStore.getState();
+    s.noteIntercept("p1", { ...card("ic-1"), lane: "FALLBACK" }, "ic-ic-1");
+    s.noteGuideReply("p1", "run-resume", "把主色调改成绿色", "平台", "我来帮你把它做出来", "evt-g1");
+
+    const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
+    expect(messages.map((m) => m.kind)).toEqual(["intercept", "agent"]);
+  });
+});

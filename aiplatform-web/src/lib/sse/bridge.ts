@@ -335,6 +335,28 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         chat.noteAcceptance(payload.projectId, payload.runId, event.id);
         return;
       }
+      case "intercept-card": {
+        // 试用拦截卡（#533 计费②门②）：被拦输入已随卡留存（服务端 bil_intercepts
+        // 待决行）——本事件即该次派发的全部（零 run）；卡内引用原文（用户气泡由
+        // 恢复受理的 run-start/guide-reply 落，不双写）；确认落定/中途关闭归卡组件
+        // （卡可回读面＝GET /projects/{id}/intercept，hook 同步本口）
+        const { payload } = platform;
+        chat.noteIntercept(
+          payload.projectId,
+          {
+            interceptId: payload.interceptId,
+            lane: payload.lane,
+            prompt: payload.prompt,
+            sourceSelected: payload.sourceSelected,
+            deductionSource: payload.deductionSource,
+            sourcePoolBalance: payload.sourcePoolBalance,
+            runId: payload.runId,
+          },
+          event.id,
+          event.id,
+        );
+        return;
+      }
       // ---- 消息部件（parts 契约）→ 工作消息 store ----
       // 部件全事件流恒挂（主智能体对话轮也产部件）——store 侧锚定守卫只收编码 run。
       case "part-text": {

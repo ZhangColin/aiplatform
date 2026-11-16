@@ -17,6 +17,10 @@
  *   <li>流水 append-only（bil_entries）：入账/扣减/调整各一行带行后余额快照＋
  *       操作者留痕；账本弱引用 account/project 不外键（可分离——未来独立账户
  *       服务的缝）</li>
+ *   <li>试用拦截面（#533 门②拦截卡，ADR-0047「平台结构闸」）：入口三分类后、
+ *       受理前两道拦（意见/兜底，咨询放行、下单意图旧轨）——被拦输入随卡留存
+ *       （bil_intercepts 待决行：确认扣减立即受理原文〔不重输〕，充值引导/中途
+ *       关闭卡可回）；确认＝随卡首次选源（源未定）＋翻转（门②）同事务</li>
  * </ul>
  *
  * <h3>限界上下文</h3>
@@ -35,10 +39,11 @@
  *       计价读面）、PricedLine/PiecePrice 换算素材模型、仓储接口、错误码</li>
  *   <li>application：BillingAppService（两轨判定读点/源选定/翻转门①②/参数）、
  *       PoolTopupAppService（双池入账——项目池入账即选源）、SegmentSettlementAppService
- *       （段收口结算＋固定单价项按次直记）</li>
+ *       （段收口结算＋固定单价项按次直记）、TrialInterceptAppService（拦截留存/
+ *       确认扣减＝门②——编排归 project 侧 DispatchAppService）</li>
  *   <li>infrastructure：MeteringPricingAdapter（UsagePricingPort 进程内适配器）</li>
- *   <li>endpoints：本票零端点（服务层机制交付——拦截闸/派发门/收银台/后台运营
- *       端点随系列②-⑤票落位）</li>
+ *   <li>endpoints：本 BC 零端点（服务层机制交付——前台端点挂 project 控制器
+ *       〔拦截卡读面/确认〕；派发门/收银台/后台运营端点随系列后续票落位）</li>
  * </ul>
  *
  * @since 0.1.0

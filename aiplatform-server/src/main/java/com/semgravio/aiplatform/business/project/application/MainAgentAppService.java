@@ -1176,4 +1176,14 @@ public class MainAgentAppService {
             throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
         }
     }
+
+    /**
+     * 意见受理守卫束（#533 拦截卡确认前置）：归档（对话区关闭）/ 订单冻结
+     * （ORD_006）/ 挂起问答（PRJ_024）——确认扣减翻转前先验受理面：拒则拦截卡
+     * 留待决、不空翻（翻转不可逆，翻转后受理被拒＝钱的承诺事实落空）。
+     */
+    public void requireOpinionAcceptable(Long projectId) {
+        Project project = requireUpdatableProject(projectId);
+        requireNoPendingQuestion(project, sessionIdOf(projectId));
+    }
 }

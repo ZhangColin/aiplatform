@@ -34,6 +34,7 @@ import com.semgravio.aiplatform.business.project.application.ProjectQueryAppServ
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
+import com.semgravio.aiplatform.business.project.application.dto.command.ConfirmInterceptCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.RenameProjectCommand;
@@ -42,6 +43,7 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Conver
 import com.semgravio.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStopResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.InterceptCardResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
@@ -174,6 +176,39 @@ public class ProjectController {
         return ApiResponse.ok(new InterviewTurnResponse(
                 dispatchAppService.dispatch(parseId(id), command.content(), command.attachments(),
                         command.designItem(), command.divergence())
+                        .runId()));
+    }
+
+    @GetMapping("/{id}/intercept")
+    @Operation(summary = "待决试用拦截卡（计费②门②，卡可回）",
+            description = "试用项目（迭代期）的意见/兜底输入被拦下后，被拦原文随卡留存"
+                    + "（bil_intercepts 待决行）——本端点是卡的可回读面：重载/回访重建"
+                    + "拦截卡。无待决或项目已付费（卡随翻转熄灭）返回 data=null。"
+                    + "卡面＝被拦输入引用＋源池显式素材：扣减源未定的项目随卡完成首次"
+                    + "选源（「本项目余额／我的账户」），后台已充项目池的项目源已选定"
+                    + "（入账即选择）——免登录直接确认（销售演示动线）。"
+                    + "归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 404 PRJ_001")
+    public ApiResponse<InterceptCardResponse> pendingIntercept(@PathVariable String id) {
+        return ApiResponse.ok(dispatchAppService.pendingIntercept(parseId(id))
+                .map(InterceptCardResponse::of)
+                .orElse(null));
+    }
+
+    @PostMapping("/{id}/intercept/confirm")
+    @Operation(summary = "拦截卡确认扣减（翻转门②：确认即翻转付费并立即受理原被拦输入）",
+            description = "扣减源未定的项目随卡完成首次选源（source 传 1=账户余额 / 2=项目余额——"
+                    + "选「我的账户」须先登录，访客吃 BILL_009 指路绑定）；源已选定（后台已充"
+                    + "项目池）则 source 可空免选直接确认。确认＝付费状态翻转（FlipGate=2 门②，"
+                    + "不可逆）＋原被拦输入立即受理（不重输：意见回意见轮、兜底回定型轻引导），"
+                    + "响应 runId＝受理运行标识（受理与回复经 SSE 到达）。意见车道先验受理"
+                    + "守卫（归档/订单冻结 ORD_006/挂起问答 PRJ_024）——拒则卡留待决、不空翻。"
+                    + "错误码：BILL_009 账户源须登录 / BILL_010 源未定且未随卡选定 / "
+                    + "BILL_011 源池余额非正（充值引导语义，到账后继续）/ BILL_012 已是付费态 / "
+                    + "BILL_017 没有待决拦截卡（可能被更新的拦截取代）。项目不存在 404 PRJ_001")
+    public ApiResponse<InterviewTurnResponse> confirmIntercept(@PathVariable String id,
+            @RequestBody(required = false) ConfirmInterceptCommand command) {
+        return ApiResponse.ok(new InterviewTurnResponse(
+                dispatchAppService.confirmIntercept(parseId(id), command == null ? null : command.source())
                         .runId()));
     }
 

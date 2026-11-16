@@ -24,6 +24,11 @@ export const queryKeys = {
     list: () => ["projects", "list"] as const,
     /** 系统预览地址（#45：run 开始即轮询，探活通过才返回 URL、取到即停）。 */
     preview: (id: string) => ["projects", "preview", id] as const,
+    /**
+     * 待决试用拦截卡（#533 计费②门②，卡可回读面）：被拦输入留存——重载/回访
+     * 重建卡（staleTime 0 挂查询侧）。确认扣减即失效（服务端卡已消费）。
+     */
+    intercept: (id: string) => ["projects", "intercept", id] as const,
     /** 文件树（交付文件只读清单，目录由前端合成；run 收口/PRD 写出随 projects 域失效——#27）。 */
     files: (id: string) => ["projects", "files", id] as const,
     /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */

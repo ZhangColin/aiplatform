@@ -546,6 +546,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/intercept/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拦截卡确认扣减（翻转门②：确认即翻转付费并立即受理原被拦输入）
+         * @description 扣减源未定的项目随卡完成首次选源（source 传 1=账户余额 / 2=项目余额——选「我的账户」须先登录，访客吃 BILL_009 指路绑定）；源已选定（后台已充项目池）则 source 可空免选直接确认。确认＝付费状态翻转（FlipGate=2 门②，不可逆）＋原被拦输入立即受理（不重输：意见回意见轮、兜底回定型轻引导），响应 runId＝受理运行标识（受理与回复经 SSE 到达）。意见车道先验受理守卫（归档/订单冻结 ORD_006/挂起问答 PRJ_024）——拒则卡留待决、不空翻。错误码：BILL_009 账户源须登录 / BILL_010 源未定且未随卡选定 / BILL_011 源池余额非正（充值引导语义，到账后继续）/ BILL_012 已是付费态 / BILL_017 没有待决拦截卡（可能被更新的拦截取代）。项目不存在 404 PRJ_001
+         */
+        post: operations["confirmIntercept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/generation/stop": {
         parameters: {
             query?: never;
@@ -793,6 +813,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/workspaces/{id}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 工作区级一键回收（单台三清，项目其余部分不动）
+         * @description 处置单点残留而不动整个项目（#473 故事 7）：单台工作区三清（容器/卷/注册表行，#485 销毁终态一致内核），<b>项目行与其余资产不动</b>（回执 projectRow＝UNTOUCHED 如实分示）；#488 在册失联行（lostAt 标记）的人工裁决出口——确认后经本端点回收，标记行随注册行级联消亡。所属项目有在飞 run 先级联停止（承 #477）；无所属（失联裁决/fork）无停止面可挂，runsStopped 如实false。回执三面逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree（UNKNOWN不算清）。运维通道不经用户会话凭证。操作者透传头落痕同项目级（未成动作不留痕）。工作区不存在（含畸形 id）404 WSP_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         */
+        post: operations["reclaimWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/workspaces/{id}/rebuild": {
         parameters: {
             query?: never;
@@ -848,7 +891,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/backoffice/workspaces/{id}/reclaim": {
+    "/api/backoffice/time-band-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 时段规则行清单（含历史版本，分页）
+         * @description 现行与历史行全量（规则史全貌），排序服务端定死＝生效起点倒序（新版本在前，同起点 id 倒序稳定——一版本多窗口行同起点相邻）。provider 为匹配键＝精确等值过滤、可缺省（缺省＝全量行）；effectiveTo 为 null 即当前行。行带操作者两列（该行最近管理动作——开行/改窗落新行、停用落被关行；存量行/无头请求——含种子脚本种入行——落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败（非法分页值）400（带字段明细，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         */
+        get: operations["entries"];
+        put?: never;
+        /**
+         * 开行（空通道首开——种子脚本通道）
+         * @description 对指定通道新开一个规则版本：一单 N 时段窗口行原子落（每项＝规则表一行〔通道 × 生效区间 × 星期口径 × UTC 窗口〕，同单各窗口共享生效起点）——DeepSeek 峰窗 01:00–04:00＋06:00–10:00 工作日（dayMask 31）两窗口一单种入。写口唯一化到管理 API 后本端点是唯一初始插入通道（#497：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝通道已有任意行即不再开行）。effectiveFrom 可回溯（种子敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。band 契约为 Integer code（1=峰 2=谷）；dayMask＝星期口径 bitmask（ISO 周序 Mon=1 Tue=2 … Sun=64，合法域 1..127）；startMinute/endMinute＝UTC 分钟（end 不含、须大于起点——跨午夜窗口拆两行）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。窗口项字段不完整/星期口径越界/跨午夜窗口 400 METER_013；同通道区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         *
+         *     错误码：
+         *     - 409 METER_008 — 同匹配键生效区间重叠（跨区间或同起点）
+         *     - 400 METER_013 — 时段规则行字段不完整
+         */
+        post: operations["open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/time-band-rules/{id}/rewindow": {
         parameters: {
             query?: never;
             header?: never;
@@ -858,13 +932,41 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 工作区级一键回收（单台三清，项目其余部分不动）
-         * @description 处置单点残留而不动整个项目（#473 故事 7）：单台工作区三清（容器/卷/注册表行，#485 销毁终态一致内核），<b>项目行与其余资产不动</b>（回执 projectRow＝UNTOUCHED 如实分示）；#488 在册失联行（lostAt 标记）的人工裁决出口——确认后经本端点回收，标记行随注册行级联消亡。所属项目有在飞 run 先级联停止（承 #477）；无所属（失联裁决/fork）无停止面可挂，runsStopped 如实 false。回执三面逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree（UNKNOWN 不算清）。运维通道不经用户会话凭证。操作者透传头落痕同项目级（未成动作不留痕）。工作区不存在（含畸形 id）404 WSP_001。需要机机签名（五头 HMAC），无签名 401
+         * 原子改窗（单调用关当前版本全部行＋开新版本）
+         * @description 同事务两段：寻址行须当前版本成员（版本任一行皆可达——关行在版本级非单行，同版本多窗口行共享区间），被关版本全部行落 effectiveTo＝新版本起点（保留其原开行操作者，不被改写）；新版本窗口清单整版本替换语义（清单即终态）。effectiveFrom 可指定（ISO-8601 Instant，含未来时点＝预发布，对齐供应商调窗口公告期）；缺省＝即时。服务端补同通道生效区间重叠校验（本表无唯一约束兜底——同版本多窗口行共享起点，同起点拒由服务端拦）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空，#160 口径）。中途任一守卫失败两段都不动。行不存在 404 METER_015；窗口项字段不完整 400 METER_013；起点早于被关版本起点 400 METER_014；目标非当前行 409 METER_016；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
-         *     - 404 WSP_001 — 工作区不存在
+         *     - 409 METER_008 — 同匹配键生效区间重叠（跨区间或同起点）
+         *     - 400 METER_013 — 时段规则行字段不完整
+         *     - 400 METER_014 — 关行时点非法（空或早于生效起点）
+         *     - 404 METER_015 — 时段规则行不存在
+         *     - 409 METER_016 — 时段规则行非当前行（已关行不可改或停用）
          */
-        post: operations["reclaimWorkspace"];
+        post: operations["rewindow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/time-band-rules/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 停用（即时生效，关版本不接新行）
+         * @description 关当前版本全部行（effectiveTo＝现在），不开新版本——此后该通道 ts 无窗口命中＝不归带（引擎归段票接线后生效；读时归段未接线前不影响现行成本面）。对未生效的预发布版本停用＝钳到自身起点成空区间（从未生效）。X-User-Id/X-User-Name 透传头自动落痕被关版本各行（停用不接新行，被关行是唯一落点；缺头落空，#160 口径）。行不存在 404 METER_015；目标非当前行 409 METER_016。需要机机签名
+         *
+         *     错误码：
+         *     - 404 METER_015 — 时段规则行不存在
+         *     - 409 METER_016 — 时段规则行非当前行（已关行不可改或停用）
+         */
+        post: operations["deactivate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1230,6 +1332,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/projects/{id}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 项目级一键回收（删除＋清残＋四面报告）
+         * @description 删除＋清残＋三清校验报告一次完成（#473 故事 6）：在飞 run <b>先级联停止</b>（承 #477 停止面——置停＋cancel(true) 中断在途，不留僵尸任务对着已删容器自救）→ 工作区销毁（<b>复用 #485 销毁终态一致内核</b>：收敛互斥双向串行＋尾部三清校验，非另写一套）→ prj_* 真删级联（受理即删语义与用户面 DELETE 同内核）。回执＝四面（注册表行/项目行/容器/卷）逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree 零残留判据（UNKNOWN 不算清——销毁未全成/探查未成不冒充清，残留如实红、归收编通道）。物理销毁尽力而为不阻断记录删除（受理即删）。运维通道不经用户会话凭证——无凭证属主的账户项目照收（归属不查，签名面担保调用应用）。X-User-Id/X-User-Name 透传头落痕（append-only wsp_reclaim_actions，缺头落空 NULL——照 #489 清扫留痕口径；未成动作不留痕）。项目不存在404 PRJ_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         */
+        post: operations["reclaimProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/price-entries": {
         parameters: {
             query?: never;
@@ -1244,18 +1369,18 @@ export interface paths {
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
          */
-        get: operations["entries"];
+        get: operations["entries_1"];
         put?: never;
         /**
          * 开行（空键首行——种子脚本通道）
-         * @description 对指定匹配键（provider × model × tokenKind × band）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。band 时段带可空（1=峰 2=谷，缺省 null＝不区分时段——#498/ADR-0044 存量语义零变动）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键同带生效区间重叠校验（改价同款；同键同带同起点拒、不同带不误拒）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         * @description 对指定匹配键（provider × model × tokenKind）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。band 时段带可空（1=峰 2=谷，缺省 null＝不区分时段——#498/ADR-0044 存量语义零变动）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键同带生效区间重叠校验（改价同款；同键同带同起点拒、不同带不误拒）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
          *     - 400 METER_004 — 单价行字段不完整
          *     - 409 METER_008 — 同匹配键生效区间重叠（跨区间或同起点）
          *     - 400 METER_010 — 单价币种非 ISO 4217 代码
          */
-        post: operations["open"];
+        post: operations["open_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1307,7 +1432,7 @@ export interface paths {
          *     - 404 METER_006 — 单价行不存在
          *     - 409 METER_007 — 单价行非当前行（已关行不可改价或停用）
          */
-        post: operations["deactivate"];
+        post: operations["deactivate_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2140,6 +2265,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/intercept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 待决试用拦截卡（计费②门②，卡可回）
+         * @description 试用项目（迭代期）的意见/兜底输入被拦下后，被拦原文随卡留存（bil_intercepts 待决行）——本端点是卡的可回读面：重载/回访重建拦截卡。无待决或项目已付费（卡随翻转熄灭）返回 data=null。卡面＝被拦输入引用＋源池显式素材：扣减源未定的项目随卡完成首次选源（「本项目余额／我的账户」），后台已充项目池的项目源已选定（入账即选择）——免登录直接确认（销售演示动线）。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 404 PRJ_001
+         */
+        get: operations["pendingIntercept"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/files": {
         parameters: {
             query?: never;
@@ -2729,29 +2874,6 @@ export interface paths {
         get: operations["detail_6"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/backoffice/projects/{id}/reclaim": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 项目级一键回收（删除＋清残＋四面报告）
-         * @description 删除＋清残＋三清校验报告一次完成（#473 故事 6）：在飞 run <b>先级联停止</b>（承 #477 停止面——置停＋cancel(true) 中断在途，不留僵尸任务对着已删容器自救）→ 工作区销毁（<b>复用 #485 销毁终态一致内核</b>：收敛互斥双向串行＋尾部三清校验，非另写一套）→ prj_* 真删级联（受理即删语义与用户面 DELETE 同内核）。回执＝四面（注册表行/项目行/容器/卷）逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree 零残留判据（UNKNOWN 不算清——销毁未全成/探查未成不冒充清，残留如实红、归收编通道）。物理销毁尽力而为不阻断记录删除（受理即删）。运维通道不经用户会话凭证——无凭证属主的账户项目照收（归属不查，签名面担保调用应用）。X-User-Id/X-User-Name 透传头落痕（append-only wsp_reclaim_actions，缺头落空 NULL——照 #489 清扫留痕口径；未成动作不留痕）。项目不存在 404 PRJ_001。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 404 PRJ_001 — 项目不存在
-         */
-        post: operations["reclaimProject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4424,6 +4546,10 @@ export interface components {
         InterviewTurnResponse: {
             runId?: string;
         };
+        ConfirmInterceptCommand: {
+            /** @description 1=账户余额, 2=项目余额 */
+            source?: number;
+        };
         ApiResponseGenerationStopResponse: {
             /** Format: int32 */
             code?: number;
@@ -4637,6 +4763,107 @@ export interface components {
             projectId?: string;
             name?: string;
             archived?: boolean;
+        };
+        ApiResponseBackofficeReclaimResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeReclaimResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeReclaimResponse: {
+            scope?: string;
+            projectId?: string;
+            workspaceId?: string;
+            runsStopped?: boolean;
+            container?: string;
+            volume?: string;
+            registryRow?: string;
+            projectRow?: string;
+            residueFree?: boolean;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            reclaimedAt?: string;
+        };
+        OpenTimeBandRuleCommand: {
+            provider?: string;
+            /** @description 时段窗口清单（≥1 项；每项＝规则表一行〔通道 × 生效区间 × 星期口径 × UTC 窗口〕，同单各窗口共享生效起点＝一个规则版本） */
+            windows?: components["schemas"]["TimeWindowCommand"][];
+            /** Format: date-time */
+            effectiveFrom?: string;
+        };
+        /** @description 时段窗口清单（≥1 项；每项＝规则表一行〔通道 × 生效区间 × 星期口径 × UTC 窗口〕，同单各窗口共享生效起点＝一个规则版本） */
+        TimeWindowCommand: {
+            /** @description 1=峰, 2=谷 */
+            band?: number;
+            /**
+             * Format: int32
+             * @description 星期口径 bitmask：ISO 周序 Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 Sat=32 Sun=64，合法域 1..127（如工作日＝31）
+             * @example 31
+             */
+            dayMask?: number;
+            /**
+             * Format: int32
+             * @description UTC 窗口起点分钟（含），0..1439（如 01:00＝60）
+             * @example 60
+             */
+            startMinute?: number;
+            /**
+             * Format: int32
+             * @description UTC 窗口终点分钟（不含），1..1440（如 04:00＝240）；须大于起点——跨午夜窗口拆两行（22:00–02:00＝22:00–24:00＋00:00–02:00）
+             * @example 240
+             */
+            endMinute?: number;
+        };
+        ApiResponseListTimeBandRuleResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["TimeBandRuleResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        TimeBandRuleResponse: {
+            id?: string;
+            provider?: string;
+            /** Format: int32 */
+            band?: number;
+            bandName?: string;
+            /** Format: int32 */
+            dayMask?: number;
+            dayMaskName?: string;
+            /** Format: int32 */
+            startMinute?: number;
+            /** Format: int32 */
+            endMinute?: number;
+            /** Format: date-time */
+            effectiveFrom?: string;
+            /** Format: date-time */
+            effectiveTo?: string;
+            operatorId?: string;
+            operatorName?: string;
+        };
+        RewindowTimeBandRuleCommand: {
+            /** @description 新时段窗口清单（≥1 项；整版本替换语义——清单即终态，被关版本的全部窗口不再延续） */
+            windows?: components["schemas"]["TimeWindowCommand"][];
+            /** Format: date-time */
+            effectiveFrom?: string;
+        };
+        ApiResponseTimeBandRuleRewindowResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["TimeBandRuleRewindowResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        TimeBandRuleRewindowResponse: {
+            /** @description 被关版本全部行（关行时点＝新版本生效起点） */
+            closed?: components["schemas"]["TimeBandRuleResponse"][];
+            /** @description 新版本全部行（窗口清单随行落库，清单即终态） */
+            opened?: components["schemas"]["TimeBandRuleResponse"][];
         };
         ApiResponseBackofficeSkillSummaryResponse: {
             /** Format: int32 */
@@ -4862,29 +5089,6 @@ export interface components {
             /** Format: date-time */
             resourceCreatedAt?: string;
         };
-        ApiResponseBackofficeReclaimResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["BackofficeReclaimResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        BackofficeReclaimResponse: {
-            scope?: string;
-            projectId?: string;
-            workspaceId?: string;
-            runsStopped?: boolean;
-            container?: string;
-            volume?: string;
-            registryRow?: string;
-            projectRow?: string;
-            residueFree?: boolean;
-            operatorId?: string;
-            operatorName?: string;
-            /** Format: date-time */
-            reclaimedAt?: string;
-        };
         UpdateProductionHandoffCommand: {
             contact?: string;
             nextStep?: string;
@@ -4942,10 +5146,10 @@ export interface components {
         OpenPriceEntryCommand: {
             provider?: string;
             model?: string;
-            /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理, 6=按张 */
+            /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理, 6=按张, 7=按件 */
             tokenKind?: number;
             /**
-             * @description 时段带（1=峰 2=谷；缺省或 null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）
+             * @description 时段带（1=峰 2=谷；缺省或 null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）（1=峰, 2=谷）
              * @example 1
              */
             band?: number;
@@ -4974,6 +5178,7 @@ export interface components {
             tokenKind?: number;
             tokenKindName?: string;
             /**
+             * Format: int32
              * @description 时段带（1=峰 2=谷；null＝不区分时段——无峰谷通道与按张行存量语义零变动，#498/ADR-0044）
              * @example 1
              */
@@ -5350,6 +5555,25 @@ export interface components {
             confirmedAt?: string;
             readiness?: components["schemas"]["PrdReadinessResponse"];
         };
+        ApiResponseInterceptCardResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["InterceptCardResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        InterceptCardResponse: {
+            interceptId?: string;
+            lane?: string;
+            prompt?: string;
+            sourceSelected?: boolean;
+            /** Format: int32 */
+            deductionSource?: number;
+            /** Format: int64 */
+            sourcePoolBalance?: number;
+            runId?: string;
+        };
         ApiResponseProjectFilesResponse: {
             /** Format: int32 */
             code?: number;
@@ -5583,6 +5807,23 @@ export interface components {
         };
         PageResponseBackofficeWorkspaceSummaryResponse: {
             items?: components["schemas"]["BackofficeWorkspaceSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponsePageResponseTimeBandRuleResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseTimeBandRuleResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PageResponseTimeBandRuleResponse: {
+            items?: components["schemas"]["TimeBandRuleResponse"][];
             /** Format: int64 */
             total?: number;
             /** Format: int32 */
@@ -7358,6 +7599,32 @@ export interface operations {
             };
         };
     };
+    confirmIntercept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConfirmInterceptCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseInterviewTurnResponse"];
+                };
+            };
+        };
+    };
     stopGeneration: {
         parameters: {
             query?: never;
@@ -7613,6 +7880,28 @@ export interface operations {
             };
         };
     };
+    reclaimWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
+                };
+            };
+        };
+    };
     rebuild: {
         parameters: {
             query?: never;
@@ -7653,6 +7942,103 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeWorkspaceDetailResponse"];
+                };
+            };
+        };
+    };
+    entries: {
+        parameters: {
+            query?: {
+                provider?: string;
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseTimeBandRuleResponse"];
+                };
+            };
+        };
+    };
+    open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenTimeBandRuleCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListTimeBandRuleResponse"];
+                };
+            };
+        };
+    };
+    rewindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RewindowTimeBandRuleCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTimeBandRuleRewindowResponse"];
+                };
+            };
+        };
+    };
+    deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListTimeBandRuleResponse"];
                 };
             };
         };
@@ -7917,50 +8303,6 @@ export interface operations {
             };
         };
     };
-    reclaimProject: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
-                };
-            };
-        };
-    };
-    reclaimWorkspace: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
-                };
-            };
-        };
-    };
     update_4: {
         parameters: {
             query?: never;
@@ -8039,7 +8381,29 @@ export interface operations {
             };
         };
     };
-    entries: {
+    reclaimProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
+                };
+            };
+        };
+    };
+    entries_1: {
         parameters: {
             query?: {
                 provider?: string;
@@ -8065,7 +8429,7 @@ export interface operations {
             };
         };
     };
-    open: {
+    open_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -8115,7 +8479,7 @@ export interface operations {
             };
         };
     };
-    deactivate: {
+    deactivate_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -9004,6 +9368,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
+                };
+            };
+        };
+    };
+    pendingIntercept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseInterceptCardResponse"];
                 };
             };
         };

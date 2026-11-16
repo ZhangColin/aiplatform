@@ -85,8 +85,10 @@ public class ConversationHistoryAppService {
     }
 
     /** 消息附件 → 原始 JSON 数组（圈注与图片物料两形态；空/全无效形态返回 null
-     *  ——不入库空数组，回访 chip 重建以本数组为准）。 */
-    private static List<Map<String, Object>> toJsonMaps(List<MessageAttachment> attachments) {
+     *  ——不入库空数组，回访 chip 重建以本数组为准）。public static：拦截留存
+     *  随拦附件序列化同口径复用（#533——载荷形状单源，对话史/留存两处只存取
+     *  不各自发明）。 */
+    public static List<Map<String, Object>> toJsonMaps(List<MessageAttachment> attachments) {
         if (attachments == null || attachments.isEmpty()) {
             return null;
         }

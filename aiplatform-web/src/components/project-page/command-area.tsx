@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
+import { usePendingIntercept } from "@/hooks/use-intercept";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import {
@@ -34,6 +35,7 @@ import { useWorkMessageStore } from "@/lib/store/work-message";
 
 import { ChatMarkdown } from "./chat-markdown";
 import { ClosingCard } from "./closing-card";
+import { InterceptCard } from "./intercept-card";
 import { QuestionCard } from "./question-card";
 import { QuoteCard } from "./quote-card";
 import { WorkMessage } from "./work-message";
@@ -161,6 +163,22 @@ export function CommandArea({
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
   // 重连失效驱动增量水合，live 事件只承载在途增量
   useConversation(projectId);
+  // 待决试用拦截卡读面（#533 计费②门②，卡可回）：重载/回访重建——live 经
+  // SSE 桥直写 store，本读面只补「刷新时事件不在场」的缺口（同形载荷同步同口）
+  const pendingIntercept = usePendingIntercept(projectId);
+  const interceptCard = pendingIntercept.data;
+  useEffect(() => {
+    if (!interceptCard?.interceptId) return;
+    useChatStore.getState().noteIntercept(projectId, {
+      interceptId: interceptCard.interceptId,
+      lane: interceptCard.lane ?? "",
+      prompt: interceptCard.prompt ?? "",
+      sourceSelected: interceptCard.sourceSelected === true,
+      deductionSource: interceptCard.deductionSource ?? undefined,
+      sourcePoolBalance: interceptCard.sourcePoolBalance ?? undefined,
+      runId: interceptCard.runId ?? undefined,
+    }, `ic-${interceptCard.interceptId}`);
+  }, [projectId, interceptCard]);
 
   const [input, setInput] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
@@ -430,6 +448,14 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
     return (
       <div className="flex w-full justify-start">
         <QuoteCard orderId={message.orderId} event={message.event} onSeeOrder={onSeeOrder} />
+      </div>
+    );
+  }
+  if (message.kind === "intercept") {
+    // 试用拦截卡（#533 计费②门②）：被拦输入留存卡——确认扣减翻转并恢复受理
+    return (
+      <div className="flex w-full justify-start">
+        <InterceptCard projectId={projectId} message={message} />
       </div>
     );
   }

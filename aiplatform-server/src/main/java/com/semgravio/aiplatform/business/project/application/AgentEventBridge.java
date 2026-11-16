@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 
 import lombok.extern.slf4j.Slf4j;
@@ -192,6 +193,34 @@ public class AgentEventBridge {
         payload.put(AgentEventTypes.GUIDE_LABEL_FIELD, label);
         payload.put(AgentEventTypes.GUIDE_TEXT_FIELD, text);
         eventsAppService.publishAgentEvent(AgentEventTypes.GUIDE_REPLY, payload);
+    }
+
+    /**
+     * intercept-card 发射（#533 计费②门②）：试用拦截卡的平台侧呈现——被拦输入
+     * 留存已落库（bil_intercepts 待决行，本事件即该次派发的全部）；载荷＝卡面
+     * （留存 id/车道/原文/源池显式素材）。发射走 {@link #publishQuietly}——读面
+     * （GET /projects/{id}/intercept）承载卡可回，呈现失败不断拦截事实（同受理卡
+     * 的取舍）。
+     */
+    public void emitInterceptCard(Project project, TrialInterceptAppService.InterceptCard card) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
+        payload.put(EventsAppService.OWNER_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerAccountId()));
+        payload.put(EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
+        payload.put(EventsAppService.RUN_FIELD, card.runId());
+        payload.put(AgentEventTypes.INTERCEPT_ID_FIELD, card.interceptId());
+        payload.put(AgentEventTypes.INTERCEPT_LANE_FIELD, card.lane());
+        payload.put(AgentEventTypes.INTERCEPT_PROMPT_FIELD, card.prompt());
+        payload.put(AgentEventTypes.INTERCEPT_SOURCE_SELECTED_FIELD, card.sourceSelected());
+        if (card.deductionSource() != null) {
+            payload.put(AgentEventTypes.INTERCEPT_DEDUCTION_SOURCE_FIELD, card.deductionSource());
+        }
+        if (card.sourcePoolBalance() != null) {
+            payload.put(AgentEventTypes.INTERCEPT_POOL_BALANCE_FIELD, card.sourcePoolBalance());
+        }
+        publishQuietly(AgentEventTypes.INTERCEPT_CARD, payload);
     }
 
     /**

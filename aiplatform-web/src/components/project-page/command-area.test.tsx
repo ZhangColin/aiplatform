@@ -46,6 +46,10 @@ vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
 }));
 
+vi.mock("@/hooks/use-intercept", () => ({
+  usePendingIntercept: () => ({ data: null }), // 读面无 QueryClient 可挂——呈现面归组件测试
+}));
+
 vi.mock("@/hooks/use-upload-material", () => ({
   useUploadMaterial: () => vi.fn(),
 }));

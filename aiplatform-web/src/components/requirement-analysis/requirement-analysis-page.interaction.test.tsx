@@ -83,6 +83,10 @@ vi.mock("@/lib/store/work-message", async (importOriginal) => {
 });
 
 vi.mock("@/hooks/use-conversation", () => ({ useConversation: () => ({}) }));
+// 拦截卡读面（#533）：无 QueryClient 可挂——读面行为归 hooks 测试，此处只断请求面
+vi.mock("@/hooks/use-intercept", () => ({
+  usePendingIntercept: () => ({ data: null }),
+}));
 vi.mock("@/hooks/use-upload-material", () => ({ useUploadMaterial: () => vi.fn() }));
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),

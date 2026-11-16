@@ -183,6 +183,34 @@ public final class AgentEventTypes {
     /** 引导回复的呈现标签键（「平台」——非智能体角色，随事件呈现）。 */
     public static final String GUIDE_LABEL_FIELD = "label";
 
+    /**
+     * 试用拦截卡（#533 计费②门②，ADR-0047 试用拦截面）：试用项目（迭代期）的
+     * 意见/兜底输入被结构闸拦下的事实呈现——平台侧卡片（显源池/随卡首次选源/
+     * 确认扣减/充值引导），非智能体 run（本事件即该次派发的全部，无 run-start）；
+     * runId 为派发锚（随派发响应同值返回）。被拦输入原文随卡留存（bil_intercepts
+     * 待决行）——确认扣减即翻转并立即受理原输入，或走充值引导/中途关闭（卡可回，
+     * 读面＝GET /projects/{id}/intercept）。
+     */
+    public static final String INTERCEPT_CARD = "intercept-card";
+
+    /** 拦截卡的留存 id 键（卡锚；字符串化防 JS 精度丢失）。 */
+    public static final String INTERCEPT_ID_FIELD = "interceptId";
+
+    /** 拦截卡的被拦车道键（OPINION=意见 / FALLBACK=兜底——恢复受理的分岔）。 */
+    public static final String INTERCEPT_LANE_FIELD = "lane";
+
+    /** 拦截卡的被拦输入原文键（卡上引用呈现；重建用户气泡同 guide-reply 的 prompt）。 */
+    public static final String INTERCEPT_PROMPT_FIELD = "prompt";
+
+    /** 拦截卡的扣减源已选定键（true＝显源池直接确认；false＝随卡首次选源）。 */
+    public static final String INTERCEPT_SOURCE_SELECTED_FIELD = "sourceSelected";
+
+    /** 拦截卡的已选定扣减源码位键（1=账户余额 2=项目余额；未定为缺省不携带）。 */
+    public static final String INTERCEPT_DEDUCTION_SOURCE_FIELD = "deductionSource";
+
+    /** 拦截卡的源池余额快照键（分；池未建不携带——充值引导的判定素材）。 */
+    public static final String INTERCEPT_POOL_BALANCE_FIELD = "sourcePoolBalance";
+
     // ---------- 消息部件（parts 契约，词根 = agentscope 原生 part 族） ----------
     // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具
     // 动作部件），收口定格。由 base.agentscope 的部件映射表产出。步骤分组已退役

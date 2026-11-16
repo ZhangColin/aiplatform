@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.business.project.endpoints.controller;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Map;
 
@@ -26,6 +27,9 @@ import com.cartisan.web.config.BaseEnumConverter;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
+import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
+import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
 import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
@@ -1115,6 +1119,90 @@ class ProjectControllerTest {
                         .content("{\"content\":\"你好\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    // ---------- 试用拦截卡（#533 计费②门②：卡可回读面 / 确认扣减） ----------
+
+    @Test
+    void given_pending_hold_when_get_intercept_then_card_payload() throws Exception {
+        // 卡可回读面：卡面＝被拦输入引用＋源池显式素材（后台已充项目池＝源已选定
+        // 免登录直确认——sourceSelected=true、余额快照分）
+        when(dispatchAppService.pendingIntercept(100L)).thenReturn(Optional.of(
+                new TrialInterceptAppService.InterceptCard(
+                        "9012345678901", "OPINION", "把主色调改成绿色",
+                        true, 2, 10000L, "run-i")));
+
+        performAsUser(get("/api/projects/100/intercept"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.interceptId").value("9012345678901"))
+                .andExpect(jsonPath("$.data.lane").value("OPINION"))
+                .andExpect(jsonPath("$.data.prompt").value("把主色调改成绿色"))
+                .andExpect(jsonPath("$.data.sourceSelected").value(true))
+                .andExpect(jsonPath("$.data.deductionSource").value(2))
+                .andExpect(jsonPath("$.data.sourcePoolBalance").value(10000))
+                .andExpect(jsonPath("$.data.runId").value("run-i"));
+    }
+
+    @Test
+    void given_no_pending_when_get_intercept_then_null_data() throws Exception {
+        // 无待决/已付费：data=null（卡随翻转熄灭）
+        when(dispatchAppService.pendingIntercept(100L)).thenReturn(Optional.empty());
+
+        performAsUser(get("/api/projects/100/intercept"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void given_confirm_when_post_intercept_confirm_then_run_id_returned() throws Exception {
+        // 确认扣减＝翻转门②：响应 runId＝受理运行标识；source Integer code 绑定
+        // 枚举（2=项目余额）后透传（BaseEnum 契约，非法值 400）
+        when(dispatchAppService.confirmIntercept(100L, DeductionSource.PROJECT))
+                .thenReturn(new DispatchAppService.DispatchRun("run-resume"));
+
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"source\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-resume"));
+        verify(dispatchAppService).confirmIntercept(100L, DeductionSource.PROJECT);
+    }
+
+    @Test
+    void given_backoffice_topped_project_when_confirm_without_body_then_passed_null_source() throws Exception {
+        // 后台已充项目池（入账即选源）＝免选直确认：请求体可整体缺省（source null）
+        when(dispatchAppService.confirmIntercept(100L, null))
+                .thenReturn(new DispatchAppService.DispatchRun("run-resume-2"));
+
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-resume-2"));
+        verify(dispatchAppService).confirmIntercept(100L, null);
+    }
+
+    @Test
+    void given_invalid_source_code_when_confirm_then_400_without_service_call() throws Exception {
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"source\":9}"))
+                .andExpect(status().isBadRequest());
+        verify(dispatchAppService, never()).confirmIntercept(any(), any());
+    }
+
+    @Test
+    void given_no_pending_when_confirm_then_bill_017_as_409() throws Exception {
+        when(dispatchAppService.confirmIntercept(100L, null))
+                .thenThrow(new ApplicationException(BillingMessage.INTERCEPT_NOT_PENDING));
+
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(8017))
+                .andExpect(jsonPath("$.message").value("没有待确认的拦截卡（输入可能已被更新的拦截取代）"));
     }
 
     @Test

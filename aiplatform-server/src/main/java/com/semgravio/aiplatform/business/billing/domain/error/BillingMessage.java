@@ -37,7 +37,11 @@ public enum BillingMessage implements CodeMessage {
 
     PARAM_KEY_UNKNOWN(404, "BILL_015", "计费参数不存在"),
 
-    PARAM_VALUE_INVALID(400, "BILL_016", "计费参数值无效（须为正数）");
+    PARAM_VALUE_INVALID(400, "BILL_016", "计费参数值无效（须为正数）"),
+
+    INTERCEPT_NOT_PENDING(409, "BILL_017", "没有待确认的拦截卡（输入可能已被更新的拦截取代）"),
+
+    INTERCEPT_FIELDS_INCOMPLETE(400, "BILL_018", "拦截留存字段不完整");
 
     private final int httpStatus;
     private final String code;

@@ -4,14 +4,24 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
+
+import com.cartisan.core.context.RequestContext;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.business.billing.application.BillingAppService;
+import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
+import com.semgravio.aiplatform.business.billing.domain.enums.InterceptLane;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
@@ -50,6 +60,15 @@ import lombok.extern.slf4j.Slf4j;
  * 经 {@code guide-reply} 事件直达对话区；下单意图归兜底的引导分岔——指引
  * Demo 确认门（「确认此版本，准备签约」；未生成时如实说明入口出现时机）。全程不起 run、不动任何
  * 产物。</p>
+ *
+ * <p><b>试用拦截闸（#533 计费②门②，ADR-0047「试用拦截面＝平台结构闸」）</b>：
+ * 分类之后、受理之前——试用项目（两轨判定单读点，迭代期已生成）的意见与兜底
+ * 输入被拦下留存（{@code bil_intercepts} 待决行，原文＋附件不丢失），拦截卡事件
+ * 直达对话面（显源池；源未定随卡首次选源——「本项目余额／我的账户」）。确认扣减
+ * ＝翻转门②（付费状态不可逆，落定同事务）并立即受理原被拦输入（不重输）；或走
+ * 充值引导/中途关闭——卡可回（读面 {@code GET /projects/{id}/intercept}）。咨询
+ * 零产物短路天然放行、下单意图维持旧轨。车道误判偏差面（票内声明）：咨询误判
+ * 意见＝多弹一次卡（可改口），意见误判咨询＝漏一次费（demo 阶段容忍）。</p>
  */
 @Service
 @Slf4j
@@ -96,6 +115,13 @@ public class DispatchAppService {
     /** 引导回复呈现标签（非智能体角色——平台自己说话）。 */
     static final String GUIDE_LABEL = "平台";
 
+    /**
+     * 随拦附件序列化器（#533 拦截留存；同对话史落库口径——NON_NULL、无效形态
+     * 上游已滤，留存载荷原样存取）。
+     */
+    private static final ObjectMapper INTERCEPT_JSON = new ObjectMapper()
+            .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+
     private final MainAgentAppService mainAgentAppService;
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
@@ -103,12 +129,16 @@ public class DispatchAppService {
     private final ModelTierAppService modelTiers;
     private final ConversationHistoryAppService conversationHistory;
     private final DesignProcessAppService designProcessAppService;
+    private final BillingAppService billingAppService;
+    private final TrialInterceptAppService trialInterceptAppService;
 
     public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
             ModelTierAppService modelTiers,
             ConversationHistoryAppService conversationHistory,
-            DesignProcessAppService designProcessAppService) {
+            DesignProcessAppService designProcessAppService,
+            BillingAppService billingAppService,
+            TrialInterceptAppService trialInterceptAppService) {
         this.mainAgentAppService = mainAgentAppService;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
@@ -116,6 +146,8 @@ public class DispatchAppService {
         this.modelTiers = modelTiers;
         this.conversationHistory = conversationHistory;
         this.designProcessAppService = designProcessAppService;
+        this.billingAppService = billingAppService;
+        this.trialInterceptAppService = trialInterceptAppService;
     }
 
     /**
@@ -158,6 +190,9 @@ public class DispatchAppService {
                     mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
         }
         Classification classified = classify(projectId, prompt);
+        if (interceptable(classified) && interceptGateOn(project)) {
+            return blockIntercept(project, prompt, attachments, laneOf(classified));
+        }
         return switch (classified.type()) {
             case OPINION -> new DispatchRun(
                     mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
@@ -165,6 +200,93 @@ public class DispatchAppService {
                     mainAgentAppService.answerInquiry(project, prompt, attachments).runId());
             case FALLBACK -> guideReply(project, prompt, classified.orderIntent(), attachments);
         };
+    }
+
+    /**
+     * 待决拦截卡读面（#533 计费②门②，卡可回）：无待决/已付费返回空（卡随翻转
+     * 熄灭）。重载/回访经 GET 重建——前端无需事件在场。
+     */
+    public Optional<TrialInterceptAppService.InterceptCard> pendingIntercept(Long projectId) {
+        return trialInterceptAppService.pendingCard(projectId);
+    }
+
+    /**
+     * 确认扣减（拦截卡·翻转门②）：意见车道先验受理守卫束（{@code requireOpinionAcceptable}
+     * ——归档/订单冻结/挂起问答拒则卡留待决、不空翻：付费状态不可逆，确定性拒绝
+     * 必须在翻转前）。源未定随卡首次选定（账户源取当前登录账户，访客选「我的账户」
+     * 吃 BILL_009 指路登录）；翻转落定同事务，随后立即受理原被拦输入（不重输——
+     * 意见回意见轮、兜底回定型轻引导），响应 runId＝受理运行的标识（挂 /api/events?runId=）。
+     *
+     * <p><b>残余竞态窗口（有意识取舍，票内声明）</b>：翻转事务提交与恢复受理之间
+     * 的毫秒窗内项目被并发归档/下单/挂起新问答时，恢复被拒＝翻转已不可逆、留存
+     * 已落定——被拦输入失去自动恢复面。处置＝用户重发该意见（已付费项目闸关直通
+     * 受理），资损为零；不引入确认回退/重试卡机制（毫秒窗概率 vs 新机制复杂度
+     * 不成比例）。</p>
+     */
+    public DispatchRun confirmIntercept(Long projectId, DeductionSource source) {
+        Project project = mainAgentAppService.requireDispatchableProject(projectId);
+        TrialInterceptAppService.PendingHold hold = trialInterceptAppService.requirePending(projectId);
+        if (hold.lane() == InterceptLane.OPINION) {
+            mainAgentAppService.requireOpinionAcceptable(projectId);
+        }
+        trialInterceptAppService.confirm(projectId, source, RequestContext.getUserId());
+        return resumeIntercept(project, hold);
+    }
+
+    /** 恢复受理原被拦输入（按留存车道分岔——确认扣减的「立即受理」语义）。 */
+    private DispatchRun resumeIntercept(Project project, TrialInterceptAppService.PendingHold hold) {
+        List<MessageAttachment> attachments = attachmentsOf(hold.attachments());
+        return switch (hold.lane()) {
+            case OPINION -> new DispatchRun(
+                    mainAgentAppService.runOpinionTurn(project.getId(), hold.prompt(), attachments)
+                            .runId());
+            case FALLBACK -> guideReply(project, hold.prompt(), false, attachments);
+        };
+    }
+
+    /** 被拦输入落留存＋拦截卡事件（本事件即该次派发的全部：零 run、零对话史——
+     *  受理前的拦下不进对话面，原文随卡呈现与恢复）。 */
+    private DispatchRun blockIntercept(Project project, String prompt,
+            List<MessageAttachment> attachments, InterceptLane lane) {
+        String runId = EventsAppService.newRunId();
+        TrialInterceptAppService.InterceptCard card = trialInterceptAppService.block(
+                project.getId(), lane, prompt,
+                ConversationHistoryAppService.toJsonMaps(attachments), runId);
+        eventBridge.emitInterceptCard(project, card);
+        log.info("[dispatch] 项目 {} 试用拦截（{}）：输入已留存待决，拦截卡已发（门②）",
+                project.getId(), lane);
+        return new DispatchRun(runId);
+    }
+
+    /** 两道拦判定（宁严勿漏，ADR-0047）：意见恒拦；兜底拦（下单意图是兜底的
+     *  引导分岔——维持旧轨不拦）；咨询零产物短路天然放行。 */
+    private static boolean interceptable(Classification classified) {
+        return classified.type() == MessageClass.OPINION
+                || (classified.type() == MessageClass.FALLBACK && !classified.orderIntent());
+    }
+
+    /**
+     * 闸的开启条件：试用项目（两轨判定单读点，行缺席＝试用）且已过获客旅程
+     * （已生成＝迭代期——五问/PRD/首个构建整场生成零扣费，意见与兜底从首次生成
+     * 起进入付费续用）。作用域形态（designItem 随话改稿）不经三分类、本票不入
+     * 闸（归岔路口票统筹，票内声明）。
+     */
+    private boolean interceptGateOn(Project project) {
+        return project.isGenerated() && billingAppService.trackOf(project.getId()).trial();
+    }
+
+    private static InterceptLane laneOf(Classification classified) {
+        return classified.type() == MessageClass.OPINION
+                ? InterceptLane.OPINION : InterceptLane.FALLBACK;
+    }
+
+    /** 留存附件载荷还原（确认受理的回放面；空/缺省归无附件）。 */
+    private static List<MessageAttachment> attachmentsOf(List<Map<String, Object>> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return MessageAttachment.NONE;
+        }
+        return INTERCEPT_JSON.convertValue(raw, new TypeReference<>() {
+        });
     }
 
     /**

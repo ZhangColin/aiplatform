@@ -251,6 +251,67 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     expect(chat?.turnActive).toBe(false);
   });
 
+  it("intercept-card（#533 门②）→ 拦截卡落对话流（卡内引用原文、不重建用户气泡；重放按事件 id 只收一次；新卡取代旧卡）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "intercept-card",
+      {
+        projectId: "p1",
+        runId: "run-i1",
+        interceptId: "ic-1",
+        lane: "OPINION",
+        prompt: "把主色调改成绿色",
+        sourceSelected: false,
+      },
+      "i1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "intercept-card",
+      {
+        projectId: "p1",
+        runId: "run-i1",
+        interceptId: "ic-1",
+        lane: "OPINION",
+        prompt: "把主色调改成绿色",
+        sourceSelected: false,
+      },
+      "i1:1", // 重放同事件
+    ));
+    // 更新的拦截顶替旧待决（服务端取代）——新卡取代旧卡，只留最新
+    dispatchAgentEvent(agentQc, agentEvent(
+      "intercept-card",
+      {
+        projectId: "p1",
+        runId: "run-i2",
+        interceptId: "ic-2",
+        lane: "FALLBACK",
+        prompt: "你好呀",
+        sourceSelected: true,
+        deductionSource: 2,
+        sourcePoolBalance: 5000,
+      },
+      "i2:1",
+    ));
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      {
+        kind: "intercept",
+        id: "i2:1",
+        settled: false,
+        card: {
+          interceptId: "ic-2",
+          lane: "FALLBACK",
+          prompt: "你好呀",
+          sourceSelected: true,
+          deductionSource: 2,
+          sourcePoolBalance: 5000,
+          runId: "run-i2",
+        },
+      },
+    ]);
+    expect(chat?.turnActive).toBe(false); // 拦下即收口
+  });
+
   it("question-raised(QUESTION + data.questions) → 问答卡（engineRef 随卡，作答回传面）", () => {
     // 问答挂起先有对话面 run 登记（run-start agent=main——runId 锚定判定）
     dispatchAgentEvent(agentQc, agentEvent(

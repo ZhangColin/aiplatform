@@ -9,6 +9,29 @@ import { asRecord } from "@/lib/utils";
 export type ChatMaterial = { name: string; path: string };
 
 /**
+ * 试用拦截卡事实（#533 计费②门②）：SSE 事件与 GET 读面同形的卡面——被拦输入
+ * 引用＋源池显式素材（源未定随卡首次选源）。确认扣减后项目翻转付费，按 lane
+ * 恢复受理原输入（不重输）。
+ */
+export type InterceptCardFact = {
+  /** 留存 id（卡锚）。 */
+  interceptId: string;
+  /** 被拦车道：OPINION=意见 / FALLBACK=兜底。 */
+  lane: string;
+  /** 被拦输入原文（卡上引用呈现；用户气泡由恢复受理的 run-start/guide-reply 落——
+   *  卡不重建气泡，避免与乐观气泡/恢复轮双写）。 */
+  prompt: string;
+  /** 扣减源是否已选定（false＝随卡首次选源）。 */
+  sourceSelected: boolean;
+  /** 已选定扣减源码位（1=账户余额 2=项目余额；未定缺省）。 */
+  deductionSource?: number;
+  /** 源池余额快照（分；池未建缺省）。 */
+  sourcePoolBalance?: number;
+  /** 拦截卡事件锚。 */
+  runId?: string;
+};
+
+/**
  * 对话面 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
  * ADR 0003 状态三分法）：按项目累积对话面（用户发言 / 智能体回复增量 / 问答卡 /
  * 收尾卡 / 平台轻引导 / 受理动作卡），对话史跨 run 常驻。<b>#89 起对话史落库</b>：闭史以 REST 水合为准（hydrate 按库序
@@ -217,6 +240,20 @@ export type ChatMessage =
       /** 事件类型：quoted=报价已出 / repriced=报价已更新（#204）。 */
       event: string;
     }
+  | {
+      /**
+       * 试用拦截卡（#533 计费②门②）：试用项目（迭代期）意见/兜底输入被结构闸
+       * 拦下的平台侧卡——live 经 intercept-card 事件到达、回访/重载经 GET 读面
+       * （同形，桥外由 hook 同步入流）。一项目一卡：新拦取代旧卡（服务端顶替旧
+       * 待决）。settled＝确认扣减落定（卡转只读回执）；关闭＝本地面移除（卡可回：
+       * 读面仍在，重载重建）。卡不重建用户气泡——恢复受理时由该轮的
+       * run-start / guide-reply 落（原文卡内引用）。
+       */
+      kind: "intercept";
+      id: string;
+      card: InterceptCardFact;
+      settled: boolean;
+    }
   | (RaisedQuestion & { kind: "question"; answered: boolean });
 
 export type ProjectChat = {
@@ -268,6 +305,14 @@ export type ChatState = {
     text: string,
     eventId: string,
   ) => void;
+  /** 拦截卡落卡（#533）：SSE 事件（eventId 在场，只收一次）与 GET 读面重建
+   *  （messageId 自持）同口——一项目一卡，新卡取代旧卡（待决被顶替）。 */
+  noteIntercept: (projectId: string, card: InterceptCardFact, messageId: string,
+    eventId?: string) => void;
+  /** 拦截卡确认落定（#533：确认扣减成功——卡转只读回执，操作区退场）。 */
+  settleIntercept: (projectId: string, interceptId: string) => void;
+  /** 拦截卡中途关闭（#533：本地面移除；卡可回——GET 读面仍在、重载重建）。 */
+  dismissIntercept: (projectId: string, interceptId: string) => void;
   /** 对话史水合（#89）：库条目增量应用（新 run 原位退位 live 片段，开放轮跳过；
    *  无 run 归属条目——报价卡 #203——恒应用，按库条目 id 原位退位不双卡）。 */
   hydrate: (projectId: string, entries: HydratedEntry[]) => void;
@@ -325,10 +370,15 @@ function localId(): string {
   return `m${messageSeq}`;
 }
 
-/** 尾条同文去重（run-start / guide-reply 回声 vs 乐观发送的等价气泡）。 */
-function lastIsSameUserText(chat: ProjectChat, text: string): boolean {
+/** 尾条已呈现同文用户输入（run-start / guide-reply 回声 vs 乐观发送的等价
+ *  气泡；#533 拦截卡径——尾条是引用同文的拦截卡时恢复受理轮不再重落气泡：卡
+ *  即该次输入的呈现位，乐观气泡已在流上）。 */
+function lastPresentsUserText(chat: ProjectChat, text: string): boolean {
   const last = chat.messages[chat.messages.length - 1];
-  return last !== undefined && last.kind === "user" && last.text === text;
+  if (last === undefined) return false;
+  if (last.kind === "user") return last.text === text;
+  if (last.kind === "intercept") return last.card.prompt === text;
+  return false;
 }
 
 /** 用户气泡落位（#87）：尾部的同 run 受理卡之前插入——重放重建时受理事件先于
@@ -461,7 +511,7 @@ export const useChatStore = create<ChatState>((set) => ({
         turnActive: true,
         openRunId: runId,
       };
-      if (!prompt || lastIsSameUserText(ingested, prompt)) return ingested;
+      if (!prompt || lastPresentsUserText(ingested, prompt)) return ingested;
       // 受理事件先于 run-start 到达（#87：服务端守卫后即发）——重放重建时用户
       // 气泡插到本 run 受理卡之前（意见在卡上，卡承接的是这条意见）
       return insertUserMessage(ingested, runId, prompt);
@@ -563,9 +613,9 @@ export const useChatStore = create<ChatState>((set) => ({
         seenEventIds: pushCapped(chat.seenEventIds, eventId),
         turnActive: false,
       };
-      // 重放重建：prompt 落用户气泡（乐观发送已落时尾条同文去重）
+      // 重放重建：prompt 落用户气泡（乐观发送已落/拦截卡已引用时尾条同文去重）
       const withUser =
-        prompt && !lastIsSameUserText(seen, prompt)
+        prompt && !lastPresentsUserText(seen, prompt)
           ? appendMessage(seen, { kind: "user", id: localId(), text: prompt, runId })
           : seen;
       return appendMessage(withUser, {
@@ -576,6 +626,50 @@ export const useChatStore = create<ChatState>((set) => ({
         runId,
       });
     }),
+
+  noteIntercept: (projectId, card, messageId, eventId) =>
+    updateChat(set, projectId, (chat) => {
+      // 一项目一卡：同卡幂等（GET 重查/事件回声不双卡），新卡取代旧卡（旧待决
+      // 被服务端顶替——本面同步退场，只留最新可确认卡）
+      if (chat.messages.some(
+          (message) => message.kind === "intercept" && message.card.interceptId === card.interceptId)) {
+        return chat;
+      }
+      if (eventId && chat.seenEventIds.includes(eventId)) return chat;
+      const base: ProjectChat = {
+        ...chat,
+        messages: chat.messages.filter((message) => message.kind !== "intercept"),
+      };
+      const seen = eventId
+        ? { ...base, seenEventIds: pushCapped(base.seenEventIds, eventId) }
+        : base;
+      // 拦下即收口（乐观起轮的对称收轮，同 guide-reply）
+      return appendMessage({ ...seen, turnActive: false }, {
+        kind: "intercept",
+        id: eventId ?? messageId,
+        card,
+        settled: false,
+      });
+    }),
+
+  settleIntercept: (projectId, interceptId) =>
+    updateChat(set, projectId, (chat) => {
+      const target = chat.messages.find(
+        (message): message is Extract<ChatMessage, { kind: "intercept" }> =>
+          message.kind === "intercept" && message.card.interceptId === interceptId);
+      if (!target || target.settled) return chat; // 无此卡或已落定——幂等
+      const messages = chat.messages.map((message) =>
+        message === target ? { ...target, settled: true } : message);
+      return { ...chat, messages };
+    }),
+
+  dismissIntercept: (projectId, interceptId) =>
+    updateChat(set, projectId, (chat) => ({
+      ...chat,
+      messages: chat.messages.filter(
+        (message) =>
+          !(message.kind === "intercept" && message.card.interceptId === interceptId)),
+    })),
 
   hydrate: (projectId, entries) =>
     updateChat(set, projectId, (chat) => {

@@ -192,7 +192,9 @@ class DispatchAppServiceTest {
         // 答询轮命令：main-{projectId} 会话（与意见轮同会话）+ 主智能体配置 + flash 档 + 只读面
         assertThat(inquiry.sessionId()).isEqualTo("main-" + projectId);
         assertThat(inquiry.prompt()).isEqualTo("我后台的地址是什么？");
-        assertThat(inquiry.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        // #538 答询轮同为访谈期主智能体轮：试用轨协议段随附（同一动态装配缝）
+        assertThat(inquiry.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
         assertThat(inquiry.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
         assertThat(inquiry.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(inquiry.workspaceReadOnly()).isTrue();
@@ -234,7 +236,8 @@ class DispatchAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand opinion = command.getAllValues().get(1);
         assertThat(opinion.sessionId()).isEqualTo("main-" + projectId);
-        assertThat(opinion.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        assertThat(opinion.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
         assertThat(opinion.workspaceReadOnly()).isTrue(); // 主智能体恒只读面（写面结构性关闭）
     }
 

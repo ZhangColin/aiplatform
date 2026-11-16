@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
+import { useInterviewQuota } from "@/hooks/use-interview-quota";
 import { usePendingIntercept } from "@/hooks/use-intercept";
 import { usePendingBalanceReminder } from "@/hooks/use-balance-reminder";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
@@ -38,6 +39,7 @@ import { ChatMarkdown } from "./chat-markdown";
 import { ClosingCard } from "./closing-card";
 import { InterceptCard } from "./intercept-card";
 import { BalanceReminderCard } from "./balance-reminder-card";
+import { InterviewQuotaChip } from "./interview-quota-chip";
 import { QuestionCard } from "./question-card";
 import { QuoteCard } from "./quote-card";
 import { WorkMessage } from "./work-message";
@@ -165,6 +167,9 @@ export function CommandArea({
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
   // 重连失效驱动增量水合，live 事件只承载在途增量
   useConversation(projectId);
+  // 五问额度读面（#538 访谈①）：「已答 N/5 问」chip 数据源——服务端单源不自算；
+  // 挂 conversation 域，轮收口（run-finish）失效即刷新（收口观测＝额度面变化点）
+  const interviewQuota = useInterviewQuota(projectId);
   // 待决试用拦截卡读面（#533 计费②门②，卡可回）：重载/回访重建——live 经
   // SSE 桥直写 store，本读面只补「刷新时事件不在场」的缺口（同形载荷同步同口）
   const pendingIntercept = usePendingIntercept(projectId);
@@ -309,6 +314,8 @@ export function CommandArea({
         }
       >
         <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[track][stage]}</p>
+        {/* 五问进度（#538 访谈①）：仅访谈期呈现，chip 自决非访谈期不渲染 */}
+        {stage === "interview" ? <InterviewQuotaChip quota={interviewQuota.data} /> : null}
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (

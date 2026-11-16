@@ -50,6 +50,14 @@ vi.mock("@/hooks/use-intercept", () => ({
   usePendingIntercept: () => ({ data: null }), // 读面无 QueryClient 可挂——呈现面归组件测试
 }));
 
+// 读面无 QueryClient 可挂——呈现面归 chip 组件测试（#537 余额提醒 / #538 五问额度）
+vi.mock("@/hooks/use-balance-reminder", () => ({
+  usePendingBalanceReminder: () => ({ data: null }),
+}));
+vi.mock("@/hooks/use-interview-quota", () => ({
+  useInterviewQuota: () => ({ data: null }),
+}));
+
 vi.mock("@/hooks/use-upload-material", () => ({
   useUploadMaterial: () => vi.fn(),
 }));

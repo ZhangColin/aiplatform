@@ -28,6 +28,7 @@ import com.semgravio.aiplatform.business.project.application.MainAgentAppService
 import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
+import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
 import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
@@ -45,6 +46,7 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Genera
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStopResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BalanceReminderCardResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterceptCardResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
@@ -88,6 +90,7 @@ public class ProjectController {
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
+    private final InterviewQuotaAppService interviewQuotaAppService;
     private final PrdVersionAppService prdVersionAppService;
     private final DemoVersionAppService demoVersionAppService;
 
@@ -98,6 +101,7 @@ public class ProjectController {
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
                              ConversationHistoryAppService conversationHistoryAppService,
+                             InterviewQuotaAppService interviewQuotaAppService,
                              PrdVersionAppService prdVersionAppService,
                              DemoVersionAppService demoVersionAppService) {
         this.appService = appService;
@@ -107,6 +111,7 @@ public class ProjectController {
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
+        this.interviewQuotaAppService = interviewQuotaAppService;
         this.prdVersionAppService = prdVersionAppService;
         this.demoVersionAppService = demoVersionAppService;
     }
@@ -207,6 +212,17 @@ public class ProjectController {
         return ApiResponse.ok(dispatchAppService.pendingBalanceReminder(parseId(id))
                 .map(BalanceReminderCardResponse::of)
                 .orElse(null));
+    }
+
+    @GetMapping("/{id}/interview-quota")
+    @Operation(summary = "五问额度读面（访谈①，试用态访谈期「第 N/5」进度单源）",
+            description = "试用状态访谈期的提问额度进度——已答问答缺口数 / 总额度 5（同缺口"
+                    + "重派不另计；计数服务端单源，前端 chip 不自算）。非试用态访谈期"
+                    + "（付费翻转 / PRD 已产出 / 已生成）返回 data=null——chip 不呈现。"
+                    + "轮收口事件失效 conversation 域时同失效（进度随对话刷新）。"
+                    + "归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 404 PRJ_001")
+    public ApiResponse<InterviewQuotaResponse> interviewQuota(@PathVariable String id) {
+        return ApiResponse.ok(interviewQuotaAppService.quotaOf(parseId(id)));
     }
 
     @PostMapping("/{id}/intercept/confirm")

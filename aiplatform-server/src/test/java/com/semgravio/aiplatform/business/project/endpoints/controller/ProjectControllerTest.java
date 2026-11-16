@@ -35,6 +35,7 @@ import com.semgravio.aiplatform.business.project.application.MainAgentAppService
 import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
+import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
 import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
@@ -44,6 +45,7 @@ import com.semgravio.aiplatform.business.project.application.dto.response.PrdRea
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
@@ -126,6 +128,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
+
+    @MockitoBean
+    private InterviewQuotaAppService interviewQuotaAppService;
 
     @MockitoBean
     private PrdVersionAppService prdVersionAppService;
@@ -497,6 +502,32 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_trial_interview_when_interview_quota_then_progress_wrapped() throws Exception {
+        // 五问额度读面（#538 访谈①）：试用态访谈期「第 N/5」进度的服务端单源——
+        // 已答缺口数 / 总额度 5 原样包裹；chip 数据前端不自算
+        when(interviewQuotaAppService.quotaOf(100L))
+                .thenReturn(new InterviewQuotaResponse(3, 5));
+
+        performAsUser(get("/api/projects/100/interview-quota"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.answered").value(3))
+                .andExpect(jsonPath("$.data.total").value(5));
+    }
+
+    @Test
+    void given_paid_or_post_prd_when_interview_quota_then_null_data() throws Exception {
+        // 非试用态访谈面（付费翻转 / PRD 已产出 / 已生成）：读面整体缺席（data=null）
+        // ——chip 不呈现，非错误面
+        when(interviewQuotaAppService.quotaOf(200L)).thenReturn(null);
+
+        performAsUser(get("/api/projects/200/interview-quota"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 
     @Test

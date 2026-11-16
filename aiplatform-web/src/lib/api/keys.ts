@@ -92,6 +92,12 @@ export const queryKeys = {
     all: ["conversation"] as const,
     /** 项目对话史（全量有序）。 */
     of: (id: string) => ["conversation", id] as const,
+    /**
+     * 五问额度读面（#538 访谈①「第 N/5」进度 chip）：服务端单源（试用态访谈期
+     * {已答,5}；非访谈期 null）。挂 conversation 命名空间：轮收口（run-finish）
+     * 失效整域时本键同失效——收口观测即额度面变化点。
+     */
+    quota: (id: string) => ["conversation", "quota", id] as const,
   },
   /**
    * 账单域（#534 计费④「我的账户」）：账户池余额＋流水（/api/me/billing）与

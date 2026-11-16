@@ -43,8 +43,10 @@ import com.semgravio.aiplatform.business.project.application.dto.command.Message
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationBody;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationRegion;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -65,6 +67,9 @@ class ConversationHistoryTest {
 
     @Autowired
     private ConversationHistoryAppService conversationHistory;
+
+    @Autowired
+    private ConversationEntryRepository entries;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -416,5 +421,74 @@ class ConversationHistoryTest {
         assertThat(conversationHistory.read(projectId))
                 .extracting(ConversationEntryResponse::kind)
                 .containsExactly(1, 2, 5); // user/agent/closing（过程明细不落）
+    }
+
+    @Test
+    void given_answered_question_cards_when_answered_gap_count_then_distinct_answered_only() {
+        // 五问额度计数读口（#538，ADR-0048）：按项目计对话史问答卡行——只计已答卡、
+        // 以问题文本为缺口标识去重（同缺口重派不另计：纠偏/重派同名问题不重复消耗额度）
+        Long projectId = persistedGeneratedProject("9805");
+        entries.save(answeredCard(projectId, "run-1", "目标用户是谁？"));
+        entries.save(answeredCard(projectId, "run-2", "核心流程走哪条？"));
+        entries.save(answeredCard(projectId, "run-3", "目标用户是谁？")); // 同缺口重派（同文本）→ 不另计
+        entries.save(pendingCard(projectId, "run-4", "预算多少？")); // 未答不计
+
+        assertThat(conversationHistory.answeredGapCount(projectId)).isEqualTo(2);
+    }
+
+    @Test
+    void given_no_question_cards_when_answered_gap_count_then_zero() {
+        Long projectId = persistedGeneratedProject("9806");
+
+        assertThat(conversationHistory.answeredGapCount(projectId)).isZero();
+    }
+
+    @Test
+    void given_question_card_without_text_when_answered_gap_count_then_header_fallback() {
+        // 缺口标识缺省回落：载荷无 question 文本时按主题标签（header）计数——
+        // 形状残缺的卡不静默丢失也不重复计数
+        Long projectId = persistedGeneratedProject("9807");
+        entries.save(ConversationEntry.question(projectId, "run-1", new LinkedHashMap<>(Map.of(
+                AgentEventTypes.RUN_FIELD, "run-1",
+                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-h",
+                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                        "questions", List.of(Map.of("header", "目标用户")))))));
+        ConversationEntry answered = ConversationEntry.question(projectId, "run-1",
+                new LinkedHashMap<>(Map.of(
+                        AgentEventTypes.RUN_FIELD, "run-1",
+                        AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-h",
+                        AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                                "questions", List.of(Map.of("header", "目标用户"))))));
+        answered.markAnswered();
+        entries.save(answered);
+        entries.save(ConversationEntry.answer(projectId, "run-1", "种子答复"));
+        entries.save(answered);
+
+        assertThat(conversationHistory.answeredGapCount(projectId)).isEqualTo(1);
+    }
+
+    /** 已答问答卡落库（计数读口种子）：卡置已答＋同 run 作答行（用户已答语义——
+     *  收口作答收口只置位不落作答行，不计入计数）。 */
+    private ConversationEntry answeredCard(Long projectId, String runId, String question) {
+        entries.save(ConversationEntry.answer(projectId, runId, "种子答复"));
+        ConversationEntry card = ConversationEntry.question(projectId, runId, questionPayload(runId, question));
+        card.markAnswered();
+        return card;
+    }
+
+    /** 待答问答卡落库（计数读口种子）。 */
+    private ConversationEntry pendingCard(Long projectId, String runId, String question) {
+        return ConversationEntry.question(projectId, runId, questionPayload(runId, question));
+    }
+
+    private Map<String, Object> questionPayload(String runId, String question) {
+        return new LinkedHashMap<>(Map.of(
+                AgentEventTypes.RUN_FIELD, runId,
+                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-" + runId,
+                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                        "toolCalls", List.of(Map.of("id", "tc-1", "name", "ask_user")),
+                        "questions", List.of(Map.of(
+                                "header", "提问", "question", question,
+                                "multiple", false, "custom", true, "options", List.of())))));
     }
 }

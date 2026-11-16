@@ -1,9 +1,12 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -118,6 +121,22 @@ public class ConversationHistoryAppService {
     }
 
     /**
+     * 收口作答置位（#538 纠偏收口——「平台代答」为词汇表回避词，本机制定名收口
+     * 作答）：挂起卡由平台收口作答——只置 run 内最近待答卡 answered、<b>不落作答
+     * 行</b>（收口作答非用户话语，对话面不见假用户发言；作答文本经 resume 工具
+     * 结果通道给模型）。读模型自洽口径同 {@link #recordAnswer}。
+     */
+    @Transactional
+    public void markAnswered(String runId) {
+        entries.findFirstByRunIdAndKindAndAnsweredFalseOrderByIdDesc(runId,
+                        ConversationEntryKind.QUESTION)
+                .ifPresent(question -> {
+                    question.markAnswered();
+                    entries.save(question);
+                });
+    }
+
+    /**
      * 智能体回复段落库（轮收口或问答挂起时的已出文本段——段序即对话序，问答
      * 挂起段先落、答复与续跑段随后，交错成完整叙事）。异步轨道写：失败只记日志。
      */
@@ -209,6 +228,59 @@ public class ConversationHistoryAppService {
             }
         }
         return summaries;
+    }
+
+    /**
+     * 已答问答缺口计数读口（#538 五问额度程序计数权威，ADR-0048）：按项目计对话
+     * 史问答卡行——只计<b>用户已答</b>卡（同 run 有问答作答行——收口作答收口的卡
+     * 只置位不落作答行，不计入「第 N/5」进度）、以问题文本为缺口标识去重（同缺口
+     * 重派不另计：纠偏/重派同名问题不重复消耗额度）。「第 N/5」进度与额度收口
+     * 判定同读本口（服务端单源，前端不自算）。
+     */
+    public int answeredGapCount(Long projectId) {
+        Set<String> answeredRuns = entries
+                .findByProjectIdAndKindOrderByIdAsc(projectId, ConversationEntryKind.ANSWER)
+                .stream()
+                .map(ConversationEntry::getRunId)
+                .collect(Collectors.toSet());
+        Set<String> gaps = new HashSet<>();
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.QUESTION)) {
+            // 未答卡（挂起待答）与收口作答卡（无作答行）都不计——额度锚「用户答完」
+            if (!Boolean.TRUE.equals(entry.getAnswered())
+                    || !answeredRuns.contains(entry.getRunId())) {
+                continue;
+            }
+            gaps.add(gapKeyOf(entry));
+        }
+        return gaps.size();
+    }
+
+    /** 缺口标识：问题文本优先（去首尾空白），缺省回落主题标签（header）；皆无
+     *  则按条目 id 计（形状残缺的卡各计一个，不静默丢失）。 */
+    private static String gapKeyOf(ConversationEntry entry) {
+        String text = firstQuestionText(entry.getQuestion());
+        return text != null ? text : "#" + entry.getId();
+    }
+
+    /** 问答卡载荷 → 首个问题文本（data.questions[0].question，缺省回落 header）。 */
+    @SuppressWarnings("unchecked")
+    private static String firstQuestionText(Map<String, Object> payload) {
+        Object data = payload == null ? null : payload.get(AgentEventTypes.WAIT_DATA_FIELD);
+        if (!(data instanceof Map<?, ?> dataMap)) {
+            return null;
+        }
+        Object questions = ((Map<String, Object>) dataMap).get("questions");
+        if (!(questions instanceof List<?> list) || list.isEmpty()
+                || !(list.get(0) instanceof Map<?, ?> first)) {
+            return null;
+        }
+        Object text = ((Map<String, Object>) first).get("question");
+        if (text instanceof String s && !s.isBlank()) {
+            return s.trim();
+        }
+        Object header = ((Map<String, Object>) first).get("header");
+        return header instanceof String h && !h.isBlank() ? h.trim() : null;
     }
 
     /**

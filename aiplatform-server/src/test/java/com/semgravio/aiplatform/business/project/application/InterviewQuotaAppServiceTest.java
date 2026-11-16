@@ -1,0 +1,167 @@
+package com.semgravio.aiplatform.business.project.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import com.semgravio.aiplatform.IntegrationTest;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.business.billing.application.BillingAppService;
+import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
+import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
+import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
+import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+
+/**
+ * 五问额度读面（#538 访谈①，ADR-0048）：「第 N/5」进度 chip 的服务端单源——试用态
+ * 访谈期返回 {已答缺口数, 5}；付费态 / PRD 已产出 / 已生成（非访谈期）返回 null
+ * （chip 不呈现）。前端不自算，收口判定（{@code closureRequired}）与 chip 同读本口。
+ */
+@IntegrationTest
+class InterviewQuotaAppServiceTest {
+
+    private static final long OWNER = 3897654321098765432L;
+
+    @Autowired
+    private InterviewQuotaAppService quotaAppService;
+
+    @Autowired
+    private ConversationHistoryAppService conversationHistory;
+
+    @Autowired
+    private ConversationEntryRepository entries;
+
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    @Autowired
+    private BillingAppService billingAppService;
+
+    @Autowired
+    private PoolTopupAppService poolTopupAppService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @AfterEach
+    void tearDown() {
+        jdbcTemplate.update("DELETE FROM prj_conversation_entries");
+        jdbcTemplate.update("DELETE FROM prj_projects");
+        jdbcTemplate.update("DELETE FROM bil_project_billing");
+        jdbcTemplate.update("DELETE FROM bil_pools");
+        jdbcTemplate.update("DELETE FROM bil_entries");
+    }
+
+    @Test
+    void given_trial_interview_with_answered_gaps_when_quota_then_answered_over_five() {
+        Long projectId = persistedInterviewProject("9601");
+        saveAnsweredCard(projectId, "run-1", "目标用户是谁？");
+        saveAnsweredCard(projectId, "run-2", "目标用户是谁？"); // 同缺口重派不另计
+        saveAnsweredCard(projectId, "run-3", "核心流程走哪条？");
+        savePendingCard(projectId, "run-4", "预算多少？"); // 未答不计
+
+        InterviewQuotaResponse quota = quotaAppService.quotaOf(projectId);
+
+        assertThat(quota).isNotNull();
+        assertThat(quota.answered()).isEqualTo(2);
+        assertThat(quota.total()).isEqualTo(5);
+    }
+
+    @Test
+    void given_trial_answered_full_when_closure_required_then_true() {
+        Long projectId = persistedInterviewProject("9602");
+        for (int i = 1; i <= 5; i++) {
+            saveAnsweredCard(projectId, "run-" + i, "问题" + i);
+        }
+
+        assertThat(quotaAppService.quotaOf(projectId).answered()).isEqualTo(5);
+        assertThat(quotaAppService.closureRequired(projectId)).isTrue();
+    }
+
+    @Test
+    void given_paid_project_when_quota_then_null() {
+        // 付费翻转后五问额度解除（无上限）——读面缺席即 chip 不呈现
+        Long projectId = persistedInterviewProject("9603");
+        saveAnsweredCard(projectId, "run-1", "目标用户是谁？");
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+
+        assertThat(quotaAppService.quotaOf(projectId)).isNull();
+        assertThat(quotaAppService.closureRequired(projectId)).isFalse();
+    }
+
+    @Test
+    void given_prd_produced_when_quota_then_null() {
+        // PRD 产出即访谈收口——额度面退场（chip 不再呈现）
+        Long projectId = persistedInterviewProject("9604");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.markPrdProduced();
+        projectRepository.save(project);
+        saveAnsweredCard(projectId, "run-1", "目标用户是谁？");
+
+        assertThat(quotaAppService.quotaOf(projectId)).isNull();
+        assertThat(quotaAppService.closureRequired(projectId)).isFalse();
+    }
+
+    @Test
+    void given_generated_project_when_quota_then_null() {
+        // 已生成＝迭代期：五问额度只约束访谈期
+        Long projectId = persistedInterviewProject("9605");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.markPrdProduced();
+        project.markGenerated();
+        projectRepository.save(project);
+
+        assertThat(quotaAppService.quotaOf(projectId)).isNull();
+    }
+
+    @Test
+    void given_no_question_cards_when_quota_then_answered_zero() {
+        Long projectId = persistedInterviewProject("9606");
+
+        InterviewQuotaResponse quota = quotaAppService.quotaOf(projectId);
+
+        assertThat(quota).isNotNull();
+        assertThat(quota.answered()).isZero();
+        assertThat(quota.total()).isEqualTo(5);
+    }
+
+    private Long persistedInterviewProject(String workspaceId) {
+        Project project = projectRepository.save(Project.create("访谈项目", null, null,
+                Long.parseLong(workspaceId), OWNER, null));
+        return project.getId();
+    }
+
+    private void saveAnsweredCard(Long projectId, String runId, String question) {
+        entries.save(ConversationEntry.answer(projectId, runId, "种子答复")); // 用户已答语义
+        ConversationEntry card = ConversationEntry.question(projectId, runId,
+                questionPayload(runId, question));
+        card.markAnswered();
+        entries.save(card);
+    }
+
+    private void savePendingCard(Long projectId, String runId, String question) {
+        entries.save(ConversationEntry.question(projectId, runId, questionPayload(runId, question)));
+    }
+
+    private Map<String, Object> questionPayload(String runId, String question) {
+        return new LinkedHashMap<>(Map.of(
+                AgentEventTypes.RUN_FIELD, runId,
+                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-" + runId,
+                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                        "toolCalls", List.of(Map.of("id", "tc-1", "name", "ask_user")),
+                        "questions", List.of(Map.of(
+                                "header", "提问", "question", question,
+                                "multiple", false, "custom", true, "options", List.of())))));
+    }
+}

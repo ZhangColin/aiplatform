@@ -33,20 +33,24 @@
  * <h3>包结构</h3>
  * <ul>
  *   <li>domain：BillingPool 聚合（双池）、ProjectBilling 聚合（扣减源＋付费状态
- *       ＝两轨判定单读点）、BillingEntry 聚合（append-only 流水）、BillingParam
- *       聚合（运营参数——全局折算率）、扣减源/翻转门/段型/流水种类/池种类枚举、
- *       Operator 值对象（admin 侧操作者，落空口径）、UsagePricingPort（计量
- *       计价读面）、PricedLine/PiecePrice 换算素材模型、仓储接口、错误码</li>
+ *       ＝两轨判定单读点）、BillingEntry 聚合（append-only 流水）、OperatorAction
+ *       聚合（后台动作 append-only 留痕——变更前后快照）、BillingParam 聚合
+ *       （运营参数——全局折算率）、扣减源/翻转门/段型/流水种类/池种类/后台动作
+ *       种类枚举、Operator 值对象（admin 侧操作者，落空口径）、UsagePricingPort
+ *       （计量计价读面）、PricedLine/PiecePrice 换算素材模型、仓储接口、错误码</li>
  *   <li>application：BillingAppService（两轨判定读点/源选定/翻转门①②/参数）、
  *       PoolTopupAppService（双池入账——项目池入账即选源）、SegmentSettlementAppService
  *       （段收口结算＋固定单价项按次直记）、TrialInterceptAppService（拦截留存/
- *       确认扣减＝门②——编排归 project 侧 DispatchAppService）</li>
+ *       确认扣减＝门②——编排归 project 侧 DispatchAppService）、
+ *       BackofficeBillingAppService（后台账户运营——四动作＋参数，动作留痕与账
+ *       务同事务）</li>
  *   <li>infrastructure：MeteringPricingAdapter（UsagePricingPort 进程内适配器）</li>
  *   <li>endpoints：模拟收银台与账单读面（#534 计费④——准入码校验/账户上下文
  *       充值/我的账户视图走本 BC 控制器；项目账单读面与项目上下文充值挂
  *       /api/projects/{id}/billing 复用 project owner 守卫）；拦截卡读面/确认
- *       挂 project 控制器（#533 编排归 DispatchAppService）；后台运营端点随
- *       #535 落位</li>
+ *       挂 project 控制器（#533 编排归 DispatchAppService）；后台账户运营端点
+ *       （#535 计费⑤——赠送/手动充值/余额调整/扣减源调整/参数，机机签名＋
+ *       bil_operator_actions 留痕）挂 /api/backoffice/billing</li>
  * </ul>
  *
  * @since 0.1.0

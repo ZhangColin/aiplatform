@@ -33,6 +33,16 @@ public enum DeductionSource implements BaseEnum<DeductionSource> {
         return name;
     }
 
+    /** 码 → 枚举（后台扣减源调整端点的映射面；未知码如实拒绝——照订单域 ofCode 先例）。 */
+    public static DeductionSource ofCode(Integer code) {
+        for (DeductionSource source : values()) {
+            if (source.code.equals(code)) {
+                return source;
+            }
+        }
+        throw new IllegalArgumentException("未知的扣减源码: " + code);
+    }
+
     /**
      * JPA Converter（框架自动应用，实体字段无需 @Convert）。
      */

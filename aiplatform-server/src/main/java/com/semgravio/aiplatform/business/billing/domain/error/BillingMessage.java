@@ -45,7 +45,15 @@ public enum BillingMessage implements CodeMessage {
 
     ACCESS_CODE_INVALID(400, "BILL_019", "充值准入码不正确（无码用户请联系平台索取）"),
 
-    TOPUP_TARGET_NOT_SOURCE_POOL(409, "BILL_020", "只能充值当前扣减源池（向非源池充值无法用于本项目扣减）");
+    TOPUP_TARGET_NOT_SOURCE_POOL(409, "BILL_020", "只能充值当前扣减源池（向非源池充值无法用于本项目扣减）"),
+
+    VOUCHER_FIELDS_INCOMPLETE(400, "BILL_021", "手动充值凭证字段不完整（实到金额/到账时间/依据必填）"),
+
+    POOL_NOT_FOUND(404, "BILL_022", "余额池不存在（目标账户/项目从未入账）"),
+
+    OPERATOR_ACTION_INVALID(400, "BILL_023", "后台运营动作非法"),
+
+    SOURCE_CODE_INVALID(400, "BILL_024", "扣减源码无效（1=账户余额 2=项目余额）");
 
     private final int httpStatus;
     private final String code;

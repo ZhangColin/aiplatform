@@ -80,8 +80,19 @@ if [ "$SKIP_BACKUP" != "1" ]; then
 fi
 
 echo "-- 解包 $BUNDLE_FN（不含 .env*，现网 env 不被覆盖）"
+# 解包前对齐源码树：清掉包内顶层目录的旧残留再解包——tar 解包只覆盖不删除，
+# 旧文件会混进构建上下文（2026-11-18 实案：11-10 包残留旧 prd-confirm-gate
+# 测试＋新包组件＝web 构建 TS2322 翻红；旧布局成对残留也会静默进 typecheck）。
+# .env* 属现网配置不在包内：先备份到临时目录，清残留后恢复原位。
+ENV_TMP=$(mktemp -d)
+find aiplatform-server aiplatform-web workspace gateway deploy -name '.env*' -type f 2>/dev/null | while read -r f; do
+  mkdir -p "$ENV_TMP/$(dirname "$f")" && cp "$f" "$ENV_TMP/$f"
+done
+rm -rf aiplatform-server aiplatform-web workspace gateway deploy
 tar -xzf "$HOME/$BUNDLE_FN" --strip-components=1
 rm "$HOME/$BUNDLE_FN"
+(cd "$ENV_TMP" && tar -cf - .) | tar -xf -
+rm -rf "$ENV_TMP"
 echo "   REVISION: $(cat REVISION)"
 
 echo "-- env 模板对照（模板必配、现网 .env.production 未配的变量；模板值多为占位符不自动写，按需补后 up -d 重建生效——restart 不重读 env_file）"

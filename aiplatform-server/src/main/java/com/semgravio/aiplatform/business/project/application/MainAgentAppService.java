@@ -230,7 +230,10 @@ public class MainAgentAppService {
                     + "操作的自洽负推理责任，不是机械填推荐）；随后立即 load_skill_through_path "
                     + "加载 prd-writing 技能（path 传 SKILL.md）并调用 savePrd 保存完整 PRD"
                     + "（content 传完整 PRD markdown 全文，summary 必传：说明覆盖了什么、"
-                    + "哪些缺口按推荐补全）；系统终点随后按第 5 条调用 saveBuildPlan 产出"
+                    + "哪些缺口按推荐补全）；PRD「关键约束」章的风格方向行按随附「风格方向"
+                    + "库·目录」选与项目领域气质最匹配的方向——缺省套仅当其余方向无一贴近"
+                    + "时才兜底，不得因收口赶工省事选缺省（2026-11-18 收口赶工落缺省套实案"
+                    + "修复，ADR-0052 补记）；系统终点随后按第 5 条调用 saveBuildPlan 产出"
                     + "切片计划。保存成功后向用户输出简短总结（PRD 已产出＋核心要点＋按推荐"
                     + "补全了哪些缺口）。除此之外本轮不要再提问。";
 
@@ -851,7 +854,9 @@ public class MainAgentAppService {
      * 代答该问题并续跑同一 run（答复经 resume 工具结果通道给模型；不落成用户作答行）。 */
     static final String CLOSURE_PLATFORM_ANSWER =
             "收口作答：访谈提问额度已用尽，本问题不再展开——请严格执行平台收口指令："
-                    + "剩余必答缺口按推荐补全，立即梳理并调用 savePrd 保存 PRD。";
+                    + "剩余必答缺口按推荐补全，立即梳理并调用 savePrd 保存 PRD（PRD「关键约束」"
+                    + "章风格方向行按随附目录选与领域气质最匹配的方向，缺省套仅兜底、"
+                    + "不得因收口赶工省事选缺省）。";
 
     /** 悬空补救文案（#538）：额度收口双失格形——恒带「继续」指路。 */
     static final String DANGLING_REMEDY_QUOTA_EXHAUSTED =

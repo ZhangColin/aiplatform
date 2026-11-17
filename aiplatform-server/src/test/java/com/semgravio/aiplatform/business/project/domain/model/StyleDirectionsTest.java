@@ -137,7 +137,14 @@ class StyleDirectionsTest {
         assertThat(catalog)
                 .contains("【风格方向库·目录】")
                 .contains("风格方向：")
-                .contains("关键约束");
+                .contains("关键约束")
+                // #551 补记（2026-11-18 收口赶工落缺省套实案）：选取协议句钉
+                // 「必须选领域最匹配、缺省仅兜底、不得赶工省事选缺省」——模型
+                // 选取纪律在目录单源块内的正本
+                .contains("必须选与项目")
+                .contains("领域气质最匹配的方向")
+                .contains("缺省套仅当其余方向无一贴近领域气质时才兜底")
+                .contains("不得因赶工/省事选缺省");
         for (StyleDirections.Direction direction : StyleDirections.all()) {
             assertThat(catalog).contains("- " + direction.name() + "：");
         }

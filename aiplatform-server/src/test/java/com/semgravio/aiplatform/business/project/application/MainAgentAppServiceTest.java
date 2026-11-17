@@ -492,7 +492,11 @@ class MainAgentAppServiceTest {
         verify(agentClient).resume(resume.capture(), any());
         assertThat(resume.getValue().systemPrompt())
                 .contains("【收口指令】")
-                .contains("访谈协议·试用轨");
+                .contains("访谈协议·试用轨")
+                // #551 补记（2026-11-18 收口赶工落缺省套实案）：收口指令内嵌
+                // 风格方向纪律——收口轮不因赶工省事选缺省套
+                .contains("风格方向行按随附「风格方向库·目录」选与项目领域气质最匹配的方向")
+                .contains("不得因收口赶工省事选缺省");
     }
 
     @Test

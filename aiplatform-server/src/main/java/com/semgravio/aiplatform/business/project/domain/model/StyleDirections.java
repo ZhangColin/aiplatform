@@ -387,8 +387,11 @@ public final class StyleDirections {
     public static String catalogMarkdown() {
         StringBuilder block = new StringBuilder(
                 "\n\n【风格方向库·目录】（平台预置，属工作协议一部分）写 PRD 时从下列方向中")
-                .append("选定其一，在「关键约束」章写明「风格方向：<方向名>」（可按领域气质微调")
-                .append("参数写在同句括号内、不从零自造配色；本选取不占访谈提问额度）：");
+                .append("选定其一，在「关键约束」章写明「风格方向：<方向名>」——必须选与项目")
+                .append("领域气质最匹配的方向（如教育类选清新教育、企业/工具类选科技前沿或沉稳")
+                .append("金融），缺省套仅当其余方向无一贴近领域气质时才兜底，不得因赶工/省事选")
+                .append("缺省（2026-11-18 收口赶工落缺省套实案修复，ADR-0052 补记；可按领域气质")
+                .append("微调参数写在同句括号内、不从零自造配色；本选取不占访谈提问额度）：");
         for (Direction direction : ALL) {
             block.append("\n- ").append(direction.name()).append("：").append(direction.domains());
         }

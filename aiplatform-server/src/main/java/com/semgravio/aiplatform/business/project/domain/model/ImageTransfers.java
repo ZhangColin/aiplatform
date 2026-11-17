@@ -5,9 +5,10 @@ import java.util.Set;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
 /**
- * 出图转存面（#288 出图工具件内核，ADR-0026/0027）的规则单点，照
- * {@link ProjectMaterials}/{@link WorkspaceRenders} 形制：供应商生成的图片转存落盘
- * 产物目录的三件事——落点命名（{@code design/{tsid}-{净化词干}.{扩展名}}，TSID
+ * 出图转存面（#288 出图工具件内核，ADR-0026/0027；#545 起构建轨落点扩 public/）
+ * 的规则单点，照 {@link ProjectMaterials}/{@link WorkspaceRenders} 形制：供应商生成
+ * 的图片按 {@link ImageAssetLane} 转存落盘的三件事——落点命名（
+ * {@code {design|public}/{tsid}-{净化词干}.{扩展名}}，TSID
  * 前缀防撞名：产物目录是候选各代的累积面，同名片不可覆盖）、转存命令构造（两形：
  * URL 形容器内 {@code curl} 拉取——egress 落在沙箱侧〔ADR-0019〕、字节不过平台
  * JVM；base64 形字节经 stdin 灌入。两形同走 {@code .part} 暂存＋原子改名：失败
@@ -30,16 +31,20 @@ public final class ImageTransfers {
     }
 
     /**
-     * 落点路径：{@code design/{tsid}-{净化词干}.{扩展名}}——镜像
-     * {@link ProjectMaterials#storedPath} 命名形（TSID 防撞、词干人读）。
+     * 落点路径：{@code {轨道目录}/{tsid}-{净化词干}.{扩展名}}——镜像
+     * {@link ProjectMaterials#storedPath} 命名形（TSID 防撞、词干人读）；轨道目录取
+     * {@link ImageAssetLane#dir()}——设计轨 {@code design/}（#283 起）、构建轨
+     * {@code public/}（#545 演示配图＝应用静态资产）。
      *
      * @param tsid      平台生成的数字标识（非用户输入）
      * @param nameStem  净化后的词干（调用方经 {@link ProjectMaterials#sanitizeName}
      *                  消毒；可空＝调用方已回落缺省词干）
      * @param extension 扩展名（小写不带点；经 {@link #extensionOf} 收口）
+     * @param lane      落点轨道（设计轨 design/；构建轨 public/）
      */
-    public static String storedPath(String tsid, String nameStem, String extension) {
-        return WorkspaceLayout.DESIGN_DIR + "/" + tsid + "-" + nameStem + "." + extension;
+    public static String storedPath(String tsid, String nameStem, String extension,
+            ImageAssetLane lane) {
+        return lane.dir() + "/" + tsid + "-" + nameStem + "." + extension;
     }
 
     /**

@@ -191,7 +191,9 @@ app:
     zhipu:
       base-url: https://open.bigmodel.cn
       api-key: ${ZHIPU_API_KEY:}
-      model: glm-image
+      # #545 快档起步（ADR-0052）：cogview-4-250304 0.06 元/张、生成快——构建轨
+      # 演示配图与设计线共用 active 供应商；质量不满运营升档＝单价表换行/改此键，零机制
+      model: ${ZHIPU_IMAGE_MODEL:cogview-4-250304}
     volcano:
       base-url: https://ark.cn-beijing.volces.com
       api-key: ${ARK_API_KEY:}

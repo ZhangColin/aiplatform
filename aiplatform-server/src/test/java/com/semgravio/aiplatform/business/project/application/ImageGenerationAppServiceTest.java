@@ -31,6 +31,7 @@ import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.model.ImageAssetLane;
 import com.semgravio.aiplatform.business.project.domain.model.ImageTransfers;
 import com.semgravio.aiplatform.business.project.domain.port.ActiveImageGenerationProvider;
 import com.semgravio.aiplatform.business.project.domain.port.ImageGenerationProvider;
@@ -171,7 +172,8 @@ class ImageGenerationAppServiceTest {
         givenUrlTransferSucceeds("12345");
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, "run-7", "designer-1",
-                "极简 logo", 1, null, "logo-方案A");
+                "极简 logo", 1, null, "logo-方案A",
+                ImageAssetLane.DESIGN);
 
         assertThat(outcome).isInstanceOf(ImageGenerationOutcome.Generated.class);
         ImageGenerationOutcome.Generated generated = (ImageGenerationOutcome.Generated) outcome;
@@ -211,7 +213,7 @@ class ImageGenerationAppServiceTest {
         givenBase64TransferSucceeds();
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, null, null,
-                "mascot", 1, null, null);
+                "mascot", 1, null, null, ImageAssetLane.DESIGN);
 
         ImageGenerationOutcome.Generated generated = (ImageGenerationOutcome.Generated) outcome;
         assertThat(generated.files()).hasSize(1);
@@ -237,12 +239,65 @@ class ImageGenerationAppServiceTest {
         givenUrlTransferSucceeds("10");
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, "run-7", "s",
-                "三稿海报", 3, "1024x1024", null);
+                "三稿海报", 3, "1024x1024", null, ImageAssetLane.DESIGN);
 
         assertThat(((ImageGenerationOutcome.Generated) outcome).files()).hasSize(3);
         assertThat(provider.calls).hasSize(3);
         assertThat(provider.calls.get(0).size()).isEqualTo("1024x1024"); // size 原样透传
         assertThat(usageEventCount()).isEqualTo(3); // 每次调用恰一条
+    }
+
+    // ---------- #545 构建轨：落 public/、dims 归 executor（设计轨回归在下述各例） ----------
+
+    @Test
+    void given_build_lane_when_generate_then_lands_public_with_executor_dimension() {
+        // ADR-0052 图片能力下放构建轨：演示配图＝应用静态资产（Next.js 根 URL 直引），
+        // 落点 public/ 而非 design/；按张计量事件照落既有缝，dims agentKind=executor
+        // （与 run 执行体成本观测同桶），事件张数/幂等键口径与设计轨一致
+        provider.enqueue(new ImageProviderResult.Generated("zhipu",
+                new ImageProviderResult.Image(
+                        "https://cdn.example/img/hero.png?Expires=1", null, "png")));
+        givenUrlTransferSucceeds("45678");
+
+        ImageGenerationOutcome outcome = service.generate(workspaceId, "run-21", "coder-21",
+                "首屏 hero 真实场景图", 1, null, "hero", ImageAssetLane.BUILD);
+
+        ImageGenerationOutcome.Generated generated = (ImageGenerationOutcome.Generated) outcome;
+        assertThat(generated.provider()).isEqualTo("testimg"); // 替身 providerKey
+        assertThat(generated.model()).isEqualTo("zhipu");
+        assertThat(generated.files()).hasSize(1);
+        assertThat(generated.files().get(0).path())
+                .matches("public/\\d+-hero\\.png");
+
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(environmentBackend).exec(any(WorkspaceHandle.class), command.capture());
+        assertThat(command.getValue())
+                .isEqualTo(ImageTransfers.downloadCommand(generated.files().get(0).path(),
+                        "https://cdn.example/img/hero.png?Expires=1"));
+
+        assertThat(usageEventCount()).isEqualTo(1);
+        Map<String, Object> event = soleUsageEvent();
+        assertThat(event.get("images")).isEqualTo(1L);
+        assertThat(event.get("run_id")).isEqualTo("run-21");
+        assertThat(String.valueOf(event.get("dims"))).contains("executor");
+        assertThat(String.valueOf(event.get("dims"))).doesNotContain("designer");
+    }
+
+    @Test
+    void given_build_lane_base64_when_generate_then_stdin_write_to_public() {
+        // 构建轨 base64 形同走 public/ 转存正本（命令构造随落点目录，无第二套机制）
+        provider.enqueue(new ImageProviderResult.Generated("cogview",
+                new ImageProviderResult.Image(null, B64, "png")));
+        givenBase64TransferSucceeds();
+
+        ImageGenerationOutcome outcome = service.generate(workspaceId, "run-22", "coder-22",
+                "空态插画", 1, null, "empty-state", ImageAssetLane.BUILD);
+
+        assertThat(((ImageGenerationOutcome.Generated) outcome).files().get(0).path())
+                .matches("public/\\d+-empty-state\\.png");
+        verify(environmentBackend).execWithStdin(any(WorkspaceHandle.class), anyString(), any());
+        assertThat(usageEventCount()).isEqualTo(1);
+        assertThat(String.valueOf(soleUsageEvent().get("dims"))).contains("executor");
     }
 
     // ---------- 重试：技术失败有限重试、不产新候选、各次照计 ----------
@@ -256,7 +311,7 @@ class ImageGenerationAppServiceTest {
         givenUrlTransferSucceeds("10");
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, null, null,
-                "p", 1, null, null);
+                "p", 1, null, null, ImageAssetLane.DESIGN);
 
         assertThat(((ImageGenerationOutcome.Generated) outcome).files()).hasSize(1);
         assertThat(provider.calls).hasSize(2);
@@ -269,7 +324,7 @@ class ImageGenerationAppServiceTest {
         givenUrlTransferSucceeds("10");
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, null, null,
-                "p", 1, null, null);
+                "p", 1, null, null, ImageAssetLane.DESIGN);
 
         assertThat(outcome).isInstanceOf(ImageGenerationOutcome.Failed.class);
         assertThat(((ImageGenerationOutcome.Failed) outcome).reason())
@@ -292,7 +347,7 @@ class ImageGenerationAppServiceTest {
                 .thenReturn(new ExecResult("2048", "", 0));
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, null, null,
-                "p", 1, null, null);
+                "p", 1, null, null, ImageAssetLane.DESIGN);
 
         assertThat(((ImageGenerationOutcome.Generated) outcome).files()).hasSize(1);
         assertThat(provider.calls).hasSize(2);
@@ -309,7 +364,7 @@ class ImageGenerationAppServiceTest {
         givenUrlTransferSucceeds("10");
 
         ImageGenerationOutcome outcome = service.generate(workspaceId, null, null,
-                "p", 2, null, null);
+                "p", 2, null, null, ImageAssetLane.DESIGN);
 
         ImageGenerationOutcome.Generated generated = (ImageGenerationOutcome.Generated) outcome;
         assertThat(generated.files()).hasSize(1);
@@ -324,14 +379,14 @@ class ImageGenerationAppServiceTest {
     void given_no_active_provider_when_generate_then_prj_045() {
         when(providers.active()).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 1, null, null))
+        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 1, null, null, ImageAssetLane.DESIGN))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("图片生成供应商未配置");
     }
 
     @Test
     void given_unknown_workspace_when_generate_then_project_not_found() {
-        assertThatThrownBy(() -> service.generate("999999", null, null, "p", 1, null, null))
+        assertThatThrownBy(() -> service.generate("999999", null, null, "p", 1, null, null, ImageAssetLane.DESIGN))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("项目不存在");
     }
@@ -344,7 +399,7 @@ class ImageGenerationAppServiceTest {
                 .thenAnswer(invocation -> new ExecResult("not-a-number", "", 0));
 
         // exit 0 而 stdout 非字节回执：命令契约破坏，防御性如实暴露（不静默重试）
-        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 1, null, null))
+        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 1, null, null, ImageAssetLane.DESIGN))
                 .isInstanceOf(ApplicationException.class)
                 .extracting("codeMessage")
                 .isEqualTo(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
@@ -352,11 +407,11 @@ class ImageGenerationAppServiceTest {
 
     @Test
     void given_invalid_params_when_generate_then_rejected_before_any_touch() {
-        assertThatThrownBy(() -> service.generate(workspaceId, null, null, " ", 1, null, null))
+        assertThatThrownBy(() -> service.generate(workspaceId, null, null, " ", 1, null, null, ImageAssetLane.DESIGN))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 0, null, null))
+        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 0, null, null, ImageAssetLane.DESIGN))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 6, null, null))
+        assertThatThrownBy(() -> service.generate(workspaceId, null, null, "p", 6, null, null, ImageAssetLane.DESIGN))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(provider.calls).isEmpty();
     }

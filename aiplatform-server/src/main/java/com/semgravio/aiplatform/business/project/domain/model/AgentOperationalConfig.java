@@ -128,6 +128,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *                                   间接升档，修轮触发面收窄至样式合规；true＝恢复
  *                                   #425 原阻断形态〔强制档喂修轮＋修不完结构性拒绝＋
  *                                   耗尽段级回滚重跑〕。仅 run 执行体行消费）
+ * @param generateImageEnabled       构建轨出图工具开关（#545，ADR-0052 图片能力下放构建轨；
+ *                                   缺省 true＝下放——run 执行体槽位挂载 generate_image，
+ *                                   演示配图落 public/；false＝槽位不挂载、回无图现状。
+ *                                   仅 run 执行体行消费——设计执行体同名工具是骨架件、
+ *                                   恒挂载不读本列。写面＝既有工具面窄幅开关
+ *                                   〔PUT /agent-tools/generate_image〕，全量配置 PUT
+ *                                   携现行值不重置）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -159,6 +166,7 @@ public record AgentOperationalConfig(
         String decisionHintDisabled,
         boolean verifySelfDecisionEnabled,
         boolean robustLintBlockingEnabled,
+        boolean generateImageEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -170,12 +178,13 @@ public record AgentOperationalConfig(
      * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、决策时注入开＋阈值/
      * 上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、verify 自决开
      * （#442 缺省）、基座 lint 强制档阻断关（#541 让路缺省——违规只标注）、
+     * 构建轨出图工具开（#545 下放缺省——新能力随发版挂载）、
      * 无写者——装配解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
                 null, false, false, null, null, null, false, false, false, true, false, true,
-                null, null, null, true, false, null, null, null);
+                null, null, null, true, false, true, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

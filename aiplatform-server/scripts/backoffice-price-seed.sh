@@ -22,6 +22,9 @@
 #
 # #288 出图按张行（tokenKind 6=image，CNY/张；2026-10-06 核对各家官方定价页）：
 #   zhipu/glm-image 0.10（docs.bigmodel.cn 定价页）｜
+#   zhipu/cogview-4-250304 0.06（#545 快档起步，ADR-0052——构建轨下放缺省模型，
+#   2026-11-17 核对 bigmodel 定价页；与 glm-image 行并存：env ZHIPU_IMAGE_MODEL
+#   覆写/运营切模型时两行各接各的按张事件，不漂移）｜
 #   volcano/doubao-seedream-5-0-260128 0.22（ark 模型价格页，Seedream 5.0 lite 档）｜
 #   dashscope/qwen-image-3.0 0.18（百炼价格页，输出张计价——文生图无输入图）。
 #   openai/gpt-image-2.5-sunburst 不种：官方按 token 计价（image output $30/1M）、
@@ -73,6 +76,7 @@ SEED_ROWS=(
   "deepseek         deepseek-flash              3  2  0.00000002   CNY  $DEEPSEEK_EFFECTIVE_FROM"
   "deepseek         deepseek-flash              2  2  0.0000040    CNY  $DEEPSEEK_EFFECTIVE_FROM"
   # -- 出图按张（tokenKind 6=image，CNY/张） --
+  "zhipu            cogview-4-250304            6  -  0.06         CNY  $DEFAULT_EFFECTIVE_FROM"
   "zhipu            glm-image                   6  -  0.10         CNY  $DEFAULT_EFFECTIVE_FROM"
   "volcano          doubao-seedream-5-0-260128  6  -  0.22         CNY  $DEFAULT_EFFECTIVE_FROM"
   "dashscope        qwen-image-3.0              6  -  0.18         CNY  $DEFAULT_EFFECTIVE_FROM"

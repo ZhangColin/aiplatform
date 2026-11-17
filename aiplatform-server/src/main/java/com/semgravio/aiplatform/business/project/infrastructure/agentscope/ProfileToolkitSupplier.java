@@ -43,9 +43,12 @@ import io.agentscope.core.tool.Toolkit;
  * + propose_skill（技能自荐——验证过的编码模式写草稿待审，#259 自产线；骨架件
  * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）
  * + propose_sediment（沉淀自荐——可复用功能模块/业务规则写采集层草稿待审，
- * #460；骨架件无开关，软指引在工作协议——无内容不调用）；
+ * #460；骨架件无开关，软指引在工作协议——无内容不调用）＋generate_image
+ * （#545 图片能力下放构建轨，ADR-0052——演示配图落 public/；增强件，
+ * {@code gi} 规格件关即不挂载，回无图现状）；
  * {@link AgentProfile#DESIGNER 设计执行体} = generate_image（出图工具件，#288
- * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由），随设计面
+ * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由；骨架件
+ * 恒挂载不读 gi 件），随设计面
  * 工作区注册（写文件件是 harness 内建、经 ProjectDesign 形态自带——shell 与
  * 委派在工厂结构性关闭）；
  * verify 子键（#352，子智能体自有平台工具面——平台工厂构建子级时按此键取
@@ -69,6 +72,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     /** 工具面规格串的件键（与 {@code AgentConfigAppService#toolSpec} 编码对偶）。 */
     private static final String WEB_SEARCH_KEY = "ws";
     private static final String FETCH_URL_KEY = "fu";
+    /** #545 构建轨出图工具件键（run 执行体槽；缺省开，关＝槽位不挂载、回无图现状）。 */
+    private static final String BUILD_IMAGE_KEY = "gi";
 
     private final PrdArtifactAdapter prdArtifacts;
     private final FinishEditFacts finishFacts;
@@ -167,6 +172,14 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             // 无开关；软指引在工作协议——不绑时刻，无内容不调用）
             toolkit.registerAgentTool(new ProposeSedimentTool(dev.workspaceId(),
                     SkillSlot.EXECUTOR.key(), sedimentProposals));
+            // #545 图片能力下放构建轨（ADR-0052，ADR-0026 备案触发器兑现）：演示
+            // 数据配图（hero/关键实体/空态美化，落 public/、计量归 executor、转存
+            // 沿用既有）——增强件，运营开关关即槽位不挂载（回无图现状）；设计执行体
+            // 同名工具是骨架件、不读本规格件
+            if (AgentConfigAppService.toolEnabled(toolSpec, BUILD_IMAGE_KEY)) {
+                toolkit.registerAgentTool(GenerateImageTool.forBuild(dev.workspaceId(),
+                        imageGeneration, landedFiles));
+            }
         }
         // #289 设计执行体（设计面工作区）：出图工具件（#288 立内核、本票发放——
         // 档位表落提示词层，执行体按设计物语义自选；#292 落盘事实报进变更事实流，
@@ -174,8 +187,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         // 经 ProjectDesign 形态自带（shell/委派在工厂结构性关闭——本面零注册即无）
         if (AgentProfile.DESIGNER.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDesign design) {
-            toolkit.registerAgentTool(new GenerateImageTool(design.workspaceId(), imageGeneration,
-                    landedFiles, designSpecs));
+            toolkit.registerAgentTool(GenerateImageTool.forDesign(design.workspaceId(),
+                    imageGeneration, landedFiles, designSpecs));
         }
         // #352 verify 子键视图：子智能体自有平台工具面（验证结果登记＋技能自荐
         // subagent 槽血统实例）——平台工厂构建子智能体时按本键取视图合并进子级

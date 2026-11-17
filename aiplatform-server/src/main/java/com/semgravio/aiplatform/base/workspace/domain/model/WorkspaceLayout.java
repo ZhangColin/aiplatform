@@ -67,6 +67,15 @@ public final class WorkspaceLayout {
     public static final String DESIGN_DIR = "design";
 
     /**
+     * 应用静态资源目录（Next.js 约定：根 URL 直引，{@code public/x.png} →
+     * {@code /x.png}）。#545 图片能力下放构建轨（ADR-0052）：出图工具件在构建轨
+     * 的转存落点＝演示数据配图（首屏 hero／关键实体图／空态美化），是应用源码的
+     * 交付资产（进文件树、源码包、版本流），与设计轨 {@link #DESIGN_DIR} 产物
+     * （设计过程稿）两轨分立；不进骨架目录——转存命令 {@code mkdir -p} 幂等自愈。
+     */
+    public static final String PUBLIC_DIR = "public";
+
+    /**
      * 导出物目录（#283/ADR-0027）：平台打包的交付导出件落点（设计资产包 tar、
      * PNG 衍生下载件，#297 写入）。文件区可见；导出件可再生（源都在），但非
      * 缓存语义——随封存保全，不进可重建名单。

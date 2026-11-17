@@ -83,7 +83,18 @@ class AgentProfileTest {
                 // #541 lint 让路句锚点：收口照扫、违规标注不拦收口；阻断形态以回执为准
                 .contains("基座 lint")
                 .contains("不拦收口")
-                .contains("拒绝回执");
+                .contains("拒绝回执")
+                // #545 图片下放构建轨（ADR-0052）：工具点名＋演示配图用途＋少而精边界
+                //（个位数、不逐卡片、无机器上限）＋public/ 根路径引用
+                .contains("generate_image")
+                .contains("演示配图")
+                .contains("首屏 hero")
+                .contains("空状态")
+                .contains("少而精")
+                .contains("个位数")
+                .contains("不逐卡片")
+                .contains("没有机器上限")
+                .contains("public/");
         // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
         // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
         // 运营配置面可覆盖（ADR-0021）

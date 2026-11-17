@@ -67,6 +67,9 @@ import java.time.LocalDateTime;
  * @param oldRobustLintBlockingEnabled 变更前基座 lint 强制档阻断开关（#541；恒有值——
  *                                       缺省态恒 false＝让路）
  * @param newRobustLintBlockingEnabled 变更后基座 lint 强制档阻断开关（#541；恒有值）
+ * @param oldGenerateImageEnabled      变更前构建轨出图工具开关（#545；恒有值——缺省态恒
+ *                                       true＝下放，设计执行体同名工具不读本列）
+ * @param newGenerateImageEnabled      变更后构建轨出图工具开关（#545；恒有值）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -98,6 +101,7 @@ public record AgentConfigTrace(
         String oldDecisionHintDisabled,
         boolean oldVerifySelfDecisionEnabled,
         boolean oldRobustLintBlockingEnabled,
+        boolean oldGenerateImageEnabled,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -122,6 +126,7 @@ public record AgentConfigTrace(
         String newDecisionHintDisabled,
         boolean newVerifySelfDecisionEnabled,
         boolean newRobustLintBlockingEnabled,
+        boolean newGenerateImageEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

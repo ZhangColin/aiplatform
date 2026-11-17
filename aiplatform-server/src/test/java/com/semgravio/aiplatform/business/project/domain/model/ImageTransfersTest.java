@@ -15,10 +15,30 @@ class ImageTransfersTest {
     // ---------- 落点命名 ----------
 
     @Test
-    void given_generated_image_when_stored_path_then_design_dir_with_tsid_prefix() {
-        // 产物目录＝design/，TSID 前缀防撞（候选各代累积面，同名片不覆盖）
-        assertThat(ImageTransfers.storedPath("123456", "hero-海报", "png"))
+    void given_design_lane_when_stored_path_then_design_dir_with_tsid_prefix() {
+        // 设计轨：产物目录＝design/，TSID 前缀防撞（候选各代累积面，同名片不覆盖）
+        assertThat(ImageTransfers.storedPath("123456", "hero-海报", "png", ImageAssetLane.DESIGN))
                 .isEqualTo("design/123456-hero-海报.png");
+    }
+
+    @Test
+    void given_build_lane_when_stored_path_then_public_dir_with_tsid_prefix() {
+        // #545 构建轨（ADR-0052）：演示配图＝应用静态资产，落 public/（Next.js 根
+        // URL 直引）；TSID 前缀防撞同设计轨——与 design/ 两轨落点互不可误投
+        assertThat(ImageTransfers.storedPath("123456", "hero", "webp", ImageAssetLane.BUILD))
+                .isEqualTo("public/123456-hero.webp");
+    }
+
+    @Test
+    void given_build_lane_path_when_download_command_then_public_parent_and_viewable_guard() {
+        // public/ 是交付路径（非非交付名单）：同一 .part 守卫命令正本，父目录换 public
+        String command = ImageTransfers.downloadCommand("public/123-hero.png",
+                "https://cdn.example.com/img/abc.png");
+        assertThat(command)
+                .startsWith("mkdir -p '/workspace/public'")
+                .contains("'/workspace/public/123-hero.png.part'")
+                .contains("mv '/workspace/public/123-hero.png.part'"
+                        + " '/workspace/public/123-hero.png'");
     }
 
     // ---------- 扩展名收口 ----------

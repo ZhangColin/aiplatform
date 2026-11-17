@@ -366,8 +366,8 @@ class MainAgentAppServiceTest {
                 + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
                 + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(overridden.getValue().modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
-        // 开关库值编入规格串（ws 关、fu 缺省开）
-        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true");
+        // 开关库值编入规格串（ws 关、fu 缺省开；#545 gi 件恒随——main 槽不消费）
+        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true,gi=true");
 
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'main'");
         appService.runOpinionTurn(projectId, "再聊聊范围");
@@ -381,7 +381,8 @@ class MainAgentAppServiceTest {
                         + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(fallback.getAllValues().get(3).modelString())
                 .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
-        assertThat(fallback.getAllValues().get(3).toolSpec()).isEqualTo("ws=true,fu=true");
+        assertThat(fallback.getAllValues().get(3).toolSpec())
+                .isEqualTo("ws=true,fu=true,gi=true");
     }
 
     @Test

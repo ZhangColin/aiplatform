@@ -2569,8 +2569,9 @@ class GenerationAppServiceTest {
         // 编码命令实取库值（prompt 与模型档位两腿）；缺省回落腿由上方枚举默认断言钉死。
         // #341 起 Demo 阶段（executor）缺省＝快模型档，故覆盖档取强模型档以示库值
         // 优先（覆盖值≠缺省值，断言才有别于回落腿）。
-        // #252 增强工具开关同批编入 toolSpec（执行体槽无增强件，规格恒缺省开——
-        // 进缓存键保持规格一致）
+        // #252 增强工具开关同批编入 toolSpec（进缓存键保持规格一致）；#545 起
+        // executor 槽有构建轨出图增强件（gi），缺省规格三件全开
+        // ws=true,fu=true,gi=true
         Long projectId = persistedProject("9870");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -2587,7 +2588,7 @@ class GenerationAppServiceTest {
         AgentCommand stage0 = command.getAllValues().get(0);
         assertThat(stage0.systemPrompt()).isEqualTo("执行体覆盖协议：开工先列步骤。");
         assertThat(stage0.modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
-        assertThat(stage0.toolSpec()).isEqualTo("ws=true,fu=true");
+        assertThat(stage0.toolSpec()).isEqualTo("ws=true,fu=true,gi=true");
     }
 
     @Test

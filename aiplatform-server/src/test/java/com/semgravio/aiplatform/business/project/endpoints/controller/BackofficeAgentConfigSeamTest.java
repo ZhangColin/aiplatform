@@ -1051,6 +1051,25 @@ class BackofficeAgentConfigSeamTest {
                 .isFalse();
     }
 
+    // ---------- 构建轨出图开关（#545，ADR-0052；经既有工具面窄幅写口，全量 PUT 不重置） ----------
+
+    @Test
+    void given_build_image_tool_off_when_full_put_config_then_switch_preserved() throws Exception {
+        // 开关写面＝PUT /agent-tools/generate_image（复用既有工具面开关，无新命令字段）：
+        // 窄幅写口关掉后，配置全量 PUT（PUT 全量语义归一其余值面）携现行值不重置本列；
+        // 值面无动＝幂等零落痕
+        jdbcTemplate.update("INSERT INTO prj_agent_configs (agent_key, generate_image_enabled) "
+                + "VALUES ('executor', FALSE)");
+
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT generate_image_enabled FROM prj_agent_configs WHERE agent_key = 'executor'",
+                Boolean.class)).isFalse();
+        assertThat(traceRowCount()).isZero();
+    }
+
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
 
     @Test

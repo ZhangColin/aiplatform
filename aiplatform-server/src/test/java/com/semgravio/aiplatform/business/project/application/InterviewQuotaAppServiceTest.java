@@ -179,6 +179,52 @@ class InterviewQuotaAppServiceTest {
     }
 
     @Test
+    void given_trial_answered_full_when_ask_block_reason_then_blocked_with_closure_directive() {
+        // 提问侧额度闸（收口闸对偶）：答满五问后 ask_user 被拒——拒因点名 5/5、
+        // 指引停止提问并 savePrd（工具点拦漂移，不出第 6 张问答卡）
+        Long projectId = persistedInterviewProject("9612");
+        for (int i = 1; i <= 5; i++) {
+            saveAnsweredCard(projectId, "run-" + i, "问题" + i);
+        }
+
+        String reason = quotaAppService.exhaustedBlockReason(projectId);
+
+        assertThat(reason).isNotNull();
+        assertThat(reason).contains("平台拒绝").contains("5/5")
+                .contains("savePrd").doesNotContain("6/5");
+    }
+
+    @Test
+    void given_trial_unfilled_when_ask_block_reason_then_null() {
+        // 未答满：提问照常放行（恒 ASK 挂起）
+        Long projectId = persistedInterviewProject("9613");
+        saveAnsweredCard(projectId, "run-1", "目标用户是谁？");
+
+        assertThat(quotaAppService.exhaustedBlockReason(projectId)).isNull();
+    }
+
+    @Test
+    void given_paid_or_prd_produced_when_ask_block_reason_then_null() {
+        // 付费翻转 / PRD 已产出（非访谈期）：提问侧不拦——付费轨无提问上限
+        Long paidId = persistedInterviewProject("9614");
+        saveAnsweredCard(paidId, "run-1", "目标用户是谁？");
+        poolTopupAppService.topup(null, paidId, 1, null, null);
+        billingAppService.flipToPaid(paidId, FlipGate.INTERCEPT);
+
+        assertThat(quotaAppService.exhaustedBlockReason(paidId)).isNull();
+
+        Long prdId = persistedInterviewProject("9615");
+        for (int i = 1; i <= 5; i++) {
+            saveAnsweredCard(prdId, "run-p" + i, "问题" + i);
+        }
+        Project prdProject = projectRepository.findById(prdId).orElseThrow();
+        prdProject.markPrdProduced();
+        projectRepository.save(prdProject);
+
+        assertThat(quotaAppService.exhaustedBlockReason(prdId)).isNull();
+    }
+
+    @Test
     void given_no_question_cards_when_quota_then_answered_zero() {
         Long projectId = persistedInterviewProject("9606");
 

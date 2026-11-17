@@ -8,7 +8,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
-import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectEventTypes;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
@@ -36,38 +35,17 @@ public class PrdArtifactAdapter {
     private final ProjectRepository projectRepository;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
-    private final InterviewQuotaAppService interviewQuota;
 
     public PrdArtifactAdapter(ProjectRepository projectRepository,
             EventsAppService eventsAppService,
-            TransactionTemplate transactionTemplate,
-            InterviewQuotaAppService interviewQuota) {
+            TransactionTemplate transactionTemplate) {
         this.projectRepository = projectRepository;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
-        this.interviewQuota = interviewQuota;
     }
 
     public String workspacePath() {
         return ProjectArtifacts.PRD;
-    }
-
-    /**
-     * savePrd 提前收口准入缝（2026-11-17 用户裁决：五问＝对用户明示的承诺）：
-     * 试用访谈期未答满五问且无用户收敛令（fastLane attest）→ 返回模型可见拒因；
-     * 问满 / 付费态 / 非访谈期 → null 放行。工作区无项目（防御面）不拦。判定经
-     * {@link InterviewQuotaAppService#earlyClosureBlockReason} 单点（chip/收口
-     * 指令/本闸三读面同源）。读短事务——工具执行线程内同步调用。
-     */
-    public String earlyClosureBlockReason(String workspaceId, boolean convergenceCommanded) {
-        Long projectId = transactionTemplate.execute(tx ->
-                projectRepository.findByWorkspaceId(Long.parseLong(workspaceId))
-                        .map(Project::getId)
-                        .orElse(null));
-        if (projectId == null) {
-            return null;
-        }
-        return interviewQuota.earlyClosureBlockReason(projectId, convergenceCommanded);
     }
 
     public void onWritten(String workspaceId) {

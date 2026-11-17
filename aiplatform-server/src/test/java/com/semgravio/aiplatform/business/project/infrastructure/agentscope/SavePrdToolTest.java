@@ -21,6 +21,7 @@ import reactor.core.publisher.Mono;
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
+import com.semgravio.aiplatform.business.project.infrastructure.InterviewToolGate;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
@@ -51,13 +52,10 @@ class SavePrdToolTest {
     /** 登记替身：记录回调，可预设抛出（PrdArtifactAdapter 为具体类，以子类覆写）。 */
     private static final class RecordingAdapter extends PrdArtifactAdapter {
         final List<String> callbacks = new ArrayList<>();
-        final List<Boolean> convergenceArgs = new ArrayList<>();
         RuntimeException failure;
-        /** 非 null＝五问承诺闸拒绝（透传拒因）；缺省 null 放行。 */
-        String earlyBlock;
 
         RecordingAdapter() {
-            super(null, null, null, null);
+            super(null, null, null);
         }
 
         @Override
@@ -72,6 +70,17 @@ class SavePrdToolTest {
             }
             callbacks.add(workspaceId);
         }
+    }
+
+    /** 闸替身：记录 fastLane 透传，可预设拒因（InterviewToolGate 为具体类，子类覆写）。 */
+    private static final class RecordingGate extends InterviewToolGate {
+        final List<Boolean> convergenceArgs = new ArrayList<>();
+        /** 非 null＝五问承诺闸拒绝（透传拒因）；缺省 null 放行。 */
+        String earlyBlock;
+
+        RecordingGate() {
+            super(null, null, null);
+        }
 
         @Override
         public String earlyClosureBlockReason(String workspaceId, boolean convergenceCommanded) {
@@ -82,9 +91,11 @@ class SavePrdToolTest {
 
     private final RecordingExec exec = new RecordingExec();
     private final RecordingAdapter port = new RecordingAdapter();
+    private final RecordingGate gate = new RecordingGate();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
-    private final SavePrdTool tool = new SavePrdTool("docs/PRD.md", "42", port, prdRevisions, fastLaneFacts, exec);
+    private final SavePrdTool tool = new SavePrdTool("docs/PRD.md", "42", port, gate,
+            prdRevisions, fastLaneFacts, exec);
 
     @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
@@ -160,7 +171,7 @@ class SavePrdToolTest {
     void given_trial_quota_open_natural_close_when_called_then_blocked_without_write_or_facts() {
         // 五问承诺闸（2026-11-17 用户裁决）：试用访谈未答满五问且无收敛令——拒因
         // 模型可见，不落盘、不置位、不落任何事实（拒因文本由额度服务单点产出）
-        port.earlyBlock = "平台拒绝本次 savePrd：五问额度尚未用满（已答 2/5 问）……继续 ask_user 提问";
+        gate.earlyBlock = "平台拒绝本次 savePrd：五问额度尚未用满（已答 2/5 问）……继续 ask_user 提问";
 
         ToolResultBlock result = call("# PRD", "判定明确，产出 PRD");
 
@@ -178,7 +189,7 @@ class SavePrdToolTest {
         call("# PRD", "收敛令收口：用户明确说直接开始做", true);
         call("# PRD", "问满五问自然收口", null);
 
-        assertThat(port.convergenceArgs).containsExactly(Boolean.TRUE, Boolean.FALSE);
+        assertThat(gate.convergenceArgs).containsExactly(Boolean.TRUE, Boolean.FALSE);
         assertThat(exec.commands).hasSize(2);
         assertThat(port.callbacks).hasSize(2);
     }

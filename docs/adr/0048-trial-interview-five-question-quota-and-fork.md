@@ -41,6 +41,16 @@
 - 同次修复的呈现缺陷：追问挂起轮不发 run-finish，conversation 域（含额度读面）唯一失效点不触发，「已答 N/5」chip 全程冻在初值——question-raised 事件补定向失效额度键。
 - 付费轨、第 5 答收口指令、收窄合法形/纠偏链、岔路口三选与「继续讨论」引导流全部不动。
 
+## 补记（2026-11-17，提问侧工具闸：第 6 问不得出卡）
+
+五问承诺闸上线当晚实测（项目 381073661124370156）：第 5 答后续跑的 system prompt 已尾附收口指令，模型仍漂移调用 ask_user 提出第 6 问——工具恒 ASK 挂起、问答卡实时呈现给用户；平台只能在**轮落定后**经收窄链（合法形收窄＋收口作答代答）把问题按推荐补全收口。用户体感＝承诺 5 问却看到第 6 问，且智能体对着一张用户没回答的卡「自说自话」。根因：savePrd 有提前收口闸（工具点拦截），ask_user 没有对称的提问侧闸，收窄只是事后观测。
+
+- **提问侧额度闸**：`AskUserTool.checkPermissions` 经新 `InterviewToolGate.questionBlockReason`（workspaceId→projectId 短事务，同读 `InterviewQuotaAppService` 单源）判定——试用访谈期已答满 5 问返回 **PASSTHROUGH**（不挂起、不发 RequireUserConfirmEvent、不出问答卡），执行体 `callAsync` 回模型可见错误拒因（点名「已答 5/5」、指令停止提问并立即 savePrd），模型同轮转产出；未问满/付费态/非访谈期恒 ASK 不变。拒因只走工具错误结果通道（同 savePrd 闸），不进工具 input（#34 防自答教学）；动作行封闭表不含 ask_user/savePrd，闸拒零用户面事件。
+- **fail-open**：闸查询异常（库抖动）按 ASK 放行——轮落定收窄链（第 5 答后挂起代答收口）保留为防御纵深，不因读面故障卡死访谈。
+- **缝归位**：原寄生在 `PrdArtifactAdapter` 的 savePrd 提前收口准入缝迁入 `InterviewToolGate`（提问/产出两缝同件、workspaceId 解析单源）；PrdArtifactAdapter 回归纯 PRD 落盘登记。chip/收口指令/提问闸/产出闸四读面同源 `computeQuota`。
+- 提示词对称点明：试用轨协议段补「第五问答复后 ask_user 调用同样会被拒绝」；ask_user 工具描述补五问用尽后的拒绝语义；`QUOTA_CLOSURE_TAIL` 不动（停止提问指令已在）。
+- live 回归面：`MainAgentSessionSmokeTest` 增「答满五问后 question-raised 帧冻结」断言（漂移提问零挂起）；收窄代答链测试仍在（模拟挂起漏网的防御面）。
+
 ## 补记（2026-11-17，问答卡「第 N 问」序号）
 
 五问改判为承诺题量后，顶部「已答 N/5 问」chip 不随卡可见——用户在卡上感知不到这是第几问。问答卡头部加「第 N 问」徽标。

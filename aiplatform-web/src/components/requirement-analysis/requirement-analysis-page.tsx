@@ -72,13 +72,17 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
 
   // 首 Demo 自动切页（#462 去确认门，ADR-0039）：首个构建 run 起跑自动记行→
   // 版本清单由空转非空即首 Demo 在途——界面自动切 Demo 体验页（可切回：仅
-  // 转换点跳一次，同 seenPrdProduced 先例——渲染期派生态，挂载即在场不重跳）
+  // 转换点跳一次，挂载即在场的存量项目不跳）。导航是副作用：只能在 effect 里
+  // 调 router.push——渲染期调用会触发 React「Cannot update a component (Router)
+  // while rendering a different component」（setState 派生态不能混入路由跳转）
   const hasPrdVersions = !!prdVersions && prdVersions.length > 0;
-  const [seenPrdVersions, setSeenPrdVersions] = useState(hasPrdVersions);
-  if (hasPrdVersions !== seenPrdVersions) {
-    setSeenPrdVersions(hasPrdVersions);
-    if (hasPrdVersions) router.push(`/projects/${projectId}/demo`);
-  }
+  const prevHasPrdVersions = useRef(hasPrdVersions);
+  useEffect(() => {
+    if (hasPrdVersions && !prevHasPrdVersions.current) {
+      router.push(`/projects/${projectId}/demo`);
+    }
+    prevHasPrdVersions.current = hasPrdVersions;
+  }, [hasPrdVersions, projectId, router]);
 
   // 「断线」语义 = 连上过再掉线（装配口径沿旧项目页）：通道从未连上不武装计时
   const wasConnected = useRef(false);

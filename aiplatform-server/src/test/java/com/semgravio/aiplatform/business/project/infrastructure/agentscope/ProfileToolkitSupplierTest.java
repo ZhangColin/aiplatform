@@ -32,6 +32,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentToolKind;
 import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetcher;
 import com.semgravio.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.semgravio.aiplatform.business.project.infrastructure.InterviewToolGate;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SedimentProposalAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SkillProposalAdapter;
@@ -62,6 +63,7 @@ import reactor.core.publisher.Mono;
 class ProfileToolkitSupplierTest {
 
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
+    private final InterviewToolGate interviewToolGate = mock(InterviewToolGate.class);
     private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
@@ -84,7 +86,7 @@ class ProfileToolkitSupplierTest {
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+        return new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
                 fastLaneFacts, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
@@ -282,7 +284,7 @@ class ProfileToolkitSupplierTest {
             String slotKey) {
         RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
                 fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
@@ -355,7 +357,7 @@ class ProfileToolkitSupplierTest {
     private void assertProposeLineage(String agentKey, AgentWorkspace workspace, String slotKey) {
         RecordingProposeAdapter recorder = new RecordingProposeAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
                 fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,

@@ -43,7 +43,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * <p>验收口径：一句话开场 → 实质提问（QUESTION 载荷带前端问答卡形状，经 JSON
  * 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ <b>答满五问才
  * 收口</b>（2026-11-17 五问承诺：纯信息答复不构成收敛令，未答满的 savePrd 被
- * 工具闸拒绝；第 5 答带收口指令→主智能体停止提问）→ savePrd 产出 PRD（工作区
+ * 工具闸拒绝；第 5 答带收口指令→主智能体停止提问，漂移的第 6 问在 ask_user
+ * 工具点被拒因拦回、零问答卡挂出）→ savePrd 产出 PRD（工作区
  * 文件 + 状态位 + document-updated，修订再执行三更新）→ 同会话上下文延续；
  * 计量落 UsageEvent（dims.agentKind=main）。</p>
  */
@@ -180,22 +181,37 @@ class MainAgentSessionSmokeTest {
         };
         String outcome = awaitResumeOutcome(allRunIds(), seenRefs);
         int guard = 0;
+        // 答满五问瞬间的 question-raised 帧数（基线必须在第 5 答落库后、下一次
+        // await 之前采——放到 await 之后会让失效路径里的第 6 张卡混进基线，断言恒真）
+        int questionsAtQuotaFull = -1;
         while (!"finished".equals(outcome)) {
-            // 答满五问后平台收口纠偏链接管：模型若漂移再提问，平台在同队列内代答并
-            // 携收口指令续跑（代答不落用户作答行、计数不增）——测试不得再作答那些
-            // 漂移问题（那是平台的轮次），只观测到 run 收口为止
+            // 答满五问后提问侧闸（AskUserTool 工具点拒因）是主防线：模型漂移再提问
+            // 不挂起、不出 question-raised、同轮转 savePrd；闸漏网的边角挂起才由收口
+            // 纠偏链代答（不落用户作答行、计数不增）——两种情形测试都不得再作答，
+            // 只观测到 run 收口为止
             if (conversationHistory.answeredGapCount(projectId) >= 5) {
                 outcome = awaitResumeOutcome(allRunIds(), seenRefs);
             } else {
                 Frame pending = questionFrameByRef(outcome);
                 seenRefs.add(outcome);
                 settle(pending, moreAnswers[conversationHistory.answeredGapCount(projectId) - 2]);
+                if (questionsAtQuotaFull < 0
+                        && conversationHistory.answeredGapCount(projectId) >= 5) {
+                    // 第 5 答已同步落库：此刻的卡数即基线（正常＝5 张、各占一号）
+                    questionsAtQuotaFull = questionRaisedFrameCount();
+                }
                 outcome = awaitResumeOutcome(allRunIds(), seenRefs);
             }
             assertThat(guard++).as("五问访谈收口循环超限（事件序：%s）",
                     frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
                     .isLessThan(10);
         }
+        // 提问侧额度闸（2026-11-17 修：实测第 6 问先出卡再自问自答）：答满五问后
+        // question-raised 帧一个都不许再多——漂移提问在工具点拦下，零第 6 张卡
+        assertThat(questionsAtQuotaFull).as("五问基线已采到（第 5 答落库点）").isNotNegative();
+        assertThat(questionRaisedFrameCount())
+                .as("答满五问后零漂移问答卡挂出（提问侧闸）")
+                .isEqualTo(questionsAtQuotaFull);
         // 收口时恰答五问（平台代答的漂移问题不落用户作答行；同缺口重派不另计）
         assertThat(conversationHistory.answeredGapCount(projectId))
                 .as("已答问答缺口数").isEqualTo(5);
@@ -466,6 +482,13 @@ class MainAgentSessionSmokeTest {
     /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源；#83 拆分后纯 QUESTION——kind 键已退役）。 */
     private Frame awaitQuestionOf(String runId) {
         return awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
+    }
+
+    /** 已到达的 question-raised 帧总数（提问侧闸回归断言：答满五问后冻结）。 */
+    private int questionRaisedFrameCount() {
+        return (int) frames.stream()
+                .filter(f -> AgentEventTypes.QUESTION_RAISED.equals(f.type()))
+                .count();
     }
 
     /** 挂起事件的引擎侧请求 id（答复续跑的锚——一轮一值）。 */

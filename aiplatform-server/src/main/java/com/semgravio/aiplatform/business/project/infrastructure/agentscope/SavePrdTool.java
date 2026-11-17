@@ -17,6 +17,7 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWai
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
+import com.semgravio.aiplatform.business.project.infrastructure.InterviewToolGate;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
@@ -30,7 +31,7 @@ import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapt
  * {@link FastLaneFacts}——{@code fastLane=true} 即快道收口〔用户明确收敛令/付费
  * 「直接开始做」视同确认〕，收口观测直派首个构建、不出卡不确认；缺席＝自然收口，
  * 试用态出岔路口三选卡、付费态确认门在场——#542，ADR-0048/0049）+ <b>五问承诺闸</b>
- *（{@link PrdArtifactAdapter#earlyClosureBlockReason}——试用访谈期未答满五问且无
+ *（{@link InterviewToolGate#earlyClosureBlockReason}——试用访谈期未答满五问且无
  * 用户收敛令即拒，拒因模型可见、不落盘不置位；2026-11-17 用户裁决：「已答 N/5」
  * 是明示承诺，除非用户明确不要否则问满）。
  * 落盘/回调任一失败回错误结果（模型
@@ -56,6 +57,7 @@ public class SavePrdTool extends ToolBase {
 
     private final String workspaceId;
     private final PrdArtifactAdapter artifactAdapter;
+    private final InterviewToolGate quotaGate;
     private final PrdRevisionFacts prdRevisions;
     private final FastLaneFacts fastLaneFacts;
     private final String containerFile;
@@ -63,17 +65,18 @@ public class SavePrdTool extends ToolBase {
 
     public SavePrdTool(String artifactPath, String workspaceId, String containerName,
             WorkspaceReadinessWaiter readinessWaiter,
-            PrdArtifactAdapter artifactAdapter, PrdRevisionFacts prdRevisions,
-            FastLaneFacts fastLaneFacts) {
-        this(artifactPath, workspaceId, artifactAdapter, prdRevisions, fastLaneFacts,
+            PrdArtifactAdapter artifactAdapter, InterviewToolGate quotaGate,
+            PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts) {
+        this(artifactPath, workspaceId, artifactAdapter, quotaGate, prdRevisions,
+                fastLaneFacts,
                 ReadinessAwaitingExecCommand.dockerExec(containerName,
                         WorkspaceId.of(workspaceId), readinessWaiter));
     }
 
     /** 执行缝注入构造（单测替身 ExecCommand）。 */
     SavePrdTool(String artifactPath, String workspaceId, PrdArtifactAdapter artifactAdapter,
-            PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
-            DockerExecFilesystem.ExecCommand exec) {
+            InterviewToolGate quotaGate, PrdRevisionFacts prdRevisions,
+            FastLaneFacts fastLaneFacts, DockerExecFilesystem.ExecCommand exec) {
         super(ToolBase.builder()
                 .name(NAME)
                 .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。调用时机：付费态"
@@ -112,6 +115,7 @@ public class SavePrdTool extends ToolBase {
                 .concurrencySafe(false));
         this.workspaceId = workspaceId;
         this.artifactAdapter = artifactAdapter;
+        this.quotaGate = quotaGate;
         this.prdRevisions = prdRevisions;
         this.fastLaneFacts = fastLaneFacts;
         this.containerFile = AgentWorkspace.ProjectDev.CONTAINER_ROOT + "/" + artifactPath;
@@ -146,7 +150,7 @@ public class SavePrdTool extends ToolBase {
         // 提前收口准入（2026-11-17 用户裁决：五问＝对用户明示的承诺）：试用访谈期
         // 未答满五问且无用户收敛令——拒因模型可见、不落盘不置位，指引继续 ask_user
         //（对偶 ①族守卫即改即愈口径）。问满/付费态/非访谈期返回 null 零影响。
-        String earlyBlock = artifactAdapter.earlyClosureBlockReason(workspaceId, fastLane);
+        String earlyBlock = quotaGate.earlyClosureBlockReason(workspaceId, fastLane);
         if (earlyBlock != null) {
             return Mono.just(ToolResultBlock.error(earlyBlock));
         }

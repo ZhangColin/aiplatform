@@ -20,6 +20,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetcher;
 import com.semgravio.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.semgravio.aiplatform.business.project.infrastructure.InterviewToolGate;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SedimentProposalAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SkillProposalAdapter;
@@ -76,6 +77,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private static final String BUILD_IMAGE_KEY = "gi";
 
     private final PrdArtifactAdapter prdArtifacts;
+    private final InterviewToolGate interviewToolGate;
     private final FinishEditFacts finishFacts;
     private final PrdRevisionFacts prdRevisions;
     private final FastLaneFacts fastLaneFacts;
@@ -93,7 +95,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final AgentConfigAppService agentConfigs;
     private final WorkspaceReadinessWaiter readinessWaiter;
 
-    public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
+    public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts,
+            InterviewToolGate interviewToolGate, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
             BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -104,6 +107,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             VerificationFacts verificationFacts, AgentConfigAppService agentConfigs,
             WorkspaceReadinessWaiter readinessWaiter) {
         this.prdArtifacts = prdArtifacts;
+        this.interviewToolGate = interviewToolGate;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
         this.fastLaneFacts = fastLaneFacts;
@@ -127,10 +131,10 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         Toolkit toolkit = new Toolkit();
         if (AgentProfile.MAIN.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {
-            toolkit.registerAgentTool(new AskUserTool());
+            toolkit.registerAgentTool(new AskUserTool(ro.workspaceId(), interviewToolGate));
             toolkit.registerAgentTool(new SavePrdTool(prdArtifacts.workspacePath(),
                     ro.workspaceId(), ro.containerName(), readinessWaiter, prdArtifacts,
-                    prdRevisions, fastLaneFacts));
+                    interviewToolGate, prdRevisions, fastLaneFacts));
             toolkit.registerAgentTool(new SaveBuildPlanTool(ro.workspaceId(), buildPlanFacts));
             toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.workspaceId(),
                     ro.containerName(), readinessWaiter));

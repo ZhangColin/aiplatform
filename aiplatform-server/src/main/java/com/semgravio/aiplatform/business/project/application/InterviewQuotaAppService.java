@@ -21,9 +21,11 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * 产出即访谈收口——读面整体缺席（null），chip 不呈现。归档项目照读（对话区
  * 只读终态，额度面同对话史口径）。</p>
  *
- * <p>同一计算体还承载 savePrd 五问承诺闸（{@link #earlyClosureBlockReason}，
- * 2026-11-17 用户裁决：5 不只是上限也是常态题量——chip/收口指令/工具闸三读面
- * 同源）。</p>
+ * <p>同一计算体还承载一对工具侧承诺闸（2026-11-17 用户裁决：5 不只是上限也是
+ * 常态题量——chip/收口指令/提问闸/产出闸四读面同源，经 infrastructure 层
+ * {@code InterviewToolGate} 按 workspaceId 取用）：savePrd 提前产出闸
+ * （{@link #earlyClosureBlockReason}）与 ask_user 提问侧闸
+ * （{@link #exhaustedBlockReason}——答满后漂移提问工具点拦下、不出第 6 张卡）。</p>
  */
 @Service
 public class InterviewQuotaAppService {
@@ -97,5 +99,32 @@ public class InterviewQuotaAppService {
                 + " 问后再保存 PRD。唯一例外：用户明确表达「不用再问了/直接出 PRD/"
                 + "直接开始做」（收敛令）时可提前收口——那时将本工具入参 fastLane 传 "
                 + "true 再调用。";
+    }
+
+    /**
+     * 提问侧额度闸（2026-11-17 收口闸对偶）：试用访谈期五问已答满时，ask_user
+     * 不再放行——第 5 答后的续跑命令已尾附收口指令，漂移提问必须在<b>工具点</b>
+     * 拦下（不挂起、不出问答卡、不发 question-raised），而非等轮落定后由收口
+     * 纠偏链平台代答（旧形态：第 6 问先出卡给用户、再被「按推荐补全」自问自答，
+     * 实测项目 381073661124370156）。未问满 / 付费翻转 / PRD 已产出 / 已生成
+     * （非访谈期）返回 null 放行。
+     *
+     * @return null＝放行（恒 ASK 挂起）；非 null＝模型可见拒因（工具自检
+     *         PASSTHROUGH、执行体回错误结果——同 savePrd 闸拒形态，指引当轮收口）
+     */
+    public String exhaustedBlockReason(Long projectId) {
+        InterviewQuotaResponse quota = computeQuota(projectId);
+        if (quota == null || quota.answered() < quota.total()) {
+            return null;
+        }
+        return "平台拒绝本次 ask_user：本项目试用访谈的五问额度已用尽（已答 "
+                + quota.answered() + "/" + quota.total()
+                + " 问），提问没有生效、不会呈现给用户。立即严格执行收口指令：停止"
+                + "一切提问（不要再调用 ask_user），剩余必答缺口全部按推荐补全（以"
+                + "专业身份直陈决定本身、禁用「假设/如果/我猜」字眼、对应用逻辑与 UI "
+                + "操作的自洽负推理责任），随即 load_skill_through_path 加载 prd-writing "
+                + "技能（path 传 SKILL.md）并调用 savePrd 保存完整 PRD（content 传完整 "
+                + "PRD markdown 全文，summary 必传）。保存成功后向用户输出简短总结，"
+                + "除此之外不要再做别的。";
     }
 }

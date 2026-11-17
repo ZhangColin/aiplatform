@@ -22,6 +22,7 @@ import com.semgravio.aiplatform.business.project.application.AgentConfigAppServi
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.BuildPlanFacts;
+import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.application.VerificationFacts;
@@ -63,6 +64,7 @@ class ProfileToolkitSupplierTest {
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
     private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
+    private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
     private final BuildPlanFacts buildPlanFacts = new BuildPlanFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
@@ -78,13 +80,12 @@ class ProfileToolkitSupplierTest {
     private final VerificationFacts verificationFacts = new VerificationFacts();
 
     /** 装配读面桩（#424 轮次预算动态供数——仅 verify 工具调用时读，装配不触）。 */
-    private final com.semgravio.aiplatform.business.project.application.AgentConfigAppService
-            agentConfigs = org.mockito.Mockito.mock(
-                    com.semgravio.aiplatform.business.project.application.AgentConfigAppService.class);
+    private final AgentConfigAppService agentConfigs = mock(AgentConfigAppService.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
+        return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+                fastLaneFacts, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
                 landedFiles, designSpecs, verificationFacts, agentConfigs, readinessWaiter);
@@ -250,7 +251,7 @@ class ProfileToolkitSupplierTest {
         RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
-                buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+                fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
                 readinessWaiter);
@@ -323,7 +324,7 @@ class ProfileToolkitSupplierTest {
         RecordingProposeAdapter recorder = new RecordingProposeAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
-                buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+                fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
                 readinessWaiter);

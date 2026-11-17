@@ -311,6 +311,12 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 轮收口即对话史有新条目（发言+回复 / 收尾卡落库）——失效对话域，水合增量
         // 接管 live 片段（#89：闭史以 REST 为准）
         void queryClient.invalidateQueries({ queryKey: queryKeys.conversation.all });
+        // 首建派发门读面（#542 访谈②）：主智能体轮收口＝岔路口置卡/快道直派的变化
+        // 点（服务端轮收口侧落位）——定向失效本键（编码 run 的起跑/收口走上方
+        // projects 域失效，已覆盖）
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.projects.buildGate(payload.projectId),
+        });
         return;
       }
       case "guide-reply": {

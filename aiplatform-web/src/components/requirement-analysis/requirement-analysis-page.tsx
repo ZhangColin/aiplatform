@@ -202,6 +202,7 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
               <Skeleton className="h-full w-full rounded-2xl" />
             ) : prd.data ? (
               <PrdPanel
+                projectId={projectId}
                 content={prd.data.content ?? ""}
                 readiness={prd.data.readiness ?? undefined}
                 articleRef={articleRef}

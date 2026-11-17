@@ -1,9 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { components } from "@/lib/api/schema";
 
 import { PrdPanel } from "./prd-panel";
+
+const gateState = vi.hoisted(() => ({ confirmable: false }));
+vi.mock("@/hooks/use-build-gate", () => ({
+  useBuildGate: () => ({ data: { prdConfirmable: gateState.confirmable } }),
+  useConfirmPrdGeneration: () => ({ mutate: () => {}, isPending: false }),
+}));
 
 type PrdReadiness = components["schemas"]["PrdReadinessResponse"];
 
@@ -33,7 +39,7 @@ function renderPanel({
   content?: string;
   readiness?: PrdReadiness;
 } = {}) {
-  return renderToStaticMarkup(<PrdPanel content={content} readiness={readiness} />);
+  return renderToStaticMarkup(<PrdPanel projectId="9001" content={content} readiness={readiness} />);
 }
 
 describe("PrdPanel · 文档头（照原型）", () => {
@@ -92,5 +98,24 @@ describe("PrdPanel · SPEC_PARSER 审计条（静态照原型，票注明示）"
     expect(html).toContain("基线语义哈希");
     expect(html).toContain("已准备生成下一阶段工程原语");
     expect(html).toContain("核对规则表");
+  });
+});
+
+describe("PrdPanel · 付费轨首建确认门（#542，ADR-0049 原动作形态恢复）", () => {
+  it("门读面为真：确认按钮在场（确认 PRD，开始生成——被确认的是文档，按钮随文档面）", () => {
+    gateState.confirmable = true;
+    try {
+      const html = renderPanel();
+      expect(html).toContain("确认 PRD，开始生成");
+      expect(html).toContain("data-prd-confirm");
+    } finally {
+      gateState.confirmable = false;
+    }
+  });
+
+  it("门读面为假：无确认按钮（试用轨岔路口点火/首建已派发）", () => {
+    gateState.confirmable = false;
+    const html = renderPanel();
+    expect(html).not.toContain("确认 PRD，开始生成");
   });
 });

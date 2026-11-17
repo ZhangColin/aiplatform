@@ -251,7 +251,12 @@ public enum ProjectMessage implements CodeMessage {
     DECISION_HINT_STACK_CAP_INVALID(400, "PRJ_082", "决策时注入的堆叠上限须为 1-3 的整数（null/缺省＝回落代码缺省 3）：{0}"),
 
     /** 决策时注入禁用集越出封闭集（#437）：token 须为库条目键——错值写不进去（null/缺省＝全启用）。 */
-    DECISION_HINT_KIND_INVALID(400, "PRJ_083", "决策时注入的禁用集条目须为封闭集内的值：{0}（可选 failure_stop_loss/anti_mock/context_economy/parallel_tools；null/缺省＝全启用）");
+    DECISION_HINT_KIND_INVALID(400, "PRJ_083", "决策时注入的禁用集条目须为封闭集内的值：{0}（可选 failure_stop_loss/anti_mock/context_economy/parallel_tools；null/缺省＝全启用）"),
+
+    // ========== 岔路口与派发门（#542 访谈②，ADR-0048 切片②＋ADR-0049——两入口退役、确认门恢复） ==========
+
+    /** PRD 确认动作守卫：确认门属付费轨首建点火——试用项目的首建点火动作是岔路口「立即生成」。 */
+    PRD_CONFIRMATION_NOT_PAID(409, "PRJ_084", "PRD 确认是付费项目的首建点火动作——试用项目请在岔路口选择「立即生成」");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销（后继 PRJ_053 两级门亦已随
     // 确认门整段退役——见上方 PRJ_053 注）

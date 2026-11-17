@@ -45,7 +45,7 @@ export type StageGateFacts = {
 
 /** 灰置原因（用户语言，点击说明——门与该去哪一步都说清）。 */
 const LOCK_REASONS: Partial<Record<DeliveryStageKey, string>> = {
-  demo: "首个 Demo 生成后开放：PRD 产出后平台会自动开始生成",
+  demo: "首个 Demo 生成后开放：PRD 产出后即可开始生成（试用项目在岔路口选「立即生成」、付费项目确认 PRD 后起跑）",
   contract: "Demo 确认后开放：请先在 Demo 体验页确认此版本",
   production: "付款完成后开放：请先完成签约付款",
 };

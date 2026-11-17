@@ -9,6 +9,7 @@ import type { components } from "@/lib/api/schema";
 import { splitPrdSections } from "@/lib/projects/prd-sections";
 
 import { prdMarkdownComponents } from "../project-page/prd-doc";
+import { PrdConfirmGate } from "../project-page/prd-confirm-gate";
 
 type PrdReadiness = components["schemas"]["PrdReadinessResponse"];
 
@@ -25,10 +26,13 @@ type PrdReadiness = components["schemas"]["PrdReadinessResponse"];
  * （打印/Word）取件面＝articleRef 所指正文容器（页面装配层持有）。</p>
  */
 export function PrdPanel({
+  projectId,
   content,
   readiness,
   articleRef,
 }: {
+  /** 项目寻址（确认门读面/确认动作的挂点，#542）。 */
+  projectId: string;
   /** PRD markdown 正文（当前工作稿）。 */
   content: string;
   /** #331 就绪投影（缺省＝后端未投影——徽标行不出）。 */
@@ -126,6 +130,11 @@ export function PrdPanel({
           ))}
         </article>
       </div>
+
+      {/* 付费轨首建确认门（#542，ADR-0049）：确认即派发首个构建——被确认的是
+          文档，门件随文档面（sticky 钉正文滚动区底，读面隐藏即不在场；呈现条件
+          归门件内 GET /build-gate 服务端单源） */}
+      <PrdConfirmGate projectId={projectId} variant="panel" />
 
       {/* SPEC_PARSER 审计条（静态照原型，票注明示；装饰件非控件） */}
       <div className="flex shrink-0 flex-col items-center justify-between gap-3 border-t border-slate-soft/80 bg-surface-dawn/90 p-4 sm:flex-row">

@@ -526,6 +526,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/prd/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认 PRD，开始生成（付费轨首建点火——确认即派发首个构建）
+         * @description ADR-0049 恢复 #462 之前的<b>原确认动作形态</b>（PRD 文档面按钮＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/断点续跑同构）；<b>版本机制零改动</b>——确认不写版本行（旧「确认即成版」#330 写表语义不复活），记行归 Demo 类 run 起跑单点、版本号＝构建基准序全域一致。<b>点击幂等</b>＝已点火重复确认 409 PRJ_017（不重复派发），失败重试走「继续生成」（POST /{id}/generate）不重复确认；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable（付费态∧PRD 在∧首建未点火）。错误码：PRJ_084 试用项目（岔路口「立即生成」即点火）；PRJ_018 PRD 尚未产出；PRJ_013 已归档；PRJ_017 已点火或生成在途；PRJ_042 设计未定稿（设计轨构建从定稿设计稿长出）；BILL_025 源池余额不足（充值回正自动重派）。项目不存在 404 PRJ_001
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 409 PRJ_013 — 项目已归档（归档是单向终点）
+         *     - 409 PRJ_017 — 系统已生成或正在生成中，请勿重复发起
+         *     - 409 PRJ_018 — PRD 尚未产出，先在对话区把需求聊出 PRD——确认此版后平台开始生成 Demo
+         *     - 409 PRJ_042 — 设计尚未定稿，系统从定稿设计稿长出
+         *     - 409 PRJ_084 — PRD 确认是付费项目的首建点火动作——试用项目请在岔路口选择「立即生成」
+         *     - 409 BILL_025 — 源池余额不足（请先充值，到账后自动继续）
+         */
+        post: operations["confirmPrdGeneration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/messages": {
         parameters: {
             query?: never;
@@ -596,8 +625,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 继续生成（断点续跑；首个 Demo 由确认触发）
-         * @description #332 生成加门后，首个构建 run 由「确认此版 PRD」触发——本端点是「继续生成」出口的载体（run-failed 或生成中断后仍可用）——run-failed 或生成中断后项目仍「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮，补产收口自动再派生成；同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次＝原地修（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（系统终点首个 Demo 由确认触发，本端点服务「继续生成」，本守卫拦未产出直连调用）；设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、系统＋设计设计先行——构建从定稿设计稿长出）；项目不存在 404 PRJ_001
+         * 生成点火与继续生成（岔路口「立即生成」/断点续跑共用单出口）
+         * @description #542 首建派发门（ADR-0048/0049——自动派发两入口退役）：试用态岔路口三选卡的「立即生成」＝本端点点火首个构建（PRD 已照产可看、平台承担本次）；付费轨首建的点火动作是 PRD 确认（POST /{id}/prd/confirm，失败重试也回本端点——不重复确认）。断点续跑（#221）同口：run-failed 或生成中断后项目仍「未生成」，重发即从断点接续——跳过已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮；补产完成后岔路口卡/确认按钮照旧在场，再点一次本端点即起跑——同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次＝原地修（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（点火前置＝PRD 在——本守卫拦未产出直连调用）；设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、系统＋设计设计先行——构建从定稿设计稿长出）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -2012,6 +2041,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/billing/projects/{projectId}/deduction-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 扣减源调整（用户选错池的后台救济通道）
+         * @description 覆盖既有选定＋操作者留痕（bil_project_billing 源列＋动作行旧/新源快照）；选「账户余额」须带账户定格（400 BILL_009）；源码缺失/未知 400 BILL_024。源调整不动账（流水/池/余额三列落空）。需要机机签名
+         *
+         *     错误码：
+         *     - 400 BILL_009 — 选择账户余额为扣减源须先登录绑定账号
+         *     - 400 BILL_024 — 扣减源码无效（1=账户余额 2=项目余额）
+         */
+        post: operations["reselectSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/billing/params/{paramKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 计费运营参数调整（全局折算率）
+         * @description 键不存在 404 BILL_015；值非正 400 BILL_016。参数行 UPDATE 自带操作者留痕（bil_params 非 append-only）；调整只影响此后结算（扣减行快照不漂移）。需要机机签名
+         *
+         *     错误码：
+         *     - 404 BILL_015 — 计费参数不存在
+         *     - 400 BILL_016 — 计费参数值无效（须为正数）
+         */
+        post: operations["adjustParam"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/billing/manual-topups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动充值录入（对公转账——仿凭证核验留痕）
+         * @description 实到金额/到账时间/依据三字段必填（任一缺失即拒 400 BILL_021、零副作用——必填即拒单一口径）；核验字段随动作明细（detail JSONB）落痕。入账口径与赠送同（项目池入账即选源）；备注缺省落「对公转账手动充值」。实到金额显式非正 400 BILL_002；目标不恰一 400 BILL_001。需要机机签名
+         *
+         *     错误码：
+         *     - 400 BILL_001 — 入账目标非法（账户与项目恰选其一）
+         *     - 400 BILL_002 — 入账金额无效（须为正整数，单位分）
+         *     - 400 BILL_021 — 手动充值凭证字段不完整（实到金额/到账时间/依据必填）
+         */
+        post: operations["manualTopup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/billing/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 赠送（默认入账户池、可指定项目池）
+         * @description 入账＋流水＋动作留痕三行同事务；向项目池入账即选定该项目扣减源（动作即选择）。目标账户与项目恰选其一（双缺省/双给 400 BILL_001）；金额非正 400 BILL_002。X-User-Id/X-User-Name 透传头自动落痕（缺头落空）。需要机机签名（五头 HMAC），无签名/错签 401
+         *
+         *     错误码：
+         *     - 400 BILL_001 — 入账目标非法（账户与项目恰选其一）
+         *     - 400 BILL_002 — 入账金额无效（须为正整数，单位分）
+         */
+        post: operations["grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/billing/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 余额调整（平台故障退款返还与纠错同载体）
+         * @description 目标池必须已存在（从未入账 404 BILL_022——调整不是入账）；调整额非零带符号（0 400 BILL_003）；原因必填（400 BILL_005）。池变动＋流水调整行＋动作留痕三行同事务。需要机机签名
+         *
+         *     错误码：
+         *     - 400 BILL_001 — 入账目标非法（账户与项目恰选其一）
+         *     - 400 BILL_003 — 余额调整金额无效（须为非零整数，单位分）
+         *     - 400 BILL_005 — 流水行字段不完整
+         *     - 404 BILL_022 — 余额池不存在（目标账户/项目从未入账）
+         */
+        post: operations["adjust"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -2325,6 +2477,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/interview-quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 五问额度读面（访谈①，试用态访谈期「第 N/5」进度单源）
+         * @description 试用状态访谈期的提问额度进度——已答问答缺口数 / 总额度 5（同缺口重派不另计；计数服务端单源，前端 chip 不自算）。非试用态访谈期（付费翻转 / PRD 已产出 / 已生成）返回 data=null——chip 不呈现。轮收口事件失效 conversation 域时同失效（进度随对话刷新）。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 404 PRJ_001
+         */
+        get: operations["interviewQuota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/intercept": {
         parameters: {
             query?: never;
@@ -2465,6 +2637,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/build-gate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 首建派发门读面（访谈②：岔路口卡与 PRD 确认按钮的呈现条件）
+         * @description #542 两入口退役后首个构建 run 的点火归用户——本端点是两个点火面的呈现条件单读点（服务端单源，前端不自算）：forkCardPending＝试用态访谈自然收口待选择（岔路口三选卡「持久可回」，重载/回访重建；「立即生成」经 POST /{id}/generate 点火）；prdConfirmable＝付费态首建待确认（PRD 文档面「确认 PRD，开始生成」按钮，确认即派发）。两呈现互斥（两轨判定归扣费域单读点）；快道（收敛令/零必答短路/「直接开始做」）收口观测直派生成——两读面都缺席（false）；点火后（generation_requested_at 落位）卡与按钮都不复现（失败重试走「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null（非 404——读面缺席语义与拦截卡同族）。
+         */
+        get: operations["buildGate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/billing": {
         parameters: {
             query?: never;
@@ -2477,6 +2669,26 @@ export interface paths {
          * @description pool＝项目池现值（从未入账 null）；sourceSelected/deductionSource/deductionSourceName＝扣减源投影（两轨判定单读点）；paid＝付费状态（不可逆）；checkoutTarget/checkoutTargetName＝收银台充值目标（码位与扣减源对齐：1=我的账户 2=本项目——「只充当前扣减源池」服务端推导：源未选或项目源＝充项目池；账户源＝引导充我的账户）；entries＝项目池流水（新先序）。归属守卫同单项目寻址统一口径（先于控制器）；项目不存在 404 PRJ_001
          */
         get: operations["billing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/balance-reminder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 待决余额提醒卡（计费③段间硬门，卡可回）
+         * @description 付费项目（迭代期）段边界源池≤0 时被拦输入随卡留存（bil_balance_holds 待决行）——本端点是卡的可回读面：重载/回访重建余额提醒卡（显当前负额＋充值入口〔先登录＋准入码〕）。无待决（充值回正已放行/试用项目门恒放行）返回 data=null。run 场派发拦截（生成/修正/设计）不留存——卡面经 SSE 一次性呈现，本读面不回。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 404 PRJ_001
+         */
+        get: operations["pendingBalanceReminder"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3430,7 +3642,7 @@ export interface paths {
         };
         /**
          * 项目成本清单（窗口聚合，成本降序分页）
-         * @description 运营扫一眼谁费钱：窗口内有 token 用量的各项目成本汇总——总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）。排序服务端定死：成本降序（排序标量＝币种桶金额直加，单价表单币种时＝精确），全未配价项目（有用量但无任何已配价分量，成本标量缺失）排后且 allUnpriced=true 标注，同序按 projectId 升序稳定。用量驱动：无用量项目不出现在清单（空窗＝空清单 200）；已删项目的历史花费照列（成本观测不抹历史，行 projectId 不解释存在性，项目名归 admin 侧按id 互查）。page 1 基（缺省 1）、size 缺省 20（上界 100）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省。查询参数（含分页）绑定失败走框架统一信封：非 ISO-8601 时间 404（类型不匹配）、非数值分页 400（带字段明细）。需要机机签名（五头 HMAC），无签名 401
+         * @description 运营扫一眼谁费钱：窗口内有 token 用量的各项目成本汇总——总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 行内成本观测切片桶 byBucket（#536：1=获客成本 2=用户费用——按该项目付费状态翻转时间戳对事件时间戳分桶，翻转前＝获客成本、翻转后＝用户费用；未翻转项目全量获客成本桶〔该桶 cost 与行 cost 同源相等〕；两桶互补不重叠、并集＝行 total/cost；窗口内无翻转后用量时用户费用桶缺席〔用量驱动，不伪装 0〕——与用户账 bil_ 流水分记、同项目两边可查）。排序服务端定死：成本降序（排序标量＝币种桶金额直加，单价表单币种时＝精确），全未配价项目（有用量但无任何已配价分量，成本标量缺失）排后且 allUnpriced=true 标注，同序按 projectId 升序稳定。用量驱动：无用量项目不出现在清单（空窗＝空清单 200）；已删项目的历史花费照列（成本观测不抹历史，行 projectId 不解释存在性，项目名归 admin 侧按id 互查）。page 1 基（缺省 1）、size 缺省 20（上界 100）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省。查询参数（含分页）绑定失败走框架统一信封：非 ISO-8601 时间 404（类型不匹配）、非数值分页 400（带字段明细）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
@@ -3477,7 +3689,7 @@ export interface paths {
         };
         /**
          * 平台成本全局总览（时间窗）
-         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor）+ agentKindName 中文名随行（#186：主链经智能体配置回解，naming/classify 等辅助标记为 null——消费端落「—」桶），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
+         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体 + 成本观测切片桶 byBucket（#536：1=获客成本 2=用户费用——按付费状态翻转时间戳对事件时间戳分桶，翻转前＝获客成本、翻转后＝用户费用，未翻转项目全量获客成本桶；两桶互补不重叠、并集＝total/cost，窗口内无翻转后用量时用户费用桶缺席〔用量驱动，不伪装 0〕；与用户账 bil_ 流水分记、同项目两边可查）。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor）+ agentKindName 中文名随行（#186：主链经智能体配置回解，naming/classify 等辅助标记为 null——消费端落「—」桶），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 NOT_FOUND — Resource not found
@@ -3642,6 +3854,26 @@ export interface paths {
          * @description 全量账号（建档顺序、不分页）。accountId 为 TSID 十进制字符串
          */
         get: operations["accounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.aiplatform/trial-notice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 试用体验提示判定
+         * @description trial=true＝试用态（提示显），false＝已付费/未知工作区（熄/不出）。workspaceId 经 X-Preview-Workspace 头（网关注入；头缺席/畸形如实 false）。Cache-Control: no-store。访客匿名可达（裸前缀在 /api 拦截面外）。
+         */
+        get: operations["notice"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4028,6 +4260,8 @@ export interface components {
             decisionHintDisabled?: string[];
             /** @description verify 自决开关（#442，#441-1；缺省 true＝自决开〔默认〕——执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿（三闸回执／整轨终验编排）不受影响。仅 run 执行体行消费） */
             verifySelfDecisionEnabled?: boolean;
+            /** @description 基座 lint 强制档阻断开关（#541；缺省 false＝让路〔默认〕——强制档违规（裸客户端直用）收口照扫、只随收尾卡标注，不喂修轮、不触发失败链、不间接升档，修轮触发面收窄至样式合规；true＝恢复原阻断形态（强制档喂修轮修一轮＋修不完收口被拒——回滚保险，未来再收紧不发版）。仅 run 执行体行消费） */
+            robustLintBlockingEnabled?: boolean;
         };
         ApiResponseBackofficeAgentConfigResponse: {
             /** Format: int32 */
@@ -4204,6 +4438,8 @@ export interface components {
             decisionHintDisabledOverridden?: boolean;
             /** @description verify 自决开关生效态（#442，#441-1；缺省 true＝自决开〔默认〕——执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿不受影响。仅 run 执行体行消费） */
             verifySelfDecisionEnabled?: boolean;
+            /** @description 基座 lint 强制档阻断开关生效态（#541；缺省 false＝让路〔默认〕——强制档违规收口照扫、只随收尾卡标注（不喂修轮、不触发失败链、不间接升档），修轮触发面收窄至样式合规；true＝恢复原阻断形态（强制档喂修轮修一轮＋修不完收口被拒——回滚保险）。仅 run 执行体行消费） */
+            robustLintBlockingEnabled?: boolean;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700200
@@ -4601,6 +4837,17 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        ApiResponseGenerationStartResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["GenerationStartResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        GenerationStartResponse: {
+            runId?: string;
+        };
         AnnotationAnchor: {
             selector?: string;
             text?: string;
@@ -4660,17 +4907,6 @@ export interface components {
         };
         GenerationStopResponse: {
             stopped?: boolean;
-        };
-        ApiResponseGenerationStartResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["GenerationStartResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        GenerationStartResponse: {
-            runId?: string;
         };
         ApiResponseFixRestartResponse: {
             /** Format: int32 */
@@ -5487,6 +5723,66 @@ export interface components {
             paymentPlan?: string;
             basis?: string;
         };
+        ReselectSourceCommand: {
+            /** Format: int32 */
+            source?: number;
+            /** Format: int64 */
+            accountId?: number;
+        };
+        ApiResponseBackofficeActionView: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeActionView"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeActionView: {
+            /** Format: int64 */
+            actionId?: number;
+            /** Format: int32 */
+            actionType?: number;
+            actionTypeName?: string;
+            /** Format: int64 */
+            entryId?: number;
+            /** Format: int64 */
+            poolId?: number;
+            /** Format: int64 */
+            balanceAfter?: number;
+        };
+        AdjustParamCommand: {
+            value?: number;
+        };
+        ManualTopupCommand: {
+            /** Format: int64 */
+            accountId?: number;
+            /** Format: int64 */
+            projectId?: number;
+            /** Format: int64 */
+            receivedAmountFen?: number;
+            /** Format: date-time */
+            receivedAt?: string;
+            evidence?: string;
+            note?: string;
+        };
+        GrantCommand: {
+            /** Format: int64 */
+            accountId?: number;
+            /** Format: int64 */
+            projectId?: number;
+            /** Format: int64 */
+            amountFen?: number;
+            note?: string;
+        };
+        BalanceAdjustCommand: {
+            /** Format: int64 */
+            accountId?: number;
+            /** Format: int64 */
+            projectId?: number;
+            /** Format: int64 */
+            delta?: number;
+            reason?: string;
+        };
         ApiResponseListProjectResponse: {
             /** Format: int32 */
             code?: number;
@@ -5680,6 +5976,29 @@ export interface components {
             /** Format: date-time */
             confirmedAt?: string;
             readiness?: components["schemas"]["PrdReadinessResponse"];
+        };
+        ApiResponseInterviewQuotaResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["InterviewQuotaResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 五问额度读面（试用态访谈期）：已答问答缺口数 / 总额度。付费态、PRD 已产出或已生成（非访谈期）时整体缺席（data=null）——「第 N/5」进度 chip 不呈现。计数服务端单源，前端不自算 */
+        InterviewQuotaResponse: {
+            /**
+             * Format: int32
+             * @description 已答问答缺口数（去重：同缺口重派不另计）
+             * @example 3
+             */
+            answered?: number;
+            /**
+             * Format: int32
+             * @description 提问额度总额（机制定 5，数值属运营面）
+             * @example 5
+             */
+            total?: number;
         };
         ApiResponseInterceptCardResponse: {
             /** Format: int32 */
@@ -5890,6 +6209,27 @@ export interface components {
             /** Format: date-time */
             at?: string;
         };
+        ApiResponseBuildGateResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BuildGateResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 首建派发门读面：岔路口卡与 PRD 确认按钮的呈现条件（服务端单源）。快道收口直派生成——两读面都缺席（false） */
+        BuildGateResponse: {
+            /**
+             * @description 岔路口三选卡呈现（试用态访谈自然收口待选择——持久可回；「立即生成」经 POST /generate 点火首个构建）
+             * @example true
+             */
+            forkCardPending?: boolean;
+            /**
+             * @description PRD 文档面确认按钮呈现（付费态首建待确认——确认即派发，POST /prd/confirm）
+             * @example false
+             */
+            prdConfirmable?: boolean;
+        };
         ApiResponseProjectBillingView: {
             /** Format: int32 */
             code?: number;
@@ -5924,6 +6264,24 @@ export interface components {
             checkoutTarget?: number;
             checkoutTargetName?: string;
             entries?: components["schemas"]["BillingEntryView"][];
+        };
+        ApiResponseBalanceReminderCardResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BalanceReminderCardResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BalanceReminderCardResponse: {
+            holdId?: string;
+            lane?: string;
+            prompt?: string;
+            /** Format: int32 */
+            designItem?: number;
+            /** Format: int64 */
+            sourcePoolBalance?: number;
+            runId?: string;
         };
         AccountBillingView: {
             accountPool?: components["schemas"]["PoolView"];
@@ -6726,6 +7084,18 @@ export interface components {
                 [key: string]: number;
             };
             allUnpriced?: boolean;
+            /** @description 成本观测切片桶（#536：1=获客成本 2=用户费用——按付费状态翻转时间戳对事件时间戳分桶，翻转前＝获客成本/翻转后＝用户费用；未翻转项目全量获客成本桶〔该桶 cost 与行 cost 同源相等〕；窗口内无翻转后用量时用户费用桶缺席〔用量驱动，不伪装 0〕） */
+            byBucket?: components["schemas"]["BucketCost"][];
+        };
+        /** @description 成本观测切片桶（#536：1=获客成本 2=用户费用——按付费状态翻转时间戳对事件时间戳分桶，翻转前＝获客成本/翻转后＝用户费用；未翻转项目全量获客成本桶〔该桶 cost 与行 cost 同源相等〕；窗口内无翻转后用量时用户费用桶缺席〔用量驱动，不伪装 0〕） */
+        BucketCost: {
+            /** Format: int32 */
+            bucket?: number;
+            bucketName?: string;
+            tokens?: components["schemas"]["TokenUsage"];
+            cost?: {
+                [key: string]: number;
+            };
         };
         PageResponseBackofficeProjectCostResponse: {
             items?: components["schemas"]["BackofficeProjectCostResponse"][];
@@ -6790,6 +7160,7 @@ export interface components {
             byModel?: components["schemas"]["ModelUsage"][];
             byAgentKind?: components["schemas"]["AgentKindUsage"][];
             byModelCost?: components["schemas"]["ModelBandCost"][];
+            byBucket?: components["schemas"]["BucketCost"][];
         };
         ModelBandCost: {
             provider?: string;
@@ -6956,6 +7327,8 @@ export interface components {
             oldDecisionHintDisabled?: string;
             /** @description 变更前 verify 自决开关（#442；恒有值——缺省态恒 true＝自决开） */
             oldVerifySelfDecisionEnabled?: boolean;
+            /** @description 变更前基座 lint 强制档阻断开关（#541；恒有值——缺省态恒 false＝让路） */
+            oldRobustLintBlockingEnabled?: boolean;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
             /** @description 变更后模型档位（null＝本次清空回落） */
@@ -7017,6 +7390,8 @@ export interface components {
             newDecisionHintDisabled?: string;
             /** @description 变更后 verify 自决开关（#442；恒有值） */
             newVerifySelfDecisionEnabled?: boolean;
+            /** @description 变更后基座 lint 强制档阻断开关（#541；恒有值） */
+            newRobustLintBlockingEnabled?: boolean;
             /**
              * @description 变更操作者 id
              * @example 700200
@@ -7059,6 +7434,17 @@ export interface components {
             data?: components["schemas"]["AccountResponse"][];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
+        };
+        ApiResponseTrialNoticeResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["TrialNoticeResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        TrialNoticeResponse: {
+            trial?: boolean;
         };
     };
     responses: never;
@@ -7742,6 +8128,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    confirmPrdGeneration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseGenerationStartResponse"];
                 };
             };
         };
@@ -9260,6 +9668,130 @@ export interface operations {
             };
         };
     };
+    reselectSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReselectSourceCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeActionView"];
+                };
+            };
+        };
+    };
+    adjustParam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paramKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdjustParamCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    manualTopup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualTopupCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeActionView"];
+                };
+            };
+        };
+    };
+    grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeActionView"];
+                };
+            };
+        };
+    };
+    adjust: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BalanceAdjustCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeActionView"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: {
@@ -9619,6 +10151,28 @@ export interface operations {
             };
         };
     };
+    interviewQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseInterviewQuotaResponse"];
+                };
+            };
+        };
+    };
     pendingIntercept: {
         parameters: {
             query?: never;
@@ -9779,6 +10333,28 @@ export interface operations {
             };
         };
     };
+    buildGate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBuildGateResponse"];
+                };
+            };
+        };
+    };
     billing: {
         parameters: {
             query?: never;
@@ -9797,6 +10373,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectBillingView"];
+                };
+            };
+        };
+    };
+    pendingBalanceReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBalanceReminderCardResponse"];
                 };
             };
         };
@@ -10937,6 +11535,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListAccountResponse"];
+                };
+            };
+        };
+    };
+    notice: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Preview-Workspace"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTrialNoticeResponse"];
                 };
             };
         };

@@ -137,6 +137,14 @@ class GenerationAppServiceTest {
     @Autowired
     private BuildPlanFacts buildPlanFacts;
 
+    /** PRD 落盘登记适配器（#542 两入口退役断言——真 savePrd 回调侧零派发）。 */
+    @Autowired
+    private com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter prdArtifacts;
+
+    /** 轨道表写口（计划在场预置——退役前首产回调「计划在场即派」形的复刻）。 */
+    @Autowired
+    private com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository generationSegments;
+
     /** 验证事实登记口（#352 收口卡验证统计脚本：模拟 verify 子智能体轮内工具登记）。 */
     @Autowired
     private VerificationFacts verificationFacts;
@@ -4866,13 +4874,13 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(any(), any());
     }
 
-    // ---------- 首 Demo 触发（#332 确认触发 → #462 去确认门平移到首次产 PRD） ----------
+    // ---------- 首建派发门（#542 访谈②：两入口退役——首产回调与轮收口兜一轮删、快道/按钮点火） ----------
 
     @Test
-    void given_no_plan_when_callback_then_defer_dispatch_to_turn_close() {
-        // 灵魂例（#462 收口精化，ADR-0039 补记）：回调发生在产 PRD 同转进行中
-        // （协议 savePrd→saveBuildPlan 有序），此刻计划必未落——本入口不补产（否则
-        // 补产轮排在同转后空烧一整轮），静默 null、零会话；同转收口携计划再派即全链
+    void given_no_plan_when_turn_close_dispatch_with_handover_then_full_chain() {
+        // 灵魂例（#462 收口精化的存活半边，#542 语义顺延）：快道收口观测派发
+        // （dispatchGenerationOnTurnClose 只在快道事实/设计定稿在场时被调用）携
+        // buildPlanFacts 交接物——直派全链：计划落轨＋阶段 0＋逐片
         Long projectId = persistedProject("9880");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4883,43 +4891,56 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
-        verify(agentClient, never()).converse(any(), any());
-        assertThat(generatedAt(projectId)).isNull();
-
-        // 同转收口（buildPlanFacts 交接物在场）：直派全链——计划落轨＋阶段 0＋逐片
         GenerationAppService.GenerationRun run =
                 appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
         assertThat(run).isNotNull();
         assertThat(appService.planOf(projectId)).isEqualTo(SINGLE_SLICE_PLAN);
         assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(1);
         assertThat(generatedAt(projectId)).isNotNull();
+        // 首建点火时点落位（#542 派发门——卡/门「未派发」读点的事实源）
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT generation_requested_at FROM prj_projects WHERE id = ?", projectId)
+                .get("generation_requested_at")).isNotNull();
     }
 
     @Test
-    void given_generated_when_dispatch_first_demo_then_null_no_repeat() {
-        // 已生成＝首个 Demo 已起，确认只负责首个——不重复派、零编码 run
-        Long projectId = persistedGeneratedProject("9881");
+    void given_prd_produced_without_user_trigger_then_no_auto_dispatch() throws Exception {
+        // 灵魂例（#542 AC③：两入口退役断言）——PRD 产出不再自动起跑：首产回调
+        // （dispatchFirstDemoOnPrdProduced 已删）只剩事实登记，计划在场也不派——
+        // 轨道表预置计划后经真适配器回调产出 PRD，零编码 run、点火不落位（全域无
+        // 无条件自动路径；点火＝岔路口「立即生成」/付费确认/快道，另见
+        // MainAgentAppServiceTest 自然收口用例）
+        Long projectId = persistedProject("9881");
+        seedConfirmedVersion(projectId);
+        // 计划在场（退役前首产回调「计划在场即派」的少数形——现在也不派）
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        generationSegments.save(GenerationSegment.pending(projectId, 0,
+                GenerationAppService.STAGE0_TITLE, project.getPrdProducedAt()));
+        generationSegments.save(GenerationSegment.pending(projectId, 1,
+                "用户能注册登录", project.getPrdProducedAt()));
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
 
-        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
-        verify(agentClient, never()).converse(any(), any());
-    }
+        // 真 savePrd 落盘回调（适配器 bean 直调——状态位置位＋document-updated，
+        // 零派发）
+        prdArtifacts.onWritten(Long.toString(project.getWorkspaceId()));
 
-    @Test
-    void given_archived_when_dispatch_first_demo_then_null() {
-        // 归档＝对话区关闭即全停——确认不派
-        Long projectId = persistedArchivedProject("9882");
-
-        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
-        verify(agentClient, never()).converse(any(), any());
+        assertThat(projectRepository.findById(projectId).orElseThrow().getPrdProducedAt())
+                .isNotNull(); // 事实登记照旧
+        verify(agentClient, never()).converse(any(), any()); // 零编码 run
+        assertThat(generatedAt(projectId)).isNull();
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT generation_requested_at FROM prj_projects WHERE id = ?", projectId)
+                .get("generation_requested_at")).isNull(); // 点火不落位
     }
 
     @Test
     void given_first_demo_failed_when_retrigger_then_redispatch_from_track() {
-        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」——
-        // 收口观测/「继续生成」/再次回调任一入口再触发即断点续跑（计划已在轨道表，
-        // 不重产计划）。首派走收口入口（产 PRD 同转计划交接物在场），重发走回调
-        // 入口（计划已落轨——本入口在场即派的少数形）
+        // 失败重发同口径（#542：重试面＝「继续生成」按钮，不重复确认/不再出卡）：
+        // 首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」——「继续生成」
+        // （startGeneration）再触发即断点续跑（计划已在轨道表，不重产计划）。
+        // 首派走快道收口观测（产 PRD 同转计划交接物在场），重发走按钮路径
         Long projectId = persistedProject("9883");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4938,14 +4959,14 @@ class GenerationAppServiceTest {
 
         assertThat(first).isNotNull();
         assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
-        // 重发（回调入口，计划在轨道表）：续跑即完成（重打桩的 matcher 空参调用触发旧
-        // answer——旧桩对 null 命令直接过，同既有先例）
+        // 重发（「继续生成」按钮路径，计划在轨道表）：续跑即完成（重打桩的 matcher
+        // 空参调用触发旧 answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "完成") : null;
         });
-        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnPrdProduced(projectId);
+        GenerationAppService.GenerationRun again = appService.startGeneration(projectId);
 
         assertThat(again).isNotNull();
         assertThat(generatedAt(projectId)).isNotNull();
@@ -5230,9 +5251,7 @@ class GenerationAppServiceTest {
         return value;
     }
 
-    /** 已确认 PRD 版本在场（#332 生成加门：{@link
-     * GenerationAppService#dispatchFirstDemoOnPrdProduced} 的调用前提——经确认缝触发时
-     * 版本必已落库；收口观测判据只看存在性，内容不参与）。 */
+    /** PRD 版本行在场（legacy 记行形态夹具——#462 起与派发门无关，仅取数事实）。 */
     private void seedConfirmedVersion(Long projectId) {
         Project project = projectOf(projectId);
         jdbcTemplate.update("""

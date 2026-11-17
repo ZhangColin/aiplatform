@@ -51,6 +51,10 @@ vi.mock("@/lib/store/prd-notices", async (importOriginal) => {
       selector({ ...seed.notices, markSeen: seed.markSeen }),
   };
 });
+vi.mock("@/hooks/use-build-gate", () => ({
+  useBuildGate: () => ({ data: null }),
+  useConfirmPrdGeneration: () => ({ mutate: () => {}, isPending: false }),
+}));
 
 beforeEach(() => {
   seed.notices = { seen: {}, pending: {} };

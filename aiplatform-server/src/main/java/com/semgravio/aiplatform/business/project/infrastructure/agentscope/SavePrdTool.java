@@ -15,6 +15,7 @@ import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem;
 import com.semgravio.aiplatform.base.agentscope.ReadinessAwaitingExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
@@ -23,17 +24,20 @@ import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapt
  * 写 {@code docs/PRD.md} 到项目 dev 工作区（经 {@link PrdArtifactAdapter#workspacePath}
  * 的业务正本路径，docker exec 覆盖写——修订再执行即更新）+ 回调
  * {@link PrdArtifactAdapter#onWritten}（置「PRD 已产出」状态位 + 发 document-updated
- * ＋<b>首次产 PRD 触发首个构建 run 派发</b>——#462 去确认门：确认门与人确认动作
- * 整段退役，首 Demo 触发平移到本工具的落盘回调侧，ADR-0039）
- * + 修订事实登记（{@link PrdRevisionFacts}——summary 必传，平台从工具调用事实
- * 观测「改没改、改了什么」入交接物，#52）。落盘/回调任一失败回错误结果（模型
+ * ——#542 首建派发门：#462 的首产自动派发回调整段退役，落盘只登记事实、点火归
+ * 用户）+ 修订事实登记（{@link PrdRevisionFacts}——summary 必传，平台从工具调用
+ * 事实观测「改没改、改了什么」入交接物，#52）+ <b>快道事实登记</b>（
+ * {@link FastLaneFacts}——{@code fastLane=true} 即快道收口〔零必答首轮直产/收敛令
+ * /付费「直接开始做」视同确认〕，收口观测直派首个构建、不出卡不确认；缺席＝
+ * 自然收口，试用态出岔路口三选卡、付费态确认门在场——#542，ADR-0048/0049）。
+ * 落盘/回调任一失败回错误结果（模型
  * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_edit 必调哲学）。
  *
  * <p>无需用户确认（权限自检恒放行）：PRD 产出是访谈协议的预期终点，保存动作本身
- * 不设工具点确认——去门化（#462）后产出即自动进入生成，用户确认动作不复存在
- * （旧「确认此版 PRD 并生成 Demo」门退役）。仅随项目只读工作区注册（{@link
- * ProfileToolkitSupplier}，#86 主智能体对话姿态）。执行体阻塞（docker exec + 置位
- * 事务），框架 ToolExecutor 缺省 boundedElastic 调度，阻塞安全。</p>
+ * 不设工具点确认——去门化（#462）后产出不再自动进入生成（#542 派发门：快道直派、
+ * 自然收口出岔路口/确认门），工具点确认动作不存在。仅随项目只读工作区注册
+ * （{@link ProfileToolkitSupplier}，#86 主智能体对话姿态）。执行体阻塞（docker
+ * exec + 置位事务），框架 ToolExecutor 缺省 boundedElastic 调度，阻塞安全。</p>
  *
  * <p>落盘经 {@link ReadinessAwaitingExecCommand} 就绪感知执行（#62 同口径）：
  * 工作区创建是异步置备（#58/#61「点创建即对话」），置备窗口期内调用本工具隐式
@@ -45,24 +49,28 @@ public class SavePrdTool extends ToolBase {
     public static final String NAME = "savePrd";
     private static final String CONTENT_KEY = "content";
     private static final String SUMMARY_KEY = "summary";
+    private static final String FAST_LANE_KEY = "fastLane";
 
     private final String workspaceId;
     private final PrdArtifactAdapter artifactAdapter;
     private final PrdRevisionFacts prdRevisions;
+    private final FastLaneFacts fastLaneFacts;
     private final String containerFile;
     private final DockerExecFilesystem.ExecCommand exec;
 
     public SavePrdTool(String artifactPath, String workspaceId, String containerName,
             WorkspaceReadinessWaiter readinessWaiter,
-            PrdArtifactAdapter artifactAdapter, PrdRevisionFacts prdRevisions) {
-        this(artifactPath, workspaceId, artifactAdapter, prdRevisions,
+            PrdArtifactAdapter artifactAdapter, PrdRevisionFacts prdRevisions,
+            FastLaneFacts fastLaneFacts) {
+        this(artifactPath, workspaceId, artifactAdapter, prdRevisions, fastLaneFacts,
                 ReadinessAwaitingExecCommand.dockerExec(containerName,
                         WorkspaceId.of(workspaceId), readinessWaiter));
     }
 
     /** 执行缝注入构造（单测替身 ExecCommand）。 */
     SavePrdTool(String artifactPath, String workspaceId, PrdArtifactAdapter artifactAdapter,
-            PrdRevisionFacts prdRevisions, DockerExecFilesystem.ExecCommand exec) {
+            PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
+            DockerExecFilesystem.ExecCommand exec) {
         super(ToolBase.builder()
                 .name(NAME)
                 .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。判定需求已明确"
@@ -70,7 +78,10 @@ public class SavePrdTool extends ToolBase {
                         + "markdown 全文（结构与写法遵循 prd-writing 技能）；summary "
                         + "传本轮说明（markdown 变更说明——修订：改了什么、覆盖哪些意见；"
                         + "首次产出：PRD 覆盖了什么——界面层按 markdown 渲染呈现，勿出"
-                        + "源码记号）——必传，平台经此观测修订事实。每次调用"
+                        + "源码记号）——必传，平台经此观测修订事实；fastLane 仅在快道"
+                        + "收口（零必答首轮直产、用户下了收敛令或明确说「直接开始做」）"
+                        + "时传 true——平台直接开始生成、不出岔路口卡；判定明确或问满"
+                        + "的自然收口不传（false）。每次调用"
                         + "覆盖旧版；成功后向用户简短总结（修订时给修订摘要），不再提问。")
                 .inputSchema(Map.of(
                         "type", "object",
@@ -80,13 +91,17 @@ public class SavePrdTool extends ToolBase {
                                         "description", "完整 PRD markdown 全文（覆盖旧版）"),
                                 SUMMARY_KEY, Map.of(
                                         "type", "string",
-                                        "description", "本轮说明：修订传改了什么、覆盖哪些意见；首次产出传 PRD 覆盖了什么")),
+                                        "description", "本轮说明：修订传改了什么、覆盖了哪些意见；首次产出传 PRD 覆盖了什么"),
+                                FAST_LANE_KEY, Map.of(
+                                        "type", "boolean",
+                                        "description", "快道收口标记：零必答首轮直产/收敛令/「直接开始做」传 true（平台直接生成、不出卡不确认）；判定明确或问满的自然收口不传")),
                         "required", List.of(CONTENT_KEY, SUMMARY_KEY)))
                 .readOnly(false)
                 .concurrencySafe(false));
         this.workspaceId = workspaceId;
         this.artifactAdapter = artifactAdapter;
         this.prdRevisions = prdRevisions;
+        this.fastLaneFacts = fastLaneFacts;
         this.containerFile = AgentWorkspace.ProjectDev.CONTAINER_ROOT + "/" + artifactPath;
         this.exec = exec;
     }
@@ -94,8 +109,8 @@ public class SavePrdTool extends ToolBase {
     @Override
     public Mono<PermissionDecision> checkPermissions(Map<String, Object> toolInput,
             io.agentscope.core.permission.PermissionContextState context) {
-        // 产出是访谈的预期终点：工具点不放确认（#462 去确认门——产出即自动进入
-        // 生成，用户确认动作不复存在；保存是平台的自动推进触发点）
+        // 产出是访谈的预期终点：工具点不放确认（#462 去确认门；#542 派发门——产出
+        // 不自动进入生成，点火归快道事实/岔路口选择/确认动作，保存不是点火面）
         return Mono.just(PermissionDecision.allow("PRD 产出是访谈的预期终点，工具点无需确认"));
     }
 
@@ -108,9 +123,14 @@ public class SavePrdTool extends ToolBase {
         Object summary = param.getInput().get(SUMMARY_KEY);
         if (summary == null || String.valueOf(summary).isBlank()) {
             return Mono.just(ToolResultBlock.error("summary 不能为空：修订传改了什么、"
-                    + "覆盖哪些意见（markdown 变更说明；首次产出传 PRD 覆盖了什么）"
+                    + "覆盖了哪些意见（markdown 变更说明；首次产出传 PRD 覆盖了什么）"
                     + "——补传 summary 后再次调用本工具"));
         }
+        // 快道标记（#542）：模型按协议上报的收口形态——true 即登记（收口观测直派），
+        // 缺席/false 不登记（自然收口——岔路口/确认门）。仅成功路径登记（失败重试
+        // 成功后的终值为准，同修订事实口径）。inputSchema 已声明 boolean 型，Jackson
+        // 按型反序列化——Boolean.TRUE.equals 单判即足（同 ReportVerificationTool 先例）。
+        boolean fastLane = Boolean.TRUE.equals(param.getInput().get(FAST_LANE_KEY));
         // 覆盖写（文件面写路径单一缝，修订即更新）
         DockerExecFilesystem.ExecOutput out = exec.run(
                 DockerExecFilesystem.overwriteWriteCommand(containerFile),
@@ -131,6 +151,10 @@ public class SavePrdTool extends ToolBase {
                     + e.getMessage()));
         }
         prdRevisions.record(workspaceId, String.valueOf(summary));
-        return Mono.just(ToolResultBlock.text("PRD 已保存到项目工作区 " + containerFile));
+        if (fastLane) {
+            fastLaneFacts.record(workspaceId);
+        }
+        return Mono.just(ToolResultBlock.text("PRD 已保存到项目工作区 " + containerFile
+                + (fastLane ? "（快道收口——平台将直接开始生成）" : "")));
     }
 }

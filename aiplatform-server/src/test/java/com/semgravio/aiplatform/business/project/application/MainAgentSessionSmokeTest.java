@@ -31,6 +31,7 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.Workspac
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -167,7 +168,11 @@ class MainAgentSessionSmokeTest {
         for (int i = 0; i < 4 && !"finished".equals(outcome); i++) {
             Frame pending = questionFrameByRef(outcome);
             seenRefs.add(outcome);
-            settle(pending, "不要再继续提问了，现在就结束访谈，直接产出 PRD");
+            // #542 自然收口话术（快道收窄）：纯信息答复、不带任何收敛/托付语义
+            // （实测模型会把「剩余细节你按推荐补全」引述为收敛意图走快道〔规则 6，
+            // fastLane 直派〕——快道机制反向验证通过，但本用例要验自然收口腿）；
+            // 判定明确与否归模型（规则 5，自然收口出岔路口卡）
+            settle(pending, "没有了，就这些信息。");
             outcome = awaitResumeOutcome(allRunIds(), seenRefs);
         }
         assertThat(outcome).as("催促收敛未在限轮内收口（已捕获事件序：%s）",
@@ -187,6 +192,12 @@ class MainAgentSessionSmokeTest {
         assertThat(prd.content()).as("PRD 正文（真模型产出）").isNotBlank();
         assertThat(prd.updatedAt()).isNotNull();
 
+        // 4a) #542 两入口退役＋岔路口（live 断言）：自然收口不派发——岔路口状态位
+        //     在场（试用态三选卡持久可回）、零编码 run 起跑（快道才直派；旧的
+        //     「照产自动派发」已退役）
+        assertThat(forkStateOf(projectId)).as("岔路口状态位（自然收口置位）").isEqualTo(ForkState.PENDING.getCode());
+        assertThat(executorRunStartCount()).as("自然收口零编码 run 起跑（两入口退役）").isZero();
+
         // 4b) 咨询答询（#86 同会话）：问项目情况——同一 main 会话直接作答（零产物），
         //     随后的修订与回溯仍在同会话连续
         MainAgentAppService.MainAgentRun inquiry = appService.answerInquiry(project,
@@ -202,6 +213,9 @@ class MainAgentSessionSmokeTest {
         awaitPrdProduced(2);
         assertThat(prdBitOf(projectId)).isAfterOrEqualTo(firstBit);
         assertThat(queryAppService.prd(projectId).content()).isNotBlank();
+        // 意见修订轮再收口：岔路口照旧在场（卡持久可回，未点火不消失）
+        assertThat(forkStateOf(projectId)).isEqualTo(ForkState.PENDING.getCode());
+        assertThat(executorRunStartCount()).isZero();
 
         // 6) 同会话上下文延续：访谈答复在上下文中可回溯（自由补充不丢）
         MainAgentAppService.MainAgentRun recall = appService.runOpinionTurn(projectId,
@@ -364,6 +378,22 @@ class MainAgentSessionSmokeTest {
         return jdbcTemplate.queryForObject(
                 "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
                 LocalDateTime.class, projectId);
+    }
+
+    /** 岔路口状态位（#542 自然收口置位 PENDING——快道/未收口为 NULL）。 */
+    private Object forkStateOf(Long projectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT fork_state FROM prj_projects WHERE id = ?",
+                Object.class, projectId);
+    }
+
+    /** 编码 run 起跑事件计数（#542 两入口退役断言——自然收口零起跑）。 */
+    private long executorRunStartCount() {
+        return frames.stream()
+                .filter(f -> AgentEventTypes.RUN_START.equals(f.type()))
+                .filter(f -> "executor".equals(String.valueOf(f.payload().get(
+                        com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes.AGENT_FIELD))))
+                .count();
     }
 
     /** 主智能体会话状态正文（#34 守卫的判读源：tool_use input 不含 answer 键）。 */

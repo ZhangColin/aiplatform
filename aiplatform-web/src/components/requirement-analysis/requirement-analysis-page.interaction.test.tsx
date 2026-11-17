@@ -95,6 +95,10 @@ vi.mock("@/hooks/use-balance-reminder", () => ({
 vi.mock("@/hooks/use-interview-quota", () => ({
   useInterviewQuota: () => ({ data: null }),
 }));
+vi.mock("@/hooks/use-build-gate", () => ({
+  useBuildGate: () => ({ data: null }),
+  useConfirmPrdGeneration: () => ({ mutate: () => {}, isPending: false }),
+}));
 vi.mock("@/hooks/use-upload-material", () => ({ useUploadMaterial: () => vi.fn() }));
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),

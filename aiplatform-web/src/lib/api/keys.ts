@@ -29,6 +29,13 @@ export const queryKeys = {
      * 重建卡（staleTime 0 挂查询侧）。确认扣减即失效（服务端卡已消费）。
      */
     intercept: (id: string) => ["projects", "intercept", id] as const,
+    /**
+     * 首建派发门读面（#542 访谈②）：岔路口三选卡与 PRD 确认按钮的呈现条件
+     * （服务端单源，前端不自算）。挂 projects 域：编码 run 起跑/收口、PRD 写出
+     * （document-updated）随域失效；主智能体轮收口（岔路口置位点）由桥在
+     * run-finish 定向失效本键。
+     */
+    buildGate: (id: string) => ["projects", "build-gate", id] as const,
     /** 文件树（交付文件只读清单，目录由前端合成；run 收口/PRD 写出随 projects 域失效——#27）。 */
     files: (id: string) => ["projects", "files", id] as const,
     /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */

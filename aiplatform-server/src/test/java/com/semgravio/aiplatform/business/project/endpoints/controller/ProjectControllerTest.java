@@ -43,6 +43,7 @@ import com.semgravio.aiplatform.business.project.application.ConversationHistory
 import com.semgravio.aiplatform.business.project.application.PrdReadiness;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
+import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
@@ -137,6 +138,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private DemoVersionAppService demoVersionAppService;
+
+    @MockitoBean
+    private BuildGateAppService buildGateAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -793,16 +797,44 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
     }
 
-    // ---------- PRD 版本（#330→#462 去门化：确认端点退役，run 起跑自动记行；读面保留） ----------
+    // ---------- PRD 版本（#330→#462 去门化：run 起跑自动记行；#542 付费轨确认端点恢复） ----------
 
     @Test
-    void given_confirm_endpoint_retired_when_post_confirm_then_404() throws Exception {
-        // 去确认门（#462，ADR-0039）：POST /prd/confirm 整段退役——端点 gone（404），
-        // 首 Demo 触发平移到首次 savePrd 落盘回调（PrdArtifactAdapter →
-        // GenerationAppService.dispatchFirstDemoOnPrdProduced），版本行由 Demo 类
-        // run 起跑自动记（PrdVersionAppService.recordOnDemoRunStart）
+    void given_paid_first_build_unrequested_when_post_confirm_then_dispatched() throws Exception {
+        // 付费轨 PRD 确认门恢复（#542，ADR-0049——恢复 #462 之前的原动作形态）：
+        // POST /prd/confirm＝确认即派发首个构建，响应回执 runId（挂 SSE 锚）；确认
+        // 不写版本行（记行归 Demo 类 run 起跑单点，构建基准序零改动）
+        when(buildGateAppService.confirmFirstBuild(100L)).thenReturn(
+                new GenerationAppService.GenerationRun("run-confirm-1"));
+
         performAsUser(post("/api/projects/100/prd/confirm"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-confirm-1"));
+    }
+
+    @Test
+    void given_trial_when_post_confirm_then_prj_084() throws Exception {
+        // 确认门属付费轨首建：试用项目的点火动作＝岔路口「立即生成」（POST /generate）
+        when(buildGateAppService.confirmFirstBuild(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.PRD_CONFIRMATION_NOT_PAID));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4084))
+                .andExpect(jsonPath("$.message").value(
+                        "PRD 确认是付费项目的首建点火动作——试用项目请在岔路口选择「立即生成」"));
+    }
+
+    @Test
+    void given_gate_when_get_build_gate_then_two_read_faces() throws Exception {
+        // 派发门读面（#542）：岔路口卡与确认按钮的呈现条件单读点（互斥两轨）
+        when(buildGateAppService.gateOf(100L)).thenReturn(
+                new BuildGateAppService.BuildGateView(true, false));
+
+        performAsUser(get("/api/projects/100/build-gate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.forkCardPending").value(true))
+                .andExpect(jsonPath("$.data.prdConfirmable").value(false));
     }
 
     @Test

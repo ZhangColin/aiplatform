@@ -59,17 +59,22 @@ import lombok.extern.slf4j.Slf4j;
  * 再问）；不炸对话、不出错误气泡。仅平台重启丢锚且挂起仍在的边角同步 409
  * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
  *
- * <p><b>链必达收口（#43；#101 生成无门→#332 生成加门→<b>#462 去确认门</b>）</b>：
- * 主智能体无派发权——生成与更新 run 的派发都不在模型手里，平台在意见轮落定后
- * 观测收口（无挂起问答）即按项目态自动派发：已生成派更新 run（交接物 = 用户意见
- * 原文 + 需求侧判定结果——PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、
- * 未生成但 PRD 已产出即派首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}；
- * 首次 savePrd 落盘回调已先行触发——{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}，
- * 收口观测再兜一轮，撞在途静默跳过）、未产出 PRD 止于对话（访谈期常态）。判定
- * 结果从工具调用事实观测（{@link PrdRevisionFacts}），不新增模型自报结论的面；
- * 大改小改分流随确认门整段退役（#462——机械停派取消，判定权归主智能体工作协议，
- * 意见轮收口一律受理即派）；守卫沿用（未产出 PRD 止于对话、归档拒、在途排队
- * 合并/静默跳过，归 {@link IterationAppService} / {@link GenerationAppService}）。</p>
+ * <p><b>链必达收口（#43；#101 生成无门→#332 生成加门→#462 去确认门→<b>#542
+ * 首建派发门（ADR-0048/0049）</b>）</b>：主智能体无派发权——生成与更新 run 的
+ * 派发都不在模型手里，平台在意见轮落定后观测收口（无挂起问答）即按项目态派发：
+ * 已生成派更新 run（交接物 = 用户意见原文 + 需求侧判定结果——PRD 改没改、改了
+ * 什么，见 {@link #dispatchOnTurnClose}，受理即派不动）；未生成但 PRD 已产出按
+ * <b>快道事实分岔</b>（#542——自动派发两入口整体退役、全域无无条件自动路径）：
+ * 快道（savePrd 的 fastLane 工具调用事实——收敛令/零必答短路/付费「直接开始做」
+ * 视同确认，{@link FastLaneFacts}）直派首次生成 run（
+ * {@link GenerationAppService#dispatchGenerationOnTurnClose}，在途静默跳过＋意见
+ * 入队 #360）；自然收口<b>不派发</b>——试用态置岔路口状态位（
+ * {@link BuildGateAppService#ensureForkPending}，三选卡持久可回、「立即生成」即
+ * 点火）、付费态确认门读面在场（PRD 文档面按钮确认即派发）；未产出 PRD 止于
+ * 对话（访谈期常态）。判定结果从工具调用事实观测（{@link PrdRevisionFacts}
+ * {@link FastLaneFacts}），不新增模型自报结论的面；守卫沿用（未产出 PRD 止于
+ * 对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
+ * {@link GenerationAppService}）。</p>
  *
  * <p><b>访谈轮收口硬契约与悬空接管（ADR-0032，#373）</b>：需求梳理期（未出 PRD）
  * 意见轮与问答作答复跑轮的合法收口只有两形——再问一问（挂起问答）或产出 PRD
@@ -116,6 +121,12 @@ public class MainAgentAppService {
     private final SegmentSettlementAppService segmentSettlement;
     private final InterviewQuotaAppService interviewQuota;
     private final BillingAppService billingAppService;
+
+    /** 快道事实（#542）：savePrd 的 fastLane 工具调用事实——收口观测分岔快道直派/自然收口。 */
+    private final FastLaneFacts fastLaneFacts;
+
+    /** 岔路口与派发门（#542）：自然收口置岔路口状态位（试用态出卡）。 */
+    private final BuildGateAppService buildGateService;
 
     /**
      * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
@@ -231,7 +242,8 @@ public class MainAgentAppService {
             ConversationHistoryAppService conversationHistory,
             MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
             SegmentSettlementAppService segmentSettlement,
-            InterviewQuotaAppService interviewQuota, BillingAppService billingAppService) {
+            InterviewQuotaAppService interviewQuota, BillingAppService billingAppService,
+            FastLaneFacts fastLaneFacts, BuildGateAppService buildGateService) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -251,6 +263,8 @@ public class MainAgentAppService {
         this.segmentSettlement = segmentSettlement;
         this.interviewQuota = interviewQuota;
         this.billingAppService = billingAppService;
+        this.fastLaneFacts = fastLaneFacts;
+        this.buildGateService = buildGateService;
     }
 
     /**
@@ -463,6 +477,7 @@ public class MainAgentAppService {
             String workspaceId = Long.toString(project.getWorkspaceId());
             prdRevisions.clear(workspaceId);
             buildPlanFacts.clear(workspaceId);
+            fastLaneFacts.clear(workspaceId);
             sedimentProposals.clear(workspaceId);
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
@@ -568,12 +583,16 @@ public class MainAgentAppService {
         requireNoPendingQuestion(project, sessionId);
         String runId = EventsAppService.newRunId();
         AgentCommand command = mainCommand(project, runId, prompt);
+        // 首建派发意图（#542）：切换是用户触发面——重产轮收口（系统终点＋PRD/计划
+        // 在场）按意图延续派发首个构建（如定稿设计稿入起跑上下文），非无条件路径
+        generationAppService.noteFirstBuildIntent(projectId);
         sessionExecutor.submit(sessionId, () -> {
             // 同补产轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的修订/
             // 计划事实不冒充本轮产出）
             String workspaceId = Long.toString(project.getWorkspaceId());
             prdRevisions.clear(workspaceId);
             buildPlanFacts.clear(workspaceId);
+            fastLaneFacts.clear(workspaceId);
             sedimentProposals.clear(workspaceId);
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
@@ -711,6 +730,7 @@ public class MainAgentAppService {
             // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
+            fastLaneFacts.clear(Long.toString(project.getWorkspaceId()));
             sedimentProposals.clear(Long.toString(project.getWorkspaceId()));
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
@@ -1007,22 +1027,43 @@ public class MainAgentAppService {
                     }
                     return;
                 }
-                // 去确认门（#462，ADR-0039——旧「生成加门 #332」退役）：系统终点 PRD
-                // 已产出即自动派首个构建 run——首次 savePrd 落盘回调已先行触发派发
-                // （{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}，幂等：
-                // 在途/已生成静默跳过），此处收口观测再兜一轮（平台轮/续跑/兜底面），
-                // 撞在途静默跳过；切片计划事实随本轮消费进交接物（saveBuildPlan 事实
-                // 在场即随派落轨道表，缺失走既有补产链）。设计类终点（含全部定稿）
-                // 保持原触发律（设计轨分岔代码保留、入口已收起）。
-                // 携意见载荷（#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
-                // 不再静默丢（锚缺失的防御边角传 null opinion 走旧静默口径）
-                GenerationAppService.GenerationRun run =
-                        generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
-                                new GenerationAppService.TurnOpinion(
-                                        opinion, prdRevisionSummary, runId));
-                if (run != null) {
-                    log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
-                            projectId, run.runId());
+                // 首建派发门（#542 访谈②，ADR-0048/0049——自动派发两入口整体退役）：
+                // 系统终点 PRD 已产出的收口按<b>快道事实</b>分岔——快道（savePrd 的
+                // fastLane 工具调用事实：收敛令/零必答短路/付费「直接开始做」视同确认）
+                // 直派首个构建 run（急着要的给快的——不出卡不确认，在途撞车静默跳过
+                // ＋意见载荷按 #360 入队不静默丢）；自然收口（判定明确含提前明确）
+                // <b>不派发</b>——试用态置岔路口状态位（三选卡持久可回，「立即生成」
+                // 即点火）、付费态确认门读面在场（PRD 文档面按钮确认即派发）——点火
+                // 归用户，全域无无条件自动路径。设计类终点（含全部定稿）保持原触发律
+                // （上方设计轨分岔已收口，设计定稿构建归 DesignProcessAppService）。
+                if (fastLaneFacts.consume(workspaceId)) {
+                    GenerationAppService.GenerationRun run =
+                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
+                                    new GenerationAppService.TurnOpinion(
+                                            opinion, prdRevisionSummary, runId));
+                    if (run != null) {
+                        log.info("[main-close] 项目 {} 快道收口（收敛令/零必答/直接开始做），"
+                                + "直接派发首次生成 run（{}）", projectId, run.runId());
+                    }
+                    return;
+                }
+                // 计划补产轮收口的意图延续（#542）：补产链由用户触发面发起（「立即
+                // 生成」/确认/快道/设计定稿）——计划在场且意图在场即再派（同一触发
+                // 链的延续、条件性路径）；无意图不派（返回 null）
+                GenerationAppService.GenerationRun resumed =
+                        generationAppService.dispatchAfterPlanProduction(projectId, plan);
+                if (resumed != null) {
+                    log.info("[main-close] 项目 {} 计划补产完成，按用户触发链延续派发"
+                            + "首次生成 run（{}）", projectId, resumed.runId());
+                    return;
+                }
+                // 自然收口：在途意见照旧排队（#360——首 Demo 在途的反馈不静默丢），
+                // 试用态置岔路口位（幂等——意见修订轮再收口卡照旧在场）
+                generationAppService.queueFirstDemoTurnOpinion(projectId,
+                        new GenerationAppService.TurnOpinion(opinion, prdRevisionSummary, runId));
+                if (buildGateService.ensureForkPending(projectId)) {
+                    log.info("[main-close] 项目 {} 试用态自然收口：岔路口三选卡在场"
+                            + "（持久可回，「立即生成」即点火）", projectId);
                 }
                 return;
             }
@@ -1308,6 +1349,7 @@ public class MainAgentAppService {
         opinionExchanges.remove(sessionId);
         prdRevisions.clear(workspaceId);
         buildPlanFacts.clear(workspaceId);
+        fastLaneFacts.clear(workspaceId);
     }
 
     /**

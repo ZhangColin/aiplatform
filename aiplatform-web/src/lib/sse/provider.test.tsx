@@ -16,14 +16,16 @@ import { SseProvider } from "./provider";
  */
 
 // useRouter 在 App Router 上下文外抛错（next 16）：mock 掉；bridge 的登记口
-// spy（其余导出保持原样——事件分发不在此测）
+// spy（其余导出保持原样——事件分发不在此测）。
+// 注：mock 路径必须走 @/ 别名——本机 vitest 4.1.11（Windows）对 `./` 相对路径
+// mock 静默不拦截（工厂不执行、原模块直进），别名路径则正常（2026-11-17 实证）。
 const pushMock = vi.hoisted(() => vi.fn());
 const noteRouteContextMock = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
   usePathname: () => "/",
 }));
-vi.mock("./bridge", async (importOriginal) => ({
+vi.mock("@/lib/sse/bridge", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   noteRouteContext: noteRouteContextMock,
 }));

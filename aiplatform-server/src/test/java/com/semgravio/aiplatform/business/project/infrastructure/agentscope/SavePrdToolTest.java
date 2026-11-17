@@ -19,14 +19,17 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem;
+import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
  * {@link SavePrdTool}：覆盖写落盘（业务正本路径）+ 落盘成功业务登记 + summary
  * 必传校验（#52：漏传报错逼补——修订事实从工具调用面观测，不自报）+ 修订事实登记
- * （{@link PrdRevisionFacts}，终值胜出）；失败回错误结果（模型可见可重试）；权限
- * 自检恒放行（PRD 无最终版一说，确认动作在下单快照）。
+ * （{@link PrdRevisionFacts}，终值胜出）+ 快道事实登记（#542：fastLane=true 即
+ * {@link FastLaneFacts}——收口观测直派、不出卡不确认；缺席＝自然收口出岔路口/
+ * 确认门）；失败回错误结果（模型可见可重试）；权限自检恒放行（PRD 无最终版一说，
+ * 确认动作在下单快照）。
  */
 class SavePrdToolTest {
 
@@ -51,7 +54,7 @@ class SavePrdToolTest {
         RuntimeException failure;
 
         RecordingAdapter() {
-            super(null, null, null, null);
+            super(null, null, null);
         }
 
         @Override
@@ -71,7 +74,8 @@ class SavePrdToolTest {
     private final RecordingExec exec = new RecordingExec();
     private final RecordingAdapter port = new RecordingAdapter();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
-    private final SavePrdTool tool = new SavePrdTool("docs/PRD.md", "42", port, prdRevisions, exec);
+    private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
+    private final SavePrdTool tool = new SavePrdTool("docs/PRD.md", "42", port, prdRevisions, fastLaneFacts, exec);
 
     @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
@@ -217,12 +221,51 @@ class SavePrdToolTest {
         assertThat(prdRevisions.consumeFailure("42")).isFalse();
     }
 
+    @Test
+    void given_fast_lane_save_when_called_then_fact_recorded() {
+        // #542 快道事实：fastLane=true（收敛令/零必答/「直接开始做」）——收口观测
+        // 直派首个构建的判定源；成功即登记（取走即清）
+        call("# PRD", "收敛令收口：按推荐补全产出", true);
+
+        assertThat(fastLaneFacts.consume("42")).isTrue();
+        assertThat(fastLaneFacts.consume("42")).isFalse(); // 取走即清
+    }
+
+    @Test
+    void given_natural_close_save_when_called_then_no_fast_lane_fact() {
+        // 自然收口（判定明确/问满收口——fastLane 缺省不传）：不登记——试用态出岔路口
+        // 卡、付费态确认门在场，点火归用户
+        call("# PRD", "判定明确，产出 PRD");
+
+        assertThat(fastLaneFacts.consume("42")).isFalse();
+    }
+
+    @Test
+    void given_fast_lane_save_when_failed_then_no_fact() {
+        // 失败不登记快道事实（失败重试成功后的终值为准，同修订事实口径）
+        exec.next = new DockerExecFilesystem.ExecOutput(125, new byte[0], "docker: No such container");
+
+        call("# PRD", "收敛令收口", true);
+
+        assertThat(fastLaneFacts.consume("42")).isFalse();
+    }
+
     // ---------- 内部 ----------
 
     private ToolResultBlock call(String content, String summary) {
-        Map<String, Object> input = summary != null
-                ? Map.of("content", content, "summary", summary)
-                : Map.of("content", content);
+        return call(content, summary, null);
+    }
+
+    /** 快道形调用（fastLane=null＝不传——自然收口缺省形）。 */
+    private ToolResultBlock call(String content, String summary, Boolean fastLane) {
+        Map<String, Object> input = new java.util.HashMap<>();
+        input.put("content", content);
+        if (summary != null) {
+            input.put("summary", summary);
+        }
+        if (fastLane != null) {
+            input.put("fastLane", fastLane);
+        }
         ToolCallParam param = ToolCallParam.builder()
                 .toolUseBlock(new ToolUseBlock(
                         "tc-1", SavePrdTool.NAME, input, null))

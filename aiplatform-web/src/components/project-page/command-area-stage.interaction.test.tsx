@@ -60,6 +60,9 @@ vi.mock("@/hooks/use-balance-reminder", () => ({
 vi.mock("@/hooks/use-interview-quota", () => ({
   useInterviewQuota: () => ({ data: null }),
 }));
+vi.mock("@/hooks/use-build-gate", () => ({
+  useBuildGate: () => ({ data: null }),
+}));
 vi.mock("@/hooks/use-prd", () => ({ usePrd: () => ({ data: undefined }) }));
 vi.mock("@/hooks/use-upload-material", () => ({ useUploadMaterial: () => vi.fn() }));
 vi.mock("@/hooks/use-chat", () => ({

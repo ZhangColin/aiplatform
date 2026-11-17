@@ -60,6 +60,7 @@ import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -117,6 +118,10 @@ class MainAgentAppServiceTest {
 
     @Autowired
     private PrdRevisionFacts prdRevisions;
+
+    /** 快道事实登记口（#542：模拟轮内 savePrd 带 fastLane=true 的工具调用事实）。 */
+    @Autowired
+    private FastLaneFacts fastLaneFacts;
 
     @Autowired
     private BillingAppService billingAppService;
@@ -1269,10 +1274,10 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_prd_produced_when_opinion_turn_closes_then_first_generation_dispatched() {
-        // 去门化（#462，ADR-0039——「生成加门 #332」退役）：PRD 已产出即自动派首个
-        // 构建 run——首次 savePrd 落盘回调已先行触发派发（此处 mock 边界无工具执行
-        // 面），收口观测再兜一轮：无「已确认版本」判据，起跑即自动记构建基准
+    void given_prd_produced_natural_close_when_turn_closes_then_fork_pending_no_dispatch() {
+        // 灵魂例（#542 访谈② AC①/AC③，ADR-0048/0049——两入口退役）：试用态自然收口
+        // （无快道事实）不派发——出岔路口三选卡（状态位持久可回：关页回来卡仍在），
+        // 编码 run 零起跑；「立即生成」才点火（见 BuildGateAppServiceTest/POST /generate）
         Long projectId = persistedPrdProject("9727");
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
@@ -1288,11 +1293,45 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
-        // 收口后派生成：编码 run 在场（零门——未生成＋PRD 已产出即派）
+        // 自然收口不派：只有主智能体一轮 converse，无任何编码 run
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues())
+                .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+        // 岔路口状态位落库（持久可回——重读在场；Integer code 落库）
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT fork_state, generation_requested_at FROM prj_projects WHERE id = ?",
+                projectId).get("fork_state")).isEqualTo(ForkState.PENDING.getCode());
+    }
+
+    @Test
+    void given_fast_lane_save_when_turn_closes_then_first_generation_dispatched_no_card() {
+        // 灵魂例（#542 AC④，ADR-0048 快道）：savePrd 携 fastLane=true（收敛令/零必答
+        // 短路/付费「直接开始做」视同确认）——收口观测直派首个构建 run，不出卡不确认
+        Long projectId = persistedPrdProject("9732");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                buildPlanFacts.record(command.workspaceId(),
+                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                fastLaneFacts.record(command.workspaceId());
+            }
+            return new AgentReply(command.runId(), "已按收敛令直接产出 PRD 与切片计划");
+        });
+
+        appService.runOpinionTurn(projectId, "别问了直接做");
+
+        // 快道直派：编码 run 在场；不出卡（岔路口位不置）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(2)).converse(command.capture(), any());
         assertThat(command.getAllValues()).anyMatch(
                 c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
+                .get("fork_state")).isNull();
     }
 
     @Test
@@ -1311,13 +1350,14 @@ class MainAgentAppServiceTest {
             if (command.sessionId().startsWith("main-")) {
                 buildPlanFacts.record(command.workspaceId(),
                         new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
             }
             return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
         });
 
-        appService.runOpinionTurn(projectId, "做一个官网");
+        appService.runOpinionTurn(projectId, "别问了直接做");
 
-        // 收口后派生成：首条编码 run 落在阶段 0 会话、携执行体配置与起服 prompt
+        // 快道收口直派生成：首条编码 run 落在阶段 0 会话、携执行体配置与起服 prompt
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(2)).converse(command.capture(), any());
         AgentCommand generation = command.getAllValues().stream()
@@ -1346,23 +1386,24 @@ class MainAgentAppServiceTest {
             if (command.sessionId().startsWith("main-")) {
                 buildPlanFacts.record(command.workspaceId(),
                         new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
                 return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
             }
             return new AgentReply(command.runId(), "系统已生成");
         });
 
-        appService.runOpinionTurn(projectId, "做一个电商系统");
+        appService.runOpinionTurn(projectId, "直接做");
 
         assertThat(generationAppService.planOf(projectId))
                 .isEqualTo(new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
     }
 
     @Test
-    void given_main_no_build_plan_when_turn_closes_then_plan_redispatched_not_faked() {
-        // 无计划兜底（#220 删 minimalFallback 后的新口径；前置事实＝PRD 已产出）：
-        // 主智能体产出 PRD 但未产出切片计划——不兜假计划，
-        // 重派主智能体按 PRD 补产（补产轮收口再判）；补产轮仍无计划即止（同 PRD 版本
-        // 只补一次），生成不倒退为「守卫不派」也不冒进
+    void given_main_no_build_plan_when_turn_closes_then_no_auto_redispatch_fork_stays() {
+        // 无计划路径（#220 删 minimalFallback；#542 两入口退役改判）：主智能体产出
+        // PRD 但未产出切片计划——自然收口不再自动补产（补产链随轮收口兜一轮退役）：
+        // 岔路口卡照旧在场（PRD 可看），「立即生成」触发时才走补产（startGeneration
+        // 计划缺失重派主智能体补产，见 GenerationAppServiceTest）——不兜假计划
         Long projectId = persistedPrdProject("9730");
         seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
@@ -1373,14 +1414,15 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
-        // 意见轮 + 补产轮恰两轮 main 会话（补产无果不递归），无任何编码 run
+        // 只有意见轮一轮 main 会话（无补产、无编码 run），岔路口在场待用户点火
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT);
+        verify(agentClient, times(1)).converse(command.capture(), any());
         assertThat(command.getAllValues())
                 .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
         assertThat(generationAppService.planOf(projectId)).isNull(); // 不出现假计划
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
+                .get("fork_state")).isEqualTo(ForkState.PENDING.getCode());
     }
 
     @Test
@@ -1532,6 +1574,7 @@ class MainAgentAppServiceTest {
                 prdRevisions.record(command.workspaceId(), "交付范围扩大");
                 buildPlanFacts.record(command.workspaceId(),
                         new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
                 return new AgentReply(command.runId(), "已按意见修订 PRD");
             }
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
@@ -1539,7 +1582,7 @@ class MainAgentAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        appService.runOpinionTurn(projectId, "交付范围加一个小程序端");
+        appService.runOpinionTurn(projectId, "交付范围加一个小程序端，直接做");
 
         // 收口后派首个构建 run：main 轮＋编码 run（至少两轮）；无停驻写读
         verify(agentClient, atLeast(2)).converse(any(), any());

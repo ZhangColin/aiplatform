@@ -61,10 +61,11 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 生成编排（#22 片2-1；#101 生成无门自动发起→#332 生成加门→<b>#462 去确认门
- * （ADR-0039）</b>——首个构建 run 的触发平移到首次产 PRD：savePrd 落盘回调
- * （{@link #dispatchFirstDemoOnPrdProduced}）即自动派，确认门与人确认动作整段
- * 退役；#104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
+ * 生成编排（#22 片2-1；#101 生成无门自动发起→#332 生成加门→#462 去确认门
+ * （ADR-0039）→<b>#542 首建派发门（ADR-0048/0049）——照产自动派发两入口整体
+ * 退役，点火归用户</b>：岔路口「立即生成」/付费轨 PRD 确认/快道/设计定稿四触发
+ * 面，自然收口不派发〔试用态出岔路口卡、付费态确认门在场〕；#104 生成轨道——
+ * 单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
  * 显式端点（POST /generate）与中断「继续生成」兜底走同一编排
  * （{@link #startGeneration}——重发即断点续跑，#221）。
  * run 执行体与主智能体
@@ -114,14 +115,21 @@ import lombok.extern.slf4j.Slf4j;
  * 缺口；措辞漂移即对照不上、按待跑重做（降级方向安全：多跑不漏做）。PRD 已演进
  * 的换锚重产（表内有旧片行）不适用存量对照——整组替换重置、从头来是既定口径。</p>
  *
- * <p><b>首 Demo 触发平移（#462 去确认门，ADR-0039）</b>：首个构建 run 的触发＝
- * 首次产 PRD（{@link #dispatchFirstDemoOnPrdProduced}，savePrd 落盘回调侧——
- * 仅计划已在场时即派；计划未落属产 PRD 同转进行中，防空烧交由轮收口单点再兜）——
- * 「确认此版 PRD 并生成 Demo」的人确认动作与两级门整段退役。未生成＋PRD 已产出，
- * 收口观测/「继续生成」即再触发（在途静默跳过）。小迭代照旧无门（受理即派）；
- * 重复触发（已生成或生成在途）按钮路径拒绝 PRJ_017。Demo 类 run 起跑自动记 PRD
- * 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，构建基准序）——
- * 记行先行、Demo 版本锚捕获读「最新版」。</p>
+ * <p><b>首建派发门（#542 访谈②，ADR-0048/0049——两入口退役）</b>：首个构建
+ * run 的点火权归用户——#462 的照产自动派发两入口（首产回调
+ * {@code dispatchFirstDemoOnPrdProduced}＋轮收口兜一轮）整体退役，全域无无条件
+ * 自动路径。触发面四条：试用态岔路口三选卡「立即生成」（{@link #startGeneration}
+ * 既有口）、付费轨 PRD 确认按钮（{@link BuildGateAppService#confirmFirstBuild}，
+ * 恢复原动作形态——确认即派发、不写版本行）、快道（收敛令/零必答短路/付费
+ * 「直接开始做」——savePrd 的 fastLane 工具调用事实，收口观测直派
+ * {@link #dispatchGenerationOnTurnClose}，不出卡不确认）、设计类轨迹全部定稿
+ * （设计轨触发律不改）。自然收口不派发：试用态出岔路口卡（状态位持久可回）、
+ * 付费态确认门在场。点火时点落 {@code generation_requested_at}
+ * （{@link #markFirstBuildRequested}——卡/门「首建未派发」呈现条件的事实源）；
+ * 失败重试走「继续生成」不重复确认、卡与门不复现。小迭代照旧无门（受理即派）；
+ * 重复触发（已生成或生成在途）按钮路径拒绝 PRJ_017。Demo 类 run 起跑自动记
+ * PRD 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，构建基准序
+ * ——确认不写版本行，记行归起跑单点）、Demo 版本锚捕获读「最新版」。</p>
  *
  * <p><b>首 Demo 在途的意见排队补派（#360）</b>：首个构建 run 在途期间（generated_at
  * 未落位）到达的意见轮，收口派发不再静默跳过——意见（原文＋需求侧修订说明）入队
@@ -616,6 +624,17 @@ public class GenerationAppService {
     private final Set<Long> balanceBlockedGeneration = ConcurrentHashMap.newKeySet();
 
     /**
+     * 首建派发意图账（#542 两入口退役的条件性再派，projectId 集）：计划补产
+     * （{@link #dispatchPlanProduction}）与终点切换重产（{@code requestEndpointShift}）
+     * 的入口都是<b>用户触发面</b>（岔路口「立即生成」/付费确认/快道/设计定稿/
+     * 切换终点）——平台轮收口的再派是同一触发链的延续（
+     * {@link #dispatchAfterPlanProduction} 消费），非无条件自动路径；无意图的
+     * 平台轮收口不派（点火归用户，卡/门读面在场）。进程内态（run 无表口径）：
+     * 重启丢账＝意图丢失，用户重点一次即兜底（卡/门仍在场）。
+     */
+    private final Set<Long> firstBuildDispatchIntents = ConcurrentHashMap.newKeySet();
+
+    /**
      * @param mainAgentAppService 计划补产口（{@link MainAgentAppService#requestBuildPlan}）。
      *        {@code @Lazy} 破主智能体编排与本服务的构造环：MainAgentAppService 收口派发
      *        依赖本服务（既有方向），本服务计划缺失时重派主智能体补产（#220 新增方向）
@@ -720,17 +739,19 @@ public class GenerationAppService {
     }
 
     /**
-     * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门→<b>#462
-     * 去确认门</b>，ADR-0039）：系统终点 PRD 已产出即自动起——首个构建的先行触发
-     * 在首次 savePrd 落盘回调（{@link #dispatchFirstDemoOnPrdProduced}，通常早于
-     * 本入口且在途），本入口是收口观测的再兜一轮（平台轮/续跑/兜底面），撞在途
-     * 静默跳过；本入口仍承担设计类轨迹的首个构建（设计全部定稿后经此起构建，
-     * 设计轨触发律不改）与失败后的重触发。守卫沿用
-     * {@link #startGeneration}（存在 / 未归档 / 未生成过 / PRD 已产出——
-     * {@link #requireGeneratableProject} 单点），差异只在在途口径：生成进行中
-     * 意见轮（{@code turnOpinion} 在场）入队＋明示、生成成功收口后合并补派
-     * （#360——不再静默丢）；无意见载荷的调用面（设计定稿构建/平台轮）仍静默
-     * 跳过（不派不报错）；按钮路径在途拒绝 PRJ_017。
+     * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门→#462
+     * 去确认门→<b>#542 两入口退役</b>，ADR-0048/0049）：自动派发两入口（首产
+     * 回调＋轮收口兜一轮）整体退役、全域无无条件自动路径——本入口只在<b>用户
+     * 触发事实</b>在场时被调用：①快道（savePrd 的 fastLane 工具调用事实——收敛令/
+     * 零必答短路/付费「直接开始做」视同确认，{@link MainAgentAppService} 收口
+     * 消费分岔直调本入口）；②设计类轨迹的首个构建（设计全部定稿后经此起构建，
+     * 设计轨触发律不改——定稿是用户动作）。<b>自然收口不走本入口</b>：试用态出
+     * 岔路口卡（{@link BuildGateAppService#ensureForkPending}）、付费态确认门
+     * 读面在场（PRD 文档面按钮）——点火归用户。守卫沿用 {@link #startGeneration}
+     * （存在 / 未归档 / 未生成过 / PRD 已产出——{@link #requireGeneratableProject}
+     * 单点），在途口径：生成进行中意见轮（{@code turnOpinion} 在场）入队＋明示、
+     * 生成成功收口后合并补派（#360——不再静默丢）；无意见载荷的调用面（设计定稿
+     * 构建）静默跳过（不派不报错）。
      *
      * @param plan 切片计划交接物（saveBuildPlan 事实终值；null = 本轮未产出——沿用
      *             表内现行计划〔PRD 锚一致才有效〕，仍无则计划缺失走补产兜底）
@@ -756,44 +777,63 @@ public class GenerationAppService {
     }
 
     /**
-     * 首次产 PRD 触发首个 Demo run（<b>#462 去确认门，ADR-0039</b>——原
-     * #332「确认触发」{@code dispatchFirstDemoOnConfirm} 平移到 savePrd 落盘
-     * 回调侧，{@link PrdArtifactAdapter#onWritten} 首次置位时调用）：首次
-     * savePrd（prdProducedAt 首次置位）即派首个构建 run——「确认此版 PRD 并生成
-     * Demo」的人确认触发退役，人机差异仅是触发者换人：人确认 → 平台自动。生成
-     * 读的是工作区 PRD 正本；派发失败不反噬 savePrd（落库已成立）——收口观测
-     * （{@link MainAgentAppService}）再兜一轮，用户重提即兜底。
+     * 在途意见排队（#360 面，#542 两入口退役后的<b>非快道</b>收口观测）：首个
+     * 构建 run 在途期间到达的意见轮——意见入队＋对话面平台明示（生成成功收口后
+     * 合并补派更新 run，不静默丢），<b>不派发</b>（自然收口无自动路径——点火归
+     * 用户：岔路口「立即生成」/确认按钮/快道）。不在途（首建未点火/已收口）静默
+     * 跳过：意见由 PRD 修订承载，无需排队。
      *
-     * <p>幂等/重发同口径：已生成或生成在途静默跳过返回 null（首个 Demo 已起或在
-     * 跑）；未生成即派——run-failed 后项目仍「未生成」，收口观测/「继续生成」
-     * 即再触发，不自动重试（防空烧）。设计类终点由
-     * {@link #dispatchGeneration} 的设计定稿门拦下（口径不变）。</p>
-     *
-     * <p><b>计划缺失不在本入口补产（#462 收口精化，ADR-0039 补记——防空烧）</b>：
-     * 本回调发生在产 PRD 同转进行中（协议第 5 条 savePrd→saveBuildPlan 有序），
-     * 此刻切片计划必未落轨道表——若在此走补产兜底，补产轮排在同转之后空跑一整轮
-     * 主智能体（同转收口本就会携 buildPlanFacts 再派，补产纯烧）。故计划未落时
-     * 本入口静默返回 null，补产兜底归轮收口单点（{@link
-     * #dispatchGenerationOnTurnClose}）：标准路径同转收口计划已在场零空烧；模型
-     * 未守协议（收口无计划）时收口侧照常补产。</p>
-     *
-     * @return 派发的 run 标识；已生成 / 在途 / 计划缺失未派返回 null——调用方不
-     *         据此报错（派发是次生事实）
+     * <p>返回 void：排队是次生事实而非派发——恒 null 的返回值只会引诱调用方误读
+     * 为派发回执。
      */
-    public GenerationRun dispatchFirstDemoOnPrdProduced(Long projectId) {
+    public void queueFirstDemoTurnOpinion(Long projectId, TurnOpinion turnOpinion) {
+        if (turnOpinion == null || turnOpinion.opinion() == null
+                || turnOpinion.opinion().isBlank()) {
+            return; // 无意见载荷（平台轮等）——无事可排
+        }
         Project project = projectRepository.findById(projectId).orElse(null);
-        if (project == null || project.getArchivedAt() != null
-                || project.getGeneratedAt() != null) {
-            return null; // 首个 Demo 已生成 / 归档——本入口只负责首个，不重复派
+        if (project == null) {
+            return;
         }
-        if (resolvePlan(project, /* handed= */ null) == null) {
-            // 计划未落＝产 PRD 同转仍在跑（收口必携计划再兜）——本入口不补产（防空烧）
-            log.info("[generate] 项目 {} 首次产 PRD 回调：切片计划未落（产 PRD 同转进行中），"
-                    + "派发交由轮收口观测再兜", projectId);
-            return null;
+        synchronized (codingRunTrack) { // 与派发侧同锁（begin 失败 ⟹ end 未发生的锁序）
+            if (!codingRunTrack.isInFlight(projectId)) {
+                return; // 不在途——不排（意见由 PRD 承载，点火归用户动作）
+            }
+            firstDemoTurnOpinions.computeIfAbsent(projectId, key -> new ArrayList<>())
+                    .add(turnOpinion);
         }
-        return dispatchGeneration(project, /* rejectInFlight= */ false, /* plan= */ null,
-                /* turnOpinion= */ null);
+        log.info("[generate] 项目 {} 首 Demo 在途，意见轮收口入队（成功收口后"
+                + "合并补派，轮锚 {}）", projectId, turnOpinion.turnRunId());
+        notifyTurnOpinionQueued(project, turnOpinion); // 锁外：回执不占轨道锁
+    }
+
+    /**
+     * 计划补产轮收口的意图延续派发（#542——{@link #dispatchPlanProduction} 的收口
+     * 腿）：计划缺失的补产链由用户触发面发起（「立即生成」/付费确认/快道/设计定稿
+     * ——补产时记意图），补产轮收口携计划在场且意图在场即再派——<b>同一触发链的
+     * 延续、条件性路径</b>（无意图不派：全域无无条件自动路径，点火归用户）。意图
+     * 随派发消费；计划未在场（补产无果等）意图保留给真正的补产收口，不误伤在途
+     * 补产期间到达的意见轮。
+     *
+     * @param plan 本轮收口的切片计划交接物（null＝本轮未产出——不动意图）
+     * @return 派发的 run 标识；无意图/无计划/在途静默跳过返回 null
+     */
+    public GenerationRun dispatchAfterPlanProduction(Long projectId, BuildPlan plan) {
+        if (plan == null) {
+            return null; // 计划未在场——非补产收口形（意图保留）
+        }
+        if (!firstBuildDispatchIntents.remove(projectId)) {
+            return null; // 无派发意图（非用户触发链的补产/直调面）——点火归用户
+        }
+        return dispatchGenerationOnTurnClose(projectId, plan);
+    }
+
+    /**
+     * 首建派发意图记账（#542）：用户触发链的平台轮（切换重产等——收口时计划在场
+     * 即按意图再派）在提交时记一笔；进程内态，收口消费即清。
+     */
+    public void noteFirstBuildIntent(Long projectId) {
+        firstBuildDispatchIntents.add(projectId);
     }
 
     /**
@@ -913,6 +953,10 @@ public class GenerationAppService {
             return null;
         }
 
+        // 首建点火时点落位（#542 派发门，ADR-0049「两轨唯一差异＝触发源」）：岔路口
+        // 「立即生成」/付费轨 PRD 确认/快道直生成/断点续跑（重发）共用——单向置位
+        // 不刷新；岔路口卡与确认按钮「首建未派发」呈现条件的事实源（BuildGateAppService）
+        markFirstBuildRequested(projectId);
         String firstRunId = EventsAppService.newRunId();
         // Demo 类 run 起跑自动记行（#462 去门化，ADR-0039）：快照当时工作区 PRD 全文
         // 为构建基准（版本号＝构建基准序，同文幂等跳过）——记行先行，随后锚捕获
@@ -1190,7 +1234,9 @@ public class GenerationAppService {
 
     /**
      * 计划缺失兜底（#220，替位已删的 minimalFallback）：重派主智能体按 PRD 补产
-     * 切片计划——补产轮（main 会话、不记用户发言）收口即经既有链必达自动再派生成。
+     * 切片计划——补产轮（main 会话、不记用户发言）收口经<b>意图延续</b>再派生成
+     * （#542：补产链入口都是用户触发面，收口再派＝同一触发链的延续
+     * {@link #dispatchAfterPlanProduction}——非无条件自动路径）。
      * 同一 PRD 版本只补产一次（{@link #planProductionRequests} 防烧护栏）：已补产过
      * 即静默不派（返回 null），用户重提意见即兜底；PRD 演进换锚可再补产。
      *
@@ -1209,6 +1255,9 @@ public class GenerationAppService {
         // 记账先于补产提交（补产轮收口的再派要靠它止住——同步执行器下后置记账会
         // 递归失控）；补产轮起跑被守卫拒（挂起问答等）则清账——该版本仍可再补
         planProductionRequests.put(projectId, project.getPrdProducedAt());
+        // 派发意图记账（#542 意图延续）：补产链的入口是用户触发面——补产轮收口携
+        // 计划即再派（dispatchAfterPlanProduction 消费），非无条件自动路径
+        noteFirstBuildIntent(projectId);
         List<String> legacyClosedOutcomes =
                 List.copyOf(legacyClosedSummaries(projectId).keySet());
         log.info("[generate] 项目 {} 计划缺失，重派主智能体按 PRD 补产切片计划（存量对照清单 {} 项）",
@@ -1255,6 +1304,20 @@ public class GenerationAppService {
 
     /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#84 静默重试——重试不换新锚，全程同值）。 */
     public record GenerationRun(String runId) {
+    }
+
+    /**
+     * 首建点火时点落位（#542）：run 提交在即时短事务置位（单向——已置不刷新；
+     * 余额拦下/计划缺失/资产失败等早退路径不落位＝「未派发」如实）。读面消费归
+     * {@link BuildGateAppService}（岔路口卡/确认按钮的呈现条件），本服务只保证
+     * 落位语义。
+     */
+    private void markFirstBuildRequested(Long projectId) {
+        transactionTemplate.executeWithoutResult(status -> projectRepository.findById(projectId)
+                .ifPresent(current -> {
+                    current.markFirstBuildRequested();
+                    projectRepository.save(current);
+                }));
     }
 
     // ---------- 内部 ----------

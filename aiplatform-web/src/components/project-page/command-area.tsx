@@ -12,6 +12,7 @@ import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
 import { useInterviewQuota } from "@/hooks/use-interview-quota";
 import { usePendingIntercept } from "@/hooks/use-intercept";
+import { useBuildGate } from "@/hooks/use-build-gate";
 import { usePendingBalanceReminder } from "@/hooks/use-balance-reminder";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
@@ -38,6 +39,7 @@ import { useWorkMessageStore } from "@/lib/store/work-message";
 import { ChatMarkdown } from "./chat-markdown";
 import { ClosingCard } from "./closing-card";
 import { InterceptCard } from "./intercept-card";
+import { ForkCard } from "./fork-card";
 import { BalanceReminderCard } from "./balance-reminder-card";
 import { InterviewQuotaChip } from "./interview-quota-chip";
 import { QuestionCard } from "./question-card";
@@ -170,6 +172,9 @@ export function CommandArea({
   // 五问额度读面（#538 访谈①）：「已答 N/5 问」chip 数据源——服务端单源不自算；
   // 挂 conversation 域，轮收口（run-finish）失效即刷新（收口观测＝额度面变化点）
   const interviewQuota = useInterviewQuota(projectId);
+  // 首建派发门读面（#542 访谈②）：岔路口三选卡呈现条件（服务端单源——自然收口
+  // 置卡、点火隐藏都在服务端，本读面挂载即查）；确认按钮读面同源（PRD 文档面消费）
+  const buildGate = useBuildGate(projectId);
   // 待决试用拦截卡读面（#533 计费②门②，卡可回）：重载/回访重建——live 经
   // SSE 桥直写 store，本读面只补「刷新时事件不在场」的缺口（同形载荷同步同口）
   const pendingIntercept = usePendingIntercept(projectId);
@@ -357,6 +362,12 @@ export function CommandArea({
         data-frame={staged ? "composer-card" : undefined}
         className={staged ? "shrink-0 rounded-2xl border border-slate-soft/80 bg-white p-3 shadow-e1" : "shrink-0 p-3"}
       >
+        {/* 岔路口三选卡（#542 访谈②）：试用态自然收口后的首建点火卡——持久可回
+            （呈现条件服务端单源，关页回来卡仍在）；「立即生成」即点火，点火后随
+            读面隐藏。钉在输入框上方＝当前状态位（不随对话流上滚） */}
+        {buildGate.data?.forkCardPending && !disabled ? (
+          <ForkCard projectId={projectId} onSeePrd={onSeePrd} />
+        ) : null}
         {!staged && prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button

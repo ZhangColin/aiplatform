@@ -11,6 +11,7 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWai
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.BuildPlanFacts;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
+import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
@@ -72,6 +73,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final PrdArtifactAdapter prdArtifacts;
     private final FinishEditFacts finishFacts;
     private final PrdRevisionFacts prdRevisions;
+    private final FastLaneFacts fastLaneFacts;
     private final BuildPlanFacts buildPlanFacts;
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -87,7 +89,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final WorkspaceReadinessWaiter readinessWaiter;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
-            PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
+            PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
+            BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
@@ -98,6 +101,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
+        this.fastLaneFacts = fastLaneFacts;
         this.buildPlanFacts = buildPlanFacts;
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -120,7 +124,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {
             toolkit.registerAgentTool(new AskUserTool());
             toolkit.registerAgentTool(new SavePrdTool(prdArtifacts.workspacePath(),
-                    ro.workspaceId(), ro.containerName(), readinessWaiter, prdArtifacts, prdRevisions));
+                    ro.workspaceId(), ro.containerName(), readinessWaiter, prdArtifacts,
+                    prdRevisions, fastLaneFacts));
             toolkit.registerAgentTool(new SaveBuildPlanTool(ro.workspaceId(), buildPlanFacts));
             toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.workspaceId(),
                     ro.containerName(), readinessWaiter));

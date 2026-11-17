@@ -25,6 +25,7 @@ import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
 import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
+import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
 import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
@@ -34,6 +35,7 @@ import com.semgravio.aiplatform.business.project.application.ProjectLifecycleApp
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
+import com.semgravio.aiplatform.business.project.application.dto.response.BuildGateResponse;
 import com.semgravio.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.ConfirmInterceptCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
@@ -93,6 +95,7 @@ public class ProjectController {
     private final InterviewQuotaAppService interviewQuotaAppService;
     private final PrdVersionAppService prdVersionAppService;
     private final DemoVersionAppService demoVersionAppService;
+    private final BuildGateAppService buildGateAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
@@ -103,7 +106,8 @@ public class ProjectController {
                              ConversationHistoryAppService conversationHistoryAppService,
                              InterviewQuotaAppService interviewQuotaAppService,
                              PrdVersionAppService prdVersionAppService,
-                             DemoVersionAppService demoVersionAppService) {
+                             DemoVersionAppService demoVersionAppService,
+                             BuildGateAppService buildGateAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
@@ -114,6 +118,7 @@ public class ProjectController {
         this.interviewQuotaAppService = interviewQuotaAppService;
         this.prdVersionAppService = prdVersionAppService;
         this.demoVersionAppService = demoVersionAppService;
+        this.buildGateAppService = buildGateAppService;
     }
 
     @PostMapping
@@ -225,6 +230,25 @@ public class ProjectController {
         return ApiResponse.ok(interviewQuotaAppService.quotaOf(parseId(id)));
     }
 
+    @GetMapping("/{id}/build-gate")
+    @Operation(summary = "首建派发门读面（访谈②：岔路口卡与 PRD 确认按钮的呈现条件）",
+            description = "#542 两入口退役后首个构建 run 的点火归用户——本端点是两个"
+                    + "点火面的呈现条件单读点（服务端单源，前端不自算）：forkCardPending"
+                    + "＝试用态访谈自然收口待选择（岔路口三选卡「持久可回」，重载/回访重建；"
+                    + "「立即生成」经 POST /{id}/generate 点火）；prdConfirmable＝付费态"
+                    + "首建待确认（PRD 文档面「确认 PRD，开始生成」按钮，确认即派发）。"
+                    + "两呈现互斥（两轨判定归扣费域单读点）；快道（收敛令/零必答短路/"
+                    + "「直接开始做」）收口观测直派生成——两读面都缺席（false）；点火后"
+                    + "（generation_requested_at 落位）卡与按钮都不复现（失败重试走"
+                    + "「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。"
+                    + "归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null"
+                    + "（非 404——读面缺席语义与拦截卡同族）。")
+    public ApiResponse<BuildGateResponse> buildGate(@PathVariable String id) {
+        BuildGateAppService.BuildGateView view = buildGateAppService.gateOf(parseId(id));
+        return ApiResponse.ok(view == null ? null
+                : new BuildGateResponse(view.forkCardPending(), view.prdConfirmable()));
+    }
+
     @PostMapping("/{id}/intercept/confirm")
     @Operation(summary = "拦截卡确认扣减（翻转门②：确认即翻转付费并立即受理原被拦输入）",
             description = "扣减源未定的项目随卡完成首次选源（source 传 1=账户余额 / 2=项目余额——"
@@ -260,20 +284,22 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/generate")
-    @Operation(summary = "继续生成（断点续跑；首个 Demo 由确认触发）",
-            description = "#332 生成加门后，首个构建 run 由「确认此版 PRD」触发——本端点是"
-                    + "「继续生成」出口的载体（run-failed 或生成中断后仍可用）——run-failed 或生成中断后项目仍"
-                    + "「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/"
-                    + "中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状"
-                    + "盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与"
-                    + "片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起"
-                    + "（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD"
-                    + " 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划"
-                    + "重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失"
-                    + "（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD "
-                    + "补产切片计划，本端点返回补产轮 runId（主智能体对话轮，补产收口自动"
-                    + "再派生成；同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，"
-                    + "用户重提意见即兜底）。"
+    @Operation(summary = "生成点火与继续生成（岔路口「立即生成」/断点续跑共用单出口）",
+            description = "#542 首建派发门（ADR-0048/0049——自动派发两入口退役）：试用态"
+                    + "岔路口三选卡的「立即生成」＝本端点点火首个构建（PRD 已照产可看、"
+                    + "平台承担本次）；付费轨首建的点火动作是 PRD 确认（POST /{id}/prd/"
+                    + "confirm，失败重试也回本端点——不重复确认）。断点续跑（#221）同口："
+                    + "run-failed 或生成中断后项目仍「未生成」，重发即从断点接续——跳过"
+                    + "已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口"
+                    + "片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、"
+                    + "中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——"
+                    + "PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表"
+                    + "（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；"
+                    + "PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；"
+                    + "计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体"
+                    + "按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮；补产"
+                    + "完成后岔路口卡/确认按钮照旧在场，再点一次本端点即起跑——同一 PRD "
+                    + "版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。"
                     + "平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发"
                     + " run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md"
                     + " 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行"
@@ -285,8 +311,7 @@ public class ProjectController {
                     + "唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
-                    + "PRD 从未产出 409 PRJ_018（系统终点首个 Demo 由确认触发，本端点服务"
-                    + "「继续生成」，本守卫拦未产出直连调用）；"
+                    + "PRD 从未产出 409 PRJ_018（点火前置＝PRD 在——本守卫拦未产出直连调用）；"
                     + "设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、"
                     + "系统＋设计设计先行——构建从定稿设计稿长出）；"
                     + "项目不存在 404 PRJ_001")
@@ -422,6 +447,29 @@ public class ProjectController {
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.prd(parseId(id)));
+    }
+
+    @PostMapping("/{id}/prd/confirm")
+    @Operation(summary = "确认 PRD，开始生成（付费轨首建点火——确认即派发首个构建）",
+            description = "ADR-0049 恢复 #462 之前的<b>原确认动作形态</b>（PRD 文档面按钮"
+                    + "＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口"
+                    + "三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认"
+                    + "（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/"
+                    + "断点续跑同构）；<b>版本机制零改动</b>——确认不写版本行（旧「确认"
+                    + "即成版」#330 写表语义不复活），记行归 Demo 类 run 起跑单点、版本号"
+                    + "＝构建基准序全域一致。<b>点击幂等</b>＝已点火重复确认 409 PRJ_017"
+                    + "（不重复派发），失败重试走「继续生成」（POST /{id}/generate）不重复"
+                    + "确认；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经"
+                    + "本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable"
+                    + "（付费态∧PRD 在∧首建未点火）。错误码：PRJ_084 试用项目（岔路口"
+                    + "「立即生成」即点火）；PRJ_018 PRD 尚未产出；PRJ_013 已归档；"
+                    + "PRJ_017 已点火或生成在途；PRJ_042 设计未定稿（设计轨构建从定稿"
+                    + "设计稿长出）；BILL_025 源池余额不足（充值回正自动重派）。"
+                    + "项目不存在 404 PRJ_001")
+    @ErrorCodes({"PRJ_001", "PRJ_013", "PRJ_017", "PRJ_018", "PRJ_042", "PRJ_084", "BILL_025"})
+    public ApiResponse<GenerationStartResponse> confirmPrdGeneration(@PathVariable String id) {
+        return ApiResponse.ok(new GenerationStartResponse(
+                buildGateAppService.confirmFirstBuild(parseId(id)).runId()));
     }
 
     @GetMapping("/{id}/prd/versions")

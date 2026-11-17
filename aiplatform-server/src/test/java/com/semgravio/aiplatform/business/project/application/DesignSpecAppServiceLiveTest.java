@@ -247,13 +247,18 @@ class DesignSpecAppServiceLiveTest {
         // 灵魂用例（#543 验收③⑥——风格物化 live，物化写基座触 workspace 缝必跑）：
         // 新项目首个构建派发＝平台读 docs/PRD.md 风格方向字段→库值确定性物化——
         // 容器事实：:root 刷库值（cat 回读独立见证）＋DESIGN.md 出方向规则句＋
-        // lint 配置落位；PRD 修订方向后再派发＝重物化换肤（基座值换掉、行随刷）
+        // lint 配置落位；PRD 修订方向后再派发＝重物化换肤（基座值换掉、行随刷）。
+        // 首份 PRD 用真实模型产出形态（项目 380985400431490033 实录：中文数字序号
+        // 章标题＋加粗列表行——裸标题 fixture 曾让序号漏锚全路绿灯，黑白缺省套现场）
         givenProjectWithWorkspace();
         writeFile("docs/PRD.md", """
                 # PRD
-                ## 关键约束
-                - 风格方向：清新教育（微调：圆角再大一点）
+                ## 五、关键约束
+                - **风格方向：清新教育**（微调：圆角再大一点）
                 - 数据存储采用平台内建数据库
+
+                ## 六、功能清单
+                - 略
                 """);
 
         assertThat(appService.materializeAtDispatch(project())).isTrue();

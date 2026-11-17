@@ -109,6 +109,29 @@ class StyleDirectionsTest {
     }
 
     @Test
+    void given_numbered_chapter_heading_when_direction_of_prd_then_parsed() {
+        // 真实模型产出（项目 380985400431490033 实录回归）：章标题带中文数字序号
+        // 「## 五、关键约束」，字段行为加粗列表项、值尾带 ** 与括号微调注释——
+        // 章锚须容忍序号前缀，字段解析须在序号章体内命中
+        String prd = """
+                # 预约管家 PRD
+                ## 五、关键约束
+                - **移动端优先**：所有界面按手机屏幕尺寸设计。
+                - **风格方向：温暖服务**（陶土暖棕、圆角亲和、生活气）。
+
+                ## 六、功能清单
+                - 略
+                """;
+        assertThat(StyleDirections.directionOfPrd(prd).name()).isEqualTo("温暖服务");
+
+        // 阿拉伯数字序号同形容忍
+        assertThat(StyleDirections.directionOfPrd("""
+                ## 5. 关键约束
+                - 风格方向：清新教育
+                """).name()).isEqualTo("清新教育");
+    }
+
+    @Test
     void given_catalog_when_markdown_then_single_source_block_with_all_names() {
         String catalog = StyleDirections.catalogMarkdown();
         assertThat(catalog)

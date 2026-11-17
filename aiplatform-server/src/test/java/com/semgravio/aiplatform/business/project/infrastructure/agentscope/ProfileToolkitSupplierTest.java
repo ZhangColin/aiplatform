@@ -282,7 +282,7 @@ class ProfileToolkitSupplierTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, false, false, null, 3, 2,
-                        true, true, true, true, false));
+                        true, true, true, true, false, false));
         var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         Map<String, Object> input = Map.of("checks",
@@ -446,7 +446,7 @@ class ProfileToolkitSupplierTest {
                 String spec = new AgentConfigAppService.EffectiveConfig(
                         "prompt", "model", ws, fu,
                         false, true, null, null, null, false, false, null, 3, 2, true,
-                        true, true, true, false).toolSpec();
+                        true, true, true, false, false).toolSpec();
                 assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
                 assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
             }

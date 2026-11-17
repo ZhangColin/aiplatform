@@ -445,11 +445,54 @@ describe("ClosingCard · 基座件使用（#425 基座 lint 两档）", () => {
         },
       },
     }));
-    expect(html).toContain("余 2 处预置件违规");
+    expect(html).toContain("余 2 处基座件违规");
     expect(html).toContain("（已自动修正一轮，仍余）");
     expect(html).toContain("src/app/login/actions.ts:8");
     expect(html).toContain("会话自写"); // 规则中文名（不露工程码）
     expect(html).toContain('title="会话存储自写——走 src/lib/robust/session"');
+  });
+
+  it("强制档余项（#541 让路缺省）：照常呈现清单——收口照扫只标注的感知面", () => {
+    const html = renderCard(closing({
+      robustKitLint: {
+        status: "violations",
+        mandatory: {
+          total: 2,
+          violations: [
+            { file: "src/lib/orders.ts", line: 12, rule: "bare-db-client", message: "数据访问裸客户端直用——走 src/lib/robust/data-access" },
+            { file: "src/app/orders/page.tsx", line: 40, rule: "bare-fetch", message: "裸 fetch——走 src/lib/robust/http" },
+          ],
+        },
+      },
+    }));
+    expect(html).toContain("余 2 处基座件违规");
+    expect(html).toContain("src/lib/orders.ts:12");
+    expect(html).toContain("裸数据库客户端");
+    expect(html).toContain("src/app/orders/page.tsx:40");
+    expect(html).toContain("裸 fetch");
+  });
+
+  it("两档并存（#541 让路后可同场）：合并计数与清单（各档条目都在场）", () => {
+    const html = renderCard(closing({
+      robustKitLint: {
+        status: "violations",
+        mandatory: {
+          total: 1,
+          violations: [
+            { file: "src/app/orders/page.tsx", line: 40, rule: "bare-fetch", message: "裸 fetch" },
+          ],
+        },
+        preset: {
+          total: 2,
+          violations: [
+            { file: "src/app/login/actions.ts", line: 8, rule: "handwritten-session", message: "会话自写" },
+          ],
+        },
+      },
+    }));
+    expect(html).toContain("余 3 处基座件违规");
+    expect(html).toContain("src/app/orders/page.tsx:40");
+    expect(html).toContain("src/app/login/actions.ts:8");
   });
 
   it("预置档超可见上限：出「查看全部 N 处」收口（卡不无限长）", () => {
@@ -462,7 +505,7 @@ describe("ClosingCard · 基座件使用（#425 基座 lint 两档）", () => {
         preset: { total: 7, violations: many },
       },
     }));
-    expect(html).toContain("余 7 处预置件违规");
+    expect(html).toContain("余 7 处基座件违规");
     expect(html).toContain("查看全部 7 处");
   });
 

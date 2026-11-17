@@ -616,29 +616,31 @@ class CoderRunAttempts {
                     }
                     throw e;
                 }
-                // lint 违规有限自动重试一轮（#296 遵守三件套③；#425 同轮扩盖基座
-                // lint）：判据已过（8081/finish_edit）、扫描有违规且修轮未用、尝试
-                // 还有余量 → 违规清单喂回执行体原地修一轮（对偶 #221 错误现场续试
-                // ——静默重试信号不外泄，part-check 停「检查中」、PASSED 不抢先播报）
-                // ；一轮用尽：样式（#296 软约束）与基座预置档（#425 不拦收口）＝
-                // 如实随收尾卡列违规项收口（不静默不假装达标，也不 run 失败）；基座
-                // <b>强制档</b>仍余（#425 收口拒绝回路）＝结构性拒绝——拒绝回执抛出
-                // 走该次尝试失败（重试现场携带违规清单），耗尽走 #353 段级回滚重跑
-                // （升档兜底，不建新通道）。触发面只认拦收口的档（#471 gap 收口）：
-                // 样式与基座强制档；基座<b>预置档</b>不触发修轮——它本不拦收口，
-                // 修轮只会把 attempt+1 推上失败升档烧强档（11-12 复演 3 次预置档
-                // 升档实录），直接随收尾卡标注即其设计归宿；预置项在强制档修轮
-                // 触发时仍随现场清单喂回（顺带修，不单独烧轮）
+                // lint 违规有限自动重试一轮（#296 遵守三件套③）——触发面 #541 收窄至
+                // <b>样式合规</b>（设计规范 lint 软形态不动，ADR-0051 lint 拆半让路）：
+                // 判据已过（8081/finish_edit）、样式扫描有违规且修轮未用、尝试还有
+                // 余量 → 违规清单喂回执行体原地修一轮（对偶 #221 错误现场续试——
+                // 静默重试信号不外泄，part-check 停「检查中」、PASSED 不抢先播报）；
+                // 一轮用尽仍违规＝如实随收尾卡列违规项收口（不静默不假装达标，也不
+                // run 失败）。基座 lint 两档（#425/#471）在<b>让路缺省</b>下都不触发
+                // 修轮、不触发失败（强制档违规只随收尾卡标注——不喂修轮不间接升档；
+                // 预置档随收尾卡标注即其设计归宿）；阻断形态＝运营开关
+                // robust_lint_blocking_enabled 开（#541 回滚保险，恢复 #425 原形）：
+                // 强制档违规喂修轮（预置项随现场清单顺带修，不单独烧轮）、修轮用尽
+                // 仍余＝结构性拒绝——拒绝回执抛出走该次尝试失败（重试现场携带违规
+                // 清单），耗尽走 #353 段级回滚重跑（升档兜底，不建新通道）
                 Map<String, Object> lint = judgment.designLint();
                 Map<String, Object> robustLint = judgment.robustKitLint();
+                boolean robustBlocking = agent.robustLintBlockingEnabled();
+                boolean robustMandatoryBlockingViolation = robustBlocking
+                        && RobustKitLintAppService.mandatoryViolationsRemain(robustLint);
                 boolean styleViolating = lint != null && !lintViolations(lint).isEmpty();
-                boolean robustMandatoryViolating =
-                        RobustKitLintAppService.mandatoryViolationsRemain(robustLint);
-                if ((styleViolating || robustMandatoryViolating)
+                if ((styleViolating || robustMandatoryBlockingViolation)
                         && !lintFixRoundUsed && attempt < maxAttempts) {
                     lintFixRoundUsed = true;
                     lintFixPending = true;
-                    previousError = combinedLintRetryScene(lint, robustLint);
+                    previousError = combinedLintRetryScene(lint,
+                            robustBlocking ? robustLint : null);
                     log.info("[{}] 项目 {} lint 扫描未过（样式 {}／基座强制 {}+预置 {} 处），自动修一轮"
                             + "（attemptRunId={}）",
                             what, projectId,
@@ -650,7 +652,7 @@ class CoderRunAttempts {
                             attemptRunId);
                     continue;
                 }
-                if (RobustKitLintAppService.mandatoryViolationsRemain(robustLint)) {
+                if (robustMandatoryBlockingViolation) {
                     // 强制档拒绝回执（#425）：末次尝试记待决 ❌（同核验未过口径——
                     // 确定终态时外环补发，降级不悬挂）
                     if (attempt == maxAttempts) {
@@ -670,7 +672,9 @@ class CoderRunAttempts {
                         retried.put(CLOSING_LINT_RETRIED_FIELD, true);
                         judgment = judgment.withDesignLint(retried);
                     }
-                    if (judgment.robustKitLint() != null && lintFixRoundUsed) {
+                    if (judgment.robustKitLint() != null && lintFixRoundUsed && robustBlocking) {
+                        // retried 只在基座违规真随修轮喂回时标（阻断形态）——让路
+                        // 缺省下修轮是样式轮，基座违规没进现场，不伪造纠偏叙事
                         Map<String, Object> retried = new LinkedHashMap<>(judgment.robustKitLint());
                         retried.put(CLOSING_LINT_RETRIED_FIELD, true);
                         judgment = judgment.withRobustKitLint(retried);
@@ -1072,9 +1076,11 @@ class CoderRunAttempts {
 
     /**
      * 收口扩载的基座 lint 键（#425：{@code { status, retried?, mandatory?, preset? }}
-     * ——各档 { total, violations[] }，条目 file/line/rule/message；强制档违规
-     * 修不完＝收口被拒（载荷不会以「带强制档违规」形态出现在收尾卡——只剩预置档
-     * 余项如实标注）；存量工作区不携带）。
+     * ——各档 { total, violations[] }，条目 file/line/rule/message；#541 让路缺省＝
+     * 两档违规都如实随收尾卡标注、不拦收口（强制档余项在此呈现——链路照扫只标注
+     * 的落点）；阻断形态（robust_lint_blocking_enabled 开＝回滚保险）强制档修轮
+     * 用尽仍余＝收口被拒（载荷不会以「带强制档违规」形态出现在收尾卡——只剩预置
+     * 档余项如实标注）；存量工作区不携带）。
      */
     static final String CLOSING_ROBUST_LINT_FIELD = "robustKitLint";
 
@@ -1144,8 +1150,10 @@ class CoderRunAttempts {
     }
 
     /**
-     * 修轮现场拼装单点（#425 两源合流）：设计规范 lint 与基座 lint 各自现场在场
-     * 即拼、以空行分隔（两扫描独立、清单各自完整——执行体一次修轮看全两份）。
+     * 修轮现场拼装单点（#425 两源合流；#541 让路后基座侧仅阻断形态传入）：设计
+     * 规范 lint 恒为修轮触发源；基座 lint 现场只在阻断形态（运营开关回滚）随修轮
+     * 喂回（让路缺省传 null＝不进现场，两档违规走收尾卡标注）。两源各自在场即拼、
+     * 以空行分隔（清单各自完整——执行体一次修轮看全两份）。
      */
     private static String combinedLintRetryScene(Map<String, Object> designLint,
             Map<String, Object> robustLint) {

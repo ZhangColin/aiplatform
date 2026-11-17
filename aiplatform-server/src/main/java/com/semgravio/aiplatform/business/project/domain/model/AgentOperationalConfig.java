@@ -122,6 +122,12 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *                                   中间件注入提示层指令，生成过程中不自发委派 verify，
  *                                   平台驱动验证腿〔三闸回执／整轨终验编排〕不受影响。
  *                                   仅 run 执行体行消费）
+ * @param robustLintBlockingEnabled  基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半
+ *                                   让路的回滚保险；缺省 false＝让路——强制档违规收口
+ *                                   照扫、只随收尾卡标注，不喂修轮、不触发失败链、不
+ *                                   间接升档，修轮触发面收窄至样式合规；true＝恢复
+ *                                   #425 原阻断形态〔强制档喂修轮＋修不完结构性拒绝＋
+ *                                   耗尽段级回滚重跑〕。仅 run 执行体行消费）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -152,6 +158,7 @@ public record AgentOperationalConfig(
         Integer decisionHintStackCap,
         String decisionHintDisabled,
         boolean verifySelfDecisionEnabled,
+        boolean robustLintBlockingEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -161,13 +168,14 @@ public record AgentOperationalConfig(
      * 路由结构性信号两开关关（#454 缺省——文件面/规模标签不参与升档判定）、
      * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、单会话开＋并行
      * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、决策时注入开＋阈值/
-     * 上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、无写者——装配
-     * 解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
+     * 上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、verify 自决开
+     * （#442 缺省）、基座 lint 强制档阻断关（#541 让路缺省——违规只标注）、
+     * 无写者——装配解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
                 null, false, false, null, null, null, false, false, false, true, false, true,
-                null, null, null, true, null, null, null);
+                null, null, null, true, false, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

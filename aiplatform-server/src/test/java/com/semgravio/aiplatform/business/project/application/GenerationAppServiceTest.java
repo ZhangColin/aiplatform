@@ -2834,6 +2834,24 @@ class GenerationAppServiceTest {
     }
 
     /**
+     * 基座 lint 强制档阻断开关切回旧行为（#541 缺省＝让路——阻断形态用例显式切回）：
+     * 直写 executor 行 robust_lint_blocking_enabled=TRUE（强制档违规喂修轮修一轮＋
+     * 修不完收口结构性拒绝＝#425 原阻断形态——回滚保险承载面）。与
+     * {@link #givenClosingGatesOpen}/{@link #givenPerSliceSessions} 可叠加（列各写各的）。
+     * 让路缺省面由 given_bare_client_..._default_... 系新用例锚定。
+     */
+    private void givenRobustLintBlocking() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     robust_lint_blocking_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    robust_lint_blocking_enabled = EXCLUDED.robust_lint_blocking_enabled
+                """);
+    }
+
+    /**
      * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——旧行为用例显式切回）：
      * 直写 executor 行 single_session_generation_enabled=FALSE（每片新会话，
      * {@code coder-{projectId}-slice-n}）＋ parallel_slice_machine_enabled=TRUE
@@ -4150,12 +4168,79 @@ class GenerationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_bare_client_slice_when_close_then_lint_fix_round_refed_back_then_closes() {
+    void given_bare_client_slice_when_close_then_annotated_without_fix_round() {
         givenPerSliceSessions();
-        // #425 AC①：强制档判据命中裸 pg/redis 客户端与裸 fetch——违规清单喂回执行体
-        // 同 run 修一轮（对偶设计规范 lint 修轮先例）；修净即正常收口，修轮事实
-        //（retried）随收尾卡如实呈现
+        // #541 AC①（lint 让路缺省形态，ADR-0051）：强制档判据命中裸 pg/redis 客户端
+        // 与裸 fetch——不喂修轮（一试即收口，无失败链、不间接升档）、不拦收口，
+        // 违规如实随收尾卡标注（mandatory 分节＋file:line 定位、用户可见）；片全
+        // 收口、生成完成
         Long projectId = persistedProject("9844");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        givenRobustKitPresentWithLintScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1 恒余强制档违规（让路＝照扫不拦）；阶段 0 干净作对照
+            if (command.sessionId().endsWith("-slice-1")) {
+                robustLintMandatory.put("9844",
+                        "./src/lib/orders.ts:12:const pool = new Pool({ connectionString });\n"
+                                + "./src/app/orders/page.tsx:40:const r = await fetch('/api/orders');\n");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 让路＝每段一试即收口（阶段 0 一次＋切片一次，无修轮重试）；重试现场
+        // 结构性不出现（不喂修轮——违规清单只在收尾卡）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .doesNotContain("基座 lint 扫描未过")
+                .doesNotContain("基座 lint 强制档未过");
+        // 违规不拦收口：片全收口＋generated_at 落位
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        // 收尾卡如实标注：robustKitLint 带强制档清单（total＋file:line 定位）、
+        // 无 retried（修轮没发生，叙事不伪造纠偏过程）；阶段 0 干净＝passed
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceClosing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> robustLint = (Map<String, Object>) sliceClosing
+                .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD);
+        assertThat(robustLint)
+                .containsEntry("status", "violations")
+                .doesNotContainKey("retried");
+        Map<String, Object> mandatory = (Map<String, Object>) robustLint.get("mandatory");
+        assertThat(mandatory).containsEntry("total", 2);
+        assertThat((List<Map<String, Object>>) mandatory.get("violations"))
+                .extracting(violation -> violation.get("file"))
+                .containsExactly("src/lib/orders.ts", "src/app/orders/page.tsx");
+        Map<String, Object> stage0Closing = (Map<String, Object>) payloads.getAllValues()
+                .get(0).get(AgentEventTypes.CLOSING_FIELD);
+        assertThat((Map<String, Object>) stage0Closing
+                .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD))
+                .containsEntry("status", "passed");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_blocking_switch_on_when_bare_client_slice_then_lint_fix_round_refed_back_then_closes() {
+        givenPerSliceSessions();
+        givenRobustLintBlocking();
+        // #541 AC②（回滚保险）：robust_lint_blocking_enabled=TRUE 恢复 #425 原阻断
+        // 形态——强制档违规清单喂回执行体同 run 修一轮（对偶设计规范 lint 修轮
+        // 先例）；修净即正常收口，修轮事实（retried）随收尾卡如实呈现
+        Long projectId = persistedProject("9847");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         givenRobustKitPresentWithLintScript();
@@ -4172,7 +4257,7 @@ class GenerationAppServiceTest {
             // #472 窄修现场改「违规现场」后仍稳）
             if (command.sessionId().endsWith("-slice-1")) {
                 boolean bareOnFirstAttempt = !command.prompt().contains("进展现场");
-                robustLintMandatory.put("9844", bareOnFirstAttempt
+                robustLintMandatory.put("9847", bareOnFirstAttempt
                         ? "./src/lib/orders.ts:12:const pool = new Pool({ connectionString });\n"
                                 + "./src/app/orders/page.tsx:40:const r = await fetch('/api/orders');\n"
                         : "");
@@ -4209,11 +4294,13 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_bare_client_never_fixed_when_generate_then_rejected_rollback_rerun_then_terminal_failed() {
+    void given_blocking_switch_on_when_bare_client_never_fixed_then_rejected_rollback_rerun_then_terminal_failed() {
         givenPerSliceSessions();
-        // #425 AC②前半：强制档修轮用尽仍余＝收口结构性拒绝（拒绝回执喂回同 run），
-        // 耗尽走 #353 段级自愈回滚重跑（不建新通道），重跑轮同形再耗尽→转终态
-        // run-failed、片 FAILED、后片不派——快档典型「绕不过预置件」形态被闸在片级
+        givenRobustLintBlocking();
+        // #541 AC②（回滚保险）＋#425 AC②前半：阻断形态下强制档修轮用尽仍余＝收口
+        // 结构性拒绝（拒绝回执喂回同 run），耗尽走 #353 段级自愈回滚重跑（不建新
+        // 通道），重跑轮同形再耗尽→转终态 run-failed、片 FAILED、后片不派——快档
+        // 典型「绕不过预置件」形态被闸在片级
         Long projectId = persistedProject("9845");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
@@ -4265,6 +4352,59 @@ class GenerationAppServiceTest {
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 3, 1);
         assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_bare_client_never_fixed_when_generate_default_then_annotated_without_rejection_or_rollback() {
+        givenPerSliceSessions();
+        // #541 链路断言（让路缺省 vs 阻断形态对照 given_blocking_switch_on_...）：
+        // 同样「修不完」的强制档违规——缺省形态一试即收口、结构性拒绝不触发、
+        // 段级回滚重跑不触发（升档兜底链断＝不间接升档）、无 run-failed、后片照派
+        Long projectId = persistedProject("9848");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        givenRobustKitPresentWithLintScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1 恒违规；阶段 0 与切片 2 干净
+            if (command.sessionId().endsWith("-slice-1")) {
+                robustLintMandatory.put("9848",
+                        "./src/lib/orders.ts:12:const pool = new Pool({});\n");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 三段各一试即收口（阶段 0＋两切片）、无失败终态、回滚结构性不触发
+        verify(agentClient, times(3)).converse(any(), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                anyMap());
+        verify(workspaceLifecycleAppService, never()).exec(anyString(),
+                argThat((WorkspaceExecCommand cmd) -> cmd != null
+                        && cmd.command().contains("git reset --hard")));
+        // 片全收口、后片照派、生成完成；违规段收尾卡如实带强制档标注
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(3)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> slice1Closing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> robustLint = (Map<String, Object>) slice1Closing
+                .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD);
+        assertThat(robustLint).containsEntry("status", "violations");
+        assertThat((Map<String, Object>) robustLint.get("mandatory"))
+                .containsEntry("total", 1);
     }
 
     @Test

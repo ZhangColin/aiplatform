@@ -74,6 +74,11 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param parallelSliceMachineEnabled 切片并行机器开关生效态（#436；缺省 false＝
  *                                fork/波/并行/合并全关；true＝宽波 fork 并行旧行为。
  *                                仅 run 执行体行消费）
+ * @param verifySelfDecisionEnabled verify 自决开关生效态（#442；缺省 true＝自决开）
+ * @param robustLintBlockingEnabled 基座 lint 强制档阻断开关生效态（#541；缺省
+ *                                false＝让路——强制档违规只随收尾卡标注、不喂修轮
+ *                                不触发失败链；true＝恢复原阻断形态（回滚保险）。
+ *                                仅 run 执行体行消费）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
  * @param updatedAt               最近写入时刻（null＝从未配置）
@@ -198,6 +203,11 @@ public record BackofficeAgentConfigResponse(
                 + "提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿不受影响。"
                 + "仅 run 执行体行消费）")
         boolean verifySelfDecisionEnabled,
+        @Schema(description = "基座 lint 强制档阻断开关生效态（#541；缺省 false＝让路〔默认〕——"
+                + "强制档违规收口照扫、只随收尾卡标注（不喂修轮、不触发失败链、不间接升档），"
+                + "修轮触发面收窄至样式合规；true＝恢复原阻断形态（强制档喂修轮修一轮＋修不完"
+                + "收口被拒——回滚保险）。仅 run 执行体行消费）")
+        boolean robustLintBlockingEnabled,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -267,6 +277,7 @@ public record BackofficeAgentConfigResponse(
                         : List.of(),
                 config.decisionHintDisabled() != null,
                 config.verifySelfDecisionEnabled(),
+                config.robustLintBlockingEnabled(),
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

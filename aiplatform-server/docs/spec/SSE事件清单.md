@@ -160,19 +160,21 @@ closing: {
         message: "..." }            # no-inline-styles 内联样式——@shadcn/lint 规则名）/
     ]                               # message（诊断原文）。无规范项目与设计会话不携带——
   }                                 # 调色板不收窄、不扫描（基座行为零改变，一等断言）
-  robustKitLint: {                  # 可缺省——基座 lint 两档扫描（#425，#407 裁决）：新基座
-    status: "violations",           # 工作区（健壮件在场探针判据）编码 run 携带（收尾卡「基座
-    retried:   true,                # 件使用」行）；status ∈ passed / violations（分档清单随附）
-    preset: {                       # / unavailable（扫描未执行——如实不假装达标）；retried＝
-      total: 1,                     # 曾发现违规并自动修一轮（与 designLint 共用同一修轮）；
-      violations: [                 # 两档分节（零命中的档不携带）：preset＝预置档（会话存储
-        { file: "src/app/login/actions.ts",  # 件自写——不拦收口、不拦不用，修不完如实标注
-          line: 8,                  # 随收尾卡）/ mandatory＝强制档（数据访问与外部调用裸客户
-          rule: "handwritten-session",  # 端直用——修轮用尽仍余＝收口结构性拒绝〔拒绝回执
-          message: "..." }          # 经重试现场喂回执行体同 run 修，耗尽走段级自愈回滚重跑
-      ]                             # 升档兜底——见 #353/#420〕，故本键不会以「带强制档违规」
-    },                              # 形态出现在收尾卡（分节防御性兼容）；条目＝file/line/
-  }                                 # rule（bare-db-client 裸数据库客户端 / bare-fetch 裸
+  robustKitLint: {                  # 可缺省——基座 lint 两档扫描（#425，#407 裁决；#541 让路）：
+    status: "violations",           # 新基座工作区（健壮件在场探针判据）编码 run 携带（收尾卡
+    retried:   true,                # 「基座件使用」行）；status ∈ passed / violations（分档清单
+    mandatory: {                    # 随附）/ unavailable（扫描未执行——如实不假装达标）；
+      total: 1,                     # retried＝曾发现违规并自动修一轮（阻断形态的强制档修轮
+      violations: [                 # 才标记——让路缺省修轮是样式轮，不伪造基座纠偏叙事）；
+        { file: "src/lib/orders.ts",  # 两档分节（零命中的档不携带），#541 让路缺省＝两档
+          line: 12,                 # 违规都如实随卡标注、不拦收口（强制档裸客户端直用在
+          rule: "bare-db-client",   # 此呈现——收口照扫只标注的落点，前端两档合并计数与
+          message: "..." }          # 清单）；阻断形态（运营开关 robust_lint_blocking_enabled
+      ]                             # 开＝回滚保险）强制档修轮用尽仍余＝收口被拒（拒绝回执
+    },                              # 经重试现场喂回，耗尽走段级自愈回滚重跑——见 #353），
+  }                                 # 该形态不会以「带强制档违规」出现在收尾卡；preset＝预置
+                                    # 档（会话件自写——不拦不用，如实标注）；条目＝file/line/
+                                    # rule（bare-db-client 裸数据库客户端 / bare-fetch 裸
                                     # fetch / handwritten-session 会话自写）/ message（件用法
                                     # 指路——细则正本住工作区 AGENTS.md 本栈写法规则节）；
                                     # 清单截 20、total 如实。存量工作区（健壮件不在场）与

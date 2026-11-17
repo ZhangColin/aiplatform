@@ -861,9 +861,10 @@ class IterationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
-        // #425 更新轨同盖（#471 gap 收口改口径）：基座 lint 预置档（会话件自写）
-        // 不触发修轮——软档违规不烧 attempt+1 失败升档，直接随收尾卡标注、不拦
-        // 收口（对比强制档＝修轮＋收口被拒）
+        // #425 更新轨同盖（#471 gap 收口改口径；#541 让路后两档同为标注缺省）：
+        // 基座 lint 预置档（会话件自写）不触发修轮——软档违规不烧 attempt+1 失败
+        // 升档，直接随收尾卡标注、不拦收口（强制档缺省同形＝只标注；阻断形态＝
+        // #541 运营开关回滚，生成轨用例承载）
         Long projectId = persistedGeneratedProject("9961");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseClosing(true, "加了登录会话", List.of(

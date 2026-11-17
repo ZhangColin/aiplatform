@@ -118,6 +118,19 @@ public final class WorkspaceLayout {
     public static final String GIT_DIR = ".git";
 
     /**
+     * 基座预置件目录清单（#541 基座件不改约，ADR-0051）：预置件（横切健壮件＋
+     * 通用模式件）的工作区落位目录——执行体不得写这些路径（编辑/删除/搬入搬出，
+     * 写保护在 run 执行体文件面 {@code DockerExecFilesystem}，路径段精确匹配），
+     * 定制只走三通道（参数 props/文案覆盖 props/wrapper）。机械清单单源：基座
+     * 模板内容演进（预置目录增减）须同步本表——BaselineEntryFilesTest 锚定
+     * 表与模板内容不漂移；告知正本＝工作区 AGENTS.md 本栈写法规则节（栈规则集，
+     * 随基座 tag 换版——本表只是写保护的判据面，不教用法）。存量工作区无这些
+     * 目录＝零命中零影响。
+     */
+    public static final List<String> BASELINE_PRESET_DIRS = List.of(
+            "src/lib/robust", "src/components/robust", "src/components/patterns");
+
+    /**
      * 约定二的目录面（init 骨架幂等落位的清单）：随骨架落位的目录——应用代码占根
      * 无目录约定，AGENTS.md 是文件资产非目录，都不在骨架内；external/（#214 run
      * 起手浅克隆创建）与 agents/（#95 框架委派位创建）是运行时按需创建，不进骨架

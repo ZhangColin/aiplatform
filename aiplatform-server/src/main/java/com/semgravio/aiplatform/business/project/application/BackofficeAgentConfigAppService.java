@@ -57,11 +57,11 @@ public class BackofficeAgentConfigAppService {
 
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
      * ＋路由结构性信号两开关关〔#454 缺省〕＋收口三闸关〔#435 翻转缺省〕＋单会话
-     * 开＋并行关＋决策时注入开」）。 */
+     * 开＋并行关＋决策时注入开＋基座 lint 阻断关〔#541 让路缺省〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null, null);
+                    null, null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -133,6 +133,8 @@ public class BackofficeAgentConfigAppService {
                 requireValidHintDisabledKinds(safe.decisionHintDisabled()),
                 // #442 缺省口径：verify 自决开关 null＝开（维持 #435 自决化现状）
                 safe.verifySelfDecisionEnabled() == null || safe.verifySelfDecisionEnabled(),
+                // #541 缺省口径：基座 lint 强制档阻断 null＝关（让路形态——违规只标注）
+                safe.robustLintBlockingEnabled() != null && safe.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
@@ -197,7 +199,7 @@ public class BackofficeAgentConfigAppService {
                 current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
                 current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
-                current.verifySelfDecisionEnabled(),
+                current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -241,7 +243,7 @@ public class BackofficeAgentConfigAppService {
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelId()),
                 true, true, true, null, null, null, false, false, null, null, null, true, true, true,
-                true, false, true, null, null, null, true,
+                true, false, true, null, null, null, true, false,
                 operator.id(), operator.name(), null);
         requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
@@ -305,7 +307,7 @@ public class BackofficeAgentConfigAppService {
                 current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
                 current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
-                current.verifySelfDecisionEnabled(),
+                current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(),
@@ -317,7 +319,7 @@ public class BackofficeAgentConfigAppService {
                 next.singleSessionGenerationEnabled(), next.parallelSliceMachineEnabled(),
                 next.decisionHintsEnabled(), next.decisionHintErrorStreak(),
                 next.decisionHintStackCap(), next.decisionHintDisabled(),
-                next.verifySelfDecisionEnabled(),
+                next.verifySelfDecisionEnabled(), next.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -353,7 +355,8 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.decisionHintErrorStreak(), next.decisionHintErrorStreak())
                 || !Objects.equals(current.decisionHintStackCap(), next.decisionHintStackCap())
                 || !Objects.equals(current.decisionHintDisabled(), next.decisionHintDisabled())
-                || current.verifySelfDecisionEnabled() != next.verifySelfDecisionEnabled();
+                || current.verifySelfDecisionEnabled() != next.verifySelfDecisionEnabled()
+                || current.robustLintBlockingEnabled() != next.robustLintBlockingEnabled();
     }
 
     /**

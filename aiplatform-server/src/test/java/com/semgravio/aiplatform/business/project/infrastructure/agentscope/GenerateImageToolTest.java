@@ -61,7 +61,7 @@ class GenerateImageToolTest {
         final List<String> materializations = new ArrayList<>();
 
         RecordingSpecService() {
-            super(null, null);
+            super(null, null, null);
         }
 
         @Override

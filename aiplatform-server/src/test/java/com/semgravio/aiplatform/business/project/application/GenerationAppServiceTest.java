@@ -186,6 +186,11 @@ class GenerationAppServiceTest {
         // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行，
         // 测试环境无 key 注入——幂等补测试 key
         ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        // #543 风格物化写面缺省桩（首个构建派发＝平台确定性写基座四件）：通用成功，
+        // 用例专属注入（合并冲突/磁盘满等）在测试体内后注册，按 Mockito 后桩优先
+        // 覆盖本位；断言「零写入」的用例走 verify(never())（桩不产生调用）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
     }
 
     @AfterEach
@@ -200,6 +205,8 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // #543 风格层 kill-switch 归位（缺省生效态——共享行，绝不把关停态留给下游）
+        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = TRUE WHERE id = 1");
     }
 
     private void givenSessionExecutorRunsInline() {
@@ -279,6 +286,9 @@ class GenerationAppServiceTest {
     private void givenAgentsMdWriteSucceeds() {
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // #543 风格物化写面（首个构建派发四件落位——本类不断言其内容，缺省成功）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
         // 切片收口推 URL（#105）：探活通过后取预览 URL（成功路径的统一桩）
         when(workspaceLifecycleAppService.exposePreview(anyString()))
                 .thenReturn(URI.create("http://localhost:30080"));
@@ -2131,7 +2141,9 @@ class GenerationAppServiceTest {
         when(workspaceLifecycleAppService.exposePreview(anyString()))
                 .thenReturn(URI.create("http://localhost:30080"));
         // apply --3way 冲突（机器查命中）；裁决 run（-merge- 会话）原地修连败
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+        // (#543 收窄注入面：只 apply 冲突——风格物化写面走 @BeforeEach 缺省成功桩)
+        when(workspaceLifecycleAppService.execWithStdin(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("git apply")), any()))
                 .thenReturn(new ExecResultResponse("", "conflict", 1));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
@@ -2186,7 +2198,9 @@ class GenerationAppServiceTest {
                 .thenReturn(URI.create("http://localhost:30080"));
         // 两 fork 片合并均冲突（机器查命中）→ 各起裁决 run；裁决 run 首试零验证、
         // 拒绝回执喂回后补验（主工作区键登记）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+        // (#543 收窄注入面：只 apply 冲突——风格物化写面走 @BeforeEach 缺省成功桩)
+        when(workspaceLifecycleAppService.execWithStdin(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("git apply")), any()))
                 .thenReturn(new ExecResultResponse("", "conflict", 1));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
@@ -4517,8 +4531,10 @@ class GenerationAppServiceTest {
 
     @Test
     void given_no_spec_when_dispatch_then_agents_md_plain_and_zero_materialization() {
-        // 一等断言（#296 验收⑤）：无规范项目派发——AGENTS.md 不带设计规范节、
-        // 物化零写入（DESIGN.md／lint 配置皆不落，基座行为零改变）
+        // 一等断言（#296 验收⑤＋#543 kill-switch 关＝回无规范现状）：风格层关停的
+        // 无规范项目派发——AGENTS.md 不带设计规范节、物化零写入（DESIGN.md／lint
+        // 配置皆不落，基座行为零改变）
+        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = FALSE WHERE id = 1");
         Long projectId = persistedProject("9820");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();

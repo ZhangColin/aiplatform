@@ -314,15 +314,45 @@ public final class DesignSpecs {
         if (style != null && !style.isBlank()) {
             md.append("\n## 风格\n\n- ").append(style.strip()).append('\n');
         }
-        md.append("""
-
-                ## 遵守条目（系统实现一律照此）
-
-                1. 样式 token 优先：颜色、圆角、字体引用上表 token（如 `bg-primary`、`text-muted-foreground`、`rounded-lg`）；禁止裸色（`bg-red-500`、`bg-[#fff]`）、禁止任意值（`p-[13px]`）、禁止 inline style。
-                2. 默认调色板工具类已收窄移除（Tailwind `--color-*: initial`），可用颜色＝上表 token 与品牌色；需要新颜色时在 `:root` 定义 token 并在 `@theme` 暴露，不在样式里写死色值。
-                3. 间距与版式用 Tailwind 默认 scale（`p-4`、`text-sm` 等）。
-                4. 收口时平台做样式合规扫描（@shadcn/lint），违规项会被要求修正。
-                """);
+        md.append(COMPLIANCE_SECTION);
         return md.toString();
+    }
+
+    /** 遵守条目常量（设计线/风格方向线规则文件共用——收口扫描硬约束同律）。 */
+    static final String COMPLIANCE_SECTION = """
+
+            ## 遵守条目（系统实现一律照此）
+
+            1. 样式 token 优先：颜色、圆角、字体引用上表 token（如 `bg-primary`、`text-muted-foreground`、`rounded-lg`）；禁止裸色（`bg-red-500`、`bg-[#fff]`）、禁止任意值（`p-[13px]`）、禁止 inline style。
+            2. 默认调色板工具类已收窄移除（Tailwind `--color-*: initial`），可用颜色＝上表 token 与品牌色；需要新颜色时在 `:root` 定义 token 并在 `@theme` 暴露，不在样式里写死色值。
+            3. 间距与版式用 Tailwind 默认 scale（`p-4`、`text-sm` 等）。
+            4. 收口时平台做样式合规扫描（@shadcn/lint），违规项会被要求修正。
+            """;
+
+    /**
+     * DESIGN.md 规则文件正文·<b>风格方向来源形</b>（#543，ADR-0052 切片①——生成式
+     * 来源的规则面：方向人读规则句＝库双件之人读件直陈＋token 表＋同一遵守条目；
+     * 与设计线 {@link #designRulesMarkdown} 同写面不同源叙述——视觉正源句换
+     * 「风格方向＋PRD 修订刷新」语义，双件同构遵守三件套零新建）。
+     */
+    public static String styleRulesMarkdown(String directionName, String directionRules,
+            Map<String, String> tokens) {
+        StringBuilder md = new StringBuilder("# 设计规范\n\n")
+                .append("本项目的设计一致性正本（风格方向：").append(directionName)
+                .append("——平台风格方向库物化，随 PRD「关键约束」章风格方向修订刷新，")
+                .append("平台维护）。系统实现每轮开工先读本文件：界面的颜色、字体、")
+                .append("圆角与组件风格与选定风格方向保持一致。\n\n")
+                .append("- 风格方向：").append(directionName)
+                .append("（来源：主智能体 PRD 关键约束节选定，平台按库值确定性物化）\n")
+                .append("- 机器正本：").append(BASELINE_GLOBALS_CSS)
+                .append("（:root token 值与调色板收窄由平台随派发刷新）\n");
+        if (tokens != null && !tokens.isEmpty()) {
+            md.append("\n## 设计 token\n\n| token | 值 |\n| --- | --- |\n");
+            tokens.forEach((name, value) -> md
+                    .append("| `").append(name).append("` | `").append(value).append("` |\n"));
+        }
+        md.append("\n## 风格方向规则（").append(directionName).append("）\n\n")
+                .append(directionRules.strip()).append('\n');
+        return md.append(COMPLIANCE_SECTION).toString();
     }
 }

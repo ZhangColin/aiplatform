@@ -30,6 +30,7 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointTyp
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
+import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -199,6 +200,14 @@ public class MainAgentAppService {
             "\n\n【访谈协议·付费轨】（平台按项目付费状态随本轮附带，属工作协议一部分）"
                     + "题量软目标 5 个以内（典型约 5 个）——是软目标不是硬上限，可超过、"
                     + "题量不固定、理想趋零；不预告剩余题数、不设硬顶。";
+
+    /**
+     * 风格方向库目录尾注（#543，ADR-0052 切片①——「目录经每轮 systemPrompt 动态装配
+     * 注入、正本单源在平台常量」）：每轮主智能体命令尾附目录视图（方向名＋领域
+     * 气质清单＋选取协议句），与两轨访谈协议段同缝共存不冲突；访谈期供写 PRD 时
+     * 代选、迭代期供「想换风格」意见走对话修订——全程不加轮次、不占五问额度。
+     */
+    static final String STYLE_DIRECTION_CATALOG_TAIL = StyleDirections.catalogMarkdown();
 
     /** 收口指令（#538，ADR-0048「第 5 问答完由编排层注入收口指令」）：额度用尽后
      * 随主智能体轮 system prompt 尾附——停止提问、剩余必答缺口按推荐补全、立即
@@ -408,7 +417,7 @@ public class MainAgentAppService {
                 model.modelString(),
                 model.channel(),
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + interviewTailsOf(project),
+                        + interviewTailsOf(project) + STYLE_DIRECTION_CATALOG_TAIL,
                 replyId,
                 pendingToolCalls.stream()
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(toolCall, answerText))
@@ -854,7 +863,8 @@ public class MainAgentAppService {
                 runId,
                 prompt,
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + sedimentNudgeTail + interviewTailsOf(project),
+                        + sedimentNudgeTail + interviewTailsOf(project)
+                        + STYLE_DIRECTION_CATALOG_TAIL,
                 model.modelString(),
                 model.channel(),
                 sessionId,
@@ -1204,7 +1214,7 @@ public class MainAgentAppService {
                 model.modelString(),
                 model.channel(),
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + interviewTailsOf(project), // 收口指令在场（额度用尽态）
+                        + interviewTailsOf(project) + STYLE_DIRECTION_CATALOG_TAIL, // 收口指令在场（额度用尽态）＋风格目录尾注
                 pending.suspension().engineRef(),
                 pending.suspension().toolCalls().stream()
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(

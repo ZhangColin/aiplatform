@@ -112,6 +112,9 @@ class BuildGateAppServiceTest {
         });
         when(workspaceLifecycleAppService.exposePreview(any()))
                 .thenReturn(java.net.URI.create("http://localhost:30080"));
+        // #543 风格物化写面缺省桩（确认即派发的首个构建＝平台确定性写基座四件）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
     }
 
     @AfterEach

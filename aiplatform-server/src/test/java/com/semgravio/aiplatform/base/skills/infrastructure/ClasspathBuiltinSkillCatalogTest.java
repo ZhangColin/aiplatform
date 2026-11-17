@@ -67,4 +67,22 @@ class ClasspathBuiltinSkillCatalogTest {
                 // 旧两级门写法退役钉死（「阻碍核心流程」级不再进模板——必答题访谈期问掉）
                 .doesNotContain("平台会拦截");
     }
+
+    @Test
+    void given_prd_writing_skill_when_read_body_then_style_direction_field_pinned() {
+        String body = catalog.findAll().stream()
+                .filter(skill -> skill.name().equals("prd-writing"))
+                .findFirst().orElseThrow()
+                .content();
+
+        // #543 风格方向行（ADR-0052）：系统形项目从目录选定、关键约束章呈现、
+        // 不占五问额度；纯系统形口径（系统＋设计走设计过程不写本行）钉死
+        assertThat(body)
+                .contains("「关键约束」章的风格方向行")
+                .contains("风格方向：")
+                .contains("风格方向库·目录")
+                .contains("只从目录选")
+                .contains("不从零自造配色")
+                .contains("不占访谈提问额度");
+    }
 }

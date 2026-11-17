@@ -24,7 +24,9 @@ import com.semgravio.aiplatform.business.project.domain.aggregate.DesignSpec;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.model.DesignSpecs;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
+import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.StyleDirectionSwitchStore;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -51,6 +53,17 @@ import lombok.extern.slf4j.Slf4j;
  * <b>收口扫描</b>（{@link #lintClosingPayload}，编码 run 收口判据回调内接线——
  * 容器内 oxlint〔@shadcn/lint 规则〕跑 token 合规扫描，事实随收尾卡如实呈现；
  * 无规范项目不扫）。设计资产包规范文件（#297）读同一正本。
+ *
+ * <p><b>风格方向来源（#543，ADR-0052 商业化一期⑤切片①——三件套扩来源、
+ * 遵守机制零新建）</b>：无正本的首个构建派发（且运营 kill-switch 开）→ 平台读
+ * {@code docs/PRD.md}「关键约束」章风格方向字段，经 {@link StyleDirections}
+ * 库值映射确定性物化（token 值集直刷 :root＋调色板收窄＋风格规则文件〔人读
+ * 规则句＝库双件直陈〕＋lint 配置，非模型动作）；字段缺失/库无此名＝落缺省套
+ * 兜底（生成不被风格层卡死）；正本行带 {@code direction_key} 标记，其后每次
+ * 派发按 PRD 字段<b>重物化</b>（改风格＝对话→PRD 修订→派发对齐，零新通道）。
+ * 生效面＝新项目全量（无正本的已生成项目更新 run 不补风格层＝存量不迁移）；
+ * kill-switch 关＝回无规范现状（物化零动作零写入、风格来源行收口不扫），
+ * 开关单行表读面动态查不缓存（#442/#517 开关保险同款，V77）。</p>
  */
 @Service
 @Slf4j
@@ -58,13 +71,19 @@ public class DesignSpecAppService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /** 风格来源正本行的源锚 runId（物化是平台动作非 run——如实直陈）。 */
+    static final String STYLE_MATERIALIZATION_RUN = "style-materialization";
+
     private final DesignSpecRepository designSpecs;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final StyleDirectionSwitchStore styleDirectionSwitch;
 
     public DesignSpecAppService(DesignSpecRepository designSpecs,
-            WorkspaceLifecycleAppService workspaceLifecycleAppService) {
+            WorkspaceLifecycleAppService workspaceLifecycleAppService,
+            StyleDirectionSwitchStore styleDirectionSwitch) {
         this.designSpecs = designSpecs;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.styleDirectionSwitch = styleDirectionSwitch;
     }
 
     /**
@@ -302,31 +321,85 @@ public class DesignSpecAppService {
      */
     public boolean materializeAtDispatch(Project project) {
         DesignSpec spec = designSpecs.findByProjectId(project.getId()).orElse(null);
-        if (spec == null) {
-            return false;
+        if (spec == null || spec.getDirectionKey() != null) {
+            // 无正本（新项目首个构建）或风格方向来源行＝生成式来源面（#543）：
+            // 按 PRD 字段经库值映射确定性物化（含重物化——改风格＝PRD 修订→派发对齐）
+            return materializeStyleDirection(project, spec);
         }
         String workspaceId = Long.toString(project.getWorkspaceId());
         // :root 刷值集：token 面＝正本直提 token；参数面＝色板→品牌附加色（确定性映射）
         Map<String, String> rootRefresh = spec.getTokens() != null
                 ? spec.getTokens()
                 : DesignSpecs.brandTokensOf(spec.getPalette());
-        Optional<String> css = readWorkspaceFile(project, DesignSpecs.BASELINE_GLOBALS_CSS);
-        if (css.isPresent()) {
-            String refreshed = DesignSpecs.upsertSpecTheme(css.get(),
-                    DesignSpecs.specThemeBlockOf(rootRefresh));
-            if (!rootRefresh.isEmpty()) {
-                refreshed = DesignSpecs.refreshRootValues(refreshed, rootRefresh);
-            }
-            writeWorkspaceFile(workspaceId, DesignSpecs.BASELINE_GLOBALS_CSS, refreshed);
-        }
-        else {
-            log.warn("[design-spec] 项目 {} 基座样式文件 {} 不在（执行体重构？）——:root 刷值与"
-                    + "调色板收窄跳过，规则文件与 lint 扫描照常", project.getId(),
-                    DesignSpecs.BASELINE_GLOBALS_CSS);
-        }
+        writeGlobalsCss(project, workspaceId, rootRefresh);
         materializeRulesFile(workspaceId, spec);
         writeWorkspaceFile(workspaceId, OXLINTRC, OXLINTRC_CONTENT);
         return true;
+    }
+
+    /**
+     * 风格方向来源物化（#543，ADR-0052 切片①）：kill-switch 关＝回无规范现状
+     * （零动作零写入）；无正本的已生成项目（更新 run 起手）不补风格层（存量
+     * 不迁移）；其余读 PRD 字段→库值映射（字段缺失/库无此名＝缺省套兜底）→
+     * 正本行建/覆写（directionKey 标记）→ 四件确定性落位（:root 刷值＋收窄块/
+     * 风格规则文件〔人读规则句＝库双件直陈〕/lint 配置）。每次派发重写（与设计线
+     * 「每派发刷值」同律，幂等同值）；写入失败＝环境故障如实上抛（run 不起跑）。
+     *
+     * @param current 现行正本行（null＝首个构建尚无行）
+     * @return 是否带规范（开关关/存量跳过＝false，调用方零规范节不扫 lint）
+     */
+    private boolean materializeStyleDirection(Project project, DesignSpec current) {
+        if (!styleDirectionSwitch.enabled()) {
+            log.info("[design-spec] 项目 {} 风格层 kill-switch 关——回无规范现状（零物化零写入）",
+                    project.getId());
+            return false;
+        }
+        if (current == null && project.getGeneratedAt() != null) {
+            // 存量不迁移：无正本的已生成项目（风格层落地前的存量）更新 run 不补风格层
+            return false;
+        }
+        StyleDirections.Direction direction = StyleDirections.directionOfPrd(
+                readWorkspaceFile(project, WorkspaceLayout.PRD).orElse(""));
+        String workspaceId = Long.toString(project.getWorkspaceId());
+        DesignSpec spec;
+        if (current == null) {
+            spec = DesignSpec.styleOf(project.getId(), WorkspaceLayout.PRD,
+                    STYLE_MATERIALIZATION_RUN, direction);
+        }
+        else {
+            current.refreshStyle(WorkspaceLayout.PRD, STYLE_MATERIALIZATION_RUN,
+                    direction.key(), direction.name(), direction.tokens());
+            spec = current;
+        }
+        designSpecs.save(spec);
+        Map<String, String> rootRefresh = spec.getTokens();
+        writeGlobalsCss(project, workspaceId, rootRefresh);
+        writeWorkspaceFile(workspaceId, WorkspaceLayout.DESIGN_MD,
+                DesignSpecs.styleRulesMarkdown(direction.name(), direction.rules(), rootRefresh));
+        writeWorkspaceFile(workspaceId, OXLINTRC, OXLINTRC_CONTENT);
+        return true;
+    }
+
+    /**
+     * globals.css 物化（设计线/风格线共用写面）：:root 值刷换＋平台 @theme 收窄块
+     * （幂等改写）；文件不在（执行体重构了样式文件）＝CSS 面跳过留日志（规则文件
+     * 与收窄纪律照常——保守方向不破链）。
+     */
+    private void writeGlobalsCss(Project project, String workspaceId,
+            Map<String, String> rootRefresh) {
+        Optional<String> css = readWorkspaceFile(project, DesignSpecs.BASELINE_GLOBALS_CSS);
+        if (css.isEmpty()) {
+            log.warn("[design-spec] 项目 {} 基座样式文件 {} 不在（执行体重构？）——:root 刷值与"
+                    + "调色板收窄跳过，规则文件与 lint 扫描照常", project.getId(),
+                    DesignSpecs.BASELINE_GLOBALS_CSS);
+            return;
+        }
+        String refreshed = DesignSpecs.upsertSpecTheme(css.get(),
+                DesignSpecs.specThemeBlockOf(rootRefresh));
+        if (!rootRefresh.isEmpty()) {
+            refreshed = DesignSpecs.refreshRootValues(refreshed, rootRefresh);
+        }
+        writeWorkspaceFile(workspaceId, DesignSpecs.BASELINE_GLOBALS_CSS, refreshed);
     }
 
     /**
@@ -344,11 +417,18 @@ public class DesignSpecAppService {
      * 容器内跑 oxlint（规则＝裸色/任意值/inline style）→ 事实载荷随收尾卡。
      * <b>软约束不当硬门</b>：违规不抛（重试一轮的决策归尝试环，仍违规如实列
      * 清单）；扫描不可执行（二进制缺失/配置错/环境故障）＝{@code unavailable}
-     * 如实呈现，不假装达标。无规范项目＝{@code null}（不扫——基座行为零改变）。
+     * 如实呈现，不假装达标。无规范项目＝{@code null}（不扫——基座行为零改变）；
+     * 风格方向来源行在 kill-switch 关时同 {@code null}（回无规范现状，#543）。
      * 全程不抛（收口链路不被扫描故障反噬）。
      */
     public Map<String, Object> lintClosingPayload(Project project) {
-        if (designSpecs.findByProjectId(project.getId()).isEmpty()) {
+        DesignSpec spec = designSpecs.findByProjectId(project.getId()).orElse(null);
+        if (spec == null) {
+            return null;
+        }
+        if (spec.getDirectionKey() != null && !styleDirectionSwitch.enabled()) {
+            log.info("[design-spec] 项目 {} 风格层 kill-switch 关——风格来源行收口不扫"
+                    + "（回无规范现状）", project.getId());
             return null;
         }
         try {

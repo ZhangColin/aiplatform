@@ -196,6 +196,9 @@ export type HydratedEntry = {
   runId?: string | null;
   text?: string | null;
   question?: Record<string, unknown> | null;
+  /** 「第 N 问」序号（#538/#549，kind=question；读口按对话史重算——权威于载荷
+   *  内嵌的 data.questionOrdinal，存量行自动有号；非问答卡缺省）。 */
+  questionOrdinal?: number | null;
   closing?: Record<string, unknown> | null;
   /** 圈注附件（#97 随用户发言落库，JSON 数组；消息回显重建圈注 chip 用）。 */
   attachments?: Record<string, unknown>[] | null;
@@ -496,7 +499,17 @@ function hydratedMessage(entry: HydratedEntry): ChatMessage | null {
         runId: entry.runId ?? "",
         ...(entry.question as Record<string, unknown> | undefined),
       });
-      return question ? { ...question, kind: "question", answered: entry.answered } : null;
+      if (!question) return null;
+      // 顶层 questionOrdinal＝读口重算权威（存量行/载荷旧值一律覆盖）；顶层缺省
+      // （旧后端/测试桩）回落载荷内嵌值
+      const ordinal =
+        typeof entry.questionOrdinal === "number" ? entry.questionOrdinal : question.ordinal;
+      return {
+        ...question,
+        kind: "question",
+        answered: entry.answered,
+        ...(ordinal !== undefined ? { ordinal } : {}),
+      };
     }
     default:
       return null;

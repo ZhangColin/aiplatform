@@ -330,6 +330,13 @@ export function CommandArea({
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
+                  // 「第 N 问」序号（#538/#549）：仅试用访谈期（额度读面在场）
+                  // 渲染——PRD 后/付费翻转后的追问无承诺题量，不标号（同 chip 进退）
+                  ordinal={
+                    stage === "interview" && interviewQuota.data
+                      ? message.ordinal
+                      : undefined
+                  }
                   interactive={message === pending}
                   selection={selection}
                   onSelectionChange={setSelection}

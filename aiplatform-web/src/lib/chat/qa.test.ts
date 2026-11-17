@@ -28,6 +28,11 @@ function questionRaised(data: unknown): QuestionRaisedPayload {
   return { runId: "run-9", engineRef: "reply-7", data };
 }
 
+/** data 面携带「第 N 问」序号（与 questions 投影同级——平台注入字段）。 */
+function questionRaisedWithOrdinal(ordinal: unknown): QuestionRaisedPayload {
+  return { runId: "run-9", engineRef: "reply-7", data: { ...questionData(), questionOrdinal: ordinal } };
+}
+
 describe("parseQuestion · question-raised → 问答卡（#19；#83 起纯 QUESTION——权限面已拆）", () => {
   it("QUESTION 事件解析出问答卡全要素（qid=engineRef、toolCalls 回传面随卡）", () => {
     const q = parseQuestion("run-9:12", questionRaised(questionData()));
@@ -73,6 +78,21 @@ describe("parseQuestion · question-raised → 问答卡（#19；#83 起纯 QUES
     ).toBeUndefined();
     // 不标推荐 → 现状（字段缺省，行为不变）
     expect(parseQuestion("e8", questionRaised(questionData()))?.recommended).toBeUndefined();
+  });
+});
+
+describe("parseQuestion · 「第 N 问」序号（#538/#549，ADR-0048 服务端单源）", () => {
+  it("data.questionOrdinal 正整数随卡携带（问答卡「第 N 问」徽标的唯一数据源）", () => {
+    expect(parseQuestion("e9", questionRaisedWithOrdinal(3))?.ordinal).toBe(3);
+    expect(parseQuestion("e10", questionRaisedWithOrdinal(1))?.ordinal).toBe(1);
+  });
+
+  it("非正整数/错误类型/缺失 → 字段缺省（不自算、不出坏徽标）", () => {
+    expect(parseQuestion("e11", questionRaisedWithOrdinal(0))?.ordinal).toBeUndefined();
+    expect(parseQuestion("e12", questionRaisedWithOrdinal(-1))?.ordinal).toBeUndefined();
+    expect(parseQuestion("e13", questionRaisedWithOrdinal(2.5))?.ordinal).toBeUndefined();
+    expect(parseQuestion("e14", questionRaisedWithOrdinal("3"))?.ordinal).toBeUndefined();
+    expect(parseQuestion("e15", questionRaised(questionData()))?.ordinal).toBeUndefined();
   });
 });
 

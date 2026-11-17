@@ -41,6 +41,11 @@ export type RaisedQuestion = {
   /** 推荐答案（#459）：推荐项 label（命中 options 才携带）——问答卡标「推荐」chip
    * 并预选缺省，用户可改选或自由输入；缺省＝无推荐，行为同现状。 */
   recommended?: string;
+  /** 「第 N 问」序号（#538/#549，ADR-0048 服务端单源）：缺口首次出现序 1..k，
+   *  同缺口重派复用旧号；live 读 data.questionOrdinal（平台转发前注入）、水合读
+   *  对话史条目顶层 questionOrdinal（read 重算权威）。仅试用访谈期渲染——门控在
+   *  问答卡调用方（额度读面在场），解析面只保真收窄。 */
+  ordinal?: number;
   toolCalls: PendingToolCall[];
 };
 
@@ -78,6 +83,9 @@ export function parseQuestion(
     options.includes(projection.recommended)
       ? projection.recommended
       : undefined;
+  // 「第 N 问」序号（#538/#549）：平台注入 data.questionOrdinal——正整数才携带，
+  // 异常形状缺省（无序号徽标，行为同现状），前端不自算
+  const ordinal = data ? questionOrdinalOf(data) : undefined;
   return {
     id: eventId,
     runId: payload.runId,
@@ -87,6 +95,7 @@ export function parseQuestion(
     multiple: projection.multiple === true,
     options,
     ...(recommended !== undefined ? { recommended } : {}),
+    ...(ordinal !== undefined ? { ordinal } : {}),
     toolCalls: (data && Array.isArray(data.toolCalls) ? data.toolCalls : []).map(
       (call) => call as PendingToolCall,
     ),
@@ -120,6 +129,15 @@ export function toAnswerToolCalls(calls: readonly PendingToolCall[]): AnswerTool
 }
 
 
+
+/** 「第 N 问」序号收窄（#538/#549）：data.questionOrdinal 为 ≥1 的安全整数才采信，
+ *  非数/小数/越界一律缺省——服务端单源字段，前端只做形状容错，不自算序号。 */
+function questionOrdinalOf(data: Record<string, unknown>): number | undefined {
+  const value = data.questionOrdinal;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : undefined;
+}
 
 function labelOf(option: unknown): string | null {
   const record = asRecord(option);

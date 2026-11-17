@@ -1,5 +1,6 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -263,6 +264,63 @@ public class ConversationHistoryAppService {
         return text != null ? text : "#" + entry.getId();
     }
 
+    /**
+     * 问答卡条目 id → 「第 N 问」序号（#538/#549，ADR-0048 程序计数权威）：按 id 升序
+     * 走查全部问答卡，缺口首次出现给 1..k 连续号，同缺口（gapKeyOf——问题文本回落
+     * header、再回落条目 id）重派复用旧号不跳号。<b>计数面是「已问出的全部卡」</b>
+     * ——挂起待答卡、收口作答（只置位无作答行）卡都占号，这保证挂起卡的号恰等于
+     * 「已答 N/5」chip 的 N+1（每轮一问、上一卡答完下一卡才问出）。非问答卡不入图。
+     */
+    private Map<Long, Integer> questionOrdinalByEntryId(Long projectId) {
+        Map<Long, Integer> byEntryId = new HashMap<>();
+        Map<String, Integer> byGap = new HashMap<>();
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.QUESTION)) {
+            Integer ordinal = byGap.computeIfAbsent(gapKeyOf(entry),
+                    key -> byGap.size() + 1);
+            byEntryId.put(entry.getId(), ordinal);
+        }
+        return byEntryId;
+    }
+
+    /**
+     * 到来问题的缺口序号：库内已问出卡的缺口序位图中，同缺口复用旧号（纠偏/重派
+     * 不跳号），新缺口＝不同缺口数＋1；incomingGapKey 为 null（载荷形状残缺）按
+     * 新缺口给号。前序卡已在各自轮 settle 时落库，本读只依赖库不依赖本轮状态。
+     */
+    private int incomingQuestionOrdinal(Long projectId, String incomingGapKey) {
+        Map<String, Integer> ordinals = new HashMap<>();
+        int next = 1;
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.QUESTION)) {
+            ordinals.putIfAbsent(gapKeyOf(entry), next);
+            next = ordinals.size() + 1;
+        }
+        Integer existing = incomingGapKey == null ? null : ordinals.get(incomingGapKey);
+        return existing != null ? existing : next;
+    }
+
+    /**
+     * 「第 N 问」序号 live 注入（#538/#549，ADR-0048 服务端单源）：question-raised
+     * 转发 SSE 与落库前，把序号放进 data.questionOrdinal——前端问答卡直接呈现，
+     * 不自算。<b>载荷复制不原地改</b>：mapper 产出的事件载荷可能为不可变 Map 且正被
+     * 重放缓冲持有；data 非对象（形状残缺）原样透传，前端 parseQuestion 同样不成卡。
+     */
+    AgentEvent enrichQuestionOrdinal(Long projectId, AgentEvent event) {
+        Object rawData = event.payload().get(AgentEventTypes.WAIT_DATA_FIELD);
+        if (!(rawData instanceof Map<?, ?> rawMap)) {
+            return event;
+        }
+        int ordinal = incomingQuestionOrdinal(projectId,
+                firstQuestionText(event.payload()));
+        Map<String, Object> data = new LinkedHashMap<>();
+        rawMap.forEach((key, value) -> data.put(String.valueOf(key), value));
+        data.put(AgentEventTypes.QUESTION_ORDINAL_FIELD, ordinal);
+        Map<String, Object> payload = new LinkedHashMap<>(event.payload());
+        payload.put(AgentEventTypes.WAIT_DATA_FIELD, data);
+        return new AgentEvent(event.type(), payload);
+    }
+
     /** 问答卡载荷 → 首个问题文本（data.questions[0].question，缺省回落 header）。 */
     @SuppressWarnings("unchecked")
     private static String firstQuestionText(Map<String, Object> payload) {
@@ -297,8 +355,10 @@ public class ConversationHistoryAppService {
         if (!projectRepository.existsById(projectId)) {
             throw new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND);
         }
+        Map<Long, Integer> ordinalByEntryId = questionOrdinalByEntryId(projectId);
         return entries.findByProjectIdOrderByIdAsc(projectId).stream()
-                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry)))
+                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry),
+                        ordinalByEntryId.get(entry.getId())))
                 .toList();
     }
 
@@ -338,12 +398,17 @@ public class ConversationHistoryAppService {
             this.sink = sink;
         }
 
-        /** sink 面：转发 + 捕获问答卡（幂等——一轮多问以后到为准，随各自 settle 落）。 */
+        /** sink 面：转发（问答卡先注入「第 N 问」序号——live 呈现面服务端单源）
+         *  + 捕获（幂等——一轮多问以后到为准，随各自 settle 落；捕获注入后事件，
+         *  落库载荷即同号，read() 重算为权威覆盖）。 */
         @Override
         public void accept(AgentEvent event) {
-            sink.accept(event);
-            if (AgentEventTypes.QUESTION_RAISED.equals(event.type())) {
-                question = event;
+            AgentEvent forward = AgentEventTypes.QUESTION_RAISED.equals(event.type())
+                    ? enrichQuestionOrdinal(projectId, event)
+                    : event;
+            sink.accept(forward);
+            if (AgentEventTypes.QUESTION_RAISED.equals(forward.type())) {
+                question = forward;
             }
         }
 

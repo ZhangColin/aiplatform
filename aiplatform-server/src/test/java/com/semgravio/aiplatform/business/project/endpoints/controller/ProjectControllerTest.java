@@ -449,20 +449,20 @@ class ProjectControllerTest {
         // （#298，null＝主会话缺省）随面携带
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
                 new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
-                        null, null, null, null, null, false,
+                        null, null, null, null, null, null, false,
                         LocalDateTime.of(2026, 9, 5, 10, 0)),
                 new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
-                        null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
-                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null,
+                        1, null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
                         null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
-                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null,
+                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null, null,
                         null, null,
                         Map.of("orderId", "900123", "event", "quoted"),
                         null, false, LocalDateTime.of(2026, 9, 6, 9, 0)),
-                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null,
+                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null, null,
                         null, null, null,
                         Map.of("error", "模型响应超时", "durationMs", 61200, "attempts",
                                 List.of(Map.of("round", 1, "attempt", 1, "durationMs", 61200,
@@ -480,6 +480,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data[1].kind").value(3))
                 .andExpect(jsonPath("$.data[1].answered").value(false))
                 .andExpect(jsonPath("$.data[1].question.engineRef").value("reply-1"))
+                // 「第 N 问」序号随问答卡读面（#538/#549，服务端单源）
+                .andExpect(jsonPath("$.data[1].questionOrdinal").value(1))
                 .andExpect(jsonPath("$.data[2].kind").value(5))
                 .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
                 .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420))

@@ -132,6 +132,15 @@ public final class AgentEventTypes {
     /** 引擎载荷原样（eventhub 不解释）。 */
     public static final String WAIT_DATA_FIELD = "data";
 
+    /**
+     * 问答卡「第 N 问」序号键（五问额度呈现面，#538/#549，ADR-0048 程序计数权威）：
+     * 平台侧在 question-raised 转发前注入 {@code data} 内的<b>呈现面字段</b>（引擎
+     * 载荷原样之外）——缺口首次出现序 1..k，同缺口（问题文本回落 header 标识）重派
+     * 复用旧号不跳号；服务端单源、前端不自算。水合读面以 ConversationEntryResponse
+     * 顶层 questionOrdinal 为权威（read 重算，存量行自动有号）。
+     */
+    public static final String QUESTION_ORDINAL_FIELD = "questionOrdinal";
+
     /** 智能体配置键（AgentProfile 稳定键，如 main/executor；run-start 携带）。 */
     public static final String AGENT_FIELD = "agent";
 

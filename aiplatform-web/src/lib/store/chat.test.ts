@@ -394,6 +394,30 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     expect(pendingQuestionOf(useChatStore.getState(), "p1")).toBeUndefined();
   });
 
+  it("问答卡序号水合（#538/#549）：顶层 questionOrdinal 为权威，缺省回落载荷内嵌值", () => {
+    const questionPayload = (ordinal?: number) => ({
+      runId: "run-1",
+      engineRef: "reply-9",
+      data: {
+        questions: [{ question: "要几分账?" }],
+        ...(ordinal !== undefined ? { questionOrdinal: ordinal } : {}),
+      },
+    });
+    useChatStore.getState().hydrate("p1", [
+      entry(1, "question", { question: questionPayload(9), questionOrdinal: 2 }), // 顶层覆盖内嵌旧值
+      entry(2, "question", { question: questionPayload(3) }), // 顶层缺省 → 回落内嵌
+      entry(3, "question", { question: questionPayload() }), // 两处皆无 → 字段缺省
+    ]);
+
+    const cards = useChatStore.getState().chats["p1"]?.messages ?? [];
+    expect(cards).toHaveLength(3);
+    expect(cards.map((m) => (m.kind === "question" ? m.ordinal : undefined))).toEqual([
+      2,
+      3,
+      undefined,
+    ]);
+  });
+
   it("run-start 漏收（连接竞态）：question-raised 就地登记 run 成卡，不丢", () => {
     const s = useChatStore.getState();
     // 页面加载时水合只拿到用户发言（问答卡尚未落库）；run-start 因 SSE 连接晚于

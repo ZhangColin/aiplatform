@@ -20,6 +20,10 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * <p>适用面＝试用态 ∧ 访谈期（未产出 PRD ∧ 未生成）；付费翻转后额度解除、PRD
  * 产出即访谈收口——读面整体缺席（null），chip 不呈现。归档项目照读（对话区
  * 只读终态，额度面同对话史口径）。</p>
+ *
+ * <p>同一计算体还承载 savePrd 五问承诺闸（{@link #earlyClosureBlockReason}，
+ * 2026-11-17 用户裁决：5 不只是上限也是常态题量——chip/收口指令/工具闸三读面
+ * 同源）。</p>
  */
 @Service
 public class InterviewQuotaAppService {
@@ -69,5 +73,29 @@ public class InterviewQuotaAppService {
     public boolean closureRequired(Long projectId) {
         InterviewQuotaResponse quota = computeQuota(projectId);
         return quota != null && quota.answered() >= quota.total();
+    }
+
+    /**
+     * 提前收口准入（2026-11-17 用户裁决：五问＝平台向用户明示的承诺，「已答 N/5」
+     * chip 全程可见）：试用访谈期未答满五问时，savePrd 只接受用户明确收敛令
+     *（模型以 fastLane=true attest）；问满 / 付费翻转 / PRD 已产出 / 已生成
+     * （非访谈期）一律放行。
+     *
+     * @return null＝放行；非 null＝模型可见拒因（savePrd 工具回错误结果、不落盘
+     *         不置位——对偶 ADR-0032 守卫的即改即愈口径，指引模型继续 ask_user）
+     */
+    public String earlyClosureBlockReason(Long projectId, boolean convergenceCommanded) {
+        InterviewQuotaResponse quota = computeQuota(projectId);
+        if (quota == null || quota.answered() >= quota.total() || convergenceCommanded) {
+            return null;
+        }
+        return "平台拒绝本次 savePrd：本项目处于试用访谈期，五问额度尚未用满"
+                + "（已答 " + quota.answered() + "/" + quota.total() + " 问），且用户本轮没有"
+                + "明确要求提前收口。「已答 N/5 问」是平台向用户明示的承诺——不得自行"
+                + "以「需求已明确/没有必答题」为由提前产出 PRD：继续调用 ask_user 按"
+                + "重要性顺序提出下一个不同缺口的问题，答满 " + quota.total()
+                + " 问后再保存 PRD。唯一例外：用户明确表达「不用再问了/直接出 PRD/"
+                + "直接开始做」（收敛令）时可提前收口——那时将本工具入参 fastLane 传 "
+                + "true 再调用。";
     }
 }

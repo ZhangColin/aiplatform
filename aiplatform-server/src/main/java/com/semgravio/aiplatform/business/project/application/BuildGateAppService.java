@@ -20,11 +20,12 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * 入口整体退役后的用户触发面单点）：首个构建 run 的点火权归用户——试用态＝岔
  * 路口三选卡「立即生成」（{@code POST /generate} 既有口，本服务只出卡读面），
  * 付费态＝PRD 文档面确认按钮（{@link #confirmFirstBuild} 恢复 #462 之前的原
- * 动作形态）；快道（收敛令/零必答短路/付费「直接开始做」）不经本缝——收口观测
- * 直派（{@link MainAgentAppService}），不出卡不确认。
+ * 动作形态）；快道（试用态＝用户明确收敛令；付费态＝零必答短路/「直接开始做」
+ * 视同确认）不经本缝——收口观测直派（{@link MainAgentAppService}），不出卡不确认。
  *
- * <p><b>岔路口状态位</b>（{@link #ensureForkPending}）：试用态访谈自然收口
- * （判定明确含提前明确——非快道）由收口观测点调用置 {@link ForkState#PENDING}
+ * <p><b>岔路口状态位</b>（{@link #ensureForkPending}）：试用态访谈问满五问后的
+ * 自然收口（非快道——2026-11-17 起未答满五问且无收敛令的 savePrd 在工具闸即被
+ * 拒，走不到本缝）由收口观测点调用置 {@link ForkState#PENDING}
  * ——持久可回（未选择前关页回来卡仍在）；快道直生成不置位（不出卡）、点火后
  * 不回清（卡隐藏由首建点火时点派生承担——失败重试走「继续生成」、卡与确认门
  * 都不复现）。设计类终点不出卡不设门（设计轨触发律不改：PRD 收口起设计过程、

@@ -244,6 +244,12 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         const question = parseQuestion(event.id, payload);
         if (question) chat.raiseQuestion(payload.projectId, payload.runId, question);
+        // 五问额度变化点（#538）：上一答在作答 POST 已同步落库，本事件标志续跑轮
+        // 再挂起——而追问挂起轮不发 run-finish（conversation 域唯一失效点），不补
+        // 本失效则「已答 N/5」chip 全程冻在初值 0/5。
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.conversation.quota(payload.projectId),
+        });
         return;
       }
       case "error": {

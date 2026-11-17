@@ -418,7 +418,7 @@ class MainAgentAppServiceTest {
         assertThat(command.getAllValues().get(0).systemPrompt())
                 .contains("访谈协议·付费轨")
                 .contains("软目标")
-                .doesNotContain("访谈协议·试用轨")
+                .doesNotContain("【访谈协议·试用轨】") // 基础协议可引用段名；断言的是试用轨段未随附
                 .doesNotContain("【收口指令】");
     }
 

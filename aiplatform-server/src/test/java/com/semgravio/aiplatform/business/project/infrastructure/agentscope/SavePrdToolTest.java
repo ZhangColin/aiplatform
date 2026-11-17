@@ -51,10 +51,13 @@ class SavePrdToolTest {
     /** 登记替身：记录回调，可预设抛出（PrdArtifactAdapter 为具体类，以子类覆写）。 */
     private static final class RecordingAdapter extends PrdArtifactAdapter {
         final List<String> callbacks = new ArrayList<>();
+        final List<Boolean> convergenceArgs = new ArrayList<>();
         RuntimeException failure;
+        /** 非 null＝五问承诺闸拒绝（透传拒因）；缺省 null 放行。 */
+        String earlyBlock;
 
         RecordingAdapter() {
-            super(null, null, null);
+            super(null, null, null, null);
         }
 
         @Override
@@ -68,6 +71,12 @@ class SavePrdToolTest {
                 throw failure;
             }
             callbacks.add(workspaceId);
+        }
+
+        @Override
+        public String earlyClosureBlockReason(String workspaceId, boolean convergenceCommanded) {
+            convergenceArgs.add(convergenceCommanded);
+            return earlyBlock;
         }
     }
 
@@ -148,6 +157,33 @@ class SavePrdToolTest {
     }
 
     @Test
+    void given_trial_quota_open_natural_close_when_called_then_blocked_without_write_or_facts() {
+        // 五问承诺闸（2026-11-17 用户裁决）：试用访谈未答满五问且无收敛令——拒因
+        // 模型可见，不落盘、不置位、不落任何事实（拒因文本由额度服务单点产出）
+        port.earlyBlock = "平台拒绝本次 savePrd：五问额度尚未用满（已答 2/5 问）……继续 ask_user 提问";
+
+        ToolResultBlock result = call("# PRD", "判定明确，产出 PRD");
+
+        assertThat(result.getState()).isEqualTo(ToolResultState.ERROR);
+        assertThat(resultText(result)).contains("平台拒绝").contains("2/5").contains("ask_user");
+        assertThat(exec.commands).isEmpty();
+        assertThat(port.callbacks).isEmpty();
+        assertThat(prdRevisions.consume("42")).isNull();
+        assertThat(fastLaneFacts.consume("42")).isFalse();
+    }
+
+    @Test
+    void given_fast_lane_flag_when_called_then_convergence_attested_to_gate_and_write_proceeds() {
+        // 收敛令是未问满时唯一合法提前收口形：fastLane=true 原样透传准入缝，闸放行后照写
+        call("# PRD", "收敛令收口：用户明确说直接开始做", true);
+        call("# PRD", "问满五问自然收口", null);
+
+        assertThat(port.convergenceArgs).containsExactly(Boolean.TRUE, Boolean.FALSE);
+        assertThat(exec.commands).hasSize(2);
+        assertThat(port.callbacks).hasSize(2);
+    }
+
+    @Test
     void given_summary_resupplied_when_called_after_error_then_succeeds() {
         // 脚本化补传链路：漏传报错 → 补传后成功（事实随成功调用落定）
         call("# PRD", null);
@@ -223,7 +259,7 @@ class SavePrdToolTest {
 
     @Test
     void given_fast_lane_save_when_called_then_fact_recorded() {
-        // #542 快道事实：fastLane=true（收敛令/零必答/「直接开始做」）——收口观测
+        // #542 快道事实：fastLane=true（用户收敛令／付费态「直接开始做」）——收口观测
         // 直派首个构建的判定源；成功即登记（取走即清）
         call("# PRD", "收敛令收口：按推荐补全产出", true);
 

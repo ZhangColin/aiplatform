@@ -120,8 +120,8 @@ import lombok.extern.slf4j.Slf4j;
  * {@code dispatchFirstDemoOnPrdProduced}＋轮收口兜一轮）整体退役，全域无无条件
  * 自动路径。触发面四条：试用态岔路口三选卡「立即生成」（{@link #startGeneration}
  * 既有口）、付费轨 PRD 确认按钮（{@link BuildGateAppService#confirmFirstBuild}，
- * 恢复原动作形态——确认即派发、不写版本行）、快道（收敛令/零必答短路/付费
- * 「直接开始做」——savePrd 的 fastLane 工具调用事实，收口观测直派
+ * 恢复原动作形态——确认即派发、不写版本行）、快道（试用态＝用户明确收敛令；
+ * 付费态＝零必答短路/「直接开始做」视同确认——savePrd 的 fastLane 工具调用事实，收口观测直派
  * {@link #dispatchGenerationOnTurnClose}，不出卡不确认）、设计类轨迹全部定稿
  * （设计轨触发律不改）。自然收口不派发：试用态出岔路口卡（状态位持久可回）、
  * 付费态确认门在场。点火时点落 {@code generation_requested_at}
@@ -742,9 +742,9 @@ public class GenerationAppService {
      * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门→#462
      * 去确认门→<b>#542 两入口退役</b>，ADR-0048/0049）：自动派发两入口（首产
      * 回调＋轮收口兜一轮）整体退役、全域无无条件自动路径——本入口只在<b>用户
-     * 触发事实</b>在场时被调用：①快道（savePrd 的 fastLane 工具调用事实——收敛令/
-     * 零必答短路/付费「直接开始做」视同确认，{@link MainAgentAppService} 收口
-     * 消费分岔直调本入口）；②设计类轨迹的首个构建（设计全部定稿后经此起构建，
+     * 触发事实</b>在场时被调用：①快道（savePrd 的 fastLane 工具调用事实——试用态
+     * 用户明确收敛令、付费态零必答短路/「直接开始做」视同确认，{@link MainAgentAppService}
+     * 收口消费分岔直调本入口）；②设计类轨迹的首个构建（设计全部定稿后经此起构建，
      * 设计轨触发律不改——定稿是用户动作）。<b>自然收口不走本入口</b>：试用态出
      * 岔路口卡（{@link BuildGateAppService#ensureForkPending}）、付费态确认门
      * 读面在场（PRD 文档面按钮）——点火归用户。守卫沿用 {@link #startGeneration}

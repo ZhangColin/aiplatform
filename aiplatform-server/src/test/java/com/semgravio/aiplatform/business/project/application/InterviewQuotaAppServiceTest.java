@@ -126,6 +126,59 @@ class InterviewQuotaAppServiceTest {
     }
 
     @Test
+    void given_trial_unfilled_without_convergence_when_early_closure_then_blocked_reason() {
+        // 五问承诺（2026-11-17 用户裁决）：未答满五问且无收敛令——savePrd 被拒，
+        // 拒因模型可见、点名已答进度并指引继续 ask_user
+        Long projectId = persistedInterviewProject("9607");
+        saveAnsweredCard(projectId, "run-1", "目标用户是谁？");
+        saveAnsweredCard(projectId, "run-2", "核心流程走哪条？");
+
+        String reason = quotaAppService.earlyClosureBlockReason(projectId, false);
+
+        assertThat(reason).isNotNull();
+        assertThat(reason).contains("平台拒绝").contains("2/5").contains("ask_user")
+                .contains("收敛令");
+    }
+
+    @Test
+    void given_trial_unfilled_with_convergence_command_when_early_closure_then_admitted() {
+        // 用户明确下收敛令（fastLane attest）——未答满也放行（用户明确不要的例外）
+        Long projectId = persistedInterviewProject("9608");
+        saveAnsweredCard(projectId, "run-1", "目标用户是谁？");
+
+        assertThat(quotaAppService.earlyClosureBlockReason(projectId, true)).isNull();
+    }
+
+    @Test
+    void given_trial_answered_full_when_early_closure_then_admitted_without_flag() {
+        // 问满五问的自然收口：fastLane 不传也放行
+        Long projectId = persistedInterviewProject("9609");
+        for (int i = 1; i <= 5; i++) {
+            saveAnsweredCard(projectId, "run-" + i, "问题" + i);
+        }
+
+        assertThat(quotaAppService.earlyClosureBlockReason(projectId, false)).isNull();
+    }
+
+    @Test
+    void given_paid_or_prd_produced_when_early_closure_then_admitted() {
+        // 非访谈期（付费翻转 / PRD 已产出）闸不拦——零必答首轮直产是付费态合法快道
+        Long paidId = persistedInterviewProject("9610");
+        saveAnsweredCard(paidId, "run-1", "目标用户是谁？");
+        poolTopupAppService.topup(null, paidId, 1, null, null);
+        billingAppService.flipToPaid(paidId, FlipGate.INTERCEPT);
+
+        assertThat(quotaAppService.earlyClosureBlockReason(paidId, false)).isNull();
+
+        Long prdId = persistedInterviewProject("9611");
+        Project prdProject = projectRepository.findById(prdId).orElseThrow();
+        prdProject.markPrdProduced();
+        projectRepository.save(prdProject);
+
+        assertThat(quotaAppService.earlyClosureBlockReason(prdId, false)).isNull();
+    }
+
+    @Test
     void given_no_question_cards_when_quota_then_answered_zero() {
         Long projectId = persistedInterviewProject("9606");
 

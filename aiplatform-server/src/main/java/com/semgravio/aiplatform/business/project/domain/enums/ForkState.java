@@ -12,8 +12,9 @@ import jakarta.persistence.Converter;
  * <p>单值即全集：卡的<b>呈现</b>是派生读（试用态 ∧ 本位 PENDING ∧ 首建未派发
  * ∧ 未归档——{@code GET /build-gate} 单读面），点火后不回清本位（隐藏由
  * {@code generation_requested_at} 派生承担——失败重试走「继续生成」、卡不复现
- * 不复活确认门）；快道（收敛令/零必答短路/付费「直接开始做」）直生成<b>不经
- * 本位</b>（不出卡）。付费态不走岔路口（确认门读面同源派生），状态位留值无害
+ * 不复活确认门）；快道（试用态＝用户明确收敛令；付费态＝零必答短路/「直接开始
+ * 做」视同确认）直生成<b>不经本位</b>（不出卡）。付费态不走岔路口（确认门读面
+ * 同源派生），状态位留值无害
  * ——呈现条件吃付费状态单读点。</p>
  */
 public enum ForkState implements BaseEnum<ForkState> {

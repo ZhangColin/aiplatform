@@ -402,6 +402,38 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     });
   });
 
+  it("question-raised → 失效五问额度读面（追问挂起轮不发 run-finish，否则「已答 N/5」chip 冻在 0/5）", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const quota = observeActiveQuery(qc, queryKeys.conversation.quota("p1"));
+    await quota.waitForSettled();
+
+    dispatchAgentEvent(qc, agentEvent(
+      "run-start", { projectId: "p1", runId: "run1", prompt: "做个官网", model: "m1", agent: "main" }, "run1:1"),
+    );
+    // 作答后的续跑轮再挂一问：上一答已在作答 POST 同步落库，本事件是额度变化点
+    dispatchAgentEvent(qc,
+      agentEvent(
+        "question-raised",
+        {
+          projectId: "p1",
+          runId: "run1",
+          sessionId: "main-p1",
+          summary: "面向谁?",
+          engineRef: "reply-7",
+          data: {
+            toolCalls: [{ id: "tc-1", name: "ask_user", input: {} }],
+            questions: [{ header: "目标用户", question: "面向谁?", multiple: false, custom: true, options: [] }],
+          },
+        },
+        "run1:5",
+      ),
+    );
+
+    await vi.waitFor(() => expect(quota.fetchCount()).toBe(2));
+    quota.unsubscribe();
+    qc.clear();
+  });
+
   it("非对话 run 的 text 不进对话（编码 run 解说归工作消息部件）", () => {
     dispatchAgentEvent(agentQc,
       agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", data: { delta: "写代码" } }, "run1:4"),

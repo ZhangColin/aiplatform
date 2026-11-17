@@ -40,10 +40,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 编排全真链（真模型 + 真 dev 容器 + 真 PG 会话状态/问答答复续跑），仅 SSE 发射边
  * （无订阅者的广播口）一处 mock 收口观测。
  *
- * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
- * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
- * （主智能体停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
- * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=main）。</p>
+ * <p>验收口径：一句话开场 → 实质提问（QUESTION 载荷带前端问答卡形状，经 JSON
+ * 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ <b>答满五问才
+ * 收口</b>（2026-11-17 五问承诺：纯信息答复不构成收敛令，未答满的 savePrd 被
+ * 工具闸拒绝；第 5 答带收口指令→主智能体停止提问）→ savePrd 产出 PRD（工作区
+ * 文件 + 状态位 + document-updated，修订再执行三更新）→ 同会话上下文延续；
+ * 计量落 UsageEvent（dims.agentKind=main）。</p>
  */
 @IntegrationTest
 class MainAgentSessionSmokeTest {
@@ -55,6 +57,12 @@ class MainAgentSessionSmokeTest {
 
     @Autowired
     private ProjectQueryAppService queryAppService;
+
+    @Autowired
+    private InterviewQuotaAppService interviewQuota;
+
+    @Autowired
+    private ConversationHistoryAppService conversationHistory;
 
     @Autowired
     private ProjectKnowledgeAppService knowledgeAppService;
@@ -152,40 +160,55 @@ class MainAgentSessionSmokeTest {
         // 被模型正当的多选题打爆）
         assertThat(asked).containsKeys("header", "multiple", "custom", "options");
 
-        // 2) 答复 → 续跑 → 第二轮提问（答复循环 ≥2 轮：续跑在同一 run 上再挂起，
-        // 新挂起新 engineRef；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
+        // 2) 答复 → 续跑 → 第二轮提问（答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
         settle(question1, "目标用户是海外企业客户，主要看公司与产品介绍；其余方面我也不确定，你继续问");
         Frame question2 = awaitNextQuestionOf(first.runId(), engineRefOf(question1));
         settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
 
-        // 3) 催促收敛：第二问答复后续跑要么再挂新问（逐问以催促文本答复再催）、要么
-        // 收口（run-finish）——上限 4 轮必收敛。不设「无在悬问开新轮」回退：续跑
-        // 出结果（新挂起/收口/异常）前开新轮会与内核挂起态相撞（ASKING 未批复即
-        // 报错），而 awaitResumeOutcome 本就阻塞到出结果，回退是死重兼竞态源
+        // 3) 五问承诺（2026-11-17 用户裁决）：试用访谈答满 5 个不同缺口前平台拒绝
+        //    提前产 PRD——第 3-5 问一律纯信息答复（不带「没有了/按推荐补全」类
+        //    收敛/托付语义，避免被模型引述为收敛令走快道），续跑应继续挂起提问；
+        //    五问额度读面随每答递增（chip「已答 N/5」的数据源，同口验证）。第 5
+        //    答后续跑带「收口指令」→ 停止提问、产出 PRD（run-finish）。不设「无在
+        //    悬问开新轮」回退（awaitResumeOutcome 阻塞到出结果，回退是死重兼竞态源）
         List<String> seenRefs = new ArrayList<>(
                 List.of(engineRefOf(question1), engineRefOf(question2)));
+        String[] moreAnswers = {
+                "网站要有联系表单，客户提交的线索直接发到我们销售邮箱，你继续问下一个",
+                "首屏要留产品演示视频位，白皮书要能下载，暂时不需要博客，你继续问下一个",
+                "移动端必须适配好，海外访问速度要快，SEO 要重视 Google 收录，你继续问下一个",
+        };
         String outcome = awaitResumeOutcome(allRunIds(), seenRefs);
-        for (int i = 0; i < 4 && !"finished".equals(outcome); i++) {
-            Frame pending = questionFrameByRef(outcome);
-            seenRefs.add(outcome);
-            // #542 自然收口话术（快道收窄）：纯信息答复、不带任何收敛/托付语义
-            // （实测模型会把「剩余细节你按推荐补全」引述为收敛意图走快道〔规则 6，
-            // fastLane 直派〕——快道机制反向验证通过，但本用例要验自然收口腿）；
-            // 判定明确与否归模型（规则 5，自然收口出岔路口卡）
-            settle(pending, "没有了，就这些信息。");
-            outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+        int guard = 0;
+        while (!"finished".equals(outcome)) {
+            // 答满五问后平台收口纠偏链接管：模型若漂移再提问，平台在同队列内代答并
+            // 携收口指令续跑（代答不落用户作答行、计数不增）——测试不得再作答那些
+            // 漂移问题（那是平台的轮次），只观测到 run 收口为止
+            if (conversationHistory.answeredGapCount(projectId) >= 5) {
+                outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+            } else {
+                Frame pending = questionFrameByRef(outcome);
+                seenRefs.add(outcome);
+                settle(pending, moreAnswers[conversationHistory.answeredGapCount(projectId) - 2]);
+                outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+            }
+            assertThat(guard++).as("五问访谈收口循环超限（事件序：%s）",
+                    frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
+                    .isLessThan(10);
         }
-        assertThat(outcome).as("催促收敛未在限轮内收口（已捕获事件序：%s）",
-                frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
-                .isEqualTo("finished");
+        // 收口时恰答五问（平台代答的漂移问题不落用户作答行；同缺口重派不另计）
+        assertThat(conversationHistory.answeredGapCount(projectId))
+                .as("已答问答缺口数").isEqualTo(5);
+        // PRD 产出即访谈收口：额度读面整体缺席（chip 退场）
+        assertThat(interviewQuota.quotaOf(projectId)).isNull();
 
         // #34 回归守卫：多轮答复续跑后，会话状态任何 tool_use 的 input 不得含
         // answer 键——答复经 block metadata（模型不可见；input 持久化且模型可见，
         // 带 answer 会教模型「ask_user 可自带答案」自答后续提问）
         assertNoAnswerKeyInToolUseInputs();
 
-        // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
-        //    （PRD 读端点直读工作区文件——run 执行体同视图）
+        // 4) 第 5 答收口指令 → savePrd：自然收口（fastLane 不传）——工作区文件 +
+        //    状态位 + document-updated（PRD 读端点直读工作区文件——run 执行体同视图）
         awaitPrdProduced(1);
         assertThat(prdBitOf(projectId)).isNotNull();
         PrdResponse prd = queryAppService.prd(projectId);

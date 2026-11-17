@@ -27,9 +27,12 @@ import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapt
  * ——#542 首建派发门：#462 的首产自动派发回调整段退役，落盘只登记事实、点火归
  * 用户）+ 修订事实登记（{@link PrdRevisionFacts}——summary 必传，平台从工具调用
  * 事实观测「改没改、改了什么」入交接物，#52）+ <b>快道事实登记</b>（
- * {@link FastLaneFacts}——{@code fastLane=true} 即快道收口〔零必答首轮直产/收敛令
- * /付费「直接开始做」视同确认〕，收口观测直派首个构建、不出卡不确认；缺席＝
- * 自然收口，试用态出岔路口三选卡、付费态确认门在场——#542，ADR-0048/0049）。
+ * {@link FastLaneFacts}——{@code fastLane=true} 即快道收口〔用户明确收敛令/付费
+ * 「直接开始做」视同确认〕，收口观测直派首个构建、不出卡不确认；缺席＝自然收口，
+ * 试用态出岔路口三选卡、付费态确认门在场——#542，ADR-0048/0049）+ <b>五问承诺闸</b>
+ *（{@link PrdArtifactAdapter#earlyClosureBlockReason}——试用访谈期未答满五问且无
+ * 用户收敛令即拒，拒因模型可见、不落盘不置位；2026-11-17 用户裁决：「已答 N/5」
+ * 是明示承诺，除非用户明确不要否则问满）。
  * 落盘/回调任一失败回错误结果（模型
  * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_edit 必调哲学）。
  *
@@ -73,15 +76,18 @@ public class SavePrdTool extends ToolBase {
             DockerExecFilesystem.ExecCommand exec) {
         super(ToolBase.builder()
                 .name(NAME)
-                .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。判定需求已明确"
-                        + "（没有必答题，或用户已下收敛令——#461 新访谈策略）时调用：content 传完整 PRD "
-                        + "markdown 全文（结构与写法遵循 prd-writing 技能）；summary "
-                        + "传本轮说明（markdown 变更说明——修订：改了什么、覆盖哪些意见；"
-                        + "首次产出：PRD 覆盖了什么——界面层按 markdown 渲染呈现，勿出"
-                        + "源码记号）——必传，平台经此观测修订事实；fastLane 仅在快道"
-                        + "收口（零必答首轮直产、用户下了收敛令或明确说「直接开始做」）"
-                        + "时传 true——平台直接开始生成、不出岔路口卡；判定明确或问满"
-                        + "的自然收口不传（false）。每次调用"
+                .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。调用时机：付费态"
+                        + "判定需求已明确（没有必答题）、试用态问满五问，或用户已下收敛令"
+                        + "——试用访谈期未答满五问且用户未明确要求提前收口时本调用会被平台"
+                        + "拒绝（错误结果可见，照其指引继续用 ask_user 提问）。content 传"
+                        + "完整 PRD markdown 全文（结构与写法遵循 prd-writing 技能）；"
+                        + "summary 传本轮说明（markdown 变更说明——修订：改了什么、覆盖"
+                        + "哪些意见；首次产出：PRD 覆盖了什么——界面层按 markdown 渲染"
+                        + "呈现，勿出源码记号）——必传，平台经此观测修订事实；fastLane "
+                        + "仅在用户明确下了收敛令（「不用再问了/直接出 PRD/直接开始做」"
+                        + "——试用态未问满五问时唯一合法的提前收口形）或付费态「直接开始"
+                        + "做」视同确认时传 true——平台直接开始生成、不出岔路口卡；问满"
+                        + "五问后的自然收口、判定明确都不传（false）。每次调用"
                         + "覆盖旧版；成功后向用户简短总结（修订时给修订摘要），不再提问。")
                 .inputSchema(Map.of(
                         "type", "object",
@@ -94,7 +100,13 @@ public class SavePrdTool extends ToolBase {
                                         "description", "本轮说明：修订传改了什么、覆盖了哪些意见；首次产出传 PRD 覆盖了什么"),
                                 FAST_LANE_KEY, Map.of(
                                         "type", "boolean",
-                                        "description", "快道收口标记：零必答首轮直产/收敛令/「直接开始做」传 true（平台直接生成、不出卡不确认）；判定明确或问满的自然收口不传")),
+                                        "description", "快道收口标记：仅当用户明确下达收敛令"
+                                                + "（「不用再问了/直接出 PRD/直接开始做」——"
+                                                + "试用态未答满五问时唯一可提前保存 PRD 的形）"
+                                                + "或付费态「直接开始做」视同确认时传 true"
+                                                + "（平台直接生成、不出卡不确认）；问满五问后的"
+                                                + "自然收口与判定明确都不传；零必答不再是试用态"
+                                                + "提前收口的依据")),
                         "required", List.of(CONTENT_KEY, SUMMARY_KEY)))
                 .readOnly(false)
                 .concurrencySafe(false));
@@ -131,6 +143,13 @@ public class SavePrdTool extends ToolBase {
         // 成功后的终值为准，同修订事实口径）。inputSchema 已声明 boolean 型，Jackson
         // 按型反序列化——Boolean.TRUE.equals 单判即足（同 ReportVerificationTool 先例）。
         boolean fastLane = Boolean.TRUE.equals(param.getInput().get(FAST_LANE_KEY));
+        // 提前收口准入（2026-11-17 用户裁决：五问＝对用户明示的承诺）：试用访谈期
+        // 未答满五问且无用户收敛令——拒因模型可见、不落盘不置位，指引继续 ask_user
+        //（对偶 ①族守卫即改即愈口径）。问满/付费态/非访谈期返回 null 零影响。
+        String earlyBlock = artifactAdapter.earlyClosureBlockReason(workspaceId, fastLane);
+        if (earlyBlock != null) {
+            return Mono.just(ToolResultBlock.error(earlyBlock));
+        }
         // 覆盖写（文件面写路径单一缝，修订即更新）
         DockerExecFilesystem.ExecOutput out = exec.run(
                 DockerExecFilesystem.overwriteWriteCommand(containerFile),

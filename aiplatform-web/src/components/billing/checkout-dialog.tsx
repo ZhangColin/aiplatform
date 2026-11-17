@@ -126,6 +126,9 @@ function CheckoutForm({ projectId }: { projectId: string | null }) {
       });
       setReceipt({ amountFen: amount, balanceFen: result?.pool?.balance ?? 0 });
       setStep("done");
+      // #544 引导流「到账即翻转」：续跑回调随到账触发（空 source 重判——免用户
+      // 重走选择）；未传（无续跑语义来路）零影响
+      useCheckoutStore.getState().onDone?.();
     } catch (e) {
       // BILL_019/BILL_020/BILL_002 message 含处置语义——就地呈现，可改口重试
       setError(errorText(e, "充值失败，请稍后重试"));

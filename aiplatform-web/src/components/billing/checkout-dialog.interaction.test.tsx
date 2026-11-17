@@ -43,7 +43,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mockProjectBilling.target = 2;
-  useCheckoutStore.setState({ open: false, projectId: null });
+  useCheckoutStore.setState({ open: false, projectId: null, onDone: null });
 });
 
 function renderDialog(projectId: string | null = null) {
@@ -156,5 +156,30 @@ describe("CheckoutDialog · 模拟收银台（#534 计费④）", () => {
         expect.objectContaining({ amountFen: 12_345 }),
       );
     });
+  });
+
+  it("到账续跑回调（#544 引导流「到账即翻转」）：携 onDone 开门，支付成功即触发", async () => {
+    const onDone = vi.fn();
+    useCheckoutStore.setState({ open: true, projectId: "p-1", onDone });
+    render(<CheckoutDialog />);
+
+    await walkToConfirm("¥50.00");
+    fireEvent.click(screen.getByRole("button", { name: /确认支付 ¥50.00/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/已到账 ¥50.00/)).toBeTruthy();
+    });
+    expect(onDone).toHaveBeenCalledTimes(1); // 到账即续跑（settle 重判翻转，免重走选择）
+  });
+
+  it("中途关闭（取消/放弃充值）不触发 onDone——卡留岔路口，随时可回", async () => {
+    const onDone = vi.fn();
+    useCheckoutStore.setState({ open: true, projectId: "p-1", onDone });
+    render(<CheckoutDialog />);
+
+    await walkToConfirm("¥50.00");
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(onDone).not.toHaveBeenCalled();
   });
 });

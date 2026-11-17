@@ -827,14 +827,32 @@ class ProjectControllerTest {
 
     @Test
     void given_gate_when_get_build_gate_then_two_read_faces() throws Exception {
-        // 派发门读面（#542）：岔路口卡与确认按钮的呈现条件单读点（互斥两轨）
+        // 派发门读面（#542）：岔路口卡与确认按钮的呈现条件单读点（互斥两轨）；
+        // forkSettleDue＝#544 引导流到账自动翻转信号（卡∧源已选∧池正）
         when(buildGateAppService.gateOf(100L)).thenReturn(
-                new BuildGateAppService.BuildGateView(true, false));
+                new BuildGateAppService.BuildGateView(true, false, true));
 
         performAsUser(get("/api/projects/100/build-gate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.forkCardPending").value(true))
-                .andExpect(jsonPath("$.data.prdConfirmable").value(false));
+                .andExpect(jsonPath("$.data.prdConfirmable").value(false))
+                .andExpect(jsonPath("$.data.forkSettleDue").value(true));
+    }
+
+    @Test
+    void given_guide_view_when_continue_discussion_then_envelope() throws Exception {
+        // 「继续讨论」引导流（#544——翻转门①）：随卡选源命令映射与判定回执信封
+        when(buildGateAppService.continueDiscussion(eq(100L), eq(DeductionSource.PROJECT), any()))
+                .thenReturn(new BuildGateAppService.ForkGuideView(true, false, 2, 10_000L));
+
+        performAsUser(post("/api/projects/100/fork/continue-discussion")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"source\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.flipped").value(true))
+                .andExpect(jsonPath("$.data.rechargeRequired").value(false))
+                .andExpect(jsonPath("$.data.deductionSource").value(2))
+                .andExpect(jsonPath("$.data.sourcePoolBalance").value(10000));
     }
 
     @Test

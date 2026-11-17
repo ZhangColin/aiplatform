@@ -635,6 +635,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/fork/continue-discussion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 岔路口「继续讨论」引导流（翻转门①：选源＋按池判定＋到账翻转）
+         * @description #544 访谈③（ADR-0048 切片③——三选上卡压平版）：访客选付费项（source 传 1=由我的账户付费 / 2=由本项目付费——扣减源随选择一次选定；账户源须先登录，访客吃 BILL_009 指路 M01）后按所选池判定——源池余额为正即翻转回访谈（flipped=true：五问额度解除、协议分轨回原归读面派生、卡随GET /build-gate 熄灭）；非正返回 rechargeRequired=true（引导充值——源已一次选定，重选拒绝 BILL_008），到账后经本端点重判（空 source）即翻转、无需重走选择。后台已充项目池的项目源已选定（入账即选择）——空 source 直达翻转判定＝免登录直接翻转（销售演示动线）。中途放弃＝不落翻转、卡留岔路口（试用态持久可回、随时改选「立即生成」）。错误码：PRJ_085 岔路口卡不在场 / BILL_008 改选拒绝（源已随选择一次选定——同源重传容忍＝重判语义）/ BILL_009 账户源须登录 / BILL_010 源未定且未随卡选定 / BILL_012 已是付费态（幂等前置，既往翻转返回 flipped=true 不报错）。项目不存在 404 PRJ_001
+         */
+        post: operations["continueDiscussion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/fix-runs/restart": {
         parameters: {
             query?: never;
@@ -2646,7 +2666,7 @@ export interface paths {
         };
         /**
          * 首建派发门读面（访谈②：岔路口卡与 PRD 确认按钮的呈现条件）
-         * @description #542 两入口退役后首个构建 run 的点火归用户——本端点是两个点火面的呈现条件单读点（服务端单源，前端不自算）：forkCardPending＝试用态访谈自然收口待选择（岔路口三选卡「持久可回」，重载/回访重建；「立即生成」经 POST /{id}/generate 点火）；prdConfirmable＝付费态首建待确认（PRD 文档面「确认 PRD，开始生成」按钮，确认即派发）。两呈现互斥（两轨判定归扣费域单读点）；快道（收敛令/零必答短路/「直接开始做」）收口观测直派生成——两读面都缺席（false）；点火后（generation_requested_at 落位）卡与按钮都不复现（失败重试走「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null（非 404——读面缺席语义与拦截卡同族）。
+         * @description #542 两入口退役后首个构建 run 的点火归用户——本端点是两个点火面的呈现条件单读点（服务端单源，前端不自算）：forkCardPending＝试用态访谈自然收口待选择（岔路口三选卡「持久可回」，重载/回访重建；「立即生成」经 POST /{id}/generate 点火）；prdConfirmable＝付费态首建待确认（PRD 文档面「确认 PRD，开始生成」按钮，确认即派发）。两呈现互斥（两轨判定归扣费域单读点）；快道（收敛令/零必答短路/「直接开始做」）收口观测直派生成——两读面都缺席（false）；点火后（generation_requested_at 落位）卡与按钮都不复现（失败重试走「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。forkSettleDue＝「继续讨论」引导流到账自动翻转信号（#544：卡在场∧源已选定∧源池余额为正——他处到账〔不限收银台单缝〕后卡回读即显，前端空 source 重判即翻转，POST /{id}/fork/continue-discussion）。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null（非 404——读面缺席语义与拦截卡同族）。
          */
         get: operations["buildGate"];
         put?: never;
@@ -4908,6 +4928,43 @@ export interface components {
         GenerationStopResponse: {
             stopped?: boolean;
         };
+        ContinueDiscussionCommand: {
+            /** @description 1=账户余额, 2=项目余额 */
+            source?: number;
+        };
+        ApiResponseContinueDiscussionResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["ContinueDiscussionResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 「继续讨论」引导流判定回执：flipped＝已翻转回访谈；rechargeRequired＝源池余额非正、引导充值（到账后重判即翻转，无需重走选择） */
+        ContinueDiscussionResponse: {
+            /**
+             * @description 是否已翻转（本次或他路竞态既往——幂等成功语义）
+             * @example true
+             */
+            flipped?: boolean;
+            /**
+             * @description 源池余额非正、引导充值（false 且 flipped=false 不成立）
+             * @example false
+             */
+            rechargeRequired?: boolean;
+            /**
+             * Format: int32
+             * @description 已选定扣减源码位（1=账户余额 2=项目余额）
+             * @example 2
+             */
+            deductionSource?: number;
+            /**
+             * Format: int64
+             * @description 源池余额快照（分；项目池从未入账为 null＝必空判定）
+             * @example 5000
+             */
+            sourcePoolBalance?: number;
+        };
         ApiResponseFixRestartResponse: {
             /** Format: int32 */
             code?: number;
@@ -6229,6 +6286,11 @@ export interface components {
              * @example false
              */
             prdConfirmable?: boolean;
+            /**
+             * @description 「继续讨论」引导流到账自动翻转信号（#544——卡在场∧源已选定∧源池余额为正：他处到账〔不限收银台单缝〕后卡回读即显，前端空 source 重判即翻转、无需重走选择）
+             * @example false
+             */
+            forkSettleDue?: boolean;
         };
         ApiResponseProjectBillingView: {
             /** Format: int32 */
@@ -8246,6 +8308,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseGenerationStartResponse"];
+                };
+            };
+        };
+    };
+    continueDiscussion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ContinueDiscussionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContinueDiscussionResponse"];
                 };
             };
         };

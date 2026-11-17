@@ -21,6 +21,7 @@ import jakarta.validation.Valid;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
@@ -36,8 +37,10 @@ import com.semgravio.aiplatform.business.project.application.ProjectQueryAppServ
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.BuildGateResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ContinueDiscussionResponse;
 import com.semgravio.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.ConfirmInterceptCommand;
+import com.semgravio.aiplatform.business.project.application.dto.command.ContinueDiscussionCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.RenameProjectCommand;
@@ -241,12 +244,16 @@ public class ProjectController {
                     + "「直接开始做」）收口观测直派生成——两读面都缺席（false）；点火后"
                     + "（generation_requested_at 落位）卡与按钮都不复现（失败重试走"
                     + "「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。"
+                    + "forkSettleDue＝「继续讨论」引导流到账自动翻转信号（#544：卡在场∧源"
+                    + "已选定∧源池余额为正——他处到账〔不限收银台单缝〕后卡回读即显，前端"
+                    + "空 source 重判即翻转，POST /{id}/fork/continue-discussion）。"
                     + "归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null"
                     + "（非 404——读面缺席语义与拦截卡同族）。")
     public ApiResponse<BuildGateResponse> buildGate(@PathVariable String id) {
         BuildGateAppService.BuildGateView view = buildGateAppService.gateOf(parseId(id));
         return ApiResponse.ok(view == null ? null
-                : new BuildGateResponse(view.forkCardPending(), view.prdConfirmable()));
+                : new BuildGateResponse(view.forkCardPending(), view.prdConfirmable(),
+                        view.forkSettleDue()));
     }
 
     @PostMapping("/{id}/intercept/confirm")
@@ -265,6 +272,29 @@ public class ProjectController {
         return ApiResponse.ok(new InterviewTurnResponse(
                 dispatchAppService.confirmIntercept(parseId(id), command == null ? null : command.source())
                         .runId()));
+    }
+
+    @PostMapping("/{id}/fork/continue-discussion")
+    @Operation(summary = "岔路口「继续讨论」引导流（翻转门①：选源＋按池判定＋到账翻转）",
+            description = "#544 访谈③（ADR-0048 切片③——三选上卡压平版）：访客选付费项"
+                    + "（source 传 1=由我的账户付费 / 2=由本项目付费——扣减源随选择一次选定；"
+                    + "账户源须先登录，访客吃 BILL_009 指路 M01）后按所选池判定——源池余额为正"
+                    + "即翻转回访谈（flipped=true：五问额度解除、协议分轨回原归读面派生、卡随"
+                    + "GET /build-gate 熄灭）；非正返回 rechargeRequired=true（引导充值——源已"
+                    + "一次选定，重选拒绝 BILL_008），到账后经本端点重判（空 source）即翻转、"
+                    + "无需重走选择。后台已充项目池的项目源已选定（入账即选择）——空 source 直达"
+                    + "翻转判定＝免登录直接翻转（销售演示动线）。中途放弃＝不落翻转、卡留岔路口"
+                    + "（试用态持久可回、随时改选「立即生成」）。错误码：PRJ_085 岔路口卡不在场 / "
+                    + "BILL_008 改选拒绝（源已随选择一次选定——同源重传容忍＝重判语义）/ "
+                    + "BILL_009 账户源须登录 / BILL_010 源未定且未随卡选定 / "
+                    + "BILL_012 已是付费态（幂等前置，既往翻转返回 flipped=true 不报错）。"
+                    + "项目不存在 404 PRJ_001")
+    public ApiResponse<ContinueDiscussionResponse> continueDiscussion(@PathVariable String id,
+            @RequestBody(required = false) ContinueDiscussionCommand command) {
+        BuildGateAppService.ForkGuideView view = buildGateAppService.continueDiscussion(
+                parseId(id), command == null ? null : command.source(), RequestContext.getUserId());
+        return ApiResponse.ok(new ContinueDiscussionResponse(view.flipped(),
+                view.rechargeRequired(), view.deductionSource(), view.sourcePoolBalance()));
     }
 
     @PostMapping("/{id}/questions/{qid}/answer")

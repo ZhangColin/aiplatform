@@ -10,18 +10,25 @@ import { create } from "zustand";
  * <p>未登录先行 M01（CONTEXT「模拟收银台」：须先登录）：触发侧持 useMe 判定，
  * 访客先开 M01（checkout-login 来路文案）、登录成功经 resume 回调重开收银台
  * ——resume 语义同签约门「绑定后放行」先例，本 store 不感知登录态。</p>
+ *
+ * <p>onDone（#544 引导流）：岔路口「继续讨论」的到账续跑——收银台支付成功即
+ * 回调（空 source 重判翻转），中途关闭不触发（放弃充值＝卡留岔路口）。</p>
  */
 export type CheckoutState = {
   open: boolean;
   /** 充值上下文：null＝我的账户（账户池）；否则项目 id（项目池/按目标推导）。 */
   projectId: string | null;
-  openCheckout: (projectId?: string | null) => void;
+  /** 到账续跑回调（#544 引导流「到账即翻转」——充值成功即触发，免用户重走选择；
+   *  可空：无续跑语义的来路〔我的账户页/项目账单节/拦截卡〕不传）。 */
+  onDone: (() => void) | null;
+  openCheckout: (projectId?: string | null, onDone?: () => void) => void;
   closeCheckout: () => void;
 };
 
 export const useCheckoutStore = create<CheckoutState>((set) => ({
   open: false,
   projectId: null,
-  openCheckout: (projectId = null) => set({ open: true, projectId }),
-  closeCheckout: () => set({ open: false }),
+  onDone: null,
+  openCheckout: (projectId = null, onDone) => set({ open: true, projectId, onDone: onDone ?? null }),
+  closeCheckout: () => set({ open: false, onDone: null }),
 }));

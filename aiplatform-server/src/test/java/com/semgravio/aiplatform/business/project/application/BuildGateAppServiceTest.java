@@ -31,7 +31,9 @@ import com.semgravio.aiplatform.base.workspace.application.dto.command.Workspace
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.business.billing.application.BillingAppService;
 import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
 import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
+import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
@@ -70,6 +72,9 @@ class BuildGateAppServiceTest {
 
     @Autowired
     private CodingRunTrack codingRunTrack;
+
+    @Autowired
+    private InterviewQuotaAppService interviewQuotaAppService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -169,6 +174,7 @@ class BuildGateAppServiceTest {
         BuildGateAppService.BuildGateView gate = gateService.gateOf(projectId);
         assertThat(gate.forkCardPending()).isTrue();
         assertThat(gate.prdConfirmable()).isFalse(); // 试用态无确认门（岔路口即点火动作）
+        assertThat(gate.forkSettleDue()).isFalse(); // 源未定——无 settle 信号（点了才选定）
         // 持久可回：落库事实独立可查（fork_state＝PENDING code 1——Integer code 落库）
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT fork_state, generation_requested_at FROM prj_projects WHERE id = ?",
@@ -320,5 +326,230 @@ class BuildGateAppServiceTest {
         finally {
             codingRunTrack.end(projectId);
         }
+    }
+
+    // ---------- 「继续讨论」引导流（#544 访谈③，翻转门①——选源＋按池判定） ----------
+
+    @Test
+    void given_account_funded_when_continue_by_account_then_source_selected_and_flipped() {
+        // 灵魂例（AC①）：访客 M01 登录＋项目平移（归登录编排）后选「由我的账户
+        // 付费」→ 账户有余额 → 扣减源一次选定＋翻转回访谈（FlipGate.FORK 门①留痕）
+        Long projectId = persistedTrialPrdProject("9920");
+        gateService.ensureForkPending(projectId);
+        topupService.topup(OWNER, null, 10_000, null, null);
+
+        BuildGateAppService.ForkGuideView view =
+                gateService.continueDiscussion(projectId, DeductionSource.ACCOUNT, OWNER);
+
+        assertThat(view.flipped()).isTrue();
+        assertThat(view.rechargeRequired()).isFalse();
+        assertThat(view.deductionSource()).isEqualTo(DeductionSource.ACCOUNT.getCode());
+        // 落库事实：源选定（账户定格）＋翻转锚＋门①留痕
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT deduction_source, source_account_id, flipped_at, flip_gate"
+                        + " FROM bil_project_billing WHERE project_id = ?",
+                projectId);
+        assertThat(row.get("deduction_source")).isEqualTo(DeductionSource.ACCOUNT.getCode());
+        assertThat(row.get("source_account_id")).isEqualTo(OWNER);
+        assertThat(row.get("flipped_at")).isNotNull();
+        assertThat(row.get("flip_gate")).isEqualTo(FlipGate.FORK.getCode());
+        // 卡随翻转熄灭（读面派生——试用态不再成立）；确认门也不在场（首建未点火）
+        assertThat(gateService.gateOf(projectId).forkCardPending()).isFalse();
+        assertThat(gateService.gateOf(projectId).prdConfirmable()).isTrue();
+        assertThat(gateService.gateOf(projectId).forkSettleDue()).isFalse(); // 已翻转无 settle 信号
+        // 翻转后五问额度解除（AC——协议分轨回原的读面：付费态额度读口恒空）
+        assertThat(interviewQuotaAppService.quotaOf(projectId)).isNull();
+    }
+
+    @Test
+    void given_account_empty_when_continue_by_account_then_recharge_guided_and_source_locked() {
+        // 灵魂例（AC②）：账户无余额 → 引导充值——源已一次选定（到账后重判即
+        // 翻转、无需重走选择）、不翻转、卡留岔路口（中途放弃随时改选「立即生成」）
+        Long projectId = persistedTrialPrdProject("9921");
+        gateService.ensureForkPending(projectId);
+        topupService.topup(OWNER, null, 10_000, null, null);
+        // 充后扣成零余额（入账口只收正数——直接落池面调平）
+        jdbcTemplate.update("UPDATE bil_pools SET balance = 0 WHERE account_id = ?", OWNER);
+
+        BuildGateAppService.ForkGuideView view =
+                gateService.continueDiscussion(projectId, DeductionSource.ACCOUNT, OWNER);
+
+        assertThat(view.flipped()).isFalse();
+        assertThat(view.rechargeRequired()).isTrue();
+        assertThat(view.deductionSource()).isEqualTo(DeductionSource.ACCOUNT.getCode());
+        assertThat(view.sourcePoolBalance()).isEqualTo(0L);
+        // 源已选定（定格账户）＋未翻转
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT deduction_source, source_account_id, flipped_at FROM bil_project_billing WHERE project_id = ?",
+                projectId);
+        assertThat(row.get("deduction_source")).isEqualTo(DeductionSource.ACCOUNT.getCode());
+        assertThat(row.get("source_account_id")).isEqualTo(OWNER);
+        assertThat(row.get("flipped_at")).isNull();
+        // 卡留岔路口（试用态 PENDING 不回清——随时改选「立即生成」）
+        assertThat(gateService.gateOf(projectId).forkCardPending()).isTrue();
+        assertThat(gateService.gateOf(projectId).forkSettleDue()).isFalse(); // 池零不 settle
+        // 源重选拒绝（BILL_008——不可自助改口）：改选项目源吃重复选定错
+        // （聚合守卫先行＝DomainException 直抛，message 同源 BillingMessage）
+        assertThatThrownBy(() -> billingAppService.selectSource(projectId, DeductionSource.PROJECT, null))
+                .hasMessageContaining(BillingMessage.SOURCE_ALREADY_SELECTED.message());
+    }
+
+    @Test
+    void given_source_selected_when_continue_with_different_source_then_bill_008() {
+        // 改口拒绝（code-review 处置——文档契约与实现对齐）：源已随选择一次选定，
+        // 引导充值支改点另一付费选项＝异源传参 → BILL_008 显式拒绝（不再静默忽略）
+        Long projectId = persistedTrialPrdProject("9929");
+        gateService.ensureForkPending(projectId);
+        gateService.continueDiscussion(projectId, DeductionSource.PROJECT, null);
+
+        assertThatThrownBy(() -> gateService.continueDiscussion(projectId, DeductionSource.ACCOUNT, OWNER))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(BillingMessage.SOURCE_ALREADY_SELECTED.message());
+        // 拒绝零落痕：源不被改、未翻转
+        Map<String, Object> unchanged = jdbcTemplate.queryForMap(
+                "SELECT deduction_source, flipped_at FROM bil_project_billing WHERE project_id = ?",
+                projectId);
+        assertThat(unchanged.get("deduction_source")).isEqualTo(DeductionSource.PROJECT.getCode());
+        assertThat(unchanged.get("flipped_at")).isNull();
+    }
+
+    @Test
+    void given_source_selected_when_continue_with_same_source_then_rejudged() {
+        // 同源重传容忍＝重判语义（code-review 处置）：引导充值支重点同选项不报错，
+        // 按既定源重判余额（此处仍零余额 → 再引导）
+        Long projectId = persistedTrialPrdProject("9930");
+        gateService.ensureForkPending(projectId);
+        gateService.continueDiscussion(projectId, DeductionSource.PROJECT, null);
+
+        BuildGateAppService.ForkGuideView view =
+                gateService.continueDiscussion(projectId, DeductionSource.PROJECT, null);
+
+        assertThat(view.flipped()).isFalse();
+        assertThat(view.rechargeRequired()).isTrue();
+    }
+
+    @Test
+    void given_project_pool_funded_when_continue_without_source_then_flip_without_login() {
+        // 灵魂例（AC④）：后台已充项目池的项目「入账即选定项目源」——选「由本项目
+        // 付费」免登录直接翻转（销售演示动线：空 source 直达翻转判定）
+        Long projectId = persistedTrialPrdProject("9922");
+        gateService.ensureForkPending(projectId);
+        topupService.topup(null, projectId, 10_000, null, null); // 入账即选定项目源
+        // 免登录语义＝命令侧 accountId 可空（项目源不读账户定格——控制器传
+        // RequestContext.getUserId()，访客现场为 null 直达翻转判定）
+        // 到账自动翻转读面信号在场：卡∧源已选∧池正（前端回读即 settle，无需点击）
+        assertThat(gateService.gateOf(projectId).forkSettleDue()).isTrue();
+
+        BuildGateAppService.ForkGuideView view =
+                gateService.continueDiscussion(projectId, null, null);
+
+        assertThat(view.flipped()).isTrue();
+        assertThat(view.deductionSource()).isEqualTo(DeductionSource.PROJECT.getCode());
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT deduction_source, flipped_at, flip_gate FROM bil_project_billing WHERE project_id = ?",
+                projectId);
+        assertThat(row.get("deduction_source")).isEqualTo(DeductionSource.PROJECT.getCode());
+        assertThat(row.get("flipped_at")).isNotNull();
+        assertThat(row.get("flip_gate")).isEqualTo(FlipGate.FORK.getCode());
+        assertThat(gateService.gateOf(projectId).forkCardPending()).isFalse();
+    }
+
+    @Test
+    void given_project_pool_never_funded_when_continue_by_project_then_recharge_guided() {
+        // 灵魂例（AC③）：试用项目从未入账、项目池必空——选「由本项目付费」＝
+        // 选定项目源＋引导充值（余额快照 null＝池未建的必空判定断言）
+        Long projectId = persistedTrialPrdProject("9923");
+        gateService.ensureForkPending(projectId);
+
+        BuildGateAppService.ForkGuideView view =
+                gateService.continueDiscussion(projectId, DeductionSource.PROJECT, null);
+
+        assertThat(view.flipped()).isFalse();
+        assertThat(view.rechargeRequired()).isTrue();
+        assertThat(view.deductionSource()).isEqualTo(DeductionSource.PROJECT.getCode());
+        assertThat(view.sourcePoolBalance()).isNull(); // 项目池从未入账必空
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT deduction_source, flipped_at FROM bil_project_billing WHERE project_id = ?",
+                projectId);
+        assertThat(row.get("deduction_source")).isEqualTo(DeductionSource.PROJECT.getCode());
+        assertThat(row.get("flipped_at")).isNull();
+        assertThat(gateService.gateOf(projectId).forkCardPending()).isTrue(); // 卡留岔路口
+    }
+
+    @Test
+    void given_recharge_arrived_when_settle_then_flip_without_reselection() {
+        // 灵魂例（AC②③收口）：到账即翻转——引导充值支后源已选定，空 source 重判
+        // （settle）即翻转回访谈，无需重走选择
+        Long projectId = persistedTrialPrdProject("9924");
+        gateService.ensureForkPending(projectId);
+        BuildGateAppService.ForkGuideView guided =
+                gateService.continueDiscussion(projectId, DeductionSource.PROJECT, null);
+        assertThat(guided.rechargeRequired()).isTrue();
+
+        topupService.topup(null, projectId, 5_000, null, null); // 到账（项目池充值）
+
+        BuildGateAppService.ForkGuideView settled =
+                gateService.continueDiscussion(projectId, null, null);
+        assertThat(settled.flipped()).isTrue();
+        assertThat(settled.sourcePoolBalance()).isEqualTo(5_000L);
+        assertThat(gateService.gateOf(projectId).forkCardPending()).isFalse();
+        assertThat(interviewQuotaAppService.quotaOf(projectId)).isNull(); // 五问额度解除
+    }
+
+    @Test
+    void given_fork_not_pending_when_continue_then_prj_085() {
+        // 引导流动作守卫：卡不在场（未自然收口）拒绝——选源/翻转只从岔路口卡发起
+        Long projectId = persistedTrialPrdProject("9925"); // 未 ensureForkPending
+
+        assertThatThrownBy(() -> gateService.continueDiscussion(projectId, DeductionSource.PROJECT, null))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FORK_NOT_PENDING.message());
+        // 拒绝零落痕：无 billing 行（源未定事实不变）
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT id FROM bil_project_billing WHERE project_id = ?", projectId)).isEmpty();
+    }
+
+    @Test
+    void given_already_paid_when_continue_then_idempotent_flipped() {
+        // 幂等：已付费（他路翻转竞态/重复提交）→ flipped＝true 成功回执，不空翻不报错
+        Long projectId = persistedTrialPrdProject("9926");
+        gateService.ensureForkPending(projectId);
+        topupService.topup(null, projectId, 10_000, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT); // 他路（门②）先翻
+
+        BuildGateAppService.ForkGuideView view =
+                gateService.continueDiscussion(projectId, DeductionSource.ACCOUNT, OWNER);
+
+        assertThat(view.flipped()).isTrue();
+        assertThat(view.rechargeRequired()).isFalse();
+        // 门别留痕不被本命令覆盖（翻转锚在钱的承诺事实上、不可逆）
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT flip_gate FROM bil_project_billing WHERE project_id = ?", projectId)
+                .get("flip_gate")).isEqualTo(FlipGate.INTERCEPT.getCode());
+    }
+
+    @Test
+    void given_source_unset_and_no_source_when_continue_then_bill_010() {
+        // 源未定且未随命令选定＝BILL_010（与翻转前置同语义）
+        Long projectId = persistedTrialPrdProject("9927");
+        gateService.ensureForkPending(projectId);
+
+        assertThatThrownBy(() -> gateService.continueDiscussion(projectId, null, null))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(BillingMessage.FLIP_SOURCE_REQUIRED.message());
+    }
+
+    @Test
+    void given_guest_not_logged_in_when_continue_by_account_then_bill_009() {
+        // 账户源须先登录绑定：访客（accountId=null）选「由我的账户付费」吃 BILL_009
+        // （聚合守卫先行＝DomainException 直抛，message 同源 BillingMessage）
+        Long projectId = persistedTrialPrdProject("9928");
+        gateService.ensureForkPending(projectId);
+
+        assertThatThrownBy(() -> gateService.continueDiscussion(projectId, DeductionSource.ACCOUNT, null))
+                .hasMessageContaining(BillingMessage.SOURCE_ACCOUNT_REQUIRED.message());
+        // 拒绝零落痕：无 billing 行（登录后重走选定）
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT id FROM bil_project_billing WHERE project_id = ?", projectId)).isEmpty();
     }
 }

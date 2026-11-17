@@ -19,5 +19,10 @@ public record BuildGateResponse(
 
         @Schema(description = "PRD 文档面确认按钮呈现（付费态首建待确认——确认即派发，"
                 + "POST /prd/confirm）", example = "false")
-        boolean prdConfirmable) {
+        boolean prdConfirmable,
+
+        @Schema(description = "「继续讨论」引导流到账自动翻转信号（#544——卡在场∧源已"
+                + "选定∧源池余额为正：他处到账〔不限收银台单缝〕后卡回读即显，前端空 "
+                + "source 重判即翻转、无需重走选择）", example = "false")
+        boolean forkSettleDue) {
 }

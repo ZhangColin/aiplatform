@@ -362,11 +362,14 @@ export function CommandArea({
         data-frame={staged ? "composer-card" : undefined}
         className={staged ? "shrink-0 rounded-2xl border border-slate-soft/80 bg-white p-3 shadow-e1" : "shrink-0 p-3"}
       >
-        {/* 岔路口三选卡（#542 访谈②）：试用态自然收口后的首建点火卡——持久可回
-            （呈现条件服务端单源，关页回来卡仍在）；「立即生成」即点火，点火后随
-            读面隐藏。钉在输入框上方＝当前状态位（不随对话流上滚） */}
+        {/* 岔路口三选卡（#542 访谈②＋#544 引导流）：试用态自然收口后的首建点火
+            卡——持久可回（呈现条件服务端单源，关页回来卡仍在）；「立即生成」即
+            点火，点火后随读面隐藏；forkSettleDue＝到账自动翻转信号（他处到账后
+            卡回读即 settle，无需重走选择）。钉在输入框上方＝当前状态位（不随对
+            话流上滚） */}
         {buildGate.data?.forkCardPending && !disabled ? (
-          <ForkCard projectId={projectId} onSeePrd={onSeePrd} />
+          <ForkCard projectId={projectId} onSeePrd={onSeePrd}
+            autoSettle={buildGate.data?.forkSettleDue ?? false} />
         ) : null}
         {!staged && prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">

@@ -21,6 +21,7 @@ import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
+import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
@@ -113,6 +114,26 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      */
     @Column(name = "generated_at")
     private LocalDateTime generatedAt;
+
+    /**
+     * 岔路口状态位（#542 访谈②，ADR-0048/0049）：试用态访谈自然收口（非快道）时
+     * 置 {@link ForkState#PENDING}——岔路口三选卡的在场事实（持久可回：未选择前
+     * 关页回来卡仍在）。NULL = 不在场（未收口／快道直生成不出卡）；点火后不回清
+     * ——卡呈现由 {@link #generationRequestedAt} 派生隐藏（详见 {@link ForkState}）。
+     * 落库 Integer code（BaseEnumConverter autoApply——同 {@link ProjectType}/
+     * {@link ProjectEndpointType} 先例，防 ORDINAL 错位）。
+     */
+    @Column(name = "fork_state")
+    private ForkState forkState;
+
+    /**
+     * 首个构建派发点火时点（#542，ADR-0049「两轨唯一差异＝触发源」的读点）：
+     * 岔路口「立即生成」／付费轨 PRD 确认／快道直生成的共同落位（单向置位，
+     * {@link #markFirstBuildRequested}）——岔路口卡与确认按钮「首建未派发」呈现
+     * 条件的事实源（失败重试走「继续生成」不回清：确认不重复、卡不复现）。
+     */
+    @Column(name = "generation_requested_at")
+    private LocalDateTime generationRequestedAt;
 
     /**
      * 确认标记所在 Demo 版本（#333 单指针，NULL = 未确认任何版本）：「确认此
@@ -280,6 +301,26 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     public void markGenerated() {
         if (generatedAt == null) {
             this.generatedAt = LocalDateTime.now();
+        }
+    }
+
+    /**
+     * 岔路口置位（#542）：自然收口观测点调用（试用态 ∧ 系统终点 ∧ PRD 在 ∧ 首建
+     * 未点火——前置归编排），幂等——已置不拒（意见修订轮再收口照旧在场）。聚合只
+     * 落位，无清位路径（呈现隐藏由派生读承担）。
+     */
+    public void markForkPending() {
+        this.forkState = ForkState.PENDING;
+    }
+
+    /**
+     * 首个构建派发点火置位（#542）：幂等单向——首次落值后不再刷新（失败重试走
+     * 「继续生成」，确认不重复、卡不复现；对偶 {@link #markGenerated} 的单置位
+     * 语义，两者相差整场生成在途窗口）。
+     */
+    public void markFirstBuildRequested() {
+        if (generationRequestedAt == null) {
+            this.generationRequestedAt = LocalDateTime.now();
         }
     }
 

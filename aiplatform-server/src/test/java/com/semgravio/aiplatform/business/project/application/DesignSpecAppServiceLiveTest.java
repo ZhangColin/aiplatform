@@ -241,6 +241,71 @@ class DesignSpecAppServiceLiveTest {
         assertThat(appService.lintClosingPayload(project())).containsEntry("status", "passed");
     }
 
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_style_direction_in_prd_when_dispatch_then_style_materialized_and_rematerialized() {
+        // 灵魂用例（#543 验收③⑥——风格物化 live，物化写基座触 workspace 缝必跑）：
+        // 新项目首个构建派发＝平台读 docs/PRD.md 风格方向字段→库值确定性物化——
+        // 容器事实：:root 刷库值（cat 回读独立见证）＋DESIGN.md 出方向规则句＋
+        // lint 配置落位；PRD 修订方向后再派发＝重物化换肤（基座值换掉、行随刷）。
+        // 首份 PRD 用真实模型产出形态（项目 380985400431490033 实录：中文数字序号
+        // 章标题＋加粗列表行——裸标题 fixture 曾让序号漏锚全路绿灯，黑白缺省套现场）
+        givenProjectWithWorkspace();
+        writeFile("docs/PRD.md", """
+                # PRD
+                ## 五、关键约束
+                - **风格方向：清新教育**（微调：圆角再大一点）
+                - 数据存储采用平台内建数据库
+
+                ## 六、功能清单
+                - 略
+                """);
+
+        assertThat(appService.materializeAtDispatch(project())).isTrue();
+
+        String css = readFile(DesignSpecs.BASELINE_GLOBALS_CSS);
+        assertThat(css).as("风格库值刷进基座 :root（容器事实）")
+                .contains("--primary: oklch(0.52 0.11 180);")
+                .contains("--radius: 0.875rem;")
+                .doesNotContain("--primary: oklch(0.205 0 0)");
+        assertThat(css).as("调色板收窄块在位").contains("--color-*: initial;");
+        assertThat(readFile("DESIGN.md")).as("风格规则文件落位（人读规则句＝库双件直陈）")
+                .contains("# 设计规范")
+                .contains("风格方向：清新教育")
+                .contains("## 风格方向规则（清新教育）")
+                .contains("圆角偏大");
+        assertThat(readFile(".oxlintrc.json")).as("lint 配置落位").contains("shadcn/no-raw-colors");
+        Map<String, Object> row = specRow();
+        assertThat(row.get("direction_key")).isEqualTo("fresh-education");
+        assertThat(row.get("style")).isEqualTo("清新教育");
+
+        // 重物化（改风格＝PRD 修订→派发对齐）：方向换沉稳金融 → 再派发＝基座换肤
+        writeFile("docs/PRD.md", "## 关键约束\n- 风格方向：沉稳金融\n");
+        assertThat(appService.materializeAtDispatch(project())).isTrue();
+
+        String refreshed = readFile(DesignSpecs.BASELINE_GLOBALS_CSS);
+        assertThat(refreshed).as("重物化＝全局换肤")
+                .contains("--primary: oklch(0.42 0.10 275);")
+                .doesNotContain("oklch(0.52 0.11 180)");
+        assertThat(specRow().get("direction_key")).isEqualTo("calm-finance");
+        assertThat(readFile("DESIGN.md"))
+                .contains("## 风格方向规则（沉稳金融）");
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_style_source_when_closing_scan_then_baseline_compliant() {
+        // 风格来源行收口扫描同律（#543 验收④——三件套对生成式来源生效）：基座
+        // 骨架页在物化后的收窄环境真跑 oxlint＝passed（风格层不空耗修轮）
+        givenProjectWithWorkspace();
+        writeFile("docs/PRD.md", "## 关键约束\n- 风格方向：科技前沿\n");
+        assertThat(appService.materializeAtDispatch(project())).isTrue();
+
+        Map<String, Object> scan = appService.lintClosingPayload(project());
+        assertThat(scan).as("风格来源收口扫描（基座骨架页合规）")
+                .containsEntry("status", "passed");
+    }
+
     /** 子串计数（幂等唯一性断言）。 */
     private static int countOccurrences(String text, String needle) {
         int count = 0;
@@ -284,7 +349,7 @@ class DesignSpecAppServiceLiveTest {
 
     private Map<String, Object> specRow() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT source_draft_path, source_run_id, tokens, palette, style"
+                "SELECT source_draft_path, source_run_id, tokens, palette, style, direction_key"
                         + " FROM prj_design_specs WHERE project_id = ?", projectId);
         assertThat(rows).hasSize(1);
         return rows.get(0);

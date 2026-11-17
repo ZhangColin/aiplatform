@@ -62,21 +62,39 @@ class AgentProfileTest {
                 .contains("DESIGN.md")
                 .contains("token 优先")
                 .contains("禁裸色")
-                // #425 执行体工作协议「用基座件、禁裸客户端」条目＋件用法指路
-                //（细则正本住工作区 AGENTS.md 本栈写法规则节——栈规则集随基座
-                // tag 换版；lint 两档口径：强制档收口被拒、预置档如实标注）
+                // #425 执行体工作协议「用基座件、禁裸客户端」条目；#540 起单源化
+                //（ADR-0051）：协议只留指针句——件清单/用法/纪律唯一正本＝工作区
+                // AGENTS.md 本栈写法规则节（栈规则集随基座 tag 换版），不再重复
+                // 枚举预置件路径（双正本必漂移）；#541 lint 让路：两档口径句改写
+                // 为「照扫标注、不拦收口」的缺省语义（阻断形态以拒绝回执为准——
+                // 闸态回执口径同收口三闸，运营开关承载面）
                 .contains("禁裸客户端")
-                .contains("src/lib/robust/data-access")
-                .contains("src/lib/robust/http")
-                .contains("src/lib/robust/session")
-                .contains("不用裸 fetch")
-                // 「预约通」实测（11-12）：prompt 写「外部 HTTP」而 lint 拦一切裸 fetch——
-                // 页面调自家 /api 被判内部调用裸写，7+4 处两段升档。语义边界对齐：规则
-                // 文本必须点名「含页面调自家 /api」，与 lint 判定边界（不分内外）一致。
-                .contains("含页面调自家 /api")
+                .contains("唯一正本＝工作区 AGENTS.md 的本栈写法规则节")
+                .contains("开工先读该节")
+                .contains("不重造轮子")
+                .contains("照常自建")
+                .doesNotContain("src/lib/robust")
+                .doesNotContain("src/components/robust")
+                .doesNotContain("httpFetch")
+                .doesNotContain("AsyncSection")
+                // 「预约通」实测（11-12）的语义边界对齐句随枚举移除一并归栈规则集
+                //（节内断言见 StackRulesEntryPathsTest——「含页面/组件调自家 /api 路由」）
                 .contains("本栈写法规则节")
-                .contains("强制档")
-                .contains("预置档");
+                // #541 lint 让路句锚点：收口照扫、违规标注不拦收口；阻断形态以回执为准
+                .contains("基座 lint")
+                .contains("不拦收口")
+                .contains("拒绝回执")
+                // #545 图片下放构建轨（ADR-0052）：工具点名＋演示配图用途＋少而精边界
+                //（个位数、不逐卡片、无机器上限）＋public/ 根路径引用
+                .contains("generate_image")
+                .contains("演示配图")
+                .contains("首屏 hero")
+                .contains("空状态")
+                .contains("少而精")
+                .contains("个位数")
+                .contains("不逐卡片")
+                .contains("没有机器上限")
+                .contains("public/");
         // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
         // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
         // 运营配置面可覆盖（ADR-0021）
@@ -121,6 +139,39 @@ class AgentProfileTest {
                 .contains("执行层")
                 .contains("拒绝")
                 .contains("#440");
+    }
+
+    @Test
+    void given_executor_prompt_when_complexity_governance_then_three_hard_lines_and_deferral_clause() {
+        // ADR-0050 执行体工作协议改写：条 1 待定项最小可用缺省＋推迟清单消费句
+        //（清单内不做、不自行加回）；条 3 收口判据＝三硬底线（撤「真实应用」厚度
+        // 指令、带数据库降为手段）＋演示数据一轮建成＋真实感反 placeholder；
+        // 机器探活三件套仍是唯一收口硬判据（回归不破）
+        String prompt = AgentProfile.EXECUTOR.systemPrompt();
+        assertThat(prompt)
+                .contains("最小可用缺省")
+                .contains("清单内不做、不自行加回")
+                .contains("无此章")
+                .contains("三硬底线")
+                .contains("能打开不白屏")
+                .contains("刷新不丢")
+                .contains("核心路径可点")
+                .contains("演示数据一轮建成")
+                .contains("placeholder")
+                .contains("唯一的收口硬要件")
+                .doesNotContain("真实应用")
+                .doesNotContain("拿不准的片建议验");
+    }
+
+    @Test
+    void given_executor_prompt_when_verify_self_decision_then_neutral_wording() {
+        // ADR-0050 条 9 撤回「拿不准的片建议验」自决建议（避免与运营开关关停打架）：
+        // 验证不是收口要件、用不用由执行体自决——不自报建议、不劝验
+        assertThat(AgentProfile.EXECUTOR.systemPrompt())
+                .contains("验证不是收口要件")
+                .contains("用不用由你自决")
+                .doesNotContain("建议验")
+                .doesNotContain("别省这一步");
     }
 
     @Test

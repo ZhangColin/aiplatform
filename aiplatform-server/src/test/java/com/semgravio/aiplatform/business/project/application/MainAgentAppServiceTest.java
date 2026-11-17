@@ -53,14 +53,21 @@ import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.business.billing.application.BillingAppService;
+import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
+import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
+import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
+import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -89,6 +96,12 @@ class MainAgentAppServiceTest {
     private MainAgentAppService appService;
 
     @Autowired
+    private ConversationEntryRepository entries;
+
+    @Autowired
+    private ConversationHistoryAppService conversationHistory;
+
+    @Autowired
     private ProjectRepository projectRepository;
 
     @Autowired
@@ -106,6 +119,16 @@ class MainAgentAppServiceTest {
 
     @Autowired
     private PrdRevisionFacts prdRevisions;
+
+    /** 快道事实登记口（#542：模拟轮内 savePrd 带 fastLane=true 的工具调用事实）。 */
+    @Autowired
+    private FastLaneFacts fastLaneFacts;
+
+    @Autowired
+    private BillingAppService billingAppService;
+
+    @Autowired
+    private PoolTopupAppService poolTopupAppService;
 
     @Autowired
     private BuildPlanFacts buildPlanFacts;
@@ -145,6 +168,11 @@ class MainAgentAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // 计费闸用例行清理（bil_ 弱引用直落，随测试项目一并清）
+        jdbcTemplate.update("DELETE FROM bil_balance_holds");
+        jdbcTemplate.update("DELETE FROM bil_entries");
+        jdbcTemplate.update("DELETE FROM bil_project_billing");
+        jdbcTemplate.update("DELETE FROM bil_pools");
     }
 
     @BeforeEach
@@ -305,8 +333,10 @@ class MainAgentAppServiceTest {
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(
                 UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
-        // 后续轮不重注知识：systemPrompt 即配置原文
-        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        // 后续轮不重注知识：systemPrompt 即配置原文＋#538 试用轨协议段＋#543 风格目录尾注
+        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         // #371 对话轮活超时：命令携可配静默判死阈值（还在干活就不掐——慢工具轮
         // 不被 2 分钟总墙钟一次性掐死），替换原三 null 总墙钟口径
         assertThat(value.silenceTimeout()).isEqualTo(mainAgentProperties.getSilenceTimeout());
@@ -331,10 +361,13 @@ class MainAgentAppServiceTest {
 
         ArgumentCaptor<AgentCommand> overridden = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(1)).converse(overridden.capture(), any());
-        assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。");
+        // 库值优先全量覆盖本体协议；#538 访谈协议段＋#543 风格目录尾注仍随附（覆盖行管本体，管不到动态装配段）
+        assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。"
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(overridden.getValue().modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
-        // 开关库值编入规格串（ws 关、fu 缺省开）
-        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true");
+        // 开关库值编入规格串（ws 关、fu 缺省开；#545 gi 件恒随——main 槽不消费）
+        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true,gi=true");
 
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'main'");
         appService.runOpinionTurn(projectId, "再聊聊范围");
@@ -343,10 +376,146 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> fallback = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(6)).converse(fallback.capture(), any());
         assertThat(fallback.getAllValues().get(3).systemPrompt())
-                .isEqualTo(AgentProfile.MAIN.systemPrompt());
+                .isEqualTo(AgentProfile.MAIN.systemPrompt()
+                        + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(fallback.getAllValues().get(3).modelString())
                 .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
-        assertThat(fallback.getAllValues().get(3).toolSpec()).isEqualTo("ws=true,fu=true");
+        assertThat(fallback.getAllValues().get(3).toolSpec())
+                .isEqualTo("ws=true,fu=true,gi=true");
+    }
+
+    @Test
+    void given_trial_interview_when_opinion_turn_then_command_carries_trial_protocol_tail() {
+        // #538 协议分轨（ADR-0048）：试用态访谈轮的 system prompt 尾附「访谈协议·试用轨」
+        // 段（重要性排序纪律、不数数），付费轨段缺席——走既有每轮动态装配缝（知识尾注
+        // 同缝），零新建机制
+        Long projectId = persistedProject("9751");
+        givenSessionExecutorRunsInline();
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+
+        appService.runOpinionTurn(projectId, "做一个预约系统");
+
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).systemPrompt())
+                .contains("访谈协议·试用轨")
+                .doesNotContain("访谈协议·付费轨")
+                .doesNotContain("【收口指令】");
+    }
+
+    @Test
+    void given_paid_interview_when_opinion_turn_then_command_carries_paid_protocol_tail() {
+        // #538 付费翻转后回原协议（无上限、题量软目标）——协议段形态随付费状态翻转
+        Long projectId = persistedProject("9752");
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        givenSessionExecutorRunsInline();
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+
+        appService.runOpinionTurn(projectId, "做一个预约系统");
+
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).systemPrompt())
+                .contains("访谈协议·付费轨")
+                .contains("软目标")
+                .doesNotContain("【访谈协议·试用轨】") // 基础协议可引用段名；断言的是试用轨段未随附
+                .doesNotContain("【收口指令】");
+    }
+
+    @Test
+    void given_generated_project_when_opinion_turn_then_no_interview_protocol_tail() {
+        // 非访谈期（已生成＝迭代期）：额度与协议段均不附着——访谈纪律不混入迭代轮
+        Long projectId = persistedGeneratedProject("9753");
+        givenSessionExecutorRunsInline();
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+
+        appService.runOpinionTurn(projectId, "把按钮改大一点");
+
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).systemPrompt())
+                .doesNotContain("【访谈协议·")
+                .doesNotContain("【收口指令】");
+    }
+
+    @Test
+    void given_any_round_when_main_command_then_style_direction_catalog_tail_attached() {
+        // #543 目录注入（ADR-0052「目录经每轮 systemPrompt 动态装配注入、正本单源
+        // 平台常量」）：访谈轮与迭代轮都随附风格方向库目录块（8 套全名＋选取协议
+        // 句）——与两轨访谈协议段同缝共存不冲突；迭代期无访谈段但目录照附
+        // （「想换风格」意见走对话修订的目录可见性）
+        Long interviewProject = persistedProject("9760");
+        givenSessionExecutorRunsInline();
+        appService.runOpinionTurn(interviewProject, "做一个课程平台");
+
+        ArgumentCaptor<AgentCommand> interview = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(1)).converse(interview.capture(), any());
+        String interviewPrompt = interview.getAllValues().get(0).systemPrompt();
+        assertThat(interviewPrompt)
+                .contains("【风格方向库·目录】")
+                .contains("风格方向：")
+                .contains("【访谈协议·试用轨");
+        for (StyleDirections.Direction direction : StyleDirections.all()) {
+            assertThat(interviewPrompt).contains("- " + direction.name() + "：");
+        }
+
+        Long iterationProject = persistedGeneratedProject("9761");
+        appService.runOpinionTurn(iterationProject, "把按钮改大一点");
+        ArgumentCaptor<AgentCommand> iteration = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(4)).converse(iteration.capture(), any());
+        // 取末次主智能体命令（编码 run 命令同 mock 混捕——按会话前缀过滤；
+        // 前面为访谈轮的纠偏链）
+        String iterationPrompt = iteration.getAllValues().stream()
+                .filter(c -> c.sessionId().startsWith("main-"))
+                .reduce((first, second) -> second)
+                .orElseThrow().systemPrompt();
+        assertThat(iterationPrompt)
+                .contains("【风格方向库·目录】")
+                .doesNotContain("【访谈协议·")
+                .endsWith(MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+    }
+
+    @Test
+    void given_quota_full_when_answer_question_then_resume_carries_closure_instruction() {
+        // #538 收口指令注入（ADR-0048「第 5 问答完由编排层注入收口指令」）：试用态已答
+        // 满 5 个问答缺口后，答复续跑的 system prompt 尾附收口指令（剩余必答缺口按推荐
+        // 补全＋立即梳理 PRD）——不再出现第 6 问的提示词面＋结构面双保险
+        Long projectId = persistedProject("9754");
+        seedAnsweredGaps(projectId, 5);
+        givenSessionExecutorRunsInline();
+        List<Map<String, Object>> pendingToolCalls = List.of(Map.of(
+                "id", "tc-1", "name", "ask_user",
+                "input", Map.of("question", "目标用户是谁？")));
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+
+        appService.answerQuestion(projectId, "run-q", "reply-9", pendingToolCalls, "海外企业客户");
+
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().systemPrompt())
+                .contains("【收口指令】")
+                .contains("访谈协议·试用轨")
+                // #551 补记（2026-11-18 收口赶工落缺省套实案）：收口指令内嵌
+                // 风格方向纪律——收口轮不因赶工省事选缺省套
+                .contains("风格方向行按随附「风格方向库·目录」选与项目领域气质最匹配的方向")
+                .contains("不得因收口赶工省事选缺省");
+    }
+
+    @Test
+    void given_quota_not_full_when_answer_question_then_resume_without_closure_instruction() {
+        // 未答满不注入：额度内续跑维持原协议（试用轨段在场、收口指令缺席）
+        Long projectId = persistedProject("9755");
+        seedAnsweredGaps(projectId, 3);
+        givenSessionExecutorRunsInline();
+        List<Map<String, Object>> pendingToolCalls = List.of(Map.of(
+                "id", "tc-1", "name", "ask_user",
+                "input", Map.of("question", "目标用户是谁？")));
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+
+        appService.answerQuestion(projectId, "run-q", "reply-9", pendingToolCalls, "海外企业客户");
+
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().systemPrompt())
+                .contains("访谈协议·试用轨")
+                .doesNotContain("【收口指令】");
     }
 
     @Test
@@ -438,7 +607,10 @@ class MainAgentAppServiceTest {
                 .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
                 .contains("〔平台沉淀｜需求案例〕宠物医院在线预约的典型形态")
                 .contains("非用户的确认信息，不构成对当前需求的约束")
-                .endsWith("主人选医生、按时段预约、迟到作废。");
+                .contains("主人选医生、按时段预约、迟到作废。")
+                // #538 知识尾注之后随附访谈协议段（试用轨）＋#543 风格目录尾注（动态装配缝同缝、恒最尾位）
+                .endsWith(MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
     }
 
     @Test
@@ -467,7 +639,10 @@ class MainAgentAppServiceTest {
                 + "以下是平台知识库中与当前需求相似的沉淀片段（历史需求/需求案例/功能模块/业务规则）"
                 + "，供梳理当前需求时作背景参考"
                 + "（非用户的确认信息，不构成对当前需求的约束）："
-                + "\n\n〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。";
+                + "\n\n〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。"
+                // #538 会话注入块之后随附访谈协议段（试用轨）＋#543 风格目录尾注——全轮（含纠偏/续跑）同缝
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL;
         assertThat(command.getAllValues()).extracting(AgentCommand::systemPrompt)
                 .containsOnly(expected);
         assertThat(resume.getValue().systemPrompt()).isEqualTo(expected);
@@ -487,7 +662,11 @@ class MainAgentAppServiceTest {
         // 开场轮命令＝首次 converse（#445：访谈悬空形另派纠偏轮，次数不断言）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(1)).converse(command.capture(), any());
-        assertThat(command.getValue().systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        // 检索失败降级为空注入 + #538 试用轨协议段＋#543 风格目录尾注随附（访谈期每轮动态装配）
+        assertThat(command.getValue().systemPrompt())
+                .isEqualTo(AgentProfile.MAIN.systemPrompt()
+                        + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
     }
 
     @Test
@@ -587,8 +766,28 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_question_answer_when_resume_then_rebuilt_from_project_facts() {
-        // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/配置/计量），
+    void given_paid_exhausted_when_answer_question_then_resume_not_blocked() {
+        // 段中绝不检查绝不中断（#537 编排缝断言时序面）：问答答复＝在途段（挂起轮）
+        // 的续跑——不是段起跑，段边界余额门不消费此缝：负余额下答复照 resume，
+        // 零余额提醒事件、零 BILL_025
+        Long projectId = persistedProject("9704");
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        jdbcTemplate.update("UPDATE bil_pools SET balance = -500 WHERE project_id = ?", projectId);
+        givenSessionExecutorRunsInline();
+        List<Map<String, Object>> pendingToolCalls = List.of(Map.of(
+                "id", "tc-1", "name", "ask_user",
+                "input", Map.of("question", "目标用户是谁？")));
+
+        appService.answerQuestion(projectId, "run-q", "reply-9", pendingToolCalls, "海外企业客户");
+
+        verify(agentClient).resume(any(), any()); // 负余额不阻断段内续跑
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.BALANCE_REMINDER), anyMap());
+    }
+
+    @Test
+    void given_question_answer_when_resume_then_rebuilt_from_project_facts() {        // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/配置/计量），
         // 待确认工具来自挂起事件载荷——不信前端回传的恢复私货
         Long projectId = persistedProject("9703");
         givenSessionExecutorRunsInline();
@@ -606,7 +805,10 @@ class MainAgentAppServiceTest {
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.workspaceId()).isEqualTo("9703");
         assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
-        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        // #538 续跑同缝随附试用轨协议段（额度内无收口指令）＋#543 风格目录尾注
+        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
+                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue(); // 续跑同只读面（#86：不漂移成读写面）
         assertThat(value.replyId()).isEqualTo("reply-9");
@@ -812,7 +1014,9 @@ class MainAgentAppServiceTest {
         assertThat(mainCommands).hasSize(2);
         assertThat(mainCommands.get(0).systemPrompt()).doesNotContain("平台轻提醒");
         assertThat(mainCommands.get(1).systemPrompt())
-                .endsWith(MainAgentAppService.SEDIMENT_NUDGE_TAIL);
+                // #543 风格目录尾注恒最尾位（提醒段在前）
+                .endsWith(MainAgentAppService.SEDIMENT_NUDGE_TAIL
+                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         // 用户 prompt 原样不动（提醒只进 system prompt 尾——交接物与呈现面零扰动）
         assertThat(mainCommands.get(1).prompt()).isEqualTo("再把按钮做成圆角");
     }
@@ -1122,10 +1326,10 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_prd_produced_when_opinion_turn_closes_then_first_generation_dispatched() {
-        // 去门化（#462，ADR-0039——「生成加门 #332」退役）：PRD 已产出即自动派首个
-        // 构建 run——首次 savePrd 落盘回调已先行触发派发（此处 mock 边界无工具执行
-        // 面），收口观测再兜一轮：无「已确认版本」判据，起跑即自动记构建基准
+    void given_prd_produced_natural_close_when_turn_closes_then_fork_pending_no_dispatch() {
+        // 灵魂例（#542 访谈② AC①/AC③，ADR-0048/0049——两入口退役）：试用态自然收口
+        // （无快道事实）不派发——出岔路口三选卡（状态位持久可回：关页回来卡仍在），
+        // 编码 run 零起跑；「立即生成」才点火（见 BuildGateAppServiceTest/POST /generate）
         Long projectId = persistedPrdProject("9727");
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
@@ -1141,11 +1345,48 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
-        // 收口后派生成：编码 run 在场（零门——未生成＋PRD 已产出即派）
+        // 自然收口不派：只有主智能体一轮 converse，无任何编码 run
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues())
+                .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+        // 岔路口状态位落库（持久可回——重读在场；Integer code 落库）
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT fork_state, generation_requested_at FROM prj_projects WHERE id = ?",
+                projectId).get("fork_state")).isEqualTo(ForkState.PENDING.getCode());
+    }
+
+    @Test
+    void given_fast_lane_save_when_turn_closes_then_first_generation_dispatched_no_card() {
+        // 灵魂例（#542 AC④，ADR-0048 快道）：savePrd 携 fastLane=true（收敛令/零必答
+        // 短路/付费「直接开始做」视同确认）——收口观测直派首个构建 run，不出卡不确认
+        Long projectId = persistedPrdProject("9732");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // #543 风格物化写面（首个构建派发四件落位——本类不断言其内容，缺省成功）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                buildPlanFacts.record(command.workspaceId(),
+                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                fastLaneFacts.record(command.workspaceId());
+            }
+            return new AgentReply(command.runId(), "已按收敛令直接产出 PRD 与切片计划");
+        });
+
+        appService.runOpinionTurn(projectId, "别问了直接做");
+
+        // 快道直派：编码 run 在场；不出卡（岔路口位不置）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(2)).converse(command.capture(), any());
         assertThat(command.getAllValues()).anyMatch(
                 c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
+                .get("fork_state")).isNull();
     }
 
     @Test
@@ -1159,18 +1400,22 @@ class MainAgentAppServiceTest {
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // #543 风格物化写面（首个构建派发四件落位——本类不断言其内容，缺省成功）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
                 buildPlanFacts.record(command.workspaceId(),
                         new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
             }
             return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
         });
 
-        appService.runOpinionTurn(projectId, "做一个官网");
+        appService.runOpinionTurn(projectId, "别问了直接做");
 
-        // 收口后派生成：首条编码 run 落在阶段 0 会话、携执行体配置与起服 prompt
+        // 快道收口直派生成：首条编码 run 落在阶段 0 会话、携执行体配置与起服 prompt
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(2)).converse(command.capture(), any());
         AgentCommand generation = command.getAllValues().stream()
@@ -1194,28 +1439,32 @@ class MainAgentAppServiceTest {
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // #543 风格物化写面（首个构建派发四件落位——本用例不断言其内容，缺省成功）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
                 buildPlanFacts.record(command.workspaceId(),
                         new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
                 return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
             }
             return new AgentReply(command.runId(), "系统已生成");
         });
 
-        appService.runOpinionTurn(projectId, "做一个电商系统");
+        appService.runOpinionTurn(projectId, "直接做");
 
         assertThat(generationAppService.planOf(projectId))
                 .isEqualTo(new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
     }
 
     @Test
-    void given_main_no_build_plan_when_turn_closes_then_plan_redispatched_not_faked() {
-        // 无计划兜底（#220 删 minimalFallback 后的新口径；前置事实＝PRD 已产出）：
-        // 主智能体产出 PRD 但未产出切片计划——不兜假计划，
-        // 重派主智能体按 PRD 补产（补产轮收口再判）；补产轮仍无计划即止（同 PRD 版本
-        // 只补一次），生成不倒退为「守卫不派」也不冒进
+    void given_main_no_build_plan_when_turn_closes_then_no_auto_redispatch_fork_stays() {
+        // 无计划路径（#220 删 minimalFallback；#542 两入口退役改判）：主智能体产出
+        // PRD 但未产出切片计划——自然收口不再自动补产（补产链随轮收口兜一轮退役）：
+        // 岔路口卡照旧在场（PRD 可看），「立即生成」触发时才走补产（startGeneration
+        // 计划缺失重派主智能体补产，见 GenerationAppServiceTest）——不兜假计划
         Long projectId = persistedPrdProject("9730");
         seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
@@ -1226,14 +1475,15 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
-        // 意见轮 + 补产轮恰两轮 main 会话（补产无果不递归），无任何编码 run
+        // 只有意见轮一轮 main 会话（无补产、无编码 run），岔路口在场待用户点火
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT);
+        verify(agentClient, times(1)).converse(command.capture(), any());
         assertThat(command.getAllValues())
                 .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
         assertThat(generationAppService.planOf(projectId)).isNull(); // 不出现假计划
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
+                .get("fork_state")).isEqualTo(ForkState.PENDING.getCode());
     }
 
     @Test
@@ -1247,6 +1497,21 @@ class MainAgentAppServiceTest {
         assertThat(AgentProfile.MAIN.systemPrompt())
                 .contains("coreJourneys")
                 .contains("sliceSizes");
+    }
+
+    @Test
+    void given_build_plan_request_prompt_when_inspect_then_deferral_segment_required() {
+        // ADR-0050 计划补产兜底同口径：补产指令面与主智能体工作协议（第 5 条）对
+        // deferredItems 推迟清单一并要求（业务向默认集口径、与 PRD「推迟清单」章
+        // 同内容、无显式推迟项可省略）
+        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT)
+                .contains("deferredItems")
+                .contains("支付停在不真扣款")
+                .contains("没有显式推迟项可省略");
+        assertThat(AgentProfile.MAIN.systemPrompt())
+                .contains("deferredItems")
+                .contains("推迟清单")
+                .contains("典型 3-5 片");
     }
 
     @Test
@@ -1364,12 +1629,16 @@ class MainAgentAppServiceTest {
         seedPrdVersionRow(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
         givenSessionExecutorRunsInline();
+        // #543 风格物化写面（首个构建派发四件落位——本用例不断言其内容，缺省成功）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
                 prdRevisions.record(command.workspaceId(), "交付范围扩大");
                 buildPlanFacts.record(command.workspaceId(),
                         new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
                 return new AgentReply(command.runId(), "已按意见修订 PRD");
             }
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
@@ -1377,7 +1646,7 @@ class MainAgentAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        appService.runOpinionTurn(projectId, "交付范围加一个小程序端");
+        appService.runOpinionTurn(projectId, "交付范围加一个小程序端，直接做");
 
         // 收口后派首个构建 run：main 轮＋编码 run（至少两轮）；无停驻写读
         verify(agentClient, atLeast(2)).converse(any(), any());
@@ -1716,6 +1985,170 @@ class MainAgentAppServiceTest {
     }
 
     @Test
+    void given_quota_full_when_turn_closes_with_drift_question_then_platform_answers_it_and_resumes_to_closure() {
+        // #538 合法形收窄（ADR-0032 两形契约的条件收窄）：第 5 答后挂起问答不再放行——
+        // 模型漂移再提问（第 6 问）时平台以收口指令代答该问题、续跑同一 run（纠偏只
+        // 导向收口不导向新问）；代答续跑产出 PRD 即合法收口形二（首个构建照派、零悬空）
+        Long projectId = persistedProject("9756");
+        seedAnsweredGaps(projectId, 5);
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) { // 意见轮：漂移再提问（第 6 问）
+                Consumer<AgentEvent> sink = invocation.getArgument(1);
+                sink.accept(new AgentEvent(AgentEventTypes.QUESTION_RAISED,
+                        new java.util.LinkedHashMap<>(Map.of(
+                                AgentEventTypes.RUN_FIELD, command.runId(),
+                                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-drift",
+                                AgentEventTypes.WAIT_SUMMARY_FIELD, "还要问一个？",
+                                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                                        "toolCalls", List.of(Map.of(
+                                                "id", "tc-d", "name", "ask_user")),
+                                        "questions", List.of(Map.of(
+                                                "question", "还要问一个？")))))));
+                return new AgentReply(command.runId(), "还有一个问题", new AgentSuspension(
+                        "reply-drift", List.of(Map.of("id", "tc-d", "name", "ask_user"))));
+            }
+            return new AgentReply(command.runId(), "构建完成");
+        });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
+            AgentResume resume = invocation.getArgument(0);
+            // 代答续跑：模型按收口指令产出 PRD（事实面置位）＋切片计划交接
+            Project project = projectRepository.findById(projectId).orElseThrow();
+            project.markPrdProduced();
+            projectRepository.save(project);
+            buildPlanFacts.record(resume.workspaceId(),
+                    new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+            return new AgentReply(resume.runId(), "好的，按推荐补全并保存 PRD");
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 提交守卫：放行
+                .thenReturn(true)   // 收口观测：漂移第 6 问挂起在场（收窄——不视作合法形一）
+                .thenReturn(false); // 代答续跑收口观测：无挂起、PRD 已产出
+
+        appService.runOpinionTurn(projectId, "再补充一个需求");
+
+        // 挂起问答不再放行：收口作答（resume 文本＝收口指令口径）并续跑同 run
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().resumeText()).contains("额度已用尽");
+        assertThat(resume.getValue().systemPrompt()).contains("【收口指令】");
+        // 漂移卡由收口作答置位、不另计缺口（同缺口重派不另计——计数仍 5）；
+        // PRD 产出即收口形二：零悬空、零补救
+        assertThat(conversationHistory.answeredGapCount(projectId)).isEqualTo(5);
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+    }
+
+    @Test
+    void given_quota_full_when_turn_dangles_then_corrective_round_only_directs_to_closure() {
+        // #538 纠偏收口：第 5 问后悬空收口（无问无 PRD）的纠偏轮只导向收口——收口
+        // 微指令（不再提问、缺口按推荐补全、立即 savePrd），不问任何问题；纠偏轮产出
+        // PRD 即收口形二（照派首个构建、零悬空）
+        Long projectId = persistedProject("9757");
+        seedAnsweredGaps(projectId, 5);
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")
+                    && command.prompt().contains("额度已用尽")) {
+                // 纠偏收口轮：模型按收口微指令产出 PRD（事实面置位）
+                Project project = projectRepository.findById(projectId).orElseThrow();
+                project.markPrdProduced();
+                projectRepository.save(project);
+                buildPlanFacts.record(command.workspaceId(),
+                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                return new AgentReply(command.runId(), "已按推荐补全并保存 PRD");
+            }
+            return new AgentReply(command.runId(), "我还没整理好");
+        });
+
+        appService.runOpinionTurn(projectId, "继续");
+
+        // 纠偏轮命令＝收口微指令（只导向收口：不再 ask_user、立即 savePrd）；其后
+        // PRD 产出即收口形二——首个构建 run 照派（coder 会话 2 次，本断言不数）
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(2)).converse(command.capture(), any());
+        List<AgentCommand> mainRounds = command.getAllValues().stream()
+                .filter(c -> c.sessionId().startsWith("main-"))
+                .toList();
+        assertThat(mainRounds).hasSize(2);
+        AgentCommand corrective = mainRounds.get(1);
+        assertThat(corrective.prompt())
+                .contains("额度已用尽")
+                .contains("savePrd")
+                .doesNotContain("ask_user 重新提出");
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+    }
+
+    @Test
+    void given_quota_corrective_exhausts_when_drift_questions_persist_then_remedy_and_marker() {
+        // #538 纠偏收口封顶两轮（同 ADR-0036 防烧 token 姿态）：代答续跑再挂起→再代答→
+        // 再挂起＝双失格——置悬空标记＋额度文案补救（恒带「继续」指路；用户作答仍可推进，
+        // 续跑随附收口指令）
+        Long projectId = persistedProject("9758");
+        seedAnsweredGaps(projectId, 5);
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return new AgentReply(command.runId(), "还有一个问题", new AgentSuspension(
+                    "reply-drift-1", List.of(Map.of("id", "tc-d1", "name", "ask_user"))));
+        });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation ->
+                new AgentReply(((AgentResume) invocation.getArgument(0)).runId(),
+                        "我还是要问", new AgentSuspension("reply-drift-2",
+                                List.of(Map.of("id", "tc-d2", "name", "ask_user")))));
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 提交守卫：放行
+                .thenReturn(true)   // 意见轮收口观测：漂移挂起在场（收窄）
+                .thenReturn(true)   // 代答续跑①收口观测：再挂起（收窄）
+                .thenReturn(true);  // 代答续跑②收口观测：再挂起（收窄）
+
+        appService.runOpinionTurn(projectId, "再补充一个需求");
+
+        // 两轮收口作答后双失格：悬空标记＋额度文案补救（恒带「继续」）
+        verify(agentClient, times(2)).resume(any(), any());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
+                        .contains("额度")
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
+                                .contains("继续")));
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_paid_interview_when_turn_closes_with_question_then_suspension_admitted_as_usual() {
+        // 付费翻转后五问额度解除：挂起问答照常＝合法收口形一（收窄只作用于试用态）——
+        // 零代答、零纠偏收口
+        Long projectId = persistedProject("9759");
+        poolTopupAppService.topup(null, projectId, 1, null, null);
+        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
+                    "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false) // 提交守卫：放行
+                .thenReturn(true); // 收口观测：挂起问答在场（合法形——收窄不生效）
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(agentClient, never()).resume(any(), any());
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+    }
+
+    @Test
     void given_interview_turn_closes_with_prd_when_observe_then_no_remedy_and_no_dangling() {
         // 合法收口形二（硬契约）：访谈期意见轮以 PRD 产出收口（含修订）——零补救、
         // 零悬空标记
@@ -2028,6 +2461,25 @@ class MainAgentAppServiceTest {
     private Long persistedProject(String workspaceId) {
         Project project = projectRepository.save(Project.create("访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
+    }
+
+    /** 已答问答缺口种子（#538 五问额度用例）：直接落 n 张已答问答卡（缺口标识＝问题
+     *  文本；同 run 补作答行＝用户已答语义——收口作答收口的卡不计入计数）。 */
+    private void seedAnsweredGaps(Long projectId, int count) {
+        for (int i = 1; i <= count; i++) {
+            entries.save(ConversationEntry.answer(projectId, "seed-run-" + i, "种子答复"));
+            ConversationEntry card = ConversationEntry.question(projectId, "seed-run-" + i,
+                    new java.util.LinkedHashMap<>(Map.of(
+                            AgentEventTypes.RUN_FIELD, "seed-run-" + i,
+                            AgentEventTypes.WAIT_ENGINE_REF_FIELD, "seed-reply-" + i,
+                            AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                                    "toolCalls", List.of(Map.of("id", "tc-" + i, "name", "ask_user")),
+                                    "questions", List.of(Map.of(
+                                            "header", "提问", "question", "种子问题" + i,
+                                            "multiple", false, "custom", true, "options", List.of()))))));
+            card.markAnswered();
+            entries.save(card);
+        }
     }
 
     /** PRD 已产出、未生成的项目（去门化 #462：收口观测派首个构建 run 的判据＝

@@ -38,6 +38,7 @@ import type {
   KnownDefectsClosing,
   ProofOfOutputClosing,
   RobustKitLintClosing,
+  RobustLintTier,
   WorkClosing,
 } from "@/lib/store/chat";
 import { rawFileUrl } from "@/lib/projects/files";
@@ -216,20 +217,24 @@ const ROBUST_LINT_RULE_LABELS: Record<string, string> = {
 };
 
 /**
- * 基座件使用区（#425 基座 lint 两档的感知面）：新基座工作区编码 run 的基座 lint
- * 事实——基座件合规（曾自动修一轮则注明，纠偏过程如实）/预置档余项清单（会话
- * 存储自写——如实标注、不拦收口，文件:行＋规则中文名，hover 带件用法指引）/
- * 扫描未执行（如实，不假装达标）。强制档违规修不完＝收口被拒，正常流转不出
- * 现在本卡（分档渲染防御性兼容）。
+ * 基座件使用区（#425 基座 lint 两档的感知面；#541 让路缺省两档同为标注）：新基座
+ * 工作区编码 run 的基座 lint 事实——基座件合规（曾自动修一轮则注明，纠偏过程
+ * 如实）/违规清单（强制档裸客户端直用与预置档会话自写都如实随卡标注、不拦
+ * 收口，两档并存合并计数与清单；文件:行＋规则中文名，hover 带件用法指引）/
+ * 扫描未执行（如实，不假装达标）。阻断形态（运营开关回滚）下强制档修不完
+ * ＝收口被拒，不会以该形态出现在本卡。
  */
 function RobustLintArea({ lint }: { lint: RobustKitLintClosing }) {
   const [open, setOpen] = useState(false);
-  const tier = lint.preset ?? lint.mandatory;
-  const violations = tier?.violations ?? [];
+  // 两档合并呈现（#541 让路后两档可同场）：计数取各档 total 之和（清单后端截
+  // 20，total 如实），清单拼接保持后端分档次序（强制档在前）
+  const tiers = [lint.mandatory, lint.preset].filter(
+    (tier): tier is RobustLintTier => tier != null,
+  );
+  const violations = tiers.flatMap((tier) => tier.violations ?? []);
+  const total = tiers.reduce((sum, tier) => sum + (tier.total ?? 0), 0);
   const shown = open ? violations : violations.slice(0, VISIBLE_LINT);
   const violating = lint.status === "violations";
-  // 分档标签随在场分节（预置＝正常流转；强制＝防御分支，标签如实不冒名）
-  const tierLabel = lint.preset ? "预置件违规" : "强制档违规";
   return (
     <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
       <div className="flex items-center gap-2 text-[13px]">
@@ -243,7 +248,7 @@ function RobustLintArea({ lint }: { lint: RobustKitLintClosing }) {
           ) : (
             <>
               <span className="font-medium text-amber-600">
-                余 {tier?.total ?? violations.length} 处{tierLabel}
+                余 {total || violations.length} 处基座件违规
               </span>
               {lint.retried ? "（已自动修正一轮，仍余）" : null}
             </>

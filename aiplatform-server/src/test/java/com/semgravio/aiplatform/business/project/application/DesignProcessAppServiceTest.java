@@ -152,6 +152,10 @@ class DesignProcessAppServiceTest {
     void ensureChannelKeyForRealResolution() {
         // 真解析链护卫（ADR-0031）：测试环境无 key 注入——幂等补测试 key
         ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        // #543 风格物化写面缺省桩（定稿自动起首个构建＝平台确定性写基座四件）：
+        // 通用成功；用例专属 exec 分岔桩在测试体内后注册覆盖（Mockito 后桩优先）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
     }
 
     @AfterEach

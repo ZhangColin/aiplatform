@@ -10,6 +10,7 @@ import { useM01Store } from "@/lib/store/m01";
 
 import { HomeHeader } from "./home-header";
 import { HomeHero } from "./home-hero";
+import { ProjectListView } from "./project-list-view";
 
 /**
  * A1 回归（匿名首访）：无凭证 cookie 的首页「只逛零足迹」——最近项目/会话身份
@@ -117,6 +118,31 @@ describe("首页匿名首访（A1）", () => {
   });
 });
 
+describe("首页死凭证 cookie（A1c：cookie 在但服务端不认——库重建/保留期过期）", () => {
+  beforeEach(() => {
+    // SSR 只验 cookie 存在性 → credentialPresent=true；全量列表与探针皆 401
+    // （后端 resolve 不到行：库重建、访客保留期过期、cookie 损坏）。
+    stubFetch({ probeStatus: 401, listStatus: 401 });
+  });
+
+  it("背景列表 401 是「未登录」答案：不弹「登录保存项目」、头像呈现「登录」入口", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderHome(true, queryClient);
+
+    // 等全量列表查询落定（401 → ApiError → 全局事件链跑完）
+    await waitFor(() =>
+      expect(queryClient.getQueryState(queryKeys.projects.list())?.fetchStatus).toBe("idle"),
+    );
+    await act(async () => {});
+
+    expect(queryClient.getQueryState(queryKeys.projects.list())?.status).toBe("error");
+    // 回归锚：背景加载 401 不劫持首页——没有用户动作被拦，不该弹登录窗
+    expect(useM01Store.getState().open).toBe(false);
+    expect(screen.queryByText("登录保存项目")).toBeNull();
+    expect(screen.getAllByText("登录").length).toBeGreaterThan(0);
+  });
+});
+
 describe("首页访客持凭证（A1b：/me 401 不弹 M01）", () => {
   beforeEach(() => {
     // 访客在场：探针 200（账户或访客任一即活）、列表 200、/me 恒 401
@@ -139,5 +165,30 @@ describe("首页访客持凭证（A1b：/me 401 不弹 M01）", () => {
     expect(useM01Store.getState().open).toBe(false);
     expect(screen.queryByText("登录保存项目")).toBeNull();
     expect(screen.getAllByText("登录").length).toBeGreaterThan(0);
+  });
+});
+
+describe("列表页主查询保持 loud（A1c 对照面：静默只属首页背景查询）", () => {
+  beforeEach(() => {
+    // 死凭证访客主动进「我的项目」：全量列表 401 → M01 承接登录引导
+    stubFetch({ probeStatus: 401, listStatus: 401 });
+  });
+
+  it("列表 401 照发全局出口事件 → 弹「登录保存项目」", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectListView guestOnly={false} />
+        <M01Dialog />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(queryKeys.projects.list())?.fetchStatus).toBe("idle"),
+    );
+    await act(async () => {});
+
+    expect(useM01Store.getState().open).toBe(true);
+    expect(useM01Store.getState().trigger).toBe("save-project");
   });
 });

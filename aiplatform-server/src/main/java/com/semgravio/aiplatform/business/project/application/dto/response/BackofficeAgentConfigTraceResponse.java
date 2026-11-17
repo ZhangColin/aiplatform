@@ -109,6 +109,10 @@ public record BackofficeAgentConfigTraceResponse(
         String oldDecisionHintDisabled,
         @Schema(description = "变更前 verify 自决开关（#442；恒有值——缺省态恒 true＝自决开）")
         boolean oldVerifySelfDecisionEnabled,
+        @Schema(description = "变更前基座 lint 强制档阻断开关（#541；恒有值——缺省态恒 false＝让路）")
+        boolean oldRobustLintBlockingEnabled,
+        @Schema(description = "变更前构建轨出图工具开关（#545；恒有值——缺省态恒 true＝下放）")
+        boolean oldGenerateImageEnabled,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型档位（null＝本次清空回落）")
@@ -156,6 +160,10 @@ public record BackofficeAgentConfigTraceResponse(
         String newDecisionHintDisabled,
         @Schema(description = "变更后 verify 自决开关（#442；恒有值）")
         boolean newVerifySelfDecisionEnabled,
+        @Schema(description = "变更后基座 lint 强制档阻断开关（#541；恒有值）")
+        boolean newRobustLintBlockingEnabled,
+        @Schema(description = "变更后构建轨出图工具开关（#545；恒有值——经工具面窄幅写口变更）")
+        boolean newGenerateImageEnabled,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -178,7 +186,8 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldSingleSessionGenerationEnabled(), trace.oldParallelSliceMachineEnabled(),
                 trace.oldDecisionHintsEnabled(), trace.oldDecisionHintErrorStreak(),
                 trace.oldDecisionHintStackCap(), trace.oldDecisionHintDisabled(),
-                trace.oldVerifySelfDecisionEnabled(),
+                trace.oldVerifySelfDecisionEnabled(), trace.oldRobustLintBlockingEnabled(),
+                trace.oldGenerateImageEnabled(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
@@ -191,7 +200,8 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.newSingleSessionGenerationEnabled(), trace.newParallelSliceMachineEnabled(),
                 trace.newDecisionHintsEnabled(), trace.newDecisionHintErrorStreak(),
                 trace.newDecisionHintStackCap(), trace.newDecisionHintDisabled(),
-                trace.newVerifySelfDecisionEnabled(),
+                trace.newVerifySelfDecisionEnabled(), trace.newRobustLintBlockingEnabled(),
+                trace.newGenerateImageEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

@@ -17,7 +17,9 @@ import com.semgravio.aiplatform.base.metering.domain.error.MeteringMessage;
  * {@code dims} 业务维度透传（终态口径 projectId + agentKind(ba/coder) + sessionId，
  * 底座不解释，可空）；{@code tokens} 五档互斥分解（见 {@link TokenUsage}）；
  * {@code images} 按张用量（#288 图片生成与模型调用并列的计量事件——按张事件
- * token 五档为零、token 事件张数为零，两量并列不混算）。run 级一条：
+ * token 五档为零、token 事件张数为零，两量并列不混算）；{@code units} 按件用量
+ * （#531 固定单价项族——联网搜索按次等，按件事件 token 五档与张数均为零，
+ * 计量仍只记用量与件数、零商业概念）。run 级一条：
  * step-finish 增量求和是 adapter 内部实现，不进协议。</p>
  */
 public record UsageEvent(
@@ -30,7 +32,8 @@ public record UsageEvent(
         String model,
         Map<String, String> dims,
         TokenUsage tokens,
-        long images) {
+        long images,
+        long units) {
 
     /**
      * 维度键：智能体种类（dims 协议词表之一——写侧终态口径成分，读侧分智能体
@@ -42,12 +45,23 @@ public record UsageEvent(
         if (images < 0) {
             throw new DomainException(MeteringMessage.USAGE_IMAGES_NEGATIVE);
         }
+        if (units < 0) {
+            throw new DomainException(MeteringMessage.USAGE_UNITS_NEGATIVE);
+        }
     }
 
-    /** token 事件便捷构造（按张用量 = 0；既有模型调用计量口径不变）。 */
+    /** token 事件便捷构造（按张/按件用量 = 0；既有模型调用计量口径不变）。 */
     public UsageEvent(
             String eventId, Instant ts, String subject, String runId, String sessionId,
             String provider, String model, Map<String, String> dims, TokenUsage tokens) {
-        this(eventId, ts, subject, runId, sessionId, provider, model, dims, tokens, 0);
+        this(eventId, ts, subject, runId, sessionId, provider, model, dims, tokens, 0, 0);
+    }
+
+    /** 按张事件便捷构造（token 五档为零、按件用量 = 0；#288 口径不变）。 */
+    public UsageEvent(
+            String eventId, Instant ts, String subject, String runId, String sessionId,
+            String provider, String model, Map<String, String> dims, TokenUsage tokens,
+            long images) {
+        this(eventId, ts, subject, runId, sessionId, provider, model, dims, tokens, images, 0);
     }
 }

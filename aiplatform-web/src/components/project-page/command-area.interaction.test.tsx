@@ -36,6 +36,22 @@ vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
 }));
 
+// 拦截卡读面（#533）：无 QueryClient 可挂——读面行为归 hooks 测试，此处只断请求面
+vi.mock("@/hooks/use-intercept", () => ({
+  usePendingIntercept: () => ({ data: null }),
+}));
+
+// 读面无 QueryClient 可挂——呈现面归 chip 组件测试（#537 余额提醒 / #538 五问额度）
+vi.mock("@/hooks/use-balance-reminder", () => ({
+  usePendingBalanceReminder: () => ({ data: null }),
+}));
+vi.mock("@/hooks/use-interview-quota", () => ({
+  useInterviewQuota: () => ({ data: null }),
+}));
+vi.mock("@/hooks/use-build-gate", () => ({
+  useBuildGate: () => ({ data: null }),
+}));
+
 vi.mock("@/hooks/use-upload-material", () => ({
   useUploadMaterial: () => uploadMaterial,
 }));

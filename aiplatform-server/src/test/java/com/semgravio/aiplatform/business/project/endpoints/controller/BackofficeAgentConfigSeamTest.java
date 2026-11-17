@@ -991,6 +991,85 @@ class BackofficeAgentConfigSeamTest {
                 .policy().disabledKinds()).isEmpty();
     }
 
+    // ---------- 基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半让路的回滚保险；缺省 false＝让路；仅 executor 行消费） ----------
+
+    @Test
+    void given_no_robust_lint_blocking_override_when_get_then_default_yielding() throws Exception {
+        // #541 缺省态（无覆盖行）：让路形态＝强制档违规收口照扫、只随收尾卡标注
+        // （不喂修轮、不触发失败链、不间接升档——11-12 复演 7 升档全 lint 族的
+        // 让路落地态）；装配读面同步（effectiveOf＝尝试环收口判定的取值单点）
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.robustLintBlockingEnabled").value(false));
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).robustLintBlockingEnabled())
+                .isFalse();
+    }
+
+    @Test
+    void given_robust_lint_blocking_toggled_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 回滚保险翻转：true＝恢复 #425 原阻断形态（强制档修轮喂回＋修不完结构性
+        // 拒绝＋耗尽段级回滚重跑）——未来再收紧不发版；留痕前后快照含开关
+        // （old=false 缺省态 → new=true）；幂等重写不落痕；清空（PUT {}）回落缺省
+        // false＝让路
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"robustLintBlockingEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.robustLintBlockingEnabled").value(true));
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).robustLintBlockingEnabled())
+                .isTrue();
+
+        // 幂等重写（PUT 全量语义：同值携带——值面无动不落痕，写者不漂移）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"robustLintBlockingEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldRobustLintBlockingEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newRobustLintBlockingEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 切回让路＝旧值写回（一次新变更、留新痕——不做版本树）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"robustLintBlockingEnabled\": false}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.robustLintBlockingEnabled").value(false));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].oldRobustLintBlockingEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].newRobustLintBlockingEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
+
+        // 清空回落：开关缺省 false＝让路形态（null 归一缺省）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.robustLintBlockingEnabled").value(false));
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).robustLintBlockingEnabled())
+                .isFalse();
+    }
+
+    // ---------- 构建轨出图开关（#545，ADR-0052；经既有工具面窄幅写口，全量 PUT 不重置） ----------
+
+    @Test
+    void given_build_image_tool_off_when_full_put_config_then_switch_preserved() throws Exception {
+        // 开关写面＝PUT /agent-tools/generate_image（复用既有工具面开关，无新命令字段）：
+        // 窄幅写口关掉后，配置全量 PUT（PUT 全量语义归一其余值面）携现行值不重置本列；
+        // 值面无动＝幂等零落痕
+        jdbcTemplate.update("INSERT INTO prj_agent_configs (agent_key, generate_image_enabled) "
+                + "VALUES ('executor', FALSE)");
+
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT generate_image_enabled FROM prj_agent_configs WHERE agent_key = 'executor'",
+                Boolean.class)).isFalse();
+        assertThat(traceRowCount()).isZero();
+    }
+
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
 
     @Test

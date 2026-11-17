@@ -19,14 +19,18 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem;
+import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
+import com.semgravio.aiplatform.business.project.infrastructure.InterviewToolGate;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
  * {@link SavePrdTool}：覆盖写落盘（业务正本路径）+ 落盘成功业务登记 + summary
  * 必传校验（#52：漏传报错逼补——修订事实从工具调用面观测，不自报）+ 修订事实登记
- * （{@link PrdRevisionFacts}，终值胜出）；失败回错误结果（模型可见可重试）；权限
- * 自检恒放行（PRD 无最终版一说，确认动作在下单快照）。
+ * （{@link PrdRevisionFacts}，终值胜出）+ 快道事实登记（#542：fastLane=true 即
+ * {@link FastLaneFacts}——收口观测直派、不出卡不确认；缺席＝自然收口出岔路口/
+ * 确认门）；失败回错误结果（模型可见可重试）；权限自检恒放行（PRD 无最终版一说，
+ * 确认动作在下单快照）。
  */
 class SavePrdToolTest {
 
@@ -51,7 +55,7 @@ class SavePrdToolTest {
         RuntimeException failure;
 
         RecordingAdapter() {
-            super(null, null, null, null);
+            super(null, null, null);
         }
 
         @Override
@@ -68,10 +72,30 @@ class SavePrdToolTest {
         }
     }
 
+    /** 闸替身：记录 fastLane 透传，可预设拒因（InterviewToolGate 为具体类，子类覆写）。 */
+    private static final class RecordingGate extends InterviewToolGate {
+        final List<Boolean> convergenceArgs = new ArrayList<>();
+        /** 非 null＝五问承诺闸拒绝（透传拒因）；缺省 null 放行。 */
+        String earlyBlock;
+
+        RecordingGate() {
+            super(null, null, null);
+        }
+
+        @Override
+        public String earlyClosureBlockReason(String workspaceId, boolean convergenceCommanded) {
+            convergenceArgs.add(convergenceCommanded);
+            return earlyBlock;
+        }
+    }
+
     private final RecordingExec exec = new RecordingExec();
     private final RecordingAdapter port = new RecordingAdapter();
+    private final RecordingGate gate = new RecordingGate();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
-    private final SavePrdTool tool = new SavePrdTool("docs/PRD.md", "42", port, prdRevisions, exec);
+    private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
+    private final SavePrdTool tool = new SavePrdTool("docs/PRD.md", "42", port, gate,
+            prdRevisions, fastLaneFacts, exec);
 
     @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
@@ -141,6 +165,33 @@ class SavePrdToolTest {
         assertThat(exec.commands).isEmpty();
         assertThat(port.callbacks).isEmpty();
         assertThat(prdRevisions.consume("42")).as("漏传不落修订事实").isNull();
+    }
+
+    @Test
+    void given_trial_quota_open_natural_close_when_called_then_blocked_without_write_or_facts() {
+        // 五问承诺闸（2026-11-17 用户裁决）：试用访谈未答满五问且无收敛令——拒因
+        // 模型可见，不落盘、不置位、不落任何事实（拒因文本由额度服务单点产出）
+        gate.earlyBlock = "平台拒绝本次 savePrd：五问额度尚未用满（已答 2/5 问）……继续 ask_user 提问";
+
+        ToolResultBlock result = call("# PRD", "判定明确，产出 PRD");
+
+        assertThat(result.getState()).isEqualTo(ToolResultState.ERROR);
+        assertThat(resultText(result)).contains("平台拒绝").contains("2/5").contains("ask_user");
+        assertThat(exec.commands).isEmpty();
+        assertThat(port.callbacks).isEmpty();
+        assertThat(prdRevisions.consume("42")).isNull();
+        assertThat(fastLaneFacts.consume("42")).isFalse();
+    }
+
+    @Test
+    void given_fast_lane_flag_when_called_then_convergence_attested_to_gate_and_write_proceeds() {
+        // 收敛令是未问满时唯一合法提前收口形：fastLane=true 原样透传准入缝，闸放行后照写
+        call("# PRD", "收敛令收口：用户明确说直接开始做", true);
+        call("# PRD", "问满五问自然收口", null);
+
+        assertThat(gate.convergenceArgs).containsExactly(Boolean.TRUE, Boolean.FALSE);
+        assertThat(exec.commands).hasSize(2);
+        assertThat(port.callbacks).hasSize(2);
     }
 
     @Test
@@ -217,12 +268,51 @@ class SavePrdToolTest {
         assertThat(prdRevisions.consumeFailure("42")).isFalse();
     }
 
+    @Test
+    void given_fast_lane_save_when_called_then_fact_recorded() {
+        // #542 快道事实：fastLane=true（用户收敛令／付费态「直接开始做」）——收口观测
+        // 直派首个构建的判定源；成功即登记（取走即清）
+        call("# PRD", "收敛令收口：按推荐补全产出", true);
+
+        assertThat(fastLaneFacts.consume("42")).isTrue();
+        assertThat(fastLaneFacts.consume("42")).isFalse(); // 取走即清
+    }
+
+    @Test
+    void given_natural_close_save_when_called_then_no_fast_lane_fact() {
+        // 自然收口（判定明确/问满收口——fastLane 缺省不传）：不登记——试用态出岔路口
+        // 卡、付费态确认门在场，点火归用户
+        call("# PRD", "判定明确，产出 PRD");
+
+        assertThat(fastLaneFacts.consume("42")).isFalse();
+    }
+
+    @Test
+    void given_fast_lane_save_when_failed_then_no_fact() {
+        // 失败不登记快道事实（失败重试成功后的终值为准，同修订事实口径）
+        exec.next = new DockerExecFilesystem.ExecOutput(125, new byte[0], "docker: No such container");
+
+        call("# PRD", "收敛令收口", true);
+
+        assertThat(fastLaneFacts.consume("42")).isFalse();
+    }
+
     // ---------- 内部 ----------
 
     private ToolResultBlock call(String content, String summary) {
-        Map<String, Object> input = summary != null
-                ? Map.of("content", content, "summary", summary)
-                : Map.of("content", content);
+        return call(content, summary, null);
+    }
+
+    /** 快道形调用（fastLane=null＝不传——自然收口缺省形）。 */
+    private ToolResultBlock call(String content, String summary, Boolean fastLane) {
+        Map<String, Object> input = new java.util.HashMap<>();
+        input.put("content", content);
+        if (summary != null) {
+            input.put("summary", summary);
+        }
+        if (fastLane != null) {
+            input.put("fastLane", fastLane);
+        }
         ToolCallParam param = ToolCallParam.builder()
                 .toolUseBlock(new ToolUseBlock(
                         "tc-1", SavePrdTool.NAME, input, null))

@@ -132,6 +132,15 @@ public final class AgentEventTypes {
     /** 引擎载荷原样（eventhub 不解释）。 */
     public static final String WAIT_DATA_FIELD = "data";
 
+    /**
+     * 问答卡「第 N 问」序号键（五问额度呈现面，#538/#549，ADR-0048 程序计数权威）：
+     * 平台侧在 question-raised 转发前注入 {@code data} 内的<b>呈现面字段</b>（引擎
+     * 载荷原样之外）——缺口首次出现序 1..k，同缺口（问题文本回落 header 标识）重派
+     * 复用旧号不跳号；服务端单源、前端不自算。水合读面以 ConversationEntryResponse
+     * 顶层 questionOrdinal 为权威（read 重算，存量行自动有号）。
+     */
+    public static final String QUESTION_ORDINAL_FIELD = "questionOrdinal";
+
     /** 智能体配置键（AgentProfile 稳定键，如 main/executor；run-start 携带）。 */
     public static final String AGENT_FIELD = "agent";
 
@@ -182,6 +191,61 @@ public final class AgentEventTypes {
 
     /** 引导回复的呈现标签键（「平台」——非智能体角色，随事件呈现）。 */
     public static final String GUIDE_LABEL_FIELD = "label";
+
+    /**
+     * 试用拦截卡（#533 计费②门②，ADR-0047 试用拦截面）：试用项目（迭代期）的
+     * 意见/兜底输入被结构闸拦下的事实呈现——平台侧卡片（显源池/随卡首次选源/
+     * 确认扣减/充值引导），非智能体 run（本事件即该次派发的全部，无 run-start）；
+     * runId 为派发锚（随派发响应同值返回）。被拦输入原文随卡留存（bil_intercepts
+     * 待决行）——确认扣减即翻转并立即受理原输入，或走充值引导/中途关闭（卡可回，
+     * 读面＝GET /projects/{id}/intercept）。
+     */
+    public static final String INTERCEPT_CARD = "intercept-card";
+
+    /** 拦截卡的留存 id 键（卡锚；字符串化防 JS 精度丢失）。 */
+    public static final String INTERCEPT_ID_FIELD = "interceptId";
+
+    /** 拦截卡的被拦车道键（OPINION=意见 / FALLBACK=兜底——恢复受理的分岔）。 */
+    public static final String INTERCEPT_LANE_FIELD = "lane";
+
+    /** 拦截卡的被拦输入原文键（卡上引用呈现；重建用户气泡同 guide-reply 的 prompt）。 */
+    public static final String INTERCEPT_PROMPT_FIELD = "prompt";
+
+    /** 拦截卡的扣减源已选定键（true＝显源池直接确认；false＝随卡首次选源）。 */
+    public static final String INTERCEPT_SOURCE_SELECTED_FIELD = "sourceSelected";
+
+    /** 拦截卡的已选定扣减源码位键（1=账户余额 2=项目余额；未定为缺省不携带）。 */
+    public static final String INTERCEPT_DEDUCTION_SOURCE_FIELD = "deductionSource";
+
+    /** 拦截卡的源池余额快照键（分；池未建不携带——充值引导的判定素材）。 */
+    public static final String INTERCEPT_POOL_BALANCE_FIELD = "sourcePoolBalance";
+
+    /**
+     * 余额提醒卡（#537 计费③段间硬门，ADR-0047）：付费项目段边界源池余额&le;0 时
+     * 段起跑被拦的事实呈现——平台侧卡片（显当前负额＋充值入口〔先登录＋准入码〕），
+     * 非智能体 run（本事件即该次派发的全部，无 run-start）；runId 为派发锚（随派发
+     * 响应同值返回）。被拦输入原文随卡留存（bil_balance_holds 待决行）——充值回正
+     * 自动放行（恢复受理不重输），或走充值引导/中途关闭（卡可回，读面＝
+     * GET /projects/{id}/balance-reminder）。run 场派发的余额拦截（无被拦输入）也
+     * 经本事件呈现——holdId/lane/prompt 缺省不携带。段内绝不检查绝不中断：本事件
+     * 只可能在段边界出现（时序断言的呈现面）。
+     */
+    public static final String BALANCE_REMINDER = "balance-reminder";
+
+    /** 余额提醒卡的留存 id 键（卡锚；run 场拦截不留存，缺省不携带）。 */
+    public static final String BALANCE_HOLD_ID_FIELD = "holdId";
+
+    /** 余额提醒卡的被拦车道键（OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿）。 */
+    public static final String BALANCE_LANE_FIELD = "lane";
+
+    /** 余额提醒卡的被拦输入原文键（卡上引用呈现；run 场拦截不携带）。 */
+    public static final String BALANCE_PROMPT_FIELD = "prompt";
+
+    /** 余额提醒卡的作用域改稿目标件序键（仅 DESIGN_REVISION 车道携带）。 */
+    public static final String BALANCE_DESIGN_ITEM_FIELD = "designItem";
+
+    /** 余额提醒卡的源池余额快照键（分；显负额素材——负额渲染客户端分转元）。 */
+    public static final String BALANCE_POOL_BALANCE_FIELD = "sourcePoolBalance";
 
     // ---------- 消息部件（parts 契约，词根 = agentscope 原生 part 族） ----------
     // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具

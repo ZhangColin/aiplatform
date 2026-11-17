@@ -158,6 +158,12 @@ app:
   session:
     ttl: 14d
     cleanup-interval: 1h
+  # #534 · business.billing 模拟收银台（ADR-0047）：充值准入码——固定码起步，
+  # 形态与发放属运营面调参（改档即生效，环境变量覆盖，不发版）；机制面见
+  # CheckoutProperties。渠道真接后只换通道、流程形态不变。
+  billing:
+    checkout:
+      access-code: ${CHECKOUT_ACCESS_CODE:DEMO-2026}
   # #213 · business.project 外部资料抓取：响应大小上限（字节，超此截断——缺省
   # 1 MiB）。纯 HTTP 只读 GET，四条安全底线见 HttpExternalContentFetcher。
   # #372 · 请求超时（秒——跨境慢源如 GitHub 实测 200 但 15s+，钉死 15s 必挂，
@@ -185,7 +191,9 @@ app:
     zhipu:
       base-url: https://open.bigmodel.cn
       api-key: ${ZHIPU_API_KEY:}
-      model: glm-image
+      # #545 快档起步（ADR-0052）：cogview-4-250304 0.06 元/张、生成快——构建轨
+      # 演示配图与设计线共用 active 供应商；质量不满运营升档＝单价表换行/改此键，零机制
+      model: ${ZHIPU_IMAGE_MODEL:cogview-4-250304}
     volcano:
       base-url: https://ark.cn-beijing.volces.com
       api-key: ${ARK_API_KEY:}

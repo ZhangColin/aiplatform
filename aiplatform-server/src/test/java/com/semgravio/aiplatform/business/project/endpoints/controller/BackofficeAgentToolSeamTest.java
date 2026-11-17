@@ -127,9 +127,15 @@ class BackofficeAgentToolSeamTest {
                         .value("HARNESS_BUILTIN"))
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'execute')].kind")
                         .value("HARNESS_BUILTIN"))
-                // harness 内建件数与自省一致（平台四件之外全是内建呈现）
+                // #545 构建轨出图件（ADR-0052 图片下放）：executor 槽在册为增强件、
+                // 缺省挂载；与 designer 槽同名骨架件并存（按槽位呈现，不串类别）
+                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].kind")
+                        .value("ENHANCEMENT"))
+                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].enabled")
+                        .value(true))
+                // harness 内建件数与自省一致（平台五件之外全是内建呈现）
                 .andExpect(jsonPath("$.data[1].tools.length()").value(
-                        4 + harnessBuiltinCount()))
+                        5 + harnessBuiltinCount()))
                 // designer（#289）：平台件 generate_image（骨架，ADR-0026 档位表落
                 // 提示词层）＋harness 内建文件工具（写文件件——注册自省，含
                 // write_file）；无 shell——execute 不在设计面（结构性关闭的呈现同源）
@@ -191,6 +197,65 @@ class BackofficeAgentToolSeamTest {
         var toolkitBack = profileToolkitSupplier.toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), specBack.toolSpec());
         assertThat(toolkitBack.getToolNames()).contains("web_search");
+    }
+
+    // ---------- #545 构建轨出图开关：关→executor 槽不挂载、设计执行体不受影响 ----------
+
+    @Test
+    void given_generate_image_toggled_off_when_inventory_and_assembly_then_executor_exits_designer_stays()
+            throws Exception {
+        // 同名件两词条：designer 槽骨架（恒挂载）与 executor 槽增强（可关）——窄幅
+        // 写口按增强件解析，落到 executor 行 generate_image_enabled
+        signedPut("generate_image", "{\"enabled\": false}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("generate_image"))
+                .andExpect(jsonPath("$.data.kind").value("ENHANCEMENT"))
+                .andExpect(jsonPath("$.data.enabled").value(false));
+
+        // 清单面：executor 槽在册未挂载；designer 槽同名件恒挂载不受影响
+        signedGet()
+                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].enabled")
+                        .value(false))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].enabled")
+                        .value(true));
+        // 写的是 executor 行
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT agent_key FROM prj_agent_configs WHERE generate_image_enabled = FALSE",
+                String.class)).isEqualTo("executor");
+
+        // 装配断言：真装配链——executor/ProjectDev 无 generate_image，骨架四件不动；
+        // designer/ProjectDesign 同名工具照挂（发放面行为不变的回归）
+        var spec = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        var executorToolkit = profileToolkitSupplier.toolkitFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), spec.toolSpec());
+        assertThat(executorToolkit.getToolNames()).doesNotContain("generate_image");
+        assertThat(executorToolkit.getToolNames()).containsExactlyInAnyOrder(
+                "finish_edit", "update_plan", "propose_skill", "propose_sediment");
+        var designerToolkit = profileToolkitSupplier.toolkitFor(AgentProfile.DESIGNER.key(),
+                new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), spec.toolSpec());
+        assertThat(designerToolkit.getToolNames()).containsExactly("generate_image");
+
+        // 留痕共机制：toggle 走配置留痕（old=true 缺省态 → new=false），全量快照含本开关
+        mockMvc.perform(BackofficeSignatures.signed(
+                get("/api/backoffice/agent-configs/executor/traces"),
+                "/api/backoffice/agent-configs/executor/traces", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].oldGenerateImageEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].newGenerateImageEnabled").value(false));
+
+        // 开＝回归（幂等同值零落痕——再关再开后只 2 痕）
+        signedPut("generate_image", "{\"enabled\": true}")
+                .andExpect(jsonPath("$.data.enabled").value(true));
+        var specBack = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        var toolkitBack = profileToolkitSupplier.toolkitFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), specBack.toolSpec());
+        assertThat(toolkitBack.getToolNames()).contains("generate_image");
+        mockMvc.perform(BackofficeSignatures.signed(
+                get("/api/backoffice/agent-configs/executor/traces"),
+                "/api/backoffice/agent-configs/executor/traces", null))
+                .andExpect(jsonPath("$.data", hasSize(2)));
     }
 
     // ---------- 留痕共机制：开关变更走配置留痕、幂等零落痕 ----------

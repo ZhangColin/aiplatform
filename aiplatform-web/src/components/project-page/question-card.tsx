@@ -20,6 +20,9 @@ import { cn } from "@/lib/utils";
  */
 export type QuestionCardProps = {
   question: Extract<ChatMessage, { kind: "question" }>;
+  /** 「第 N 问」序号（#538/#549，五问额度呈现面，服务端单源）：仅试用访谈期
+   *  （额度读面在场）由调用方传入；PRD 后/付费翻转后的追问不传＝不渲染徽标。 */
+  ordinal?: number;
   /** 待答中的当前问题才可交互（尾问唯一）。 */
   interactive: boolean;
   /** 勾选（父层持有，Enter 作答合并用；新问题时初始化为 [recommended] 或 []）。 */
@@ -42,6 +45,7 @@ function RecommendedBadge() {
 
 export function QuestionCard({
   question,
+  ordinal,
   interactive,
   selection,
   onSelectionChange,
@@ -59,6 +63,17 @@ export function QuestionCard({
       )}
     >
       <div className="mb-2 flex items-center gap-2">
+        {typeof ordinal === "number" ? (
+          <span
+            data-slot="question-ordinal"
+            className={cn(
+              "rounded-full px-2 py-0.5 text-xs font-medium",
+              interactive ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+            )}
+          >
+            第 {ordinal} 问
+          </span>
+        ) : null}
         <span
           className={cn(
             "rounded-full px-2 py-0.5 text-xs font-medium",

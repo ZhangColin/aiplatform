@@ -20,6 +20,8 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
+import com.semgravio.aiplatform.business.project.domain.model.ImageAssetLane;
 import com.semgravio.aiplatform.business.project.domain.model.ImageTransfers;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectMaterials;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
@@ -30,20 +32,26 @@ import com.semgravio.aiplatform.business.project.domain.port.ImageProviderResult
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 出图工具件内核（#288，ADR-0026/0027）：调图片生成供应商出图、按张计量、转存
- * 落盘产物目录——对调用方（出图工具件，发放接线归 #289 设计执行体票）收拢一件事：
- * 「按提示出 N 张位图稿、逐张落 {@code design/}、技术失败有限重试不产新候选」。
+ * 出图工具件内核（#288，ADR-0026/0027；#545 起双轨——ADR-0052 图片能力下放
+ * 构建轨）：调图片生成供应商出图、按张计量、转存
+ * 落盘——对调用方（出图工具件：#289 设计执行体＋#545 run 执行体构建轨）收拢一件事：
+ * 「按提示出 N 张位图、逐张落轨道目录（{@code design/} 设计稿或 {@code public/}
+ * 演示配图）、技术失败有限重试不产新候选」。
  *
  * <p><b>按张计量</b>：每次供应商调用成功报恰一条按张事件（张数进 images 列、token
  * 五档为零，与模型调用事件并列进成本观测；幂等键＝img-＋TSID，重试各次各报各的
  * ——ADR-0026「重试各次照计平台成本」：转存失败的尝试已向供应商付费，照实入账）。
- * dims 终态口径＝{@link UsageDims} 三键（agentKind=designer）。</p>
+ * dims 终态口径＝{@link UsageDims} 三键：设计轨 agentKind=designer（#288），
+ * 构建轨（#545 图片能力下放，ADR-0052）agentKind=executor（与 run 执行体成本
+ * 观测同桶，读侧 byKey 回解展示名既有）。</p>
  *
  * <p><b>转存＝容器侧落盘</b>（ADR-0027）：URL 形在容器内 curl 下载直落产物目录
  * （字节不过平台 JVM，URL 只中转不入库不透出）；base64 形字节经 stdin 灌入
  * （回执与字节数核对）。两形同走 {@code .part} 暂存＋失败清理（
  * {@link ImageTransfers} 命令正本）：失败尝试不留半张稿，成功各张不覆盖——每次
- * 尝试各拿新落点（TSID 前缀），重试＝重新出图，不产新候选。</p>
+ * 尝试各拿新落点（TSID 前缀），重试＝重新出图，不产新候选。落点按
+ * {@link ImageAssetLane 轨道}：设计轨 {@code design/}（#288）、构建轨
+ * {@code public/}（#545 演示配图＝应用静态资产，Next.js 根 URL 直引）。</p>
  *
  * <p>无落库（事务注解取舍同读侧——工作区文件面不经数据库）；计量事件经
  * {@link UsageEventSink} 同步直报（端口幂等）。供应商未配置（无 active 适配器）
@@ -88,17 +96,22 @@ public class ImageGenerationAppService {
      * @param count       张数（1~5）
      * @param size        画幅（可空＝供应商缺省，原样透传由供应商校验）
      * @param name        落盘词干提示（可空；物料同规消毒，扩展名随生成图）
+     * @param lane        落点轨道（设计轨 design/＋dims=designer；构建轨 public/＋
+     *                    dims=executor，#545 ADR-0052）
      * @return 落盘清单（路径＋字节）与部分失败清单；全部失败带如实理由
      * @throws ApplicationException PRJ_045 供应商未配置；PRJ_001 工作区名下无项目；
      *                              WSP_002 转存回执畸形（命令契约破坏，防御性暴露）
      */
     public ImageGenerationOutcome generate(String workspaceId, String runId, String sessionId,
-            String prompt, int count, String size, String name) {
+            String prompt, int count, String size, String name, ImageAssetLane lane) {
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException("prompt 不能为空（画面正向描述）");
         }
         if (count < 1 || count > 5) {
             throw new IllegalArgumentException("张数须在 1~5 内: " + count);
+        }
+        if (lane == null) {
+            throw new IllegalArgumentException("出图落点轨道不能为空（设计轨/构建轨）");
         }
         ImageGenerationProvider provider = providers.active()
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.IMAGE_PROVIDER_UNCONFIGURED));
@@ -122,8 +135,8 @@ public class ImageGenerationAppService {
                 ImageProviderResult.Generated generated = (ImageProviderResult.Generated) result;
                 model = generated.model();
                 // 供应商调用成功即计量（张数=1，单次调用单张口径）——转存失败也已付费，照实入账
-                reportUsage(provider, generated, projectId, runId, dimsSessionId);
-                TransferAttempt transfer = transfer(workspaceId, generated.image(), name);
+                reportUsage(provider, generated, projectId, runId, dimsSessionId, lane);
+                TransferAttempt transfer = transfer(workspaceId, generated.image(), name, lane);
                 if (transfer.landed() != null) {
                     files.add(transfer.landed());
                     lastReason = null;
@@ -145,7 +158,12 @@ public class ImageGenerationAppService {
     /** 供应商调用成功即报恰一条按张事件（幂等键每次调用唯一；重试各次各报各的）。 */
     private void reportUsage(ImageGenerationProvider provider,
             ImageProviderResult.Generated generated, Long projectId,
-            String runId, String sessionId) {
+            String runId, String sessionId, ImageAssetLane lane) {
+        // 计量归属随轨道：设计轨 designer（#288）、构建轨 executor（#545——与 run
+        // 执行体模型调用同桶，读侧展示名 byKey 既有；图片耗时/张数归因面由此可拉）
+        String agentKind = lane == ImageAssetLane.BUILD
+                ? UsageDims.kindOf(AgentProfile.EXECUTOR)
+                : UsageDims.AGENT_KIND_DESIGNER;
         usageEventSink.report(new UsageEvent(
                 EVENT_PREFIX + "-" + EventsAppService.newRunId(),
                 Instant.now(),
@@ -154,22 +172,24 @@ public class ImageGenerationAppService {
                 sessionId.isBlank() ? null : sessionId,
                 provider.providerKey(),
                 generated.model(),
-                UsageDims.of(projectId, UsageDims.AGENT_KIND_DESIGNER, sessionId),
+                UsageDims.of(projectId, agentKind, sessionId),
                 TokenUsage.ZERO,
                 1));
     }
 
     /**
-     * 转存一张：URL 形容器内下载、base64 形 stdin 灌字节。落点＝
-     * {@code design/{tsid}-{净化词干}.{扩展名}}（每次尝试新 TSID）。
+     * 转存一张：URL 形容器内下载、base64 形 stdin 灌字节。落点按轨道——
+     * {@code design/{tsid}-{净化词干}.{扩展名}}（设计轨）或
+     * {@code public/...}（构建轨）；每次尝试新 TSID。
      *
      * @return 成功带落盘件；失败带如实理由（退出码非 0，重试预算内再试）
      */
-    private TransferAttempt transfer(String workspaceId, ImageProviderResult.Image image, String name) {
+    private TransferAttempt transfer(String workspaceId, ImageProviderResult.Image image, String name,
+            ImageAssetLane lane) {
         String stem = name == null || name.isBlank()
                 ? DEFAULT_STEM : ProjectMaterials.sanitizeName(name);
         String path = ImageTransfers.storedPath(EventsAppService.newRunId(), stem,
-                ImageTransfers.extensionOf(image.extension()));
+                ImageTransfers.extensionOf(image.extension()), lane);
         ExecResultResponse result;
         long expectedBytes = -1;
         if (image.isUrlForm()) {

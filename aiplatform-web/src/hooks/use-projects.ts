@@ -15,14 +15,18 @@ import { normalizeProjectSummary, type ProjectResponse } from "@/lib/projects/li
 /**
  * 列表（全量；P08 阶段与排序由消费端 lib/projects/list 推导）。{@code enabled=false}
  * 供匿名可逛面（首页「只逛零足迹」）：无凭证 cookie 时背景查询不发请求，
- * 401 出口也就无从弹登录框。
+ * 401 出口也就无从弹登录框。{@code silentUnauthorized=true} 供首页背景查询
+ *（{@link useRecentProjects}）：cookie 存在但服务端不认（库重建/访客保留期
+ * 过期/凭证损坏）时 401 是「无有效会话」的答案、不是用户动作被拦——不发
+ * 全局出口事件、不弹 M01（同 useMe／SSE 探针口径）。列表页主查询保持
+ * loud：死凭证访客主动进「我的项目」时仍由 M01 承接登录引导。
  */
-export function useProjectList(enabled = true) {
+export function useProjectList(enabled = true, silentUnauthorized = false) {
   return useQuery({
     queryKey: queryKeys.projects.list(),
     queryFn: ({ signal }) =>
       api
-        .get<ProjectResponse[]>("/projects", { signal })
+        .get<ProjectResponse[]>("/projects", { signal, silentUnauthorized })
         .then((items) => (items ?? []).map(normalizeProjectSummary)),
     enabled,
   });
@@ -31,11 +35,16 @@ export function useProjectList(enabled = true) {
 export type { ProjectSummary } from "@/lib/projects/list";
 
 /**
- * 首页「最近的项目」= 未归档项目（已归档只留在列表页折叠分组）。
+ * 首页「最近的项目」= 未归档项目（已归档只留在列表页）。
  * {@code enabled=false}＝匿名首访：不发列表请求、无草稿恢复横幅。
+ *
+ * <p>背景查询恒定静默 401（{@code silentUnauthorized}）：首页是匿名可逛面，
+ * cookie 在但已失效（库重建／保留期过期／损坏）时，全量列表 401 只代表
+ * 「当前无有效会话」——头像位照常呈现「登录」入口，不劫持首页弹 M01
+ *（死 cookie 不会被 401 响应清除，loud 形态下每次进站必弹、无自愈）。</p>
  */
 export function useRecentProjects(enabled = true) {
-  const { data } = useProjectList(enabled);
+  const { data } = useProjectList(enabled, true);
   return (data ?? []).filter((p) => !p.archived);
 }
 

@@ -7,6 +7,7 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -27,6 +28,9 @@ import com.semgravio.aiplatform.base.workspace.application.dto.command.Workspace
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.semgravio.aiplatform.business.project.domain.model.DesignPrints;
@@ -238,6 +242,15 @@ public class DesignProcessAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectRenderAppService renders;
     private final DesignSpecAppService designSpecs;
+    private final BalanceGateAppService balanceGate;
+
+    /**
+     * 余额闸暂存的设计派发 intent（#537 段边界余额门，projectId 集）：段边界源池
+     * ≤0 时收口派发被拦的项目暂存于此，充值回正经 {@link #drainBalanceBlocked}
+     * 自动重派（被拦意见已并入在途排队面 {@link #queuedRevisions}——重派按残队口径
+     * 合并受理）。进程内锚形态（同排队态口径）——重启丢账属既有兜底哲学。
+     */
+    private final Set<Long> balanceBlockedDesign = ConcurrentHashMap.newKeySet();
 
     /**
      * 设计轨在途的排队意见（#291 在途插话，projectId → FIFO）：当前稿代收口后
@@ -264,7 +277,8 @@ public class DesignProcessAppService {
             OrderQueryAppService orderQueryAppService,
             ConversationHistoryAppService conversationHistory,
             ProjectRenderAppService renders,
-            DesignSpecAppService designSpecs) {
+            DesignSpecAppService designSpecs,
+            BalanceGateAppService balanceGate) {
         this.projectRepository = projectRepository;
         this.designItems = designItems;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -280,6 +294,7 @@ public class DesignProcessAppService {
         this.conversationHistory = conversationHistory;
         this.renders = renders;
         this.designSpecs = designSpecs;
+        this.balanceGate = balanceGate;
     }
 
     /** 一场设计轨道的运行标识（首件 run 的用户面身份）。 */
@@ -310,6 +325,22 @@ public class DesignProcessAppService {
      */
     public DesignRun dispatchDesignOnTurnClose(Long projectId, String opinion) {
         Project project = requireDesignableProject(projectId);
+        // 段边界余额门（#537 计费③，ADR-0047 段间硬门）：设计派发起跑前查门——
+        // 源池≤0 拦下：被拦意见并入在途排队面（queuedRevisions——充值回正重派时
+        // 按残队口径合并受理，不丢轮）＋项目暂存集＋余额提醒卡直达对话面（显负额
+        // ＋充值入口），充值回正经 drainBalanceBlocked 自动重派（不手动重试）；
+        // 试用恒放行。段内绝不检查绝不中断——本门只在此（段起跑前）被消费。
+        BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
+        if (gate.blocked()) {
+            enqueueRevision(projectId, null, opinion, null);
+            balanceBlockedDesign.add(projectId);
+            eventBridge.emitBalanceReminder(project,
+                    BalanceReminderAppService.BalanceReminderCard.forRunBlock(
+                            gate.blockedBalanceFen(), EventsAppService.newRunId()));
+            log.info("[design] 项目 {} 余额提醒（run 场）：设计派发 intent 已暂存"
+                    + "（意见已并入排队面），充值回正自动重派", projectId);
+            return null;
+        }
         if (!codingRunTrack.begin(projectId)) {
             // 在途插话排队（#291）：不丢失、不打断——当前稿代收口后排空受理
             enqueueRevision(projectId, null, opinion, null);
@@ -484,7 +515,8 @@ public class DesignProcessAppService {
                             attemptRunId, attemptChanges),
                     CoderRunAttempts.DESIGN_LABEL, /* injectKnowledge= */ false,
                     CoderRunAttempts.RunSeat.designer(itemTitle),
-                    RunHeading.slice(itemTitle, item.getOrd(), total));
+                    RunHeading.slice(itemTitle, item.getOrd(), total),
+                    SegmentType.DESIGN_TURN);
             if (!result.succeeded()) {
                 failDesignItem(projectId, item.getOrd(), runId);
                 eventBridge.emitRunFailed(project, runId, result.failure());
@@ -512,6 +544,31 @@ public class DesignProcessAppService {
     private boolean hasQueuedRevisions(Long projectId) {
         Deque<QueuedRevision> queue = queuedRevisions.get(projectId);
         return queue != null && !queue.isEmpty();
+    }
+
+    /**
+     * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
+     * 余额闸暂存的设计派发 intent 逐项目重派（未回正的项目保持暂存待下一次入账；
+     * 重派自然再守全守卫——被拦意见随 queuedRevisions 残队口径合并受理）。重派
+     * 失败记日志——用户重提意见即兜底。入账事件（AFTER_COMMIT 监听）触发。
+     */
+    public void drainBalanceBlocked() {
+        for (Long projectId : Set.copyOf(balanceBlockedDesign)) {
+            if (balanceGate.assess(projectId).blocked()) {
+                continue; // 未回正——暂存保持待下一次入账
+            }
+            if (!balanceBlockedDesign.remove(projectId)) {
+                continue; // 并发已被排空——不重复重派
+            }
+            try {
+                log.info("[design] 项目 {} 余额回正：暂存设计派发 intent 自动重派", projectId);
+                dispatchDesignOnTurnClose(projectId, null);
+            }
+            catch (RuntimeException e) {
+                log.warn("[design] 项目 {} 余额回正排空重派失败（intent 丢弃，重提即兜底）：{}",
+                        projectId, e.toString());
+            }
+        }
     }
 
     /**
@@ -619,7 +676,8 @@ public class DesignProcessAppService {
                 CoderRunAttempts.DESIGN_LABEL, /* injectKnowledge= */ false,
                 CoderRunAttempts.RunSeat.designer(item.getTitle()),
                 RunHeading.slice(item.getTitle(), item.getOrd(),
-                        designItems.findByProjectIdOrderByOrdAsc(projectId).size()));
+                        designItems.findByProjectIdOrderByOrdAsc(projectId).size()),
+                SegmentType.DESIGN_TURN);
         lastActiveOrd.put(projectId, item.getOrd());
         if (!result.succeeded()) {
             log.warn("[design] 项目 {} 件 {} 改稿超限转终态（runId={}）——件状态保持，用户重提即兜底",

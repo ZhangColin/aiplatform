@@ -79,7 +79,13 @@ import lombok.extern.slf4j.Slf4j;
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
-     * 0.15（#421）：基座模板补厚三层——健壮件四件套（src/lib/robust 数据访问层＋
+     * 0.18（#540）：基座模板增首批模式件两件（src/components/patterns——
+     * ValidatedForm 表单＋校验＋提交态、FilterableList 列表＋筛选＋分页，
+     * ADR-0051；行为契约＋静态纪律测试同吃狗粮门；用法与纪律随栈规则集常量节
+     * 扩容）。0.17（#471 后续）：bare-fetch 语义对齐（四正本改「任何 HTTP 调用
+     * 含页面调自家 /api」）＋基座关 dev tools 浮标。0.16（#471）：基座预置三
+     * 入口件（src/lib/db、http、auth——robust 件单例 re-export）＋预置档违规
+     * 退出修轮。0.15（#421）：基座模板补厚三层——健壮件四件套（src/lib/robust 数据访问层＋
      * fetch 封装＋会话存储件、src/components/robust 三态 UX 件＋页面级错误边界）＋
      * 测试跑道（vitest 配置＋自测骨架，构建期 pnpm test 狗粮门）＋旧裸客户端出口
      * src/lib/db.ts 吸收删除（ADR-0035；栈规则集 AGENTS.md 节由平台派发时按健壮件
@@ -97,7 +103,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * ADR-0027）。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。升版强制重建镜像，
      * 存量项目经既有幂等重建（唤醒/重建容器即用新镜像）自愈。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.17";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */

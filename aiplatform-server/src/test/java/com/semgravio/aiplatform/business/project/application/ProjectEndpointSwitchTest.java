@@ -330,6 +330,9 @@ class ProjectEndpointSwitchTest {
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // #543 风格物化写面（首个构建派发四件落位——本用例不断言其内容，缺省成功）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
         // 切换重产轮脚本：主智能体重写 PRD＋产计划（saveBuildPlan 事实登记）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);

@@ -5,7 +5,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,8 +23,11 @@ import org.springframework.stereotype.Component;
 import com.cartisan.core.domain.BaseEnum;
 
 import com.semgravio.aiplatform.base.metering.domain.enums.Band;
+import com.semgravio.aiplatform.base.metering.domain.enums.CostBucket;
 import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
+import com.semgravio.aiplatform.base.metering.domain.model.CostBucketUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.GlobalUsageSummary;
+import com.semgravio.aiplatform.base.metering.domain.model.PricedUsageLine;
 import com.semgravio.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UnpricedTierUsage;
@@ -37,7 +43,8 @@ import com.semgravio.aiplatform.base.metering.domain.repository.UsageEventAggreg
  * 各组数字自洽（总量 = 各分模型之和 = 各分维度之和；cost = 窗口内已配价分量的
  * 币种分桶和）。
  *
- * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张，#288）经
+ * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张 #288＋按件
+ * #531 固定单价项族）经
  * {@code CROSS JOIN LATERAL VALUES} 展开后与单价表按 (provider, model, kind) + ts 落
  * {@code [effective_from, effective_to)} 区间匹配；时段带维（#499，ADR-0044 读时归段）
  * ＝事件 ts 经时段规则表归带（峰/谷，epoch 数学派生 UTC 星期/分钟、免会话时区坑）
@@ -59,15 +66,25 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     + "COALESCE(SUM(e.cache_read), 0), COALESCE(SUM(e.cache_write), 0), "
                     + "COALESCE(SUM(e.reasoning), 0)";
 
-    /** 档位 ↔ 用量列（VALUES 展开素材）：token 五档与 TokenUsage 五档同序，末位
-     *  按张档（#288）对应 images 列——成本换算与未配价对六档同一公式。 */
+    /** 档位 ↔ 用量列（VALUES 展开素材）：token 五档与 TokenUsage 五档同序，末两位
+     *  计件档——按张（#288，images 列）与按件（#531 固定单价项族，units 列）
+     *  ——成本换算与未配价对各档同一公式。 */
     private static final List<Map.Entry<TokenKind, String>> KIND_COLUMNS = List.of(
             Map.entry(TokenKind.INPUT, "input"),
             Map.entry(TokenKind.OUTPUT, "output"),
             Map.entry(TokenKind.CACHE_READ, "cache_read"),
             Map.entry(TokenKind.CACHE_WRITE, "cache_write"),
             Map.entry(TokenKind.REASONING, "reasoning"),
-            Map.entry(TokenKind.IMAGE, "images"));
+            Map.entry(TokenKind.IMAGE, "images"),
+            Map.entry(TokenKind.UNIT, "units"));
+
+    /** 计件档（按张/按件）的 kind 码清单：单点派生自 {@link TokenKind#isCountBased()}
+     *  ——不受时段带影响（带维恒落 NULL、单价只匹配 NULL 带行），与 token 五档的
+     *  带匹配分支分流。 */
+    private static final String COUNT_BASED_KINDS = KIND_COLUMNS.stream()
+            .filter(kindColumn -> kindColumn.getKey().isCountBased())
+            .map(kindColumn -> kindColumn.getKey().getCode().toString())
+            .collect(Collectors.joining(", "));
 
     /**
      * 档位展开 VALUES 子句（表别名恒为 e）：(kind code, 该档用量列)——成本换算与
@@ -116,22 +133,33 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     + " ELSE " + Band.PEAK.getCode() + " END)"
                     + " END";
 
-    /** 未配价警示的归带维：token 档按事件归带分组；按张档不受带影响（落空）。 */
+    /** 未配价警示的归带维：token 档按事件归带分组；计件档（按张/按件）不受带影响（落空）。 */
     private static final String UNPRICED_BAND =
-            "CASE WHEN part.kind = " + TokenKind.IMAGE.getCode() + " THEN NULL"
+            "CASE WHEN part.kind IN (" + COUNT_BASED_KINDS + ") THEN NULL"
                     + " ELSE " + EVENT_BAND + " END";
+
+    /**
+     * 成本观测切片桶表达式（#536，锚集非空时经 {@link #sliceJoin} 挂 slice 侧栏）：
+     * 事件 ts &lt; 锚＝获客成本桶、ts &gt;= 锚＝用户费用桶（翻转时刻本身归用户费用
+     * 桶——与计费段结算 {@code e.ts >= flippedAt} 边界同口径）；行无锚（未翻转
+     * subject/锚集外）＝全量获客成本桶。桶码单点取自 {@link CostBucket}。
+     */
+    private static final String SLICE_BUCKET =
+            "CASE WHEN slice.anchor IS NULL OR e.ts < slice.anchor THEN "
+                    + CostBucket.ACQUISITION.getCode()
+                    + " ELSE " + CostBucket.USER_FEE.getCode() + " END";
 
     /**
      * 事件时点生效区间匹配（单价表别名恒为 p；与事件 ts 落 [from, to) 半开同口径）。
      * 时段带维（#499，ADR-0044 读时归段）：token 档按 {@link #EVENT_BAND} 归带匹配
-     * 对应带单价行、无规则行通道回落 NULL 带行（存量语义）；按张档不受 band 影响
-     * （只匹配 NULL 带行——#288 按张行不带维度）。
+     * 对应带单价行、无规则行通道回落 NULL 带行（存量语义）；计件档（按张/按件）
+     * 不受 band 影响（只匹配 NULL 带行——计件行不带维度）。
      */
     private static final String PRICE_MATCH =
             "p.provider = e.provider AND p.model = e.model AND p.token_kind = part.kind"
                     + " AND e.ts >= p.effective_from AND (p.effective_to IS NULL OR e.ts < p.effective_to)"
-                    + " AND (part.kind = " + TokenKind.IMAGE.getCode() + " AND p.band IS NULL"
-                    + " OR part.kind <> " + TokenKind.IMAGE.getCode() + " AND ("
+                    + " AND (part.kind IN (" + COUNT_BASED_KINDS + ") AND p.band IS NULL"
+                    + " OR part.kind NOT IN (" + COUNT_BASED_KINDS + ") AND ("
                     + " (p.band IS NULL AND NOT EXISTS (SELECT 1 FROM met_time_band_rules r"
                     + " WHERE " + RULE_OPEN + "))"
                     + " OR p.band = " + EVENT_BAND + "))";
@@ -178,7 +206,8 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
     }
 
     @Override
-    public GlobalUsageSummary aggregateGlobal(Instant from, Instant to) {
+    public GlobalUsageSummary aggregateGlobal(Instant from, Instant to,
+            Map<String, Instant> sliceAnchors) {
         // 全局口径（跨项目无 subject 过滤）：total/byModel 共用同一 where/args，
         // cost/分智能体条件不同各自建
         List<Object> args = CollUtil.newArrayList();
@@ -200,7 +229,10 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                         + " GROUP BY kv.dim_value ORDER BY kv.dim_value",
                 dimArgs.toArray(), (rs, rowNum) -> new GlobalUsageSummary.AgentKindUsage(
                         rs.getString(1), readTokens(rs, 2)));
-        return new GlobalUsageSummary(from, to, total, cost, byModel, byAgentKind, byModelCost);
+        // 成本观测切片桶（#536）：桶 × 用量 与 桶 × 币种成本 两查合并（同 aggregateSubjectCosts 形制）
+        List<CostBucketUsage> byBucket = globalBucketsOf(from, to, sliceAnchors);
+        return new GlobalUsageSummary(from, to, total, cost, byModel, byAgentKind, byModelCost,
+                byBucket);
     }
 
     @Override
@@ -222,7 +254,8 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
     }
 
     @Override
-    public List<SubjectCostSummary> aggregateSubjectCosts(Instant from, Instant to) {
+    public List<SubjectCostSummary> aggregateSubjectCosts(Instant from, Instant to,
+            Map<String, Instant> sliceAnchors) {
         // 两查合并：① subject 总量（无 LATERAL 展开——五档列直 SUM，不受展开扇出
         // 影响）；② subject × 币种成本分桶（costBuckets 的分组细化一维）。两查
         // 同窗同事务，subject 集 ② ⊆ ①（成本行由窗口内事件驱动）。
@@ -254,13 +287,51 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     }
                     return bySubject;
                 });
+        // ③ 切片桶两查（#536）：subject × 桶 用量 与 subject × 桶 × 币种成本
+        // （与 ①② 同 where 口径，锚集空时桶列恒获客成本——sliceJoin 空串）
+        Map<String, List<CostBucketUsage>> bucketsBySubject = subjectBucketsOf(from, to, sliceAnchors);
         return totals.entrySet().stream()
                 .map(entry -> {
                     Map<Currency, BigDecimal> cost = costBySubject.getOrDefault(entry.getKey(), Map.of());
                     // 全未配价＝窗口内有用量但无任何已配价分量（成本分桶为空）
-                    return new SubjectCostSummary(entry.getKey(), entry.getValue(), cost, cost.isEmpty());
+                    return new SubjectCostSummary(entry.getKey(), entry.getValue(), cost, cost.isEmpty(),
+                            bucketsBySubject.getOrDefault(entry.getKey(), List.of()));
                 })
                 .toList();
+    }
+
+    @Override
+    public List<PricedUsageLine> aggregatePricedLinesByRuns(String subject, Collection<String> runIds,
+            Instant from) {
+        if (subject == null || subject.isBlank() || runIds == null || runIds.isEmpty()) {
+            return List.of();
+        }
+        // run 寻址的段用量线集（#531 计费结算）：与 costBuckets 同一展开/匹配机器，
+        // 差异＝run_id IN 过滤（可叠加翻转时点下界——计费边界机制面）、分组细化到
+        // 单价行（快照粒度——同键改价跨区间出多线，各按各时点单价不混价）。
+        // run_id 重复/乱序无害（IN 语义）。
+        String placeholders = String.join(",", Collections.nCopies(runIds.size(), "?"));
+        List<Object> args = new ArrayList<>();
+        args.add(subject);
+        args.addAll(runIds);
+        String lowerBound = from == null ? "" : " AND e.ts >= ?";
+        if (from != null) {
+            args.add(Timestamp.from(from));
+        }
+        return jdbcTemplate.query(
+                "SELECT e.provider, e.model, part.kind, p.unit_price, p.currency, SUM(part.tokens)"
+                        + " FROM met_usage_events e"
+                        + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
+                        + " JOIN met_price_entries p ON " + PRICE_MATCH
+                        + " WHERE e.subject = ? AND e.run_id IN (" + placeholders + ")"
+                        + lowerBound
+                        + " AND part.tokens > 0"
+                        + " GROUP BY e.provider, e.model, part.kind, p.unit_price, p.currency"
+                        + " ORDER BY e.provider, e.model, part.kind, p.unit_price, p.currency",
+                args.toArray(), (rs, rowNum) -> new PricedUsageLine(
+                        rs.getString(1), rs.getString(2),
+                        BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)),
+                        rs.getLong(6), rs.getBigDecimal(4), rs.getString(5)));
     }
 
     /** 总量查询（按 subject/全局两口径共用，差异全在 where）。 */
@@ -331,6 +402,134 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                                 : BaseEnum.requireByCode(Band.class, (Integer) entry.getKey().get(2)),
                         entry.getValue()))
                 .toList();
+    }
+
+    /**
+     * 全局切片桶两查合并（#536 全局总览 byBucket 维）：桶 × 用量（五档直 SUM）＋
+     * 桶 × 币种成本（档位展开 × 时点生效价，与 costBuckets 同一换算机器）——两桶
+     * 互补不重叠、并集＝全局口径；用量驱动（空窗/无事件返回空清单）。
+     */
+    private List<CostBucketUsage> globalBucketsOf(Instant from, Instant to,
+            Map<String, Instant> sliceAnchors) {
+        String bucket = bucketExprOf(sliceAnchors);
+        List<Object> tokenArgs = CollUtil.newArrayList();
+        Map<Integer, TokenUsage> tokens = jdbcTemplate.query(
+                "SELECT " + bucket + ", " + TOKEN_SUMS
+                        + " FROM met_usage_events e" + sliceJoin(tokenArgs, sliceAnchors)
+                        + whereOf(tokenArgs, null, from, to)
+                        + " GROUP BY " + bucket + " ORDER BY " + bucket,
+                tokenArgs.toArray(), rs -> {
+                    Map<Integer, TokenUsage> byBucket = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        byBucket.put(rs.getInt(1), readTokens(rs, 2));
+                    }
+                    return byBucket;
+                });
+        List<Object> costArgs = CollUtil.newArrayList();
+        Map<Integer, Map<Currency, BigDecimal>> costs = jdbcTemplate.query(
+                "SELECT " + bucket + ", p.currency, SUM(part.tokens * p.unit_price)"
+                        + " FROM met_usage_events e"
+                        + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
+                        + " JOIN met_price_entries p ON " + PRICE_MATCH
+                        + sliceJoin(costArgs, sliceAnchors)
+                        + whereOf(costArgs, null, from, to, "part.tokens > 0")
+                        + " GROUP BY " + bucket + ", p.currency ORDER BY " + bucket + ", p.currency",
+                costArgs.toArray(), rs -> {
+                    Map<Integer, Map<Currency, BigDecimal>> byBucket = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        byBucket.computeIfAbsent(rs.getInt(1), key -> new LinkedHashMap<>())
+                                .put(Currency.getInstance(rs.getString(2)), rs.getBigDecimal(3));
+                    }
+                    return byBucket;
+                });
+        return tokens.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new CostBucketUsage(CostBucket.ofCode(entry.getKey()), entry.getValue(),
+                        costs.getOrDefault(entry.getKey(), Map.of())))
+                .toList();
+    }
+
+    /**
+     * 项目清单切片桶两查合并（#536 行内 byBucket）：subject × 桶 用量 与
+     * subject × 桶 × 币种成本两查（同总量/成本两查的窗口口径与锚侧栏）——行级
+     * 两桶互补不重叠、并集＝行总量；用量驱动（有价分量的桶必有用量分量，合并以
+     * 用量桶行集为准）。无用量 subject 不在本结果（清单行本身用量驱动）。
+     */
+    private Map<String, List<CostBucketUsage>> subjectBucketsOf(Instant from, Instant to,
+            Map<String, Instant> sliceAnchors) {
+        String bucket = bucketExprOf(sliceAnchors);
+        List<Object> tokenArgs = CollUtil.newArrayList();
+        Map<String, Map<Integer, TokenUsage>> tokens = jdbcTemplate.query(
+                "SELECT e.subject, " + bucket + ", " + TOKEN_SUMS
+                        + " FROM met_usage_events e" + sliceJoin(tokenArgs, sliceAnchors)
+                        + whereOf(tokenArgs, null, from, to)
+                        + " GROUP BY e.subject, " + bucket
+                        + " ORDER BY e.subject, " + bucket,
+                tokenArgs.toArray(), rs -> {
+                    Map<String, Map<Integer, TokenUsage>> bySubject = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        bySubject.computeIfAbsent(rs.getString(1), key -> new LinkedHashMap<>())
+                                .put(rs.getInt(2), readTokens(rs, 3));
+                    }
+                    return bySubject;
+                });
+        List<Object> costArgs = CollUtil.newArrayList();
+        Map<String, Map<Integer, Map<Currency, BigDecimal>>> costs = jdbcTemplate.query(
+                "SELECT e.subject, " + bucket + ", p.currency, SUM(part.tokens * p.unit_price)"
+                        + " FROM met_usage_events e"
+                        + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
+                        + " JOIN met_price_entries p ON " + PRICE_MATCH
+                        + sliceJoin(costArgs, sliceAnchors)
+                        + whereOf(costArgs, null, from, to, "part.tokens > 0")
+                        + " GROUP BY e.subject, " + bucket + ", p.currency"
+                        + " ORDER BY e.subject, " + bucket + ", p.currency",
+                costArgs.toArray(), rs -> {
+                    Map<String, Map<Integer, Map<Currency, BigDecimal>>> bySubject = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        bySubject.computeIfAbsent(rs.getString(1), key -> new LinkedHashMap<>())
+                                .computeIfAbsent(rs.getInt(2), b -> new LinkedHashMap<>())
+                                .put(Currency.getInstance(rs.getString(3)), rs.getBigDecimal(4));
+                    }
+                    return bySubject;
+                });
+        Map<String, List<CostBucketUsage>> bucketsBySubject = new LinkedHashMap<>();
+        tokens.forEach((subject, byBucket) -> bucketsBySubject.put(subject, byBucket.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new CostBucketUsage(CostBucket.ofCode(entry.getKey()), entry.getValue(),
+                        costs.getOrDefault(subject, Map.of()).getOrDefault(entry.getKey(), Map.of())))
+                .toList()));
+        return bucketsBySubject;
+    }
+
+    /**
+     * 切片锚侧栏挂接（#536）：锚集非空时 {@code LEFT JOIN (VALUES (subject, anchor),
+     * …) AS slice(subject, anchor)} 按 subject 挂锚——行无锚（未翻转 subject）即
+     * {@code slice.anchor IS NULL}（全量获客成本桶）；锚集空返回空串（桶列经
+     * {@link #bucketExprOf} 回落常量获客成本，不引 slice 别名）。占位参数成对
+     * 落入 args（subject 串在前、锚时点 Timestamp 在后），JOIN 先于 WHERE 拼入
+     * 故参数序天然一致。
+     */
+    private static String sliceJoin(List<Object> args, Map<String, Instant> sliceAnchors) {
+        if (sliceAnchors == null || sliceAnchors.isEmpty()) {
+            return "";
+        }
+        List<String> rows = CollUtil.newArrayList();
+        sliceAnchors.forEach((subject, anchor) -> {
+            // 锚列 CAST 定型：VALUES 占位符在 LATERAL 上下文无从推断类型（PSQL 裸 ? 报
+            // 「operator does not exist: timestamp with time zone」）
+            rows.add("(?, CAST(? AS timestamp with time zone))");
+            args.add(subject);
+            args.add(Timestamp.from(anchor));
+        });
+        return " LEFT JOIN (VALUES " + String.join(", ", rows) + ")"
+                + " AS slice(subject, anchor) ON slice.subject = e.subject";
+    }
+
+    /** 切片桶列：锚集空时不挂 slice 侧栏，桶列回落常量获客成本（全量前桶）。 */
+    private static String bucketExprOf(Map<String, Instant> sliceAnchors) {
+        return sliceAnchors == null || sliceAnchors.isEmpty()
+                ? String.valueOf(CostBucket.ACQUISITION.getCode())
+                : SLICE_BUCKET;
     }
 
     private static TokenUsage readTokens(ResultSet rs, int base) throws SQLException {

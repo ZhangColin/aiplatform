@@ -172,6 +172,42 @@ describe("智能体事件族收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it("intercept-card 按正本收窄（payload {projectId, runId, interceptId, lane, prompt, sourceSelected, deductionSource?, sourcePoolBalance?}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「智能体事件族」intercept-card 行（#533 计费②门②：试用
+    // 拦截卡——被拦输入留存，显源池/随卡首次选源/确认扣减翻转）
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "intercept-card",
+        payload: {
+          projectId: "p1",
+          runId: "run1",
+          interceptId: "9012345678901",
+          lane: "OPINION",
+          prompt: "把主色调改成绿色",
+          sourceSelected: true,
+          deductionSource: 2,
+          sourcePoolBalance: 10000,
+        },
+        ts: "",
+      }),
+    );
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject({
+      type: "intercept-card",
+      payload: {
+        projectId: "p1",
+        runId: "run1",
+        interceptId: "9012345678901",
+        lane: "OPINION",
+        prompt: "把主色调改成绿色",
+        sourceSelected: true,
+        deductionSource: 2,
+        sourcePoolBalance: 10000,
+      },
+    });
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it("acceptance-start 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {
     // 期望值来自正本「生命周期事件」acceptance-start 行（#87：受理动作卡——受理轮
     // 开场受理事实，对话区动作卡呈现源）

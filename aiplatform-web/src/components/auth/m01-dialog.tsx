@@ -26,11 +26,12 @@ import { useM01Store, type M01Trigger } from "@/lib/store/m01";
  * 挂全局 layout 一份（顶栏「登录」、签约门、401 出口三处触发共用——顶栏原
  * 「保存项目」入口已并入「登录」）。
  *
- * <p>三处触发：①顶栏「登录」入口（#377）开 topbar-login 文案、无续跑回调
+ * <p>四处触发：①顶栏「登录」入口（#377）开 topbar-login 文案、无续跑回调
  * （验码通过即关、顶栏转已登录态）；②签约门（下单入口接到 ORD_017/5017）开
  * stage-gate 文案并携 resume 续跑回调，验码成功即回调续跑本单（「绑定后放行」）；
- * ③401 全局出口（{@link UNAUTHORIZED_EVENT}）开 save-project 文案——无续跑
- * 语义（请求保持 error 态，登录后前端按域失效自愈）。</p>
+ * ③收银台充值（#534 模拟收银台须先登录）开 checkout-login 文案并携 resume
+ * 重开收银台；④401 全局出口（{@link UNAUTHORIZED_EVENT}）开 save-project 文案
+ * ——无续跑语义（请求保持 error 态，登录后前端按域失效自愈）。</p>
  *
  * <p>表单态随时开重挂（{@link M01Form} 仅在开门时挂载）自然归零，不用 effect
  * 复位。码验证错误（ApiError 6005–6008）就地出后端中文 message，不 toast。</p>
@@ -204,5 +205,15 @@ const COPY = {
     title: "登录",
     description:
       "输入邮箱收取验证码即可登录——验证码登录即注册、无需密码；本浏览器未绑定的项目会自动归入账号，换设备也能继续。",
+  },
+  "checkout-login": {
+    title: "登录后充值",
+    description:
+      "模拟收银台须先登录——充值到账你的账号余额，消费透明可查；验证码登录即注册，本浏览器未绑定的项目会自动归入账号。",
+  },
+  "fork-login": {
+    title: "登录后继续讨论",
+    description:
+      "继续讨论转为付费、按用量从所选余额池扣减——须先登录绑定账号；验证码登录即注册，本浏览器未绑定的项目会自动归入账号、讨论记录不丢。",
   },
 } as const;

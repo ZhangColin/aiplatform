@@ -10,6 +10,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
+import { useInterviewQuota } from "@/hooks/use-interview-quota";
+import { usePendingIntercept } from "@/hooks/use-intercept";
+import { useBuildGate } from "@/hooks/use-build-gate";
+import { usePendingBalanceReminder } from "@/hooks/use-balance-reminder";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import {
@@ -34,6 +38,10 @@ import { useWorkMessageStore } from "@/lib/store/work-message";
 
 import { ChatMarkdown } from "./chat-markdown";
 import { ClosingCard } from "./closing-card";
+import { InterceptCard } from "./intercept-card";
+import { ForkCard } from "./fork-card";
+import { BalanceReminderCard } from "./balance-reminder-card";
+import { InterviewQuotaChip } from "./interview-quota-chip";
 import { QuestionCard } from "./question-card";
 import { QuoteCard } from "./quote-card";
 import { WorkMessage } from "./work-message";
@@ -161,6 +169,46 @@ export function CommandArea({
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
   // 重连失效驱动增量水合，live 事件只承载在途增量
   useConversation(projectId);
+  // 五问额度读面（#538 访谈①）：「已答 N/5 问」chip 数据源——服务端单源不自算；
+  // 挂 conversation 域，轮收口（run-finish）失效即刷新（收口观测＝额度面变化点）
+  const interviewQuota = useInterviewQuota(projectId);
+  // 首建派发门读面（#542 访谈②）：岔路口三选卡呈现条件（服务端单源——自然收口
+  // 置卡、点火隐藏都在服务端，本读面挂载即查）；确认按钮读面同源（PRD 文档面消费）
+  const buildGate = useBuildGate(projectId);
+  // 待决试用拦截卡读面（#533 计费②门②，卡可回）：重载/回访重建——live 经
+  // SSE 桥直写 store，本读面只补「刷新时事件不在场」的缺口（同形载荷同步同口）
+  const pendingIntercept = usePendingIntercept(projectId);
+  const interceptCard = pendingIntercept.data;
+  useEffect(() => {
+    if (!interceptCard?.interceptId) return;
+    useChatStore.getState().noteIntercept(projectId, {
+      interceptId: interceptCard.interceptId,
+      lane: interceptCard.lane ?? "",
+      prompt: interceptCard.prompt ?? "",
+      sourceSelected: interceptCard.sourceSelected === true,
+      deductionSource: interceptCard.deductionSource ?? undefined,
+      sourcePoolBalance: interceptCard.sourcePoolBalance ?? undefined,
+      runId: interceptCard.runId ?? undefined,
+    }, `ic-${interceptCard.interceptId}`);
+  }, [projectId, interceptCard]);
+  // 待决余额提醒卡读面（#537 计费③段间硬门，卡可回）：live 经 SSE 桥直写
+  // store，本读面补重载缺口；读面 null＝充值回正已放行（卡随熄灭，本面移除）
+  const pendingBalanceReminder = usePendingBalanceReminder(projectId);
+  const balanceReminderCard = pendingBalanceReminder.data;
+  useEffect(() => {
+    if (balanceReminderCard) {
+      useChatStore.getState().noteBalanceReminder(projectId, {
+        holdId: balanceReminderCard.holdId ?? undefined,
+        lane: balanceReminderCard.lane ?? undefined,
+        prompt: balanceReminderCard.prompt ?? undefined,
+        designItem: balanceReminderCard.designItem ?? undefined,
+        sourcePoolBalance: balanceReminderCard.sourcePoolBalance ?? undefined,
+        runId: balanceReminderCard.runId ?? undefined,
+      }, `br-${balanceReminderCard.holdId ?? balanceReminderCard.runId ?? "pending"}`);
+    } else if (pendingBalanceReminder.isSuccess) {
+      useChatStore.getState().dismissBalanceReminder(projectId);
+    }
+  }, [projectId, balanceReminderCard, pendingBalanceReminder.isSuccess]);
 
   const [input, setInput] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
@@ -271,6 +319,8 @@ export function CommandArea({
         }
       >
         <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[track][stage]}</p>
+        {/* 五问进度（#538 访谈①）：仅访谈期呈现，chip 自决非访谈期不渲染 */}
+        {stage === "interview" ? <InterviewQuotaChip quota={interviewQuota.data} /> : null}
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
@@ -280,6 +330,13 @@ export function CommandArea({
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
+                  // 「第 N 问」序号（#538/#549）：仅试用访谈期（额度读面在场）
+                  // 渲染——PRD 后/付费翻转后的追问无承诺题量，不标号（同 chip 进退）
+                  ordinal={
+                    stage === "interview" && interviewQuota.data
+                      ? message.ordinal
+                      : undefined
+                  }
                   interactive={message === pending}
                   selection={selection}
                   onSelectionChange={setSelection}
@@ -312,6 +369,15 @@ export function CommandArea({
         data-frame={staged ? "composer-card" : undefined}
         className={staged ? "shrink-0 rounded-2xl border border-slate-soft/80 bg-white p-3 shadow-e1" : "shrink-0 p-3"}
       >
+        {/* 岔路口三选卡（#542 访谈②＋#544 引导流）：试用态自然收口后的首建点火
+            卡——持久可回（呈现条件服务端单源，关页回来卡仍在）；「立即生成」即
+            点火，点火后随读面隐藏；forkSettleDue＝到账自动翻转信号（他处到账后
+            卡回读即 settle，无需重走选择）。钉在输入框上方＝当前状态位（不随对
+            话流上滚） */}
+        {buildGate.data?.forkCardPending && !disabled ? (
+          <ForkCard projectId={projectId} onSeePrd={onSeePrd}
+            autoSettle={buildGate.data?.forkSettleDue ?? false} />
+        ) : null}
         {!staged && prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button
@@ -430,6 +496,23 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
     return (
       <div className="flex w-full justify-start">
         <QuoteCard orderId={message.orderId} event={message.event} onSeeOrder={onSeeOrder} />
+      </div>
+    );
+  }
+  if (message.kind === "intercept") {
+    // 试用拦截卡（#533 计费②门②）：被拦输入留存卡——确认扣减翻转并恢复受理
+    return (
+      <div className="flex w-full justify-start">
+        <InterceptCard projectId={projectId} message={message} />
+      </div>
+    );
+  }
+  if (message.kind === "balance-reminder") {
+    // 余额提醒卡（#537 计费③段间硬门）：欠费暂停卡——显负额＋充值引导（到账
+    // 自动放行，无确认动作）
+    return (
+      <div className="flex w-full justify-start">
+        <BalanceReminderCard projectId={projectId} message={message} />
       </div>
     );
   }

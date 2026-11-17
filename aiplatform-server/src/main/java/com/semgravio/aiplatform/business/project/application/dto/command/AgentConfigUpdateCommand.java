@@ -94,6 +94,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          自决开〔默认——#435 自决化落地态〕；false＝自决关闭——
  *                          执行体生成过程中不自发委派 verify 子智能体〔提示层收窄〕，
  *                          平台驱动验证腿不受影响。仅 run 执行体行消费）
+ * @param robustLintBlockingEnabled 基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半
+ *                          让路的回滚保险；缺省 false/null＝让路〔默认——强制档违规
+ *                          收口照扫只随收尾卡标注，不喂修轮、不触发失败链〕；true＝
+ *                          恢复 #425 原阻断形态〔强制档喂修轮＋修不完结构性拒绝〕。
+ *                          仅 run 执行体行消费）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -184,5 +189,11 @@ public record AgentConfigUpdateCommand(
                 + "执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——"
                 + "提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿（三闸回执／"
                 + "整轨终验编排）不受影响。仅 run 执行体行消费）")
-        Boolean verifySelfDecisionEnabled) {
+        Boolean verifySelfDecisionEnabled,
+        @Schema(description = "基座 lint 强制档阻断开关（#541；缺省 false＝让路〔默认〕——"
+                + "强制档违规（裸客户端直用）收口照扫、只随收尾卡标注，不喂修轮、不触发"
+                + "失败链、不间接升档，修轮触发面收窄至样式合规；true＝恢复原阻断形态"
+                + "（强制档喂修轮修一轮＋修不完收口被拒——回滚保险，未来再收紧不发版）。"
+                + "仅 run 执行体行消费）")
+        Boolean robustLintBlockingEnabled) {
 }

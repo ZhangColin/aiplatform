@@ -15,13 +15,16 @@ import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 import { FileDownloadButton } from "./file-download";
+import { PrdConfirmGate } from "./prd-confirm-gate";
 
 /**
  * PRD 篇（#20 口径，#79 从文件模式抽出为「文档」范式正文）：markdown 正文 +
  * 修订「已更新」标记 + markSeen 兜底。文档范式（默认挂载）与文件树模式
  * （PRD 选中）共用同一篇。用户面不带角色署名（ADR 0006 方向：一个「它」）。
- * #462 去确认门（ADR-0039）：「确认此版 PRD 并生成 Demo」门组件整段退役——
- * PRD 产出即自动进入生成（首次 savePrd 触发首个构建 run），本组件只读呈现。
+ * #542 付费轨首建 PRD 确认门恢复（ADR-0049——原动作形态回归）：付费状态项目
+ * 首建未派发时文档面带「确认 PRD，开始生成」按钮（呈现条件＝GET /build-gate
+ * prdConfirmable 服务端单源；确认即派发、点击幂等、确认不写版本行）——试用轨
+ * 点火在岔路口三选卡（PRD 照产可看、选择即触发），文档面无按钮。
  */
 export function PrdDoc({
   projectId,
@@ -65,7 +68,6 @@ export function PrdDoc({
                   : "随访谈整理"
                 : "平台正在和你梳理需求；整理好的需求文档会出现在这里，随时可以提意见让它更新。"}
             </p>
-            {/* 去确认门（#462）：无确认动作挂点——PRD 在场即读面，产出即自动进入生成 */}
           </header>
           {prd.data ? (
             <Markdown remarkPlugins={[remarkGfm]} components={prdMarkdownComponents}>
@@ -76,6 +78,10 @@ export function PrdDoc({
               你的想法、确认过的要点和待定的事项，都会写进这份需求文档。
             </p>
           )}
+          {/* 付费轨首建确认门（#542，ADR-0049 原动作形态恢复）：付费态∧PRD 在∧
+              首建未派发——确认即派发首个构建（幂等，失败重试走「继续生成」）；
+              呈现条件归门件内 GET /build-gate 服务端单源 */}
+          <PrdConfirmGate projectId={projectId} variant="doc" />
         </article>
       )}
     </ScrollArea>

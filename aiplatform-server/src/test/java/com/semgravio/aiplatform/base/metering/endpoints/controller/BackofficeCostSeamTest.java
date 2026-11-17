@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.base.metering.endpoints.controller;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Map;
 
@@ -56,6 +57,9 @@ class BackofficeCostSeamTest {
     private static final String PROVIDER = "backoffice-cost";
     private static final String SUBJ_A = "cost-subj-a";
     private static final String SUBJ_B = "cost-subj-b";
+    /** 切片夹具 subjects（#536）：十进制数值串对齐 bil_project_billing.project_id。 */
+    private static final String SUBJ_FLIP = "9305111";
+    private static final String SUBJ_TRIAL = "9305222";
 
     /** 夹具时间锚：T0…T4 逐日，窗口/改价边界都以这些整点切。 */
     private static final Instant T0 = Instant.parse("2026-07-01T00:00:00Z");
@@ -83,10 +87,12 @@ class BackofficeCostSeamTest {
     @AfterEach
     void cleanUsageEvents() {
         // 全局聚合的断言面是全表和数：事件表前后全清（单价行只清本类 provider，
-        // 他类测试的单价夹具不动）；时段规则行同属本类夹具，前后全清
+        // 他类测试的单价夹具不动）；时段规则行同属本类夹具，前后全清；
+        // bil_project_billing 本类自建切片锚夹具，前后全清（弱引用无 FK 直删）
         jdbcTemplate.update("DELETE FROM met_usage_events");
         jdbcTemplate.update("DELETE FROM met_price_entries WHERE provider = ?", PROVIDER);
         jdbcTemplate.update("DELETE FROM met_time_band_rules WHERE provider = ?", PROVIDER);
+        jdbcTemplate.update("DELETE FROM bil_project_billing");
     }
 
     // ---------- 全局总览：跨 subject 聚合＋币种分桶＋byModel/byAgentKind ----------
@@ -355,6 +361,64 @@ class BackofficeCostSeamTest {
                 .andExpect(jsonPath("$.data.items").isEmpty());
     }
 
+    // ---------- 成本观测切片桶（#536）：翻转时间戳对事件时间戳分桶，两桶维度呈现 ----------
+
+    @Test
+    void given_flipped_subject_when_overview_then_acquisition_and_user_fee_buckets()
+            throws Exception {
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-usd",
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
+        // SUBJ_FLIP 翻转于 T2：T1 前桶、T2 恰在锚上（归用户费用——边界归后桶）、T3 后桶；
+        // SUBJ_TRIAL 无计费态行（试用）：全量获客成本桶
+        flipFixture("9305111", T2);
+        report("evt-flip-before", T1, SUBJ_FLIP, "m-usd", Map.of(), 1000);
+        report("evt-flip-at-anchor", T2, SUBJ_FLIP, "m-usd", Map.of(), 500);
+        report("evt-flip-after", T3, SUBJ_FLIP, "m-usd", Map.of(), 1500);
+        report("evt-trial", T1, SUBJ_TRIAL, "m-usd", Map.of(), 2000);
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/costs/overview"), "/api/backoffice/costs/overview", null))
+                .andExpect(status().isOk())
+                // 总量并集＝两桶之和：5000 input、$0.005
+                .andExpect(jsonPath("$.data.total.input").value(5000))
+                .andExpect(jsonPath("$.data.cost.USD").value(0.005))
+                // 获客成本桶＝锚前 1000＋试用 2000＝3000（$0.003）
+                .andExpect(jsonPath("$.data.byBucket", hasSize(2)))
+                .andExpect(jsonPath("$.data.byBucket[0].bucket").value(1))
+                .andExpect(jsonPath("$.data.byBucket[0].bucketName").value("获客成本"))
+                .andExpect(jsonPath("$.data.byBucket[0].tokens.input").value(3000))
+                .andExpect(jsonPath("$.data.byBucket[0].cost.USD").value(0.003))
+                // 用户费用桶＝锚上 500＋锚后 1500＝2000（$0.002）
+                .andExpect(jsonPath("$.data.byBucket[1].bucket").value(2))
+                .andExpect(jsonPath("$.data.byBucket[1].bucketName").value("用户费用"))
+                .andExpect(jsonPath("$.data.byBucket[1].tokens.input").value(2000))
+                .andExpect(jsonPath("$.data.byBucket[1].cost.USD").value(0.002));
+    }
+
+    @Test
+    void given_window_narrowed_before_anchor_when_overview_then_user_fee_bucket_absent()
+            throws Exception {
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-usd",
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
+        flipFixture("9305111", T2);
+        report("evt-before", T1, SUBJ_FLIP, "m-usd", Map.of(), 1000);
+        report("evt-at-anchor", T2, SUBJ_FLIP, "m-usd", Map.of(), 500);
+        report("evt-after", T3, SUBJ_FLIP, "m-usd", Map.of(), 1500);
+
+        // [T0, T2)：锚后事件全在窗外 → 用户费用桶缺席（用量驱动不伪装 0，单桶全获客）
+        String path = "/api/backoffice/costs/overview?from=" + T0 + "&to=" + T2;
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/costs/overview")
+                                .queryParam("from", T0.toString())
+                                .queryParam("to", T2.toString()),
+                        path, null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total.input").value(1000))
+                .andExpect(jsonPath("$.data.byBucket", hasSize(1)))
+                .andExpect(jsonPath("$.data.byBucket[0].bucket").value(1))
+                .andExpect(jsonPath("$.data.byBucket[0].tokens.input").value(1000));
+    }
+
     // ---------- 参数负例：非 ISO-8601 Instant → 404（类型不匹配，框架口径） ----------
 
     @Test
@@ -374,6 +438,16 @@ class BackofficeCostSeamTest {
     }
 
     // ---------- 夹具 ----------
+
+    /** 切片锚夹具（#536）：计费态行直落 bil_project_billing（弱引用无 FK），
+     *  翻转时点取窗口锚以便边界断言精确。 */
+    private void flipFixture(String projectNumericId, Instant flippedAt) {
+        long id = Long.parseLong(projectNumericId);
+        jdbcTemplate.update("INSERT INTO bil_project_billing (id, project_id,"
+                        + " deduction_source, flipped_at, flip_gate)"
+                        + " VALUES (?, ?, 2, ?, 2)",
+                id, id, Timestamp.from(flippedAt));
+    }
 
     private void report(String eventId, Instant ts, String subject, String model,
                         Map<String, String> dims, long inputTokens) {

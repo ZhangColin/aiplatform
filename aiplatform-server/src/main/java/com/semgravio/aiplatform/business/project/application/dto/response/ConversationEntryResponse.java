@@ -39,7 +39,8 @@ public record ConversationEntryResponse(
                 + "engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的"
                 + "待确认工具最小面）、data.questions=[{header,question,multiple,custom,"
                 + "options[{label}],recommended?}]（问答卡投影，custom 恒 true 可自由输入；"
-                + "recommended 可缺省＝推荐答案 #459，命中 options 才携带）。"
+                + "recommended 可缺省＝推荐答案 #459，命中 options 才携带）；"
+                + "data.questionOrdinal＝「第 N 问」序号（平台注入，见顶层 questionOrdinal）。"
                 + "answered=false 即挂起待答，据此可重建可作答",
                 example = "{\"runId\":\"r-01\",\"sessionId\":\"s-01\",\"engine\":\"agentscope\","
                         + "\"summary\":\"目标用户是谁？\",\"engineRef\":\"req-77\","
@@ -47,8 +48,14 @@ public record ConversationEntryResponse(
                         + "\"input\":{\"question\":\"目标用户是谁？\",\"header\":\"目标用户\"}}],"
                         + "\"questions\":[{\"header\":\"目标用户\",\"question\":\"目标用户是谁？\","
                         + "\"multiple\":false,\"custom\":true,"
-                        + "\"options\":[{\"label\":\"个人开发者\"}]}]}}")
+                        + "\"options\":[{\"label\":\"个人开发者\"}],"
+                        + "\"questionOrdinal\":1}]}}")
         Map<String, Object> question,
+        @Schema(description = "「第 N 问」序号（#538/#549 五问额度呈现面，ADR-0048 服务端"
+                + "单源）：kind=3 question 携带——缺口首次出现序 1..k（同缺口重派复用旧号"
+                + "不跳号，挂起卡也占号），读口按对话史重算（存量行自动有号）；其余 kind "
+                + "为 null。前端仅试用访谈期（额度读面在场）渲染问答卡序号徽标")
+        Integer questionOrdinal,
         @Schema(description = "收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish "
                 + "收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝"
                 + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
@@ -97,9 +104,10 @@ public record ConversationEntryResponse(
         LocalDateTime at) {
 
     /** 实体 → 读面（kind 出 Integer code + kindName 中文名；sessionSource 可空
-     *  ——设计会话收尾卡才携带，null＝主会话缺省，判定归读口单点）。 */
+     *  ——设计会话收尾卡才携带，null＝主会话缺省，判定归读口单点；questionOrdinal
+     *  仅问答卡携带——「第 N 问」序号，读口重算）。 */
     public static ConversationEntryResponse of(ConversationEntry entry,
-            ConversationSessionSource sessionSource) {
+            ConversationSessionSource sessionSource, Integer questionOrdinal) {
         return new ConversationEntryResponse(
                 entry.getId(),
                 entry.getKind().getCode(),
@@ -109,6 +117,7 @@ public record ConversationEntryResponse(
                 entry.getRunId(),
                 entry.getText(),
                 entry.getQuestion(),
+                questionOrdinal,
                 entry.getClosing(),
                 entry.getAttachments(),
                 entry.getQuote(),

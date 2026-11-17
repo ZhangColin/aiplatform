@@ -57,11 +57,11 @@ public class BackofficeAgentConfigAppService {
 
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
      * ＋路由结构性信号两开关关〔#454 缺省〕＋收口三闸关〔#435 翻转缺省〕＋单会话
-     * 开＋并行关＋决策时注入开」）。 */
+     * 开＋并行关＋决策时注入开＋基座 lint 阻断关〔#541 让路缺省〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null, null);
+                    null, null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -133,6 +133,11 @@ public class BackofficeAgentConfigAppService {
                 requireValidHintDisabledKinds(safe.decisionHintDisabled()),
                 // #442 缺省口径：verify 自决开关 null＝开（维持 #435 自决化现状）
                 safe.verifySelfDecisionEnabled() == null || safe.verifySelfDecisionEnabled(),
+                // #541 缺省口径：基座 lint 强制档阻断 null＝关（让路形态——违规只标注）
+                safe.robustLintBlockingEnabled() != null && safe.robustLintBlockingEnabled(),
+                // #545 构建轨出图开关不在全量 PUT 命令面（无新 DTO 字段）：携现行值
+                // 不重置——写口唯一＝窄幅工具开关 toggleTool
+                current.generateImageEnabled(),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
@@ -160,8 +165,10 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 工具面开关写口（#252，PUT /agent-tools/{toolName}）：按工具注册名窄幅开关——
-     * 仅增强工具（web_search/fetch_url，挂 {@link AgentProfile#MAIN main} 行开关列，
-     * 与配置全量写共表共留痕机制）；骨架工具与 harness 内建编码工具结构性锁死
+     * 增强工具三件：web_search/fetch_url（挂 {@link AgentProfile#MAIN main} 行）＋
+     * generate_image 构建轨（#545，挂 {@link AgentProfile#EXECUTOR executor} 行
+     * generate_image_enabled——与 designer 槽同名骨架件并存，按增强件解析不被遮蔽），
+     * 均与配置全量写共表共留痕机制；骨架工具与 harness 内建编码工具结构性锁死
      * （接口层拒绝）。写语义与全量写同构：只动目标开关列、其余值面原样携带，值面
      * 有动才落痕（幂等回执零写入）。
      *
@@ -176,7 +183,9 @@ public class BackofficeAgentConfigAppService {
         if (enabled == null) {
             throw new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_TARGET_REQUIRED);
         }
-        AgentTool tool = AgentTool.byName(toolName)
+        // #545 同名两词条（generate_image：designer 骨架＋executor 增强）——窄幅写口
+        // 解析增强件，骨架同名件不遮蔽开关
+        AgentTool tool = AgentTool.enhancementByName(toolName)
                 .orElseThrow(() -> harnessBuiltinOrNotFound(toolName));
         if (tool.kind() != AgentToolKind.ENHANCEMENT) {
             throw new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_FORBIDDEN);
@@ -197,7 +206,9 @@ public class BackofficeAgentConfigAppService {
                 current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
                 current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
-                current.verifySelfDecisionEnabled(),
+                current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
+                tool == AgentTool.GENERATE_IMAGE_BUILD ? enabled
+                        : current.generateImageEnabled(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -241,7 +252,7 @@ public class BackofficeAgentConfigAppService {
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelId()),
                 true, true, true, null, null, null, false, false, null, null, null, true, true, true,
-                true, false, true, null, null, null, true,
+                true, false, true, null, null, null, true, false, true,
                 operator.id(), operator.name(), null);
         requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
@@ -305,7 +316,8 @@ public class BackofficeAgentConfigAppService {
                 current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
                 current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
-                current.verifySelfDecisionEnabled(),
+                current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
+                current.generateImageEnabled(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(),
@@ -317,7 +329,8 @@ public class BackofficeAgentConfigAppService {
                 next.singleSessionGenerationEnabled(), next.parallelSliceMachineEnabled(),
                 next.decisionHintsEnabled(), next.decisionHintErrorStreak(),
                 next.decisionHintStackCap(), next.decisionHintDisabled(),
-                next.verifySelfDecisionEnabled(),
+                next.verifySelfDecisionEnabled(), next.robustLintBlockingEnabled(),
+                next.generateImageEnabled(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -353,7 +366,9 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.decisionHintErrorStreak(), next.decisionHintErrorStreak())
                 || !Objects.equals(current.decisionHintStackCap(), next.decisionHintStackCap())
                 || !Objects.equals(current.decisionHintDisabled(), next.decisionHintDisabled())
-                || current.verifySelfDecisionEnabled() != next.verifySelfDecisionEnabled();
+                || current.verifySelfDecisionEnabled() != next.verifySelfDecisionEnabled()
+                || current.robustLintBlockingEnabled() != next.robustLintBlockingEnabled()
+                || current.generateImageEnabled() != next.generateImageEnabled();
     }
 
     /**

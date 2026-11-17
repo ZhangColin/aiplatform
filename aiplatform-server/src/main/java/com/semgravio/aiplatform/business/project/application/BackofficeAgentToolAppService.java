@@ -56,22 +56,28 @@ public class BackofficeAgentToolAppService {
     @Transactional(readOnly = true)
     public List<BackofficeAgentToolSlotResponse> inventory() {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        // #545 executor 槽有可关增强件（generate_image 构建轨）：挂载态读 gi 开关
+        AgentConfigAppService.EffectiveConfig executor =
+                agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         return List.of(
-                slotOf("main", AgentProfile.MAIN.getName(), main),
-                slotOf("executor", AgentProfile.EXECUTOR.getName(), null),
+                slotOf("main", AgentProfile.MAIN.getName(), main, false),
+                slotOf("executor", AgentProfile.EXECUTOR.getName(), executor, true),
                 designerSlot(),
                 subagentSlot());
     }
 
-    /** 平台智能体槽位：枚举平台资产（增强按生效开关标挂载态）＋harness 内建（executor）。 */
+    /**
+     * 平台智能体槽位：枚举平台资产（增强按生效开关标挂载态）＋harness 内建（executor
+     * 编码件——{@code includeCodingBuiltins}）。
+     */
     private static BackofficeAgentToolSlotResponse slotOf(String slot, String slotName,
-            AgentConfigAppService.EffectiveConfig toggles) {
+            AgentConfigAppService.EffectiveConfig toggles, boolean includeCodingBuiltins) {
         List<BackofficeAgentToolResponse> tools = new ArrayList<>();
         for (AgentTool tool : AgentTool.ofSlot(slot)) {
             tools.add(BackofficeAgentToolResponse.of(tool.toolName(), tool.kind(),
                     mounted(tool, toggles), tool.description()));
         }
-        if (toggles == null) { // executor 槽：harness 内建编码工具呈现口径（main 只读面结构性无）
+        if (includeCodingBuiltins) { // executor 槽：harness 内建编码工具呈现口径（main 只读面结构性无）
             for (HarnessBuiltinTools.BuiltinTool builtin : HarnessBuiltinTools.codingTools()) {
                 tools.add(BackofficeAgentToolResponse.of(builtin.name(),
                         AgentToolKind.HARNESS_BUILTIN, true, builtin.description()));
@@ -129,6 +135,10 @@ public class BackofficeAgentToolAppService {
     private static boolean mounted(AgentTool tool, AgentConfigAppService.EffectiveConfig toggles) {
         if (tool.kind() != AgentToolKind.ENHANCEMENT || toggles == null) {
             return true;
+        }
+        // #545 构建轨出图件读 gi 开关（executor 槽）；余两件归 main 槽 ws/fu
+        if (tool == AgentTool.GENERATE_IMAGE_BUILD) {
+            return toggles.generateImageEnabled();
         }
         return tool == AgentTool.WEB_SEARCH ? toggles.webSearchEnabled()
                 : toggles.fetchUrlEnabled();

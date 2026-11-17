@@ -24,6 +24,7 @@ import com.semgravio.aiplatform.base.agentscope.LandedFileFacts;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
+import com.semgravio.aiplatform.business.project.domain.model.ImageAssetLane;
 
 /**
  * {@link GenerateImageTool}：出图工具件的输入面与回执面（#288 内核，纯 JUnit——
@@ -49,9 +50,10 @@ class GenerateImageToolTest {
 
         @Override
         public ImageGenerationOutcome generate(String workspaceId, String runId,
-                String sessionId, String prompt, int count, String size, String name) {
+                String sessionId, String prompt, int count, String size, String name,
+                ImageAssetLane lane) {
             calls.add(workspaceId + "|" + runId + "|" + sessionId + "|" + prompt
-                    + "|" + count + "|" + size + "|" + name);
+                    + "|" + count + "|" + size + "|" + name + "|" + lane);
             return next;
         }
     }
@@ -61,7 +63,7 @@ class GenerateImageToolTest {
         final List<String> materializations = new ArrayList<>();
 
         RecordingSpecService() {
-            super(null, null);
+            super(null, null, null);
         }
 
         @Override
@@ -74,7 +76,7 @@ class GenerateImageToolTest {
     private final RecordingService service = new RecordingService();
     private final RecordingSpecService specService = new RecordingSpecService();
     private final LandedFileFacts landedFiles = new LandedFileFacts();
-    private final GenerateImageTool tool = new GenerateImageTool("77", service, landedFiles,
+    private final GenerateImageTool tool = GenerateImageTool.forDesign("77", service, landedFiles,
             specService);
 
     @Test
@@ -83,6 +85,12 @@ class GenerateImageToolTest {
         assertThat(tool.getParameters()).containsKeys("type", "properties", "required");
         assertThat(String.valueOf(tool.getParameters().get("required"))).contains("prompt");
         assertThat(tool.isReadOnly()).isFalse(); // 写工作区（design/ 落盘）
+        // #545 双轨回归：设计轨 schema 六参（palette/style 物化通道在）、文案保持
+        // 设计稿语义（配色）——不被构建轨四参/配图文案连带改写
+        Map<String, Object> properties = castProperties(tool.getParameters().get("properties"));
+        assertThat(properties).containsOnlyKeys("prompt", "count", "size", "name",
+                "palette", "style");
+        assertThat(String.valueOf(properties.get("prompt"))).contains("配色");
     }
 
     @Test
@@ -105,7 +113,7 @@ class GenerateImageToolTest {
         assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
         // 血统腿：工作区（构造态）＋ run/会话（每调用提取）＋ 参数面全透传
         assertThat(service.calls).containsExactly(
-                "77|run-5|designer-9|夏日饮品海报|3|1024x1024|hero-方案A");
+                "77|run-5|designer-9|夏日饮品海报|3|1024x1024|hero-方案A|DESIGN");
         // 回执＝落盘路径＋字节（供应商 URL 不透出——ADR-0027 转存口径）
         assertThat(textOf(result)).contains("design/123-hero.png").contains("2048");
         assertThat(textOf(result)).doesNotContain("https://");
@@ -116,7 +124,7 @@ class GenerateImageToolTest {
         ToolResultBlock result = tool.callAsync(call(Map.of("prompt", "logo"), null, null)).block();
 
         assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
-        assertThat(service.calls).containsExactly("77|null|null|logo|1|null|null");
+        assertThat(service.calls).containsExactly("77|null|null|logo|1|null|null|DESIGN");
     }
 
     @Test
@@ -192,11 +200,12 @@ class GenerateImageToolTest {
         RecordingService throwing = new RecordingService() {
             @Override
             public ImageGenerationOutcome generate(String workspaceId, String runId,
-                    String sessionId, String prompt, int count, String size, String name) {
+                    String sessionId, String prompt, int count, String size, String name,
+                    ImageAssetLane lane) {
                 throw new IllegalStateException("图片生成供应商未配置，暂时无法出图");
             }
         };
-        GenerateImageTool tool = new GenerateImageTool("77", throwing, new LandedFileFacts(),
+        GenerateImageTool tool = GenerateImageTool.forDesign("77", throwing, new LandedFileFacts(),
                 new RecordingSpecService());
 
         ToolResultBlock result = tool.callAsync(call(Map.of("prompt", "p"), null, null)).block();
@@ -239,6 +248,71 @@ class GenerateImageToolTest {
         tool.callAsync(call(mapOf("prompt", "p", "style", "极简"), "run-10", "designer-1"))
                 .block();
         assertThat(specService.materializations).isEmpty();
+    }
+
+    // ---------- #545 构建轨形态（run 执行体演示配图：public/ 落点、无设计参数物化） ----------
+
+    @Test
+    void given_build_track_when_inspected_then_demo_image_contract_without_design_params() {
+        GenerateImageTool buildTool = GenerateImageTool.forBuild("88", service, new LandedFileFacts());
+
+        assertThat(buildTool.getName()).isEqualTo("generate_image");
+        assertThat(buildTool.isReadOnly()).isFalse();
+        // 构建轨 schema 只留画面四参（prompt/count/size/name）——palette/style 是设计轨
+        // 的设计意图物化通道（spec.json 草稿），构建轨规范正本是 DESIGN.md，不发此面
+        Map<String, Object> properties = castProperties(buildTool.getParameters().get("properties"));
+        assertThat(properties).containsOnlyKeys("prompt", "count", "size", "name");
+        // 构建向描述：演示配图用途＋public/ 落点＋根路径引用，模型据此知道图往哪用
+        assertThat(String.valueOf(buildTool.getDescription()))
+                .contains("public/")
+                .contains("演示")
+                .doesNotContain("spec.json");
+    }
+
+    @Test
+    void given_build_track_when_called_then_kernel_invoked_with_build_lane_and_public_result() {
+        RecordingService buildService = new RecordingService();
+        buildService.next = new ImageGenerationOutcome.Generated("zhipu", "cogview-4-250304",
+                List.of(new ImageGenerationOutcome.LandedImage("public/55-hero.png", 8192)),
+                List.of());
+        LandedFileFacts buildLanded = new LandedFileFacts();
+        RecordingSpecService buildSpecs = new RecordingSpecService();
+        GenerateImageTool buildTool = GenerateImageTool.forBuild("88", buildService, buildLanded);
+
+        ToolResultBlock result = buildTool.callAsync(
+                call(Map.of("prompt", "首屏 hero 城市夜景", "name", "hero"),
+                        "run-31", "coder-31")).block();
+
+        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
+        // 内核按构建轨调用：落 public/、计量归 executor 桶（内核测试钉落点与 dims）
+        assertThat(buildService.calls).containsExactly(
+                "88|run-31|coder-31|首屏 hero 城市夜景|1|null|hero|BUILD");
+        assertThat(textOf(result)).contains("public/55-hero.png").contains("8192");
+        assertThat(textOf(result)).doesNotContain("https://");
+        // 落盘事实照常进变更流（构建轨收口卡/文件变更看得见配图），锚定 /public
+        assertThat(buildLanded.drain("run-31")).containsExactly(
+                new FileChange("/public/55-hero.png", 1, 0));
+        // 构建轨结构性无设计规范服务——即便输入私夹 palette/style 也不触物化
+        buildTool.callAsync(call(mapOf("prompt", "p", "palette", List.of("#fff"),
+                "style", "x"), "run-32", "coder-32")).block();
+        assertThat(buildSpecs.materializations).isEmpty();
+    }
+
+    @Test
+    void given_build_track_blank_prompt_or_bad_count_when_called_then_error_without_kernel_call() {
+        RecordingService buildService = new RecordingService();
+        GenerateImageTool buildTool = GenerateImageTool.forBuild("88", buildService, landedFiles);
+
+        assertThat(buildTool.callAsync(call(Map.of("count", 0), null, null)).block().getState())
+                .isEqualTo(ToolResultState.ERROR);
+        assertThat(buildTool.callAsync(call(Map.of("prompt", "  "), null, null)).block().getState())
+                .isEqualTo(ToolResultState.ERROR);
+        assertThat(buildService.calls).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castProperties(Object properties) {
+        return (Map<String, Object>) properties;
     }
 
     // ---------- 替身与参数构造 ----------

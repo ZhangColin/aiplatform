@@ -65,6 +65,10 @@ vi.mock("@/hooks/use-prd", () => ({
   usePrdVersions: () => ({ data: seed.prdVersions }),
 }));
 
+vi.mock("@/hooks/use-build-gate", () => ({
+  useBuildGate: () => ({ data: null }),
+  useConfirmPrdGeneration: () => ({ mutate: () => {}, isPending: false }),
+}));
 vi.mock("@/lib/sse/agent-event-channel", () => ({ useAgentEventChannel: () => ({}) }));
 vi.mock("@/lib/sse/provider", () => ({ useSseStatus: () => "connected" }));
 

@@ -25,6 +25,7 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.model.ImageAssetLane;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -98,7 +99,7 @@ class ImageGenerationSmokeTest {
 
         ImageGenerationOutcome outcome = imageGeneration.generate(workspaceId, null,
                 SMOKE_SESSION, "一张极简风格的品牌插画：米色背景上一枚绿色圆环，扁平风格，无文字", 1,
-                null, "冒烟-圆环");
+                null, "冒烟-圆环", ImageAssetLane.DESIGN);
 
         assertThat(outcome).as("真供应商应出图成功（失败即真跑失败，不粉饰）")
                 .isInstanceOf(ImageGenerationOutcome.Generated.class);

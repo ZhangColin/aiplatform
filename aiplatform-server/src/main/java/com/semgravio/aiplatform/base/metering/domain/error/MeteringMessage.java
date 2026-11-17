@@ -37,7 +37,11 @@ public enum MeteringMessage implements CodeMessage {
 
     TIME_BAND_RULE_NOT_FOUND(404, "METER_015", "时段规则行不存在"),
 
-    TIME_BAND_RULE_NOT_CURRENT(409, "METER_016", "时段规则行非当前行（已关行不可改或停用）");
+    TIME_BAND_RULE_NOT_CURRENT(409, "METER_016", "时段规则行非当前行（已关行不可改或停用）"),
+
+    USAGE_UNITS_NEGATIVE(400, "METER_017", "用量件数不能为负数"),
+
+    PIECE_PRICE_KIND_INVALID(400, "METER_018", "固定单价查询只支持计件档（按张/按件）");
 
     // 时段规则同通道生效区间重叠沿用 METER_008（#497 对称单价表口径，码位不另立）
 

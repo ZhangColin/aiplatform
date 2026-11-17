@@ -517,4 +517,72 @@ class DockerExecFilesystemTest {
         assertThat(exec.commands).containsExactly("grep -E \"\\.env\" f");
         assertThat(resp.exitCode()).isEqualTo(0);
     }
+
+    // ---------- 基座件不改约写保护（#541，ADR-0051：预置件路径清单——执行体不得写） ----------
+
+    @Test
+    void given_preset_dir_write_when_any_write_face_then_rejected_without_exec() {
+        // #541 基座件不改约：预置件目录（健壮件＋模式件，清单正本＝
+        // WorkspaceLayout.BASELINE_PRESET_DIRS）下的写动作全拒——write（新建）/put
+        // （edit 回写与 upload）/delete/move（两端任一在清单内）都 fail 结果＋
+        // 三通道指引（对偶 #440 ①族守卫的模型可见拒因），平台侧拒绝、容器从未执行
+        WriteResult write = fs.write(RuntimeContext.empty(),
+                "/src/components/patterns/NewThing.tsx", "x");
+        assertThat(write.isSuccess()).isFalse();
+        assertThat(write.error()).contains("基座件不改约").contains("三通道");
+
+        var uploads = fs.uploadFiles(RuntimeContext.empty(),
+                List.of(Map.entry("/src/lib/robust/session.ts", "x".getBytes())));
+        assertThat(uploads.get(0).isSuccess()).isFalse();
+        assertThat(uploads.get(0).error()).contains("基座件不改约");
+
+        WriteResult delete = fs.delete(RuntimeContext.empty(),
+                "/src/lib/robust/data-access.ts");
+        assertThat(delete.isSuccess()).isFalse();
+        assertThat(delete.error()).contains("基座件不改约");
+
+        // move 两端任一属预置件目录即拒（搬出＝删除预置件；搬入＝污染件目录）
+        WriteResult moveOut = fs.move(RuntimeContext.empty(),
+                "/src/components/robust/ErrorBoundary.tsx", "/src/components/ErrorBoundary.tsx");
+        assertThat(moveOut.isSuccess()).isFalse();
+        assertThat(moveOut.error()).contains("基座件不改约");
+        WriteResult moveIn = fs.move(RuntimeContext.empty(),
+                "/src/components/Card.tsx", "/src/components/patterns/Card.tsx");
+        assertThat(moveIn.isSuccess()).isFalse();
+
+        // 平台侧拒绝＝零容器命令（文件面任何 exec 都不该发生）
+        assertThat(exec.commands).isEmpty();
+    }
+
+    @Test
+    void given_preset_file_edit_when_read_ok_then_write_rejected() {
+        // edit 链路：read 照常（读面不拦——件可读可学），回写被守卫拒绝
+        exec.responder = c -> ok("const jar = await cookies();");
+
+        EditResult result = fs.edit(RuntimeContext.empty(),
+                "/src/lib/robust/session.ts", "cookies()", "x()", false);
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.error()).contains("基座件不改约");
+        // 读命令到容器、写命令没到（守卫在写缝拦）
+        assertThat(exec.ran("cat '/workspace/src/lib/robust/session.ts'")).isTrue();
+        assertThat(exec.ran("cat > '/workspace/src/lib/robust/session.ts'")).isFalse();
+    }
+
+    @Test
+    void given_prefix_adjacent_paths_when_write_then_not_blocked() {
+        // 路径段边界精确匹配：前缀相似但不属预置件目录的路径不误拦（新件照常写）
+        exec.responder = c -> ok("");
+
+        WriteResult adjacent = fs.write(RuntimeContext.empty(),
+                "/src/lib/robustish/util.ts", "x");
+        assertThat(adjacent.isSuccess()).isTrue();
+        WriteResult adjacent2 = fs.write(RuntimeContext.empty(),
+                "/src/components/patterns-list/Card.tsx", "x");
+        assertThat(adjacent2.isSuccess()).isTrue();
+        WriteResult normal = fs.write(RuntimeContext.empty(), "/src/lib/util.ts", "x");
+        assertThat(normal.isSuccess()).isTrue();
+
+        assertThat(exec.commands).hasSize(3);
+    }
 }

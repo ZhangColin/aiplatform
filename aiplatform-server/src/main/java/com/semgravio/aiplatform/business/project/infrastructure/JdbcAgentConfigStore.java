@@ -33,6 +33,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    single_session_generation_enabled, parallel_slice_machine_enabled,
                    decision_hints_enabled, decision_hint_error_streak, decision_hint_stack_cap,
                    decision_hint_disabled, verify_self_decision_enabled,
+                   robust_lint_blocking_enabled, generate_image_enabled,
                    operator_id, operator_name, updated_at
             FROM prj_agent_configs WHERE agent_key = ?
             """;
@@ -49,8 +50,9 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                  single_session_generation_enabled, parallel_slice_machine_enabled,
                  decision_hints_enabled, decision_hint_error_streak, decision_hint_stack_cap,
                  decision_hint_disabled, verify_self_decision_enabled,
+                 robust_lint_blocking_enabled, generate_image_enabled,
                  operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (agent_key) DO UPDATE SET
                 system_prompt = EXCLUDED.system_prompt,
                 model_id = EXCLUDED.model_id,
@@ -75,6 +77,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 decision_hint_stack_cap = EXCLUDED.decision_hint_stack_cap,
                 decision_hint_disabled = EXCLUDED.decision_hint_disabled,
                 verify_self_decision_enabled = EXCLUDED.verify_self_decision_enabled,
+                robust_lint_blocking_enabled = EXCLUDED.robust_lint_blocking_enabled,
+                generate_image_enabled = EXCLUDED.generate_image_enabled,
                 operator_id = EXCLUDED.operator_id,
                 operator_name = EXCLUDED.operator_name,
                 updated_at = CURRENT_TIMESTAMP
@@ -92,7 +96,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                  old_single_session_generation_enabled, old_parallel_slice_machine_enabled,
                  old_decision_hints_enabled, old_decision_hint_error_streak,
                  old_decision_hint_stack_cap, old_decision_hint_disabled,
-                 old_verify_self_decision_enabled,
+                 old_verify_self_decision_enabled, old_robust_lint_blocking_enabled,
+                 old_generate_image_enabled,
                  new_system_prompt, new_model_id, new_web_search_enabled,
                  new_fetch_url_enabled, new_routing_enabled, new_routing_strong_model_id,
                  new_routing_file_count_threshold, new_routing_escalating_size_labels,
@@ -103,10 +108,12 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                  new_single_session_generation_enabled, new_parallel_slice_machine_enabled,
                  new_decision_hints_enabled, new_decision_hint_error_streak,
                  new_decision_hint_stack_cap, new_decision_hint_disabled,
-                 new_verify_self_decision_enabled,
+                 new_verify_self_decision_enabled, new_robust_lint_blocking_enabled,
+                 new_generate_image_enabled,
                  operator_id, operator_name)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?)
             """;
 
     /** 倒序最近先（id 陪排——同秒多痕不乱序）。 */
@@ -121,7 +128,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    old_single_session_generation_enabled, old_parallel_slice_machine_enabled,
                    old_decision_hints_enabled, old_decision_hint_error_streak,
                    old_decision_hint_stack_cap, old_decision_hint_disabled,
-                   old_verify_self_decision_enabled,
+                   old_verify_self_decision_enabled, old_robust_lint_blocking_enabled,
+                   old_generate_image_enabled,
                    new_system_prompt, new_model_id,
                    new_web_search_enabled, new_fetch_url_enabled, new_routing_enabled,
                    new_routing_strong_model_id, new_routing_file_count_threshold,
@@ -133,7 +141,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    new_single_session_generation_enabled, new_parallel_slice_machine_enabled,
                    new_decision_hints_enabled, new_decision_hint_error_streak,
                    new_decision_hint_stack_cap, new_decision_hint_disabled,
-                   new_verify_self_decision_enabled,
+                   new_verify_self_decision_enabled, new_robust_lint_blocking_enabled,
+                   new_generate_image_enabled,
                    operator_id, operator_name,
                    created_at
             FROM prj_agent_config_traces WHERE agent_key = ?
@@ -167,7 +176,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 config.singleSessionGenerationEnabled(), config.parallelSliceMachineEnabled(),
                 config.decisionHintsEnabled(), config.decisionHintErrorStreak(),
                 config.decisionHintStackCap(), config.decisionHintDisabled(),
-                config.verifySelfDecisionEnabled(),
+                config.verifySelfDecisionEnabled(), config.robustLintBlockingEnabled(),
+                config.generateImageEnabled(),
                 config.operatorId(), config.operatorName());
     }
 
@@ -186,7 +196,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 trace.oldSingleSessionGenerationEnabled(), trace.oldParallelSliceMachineEnabled(),
                 trace.oldDecisionHintsEnabled(), trace.oldDecisionHintErrorStreak(),
                 trace.oldDecisionHintStackCap(), trace.oldDecisionHintDisabled(),
-                trace.oldVerifySelfDecisionEnabled(),
+                trace.oldVerifySelfDecisionEnabled(), trace.oldRobustLintBlockingEnabled(),
+                trace.oldGenerateImageEnabled(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
@@ -199,7 +210,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 trace.newSingleSessionGenerationEnabled(), trace.newParallelSliceMachineEnabled(),
                 trace.newDecisionHintsEnabled(), trace.newDecisionHintErrorStreak(),
                 trace.newDecisionHintStackCap(), trace.newDecisionHintDisabled(),
-                trace.newVerifySelfDecisionEnabled(),
+                trace.newVerifySelfDecisionEnabled(), trace.newRobustLintBlockingEnabled(),
+                trace.newGenerateImageEnabled(),
                 trace.operatorId(), trace.operatorName());
     }
 
@@ -230,6 +242,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 integerOrNull(rs, "decision_hint_stack_cap"),
                 rs.getString("decision_hint_disabled"),
                 rs.getBoolean("verify_self_decision_enabled"),
+                rs.getBoolean("robust_lint_blocking_enabled"),
+                rs.getBoolean("generate_image_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }
@@ -256,6 +270,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 integerOrNull(rs, "old_decision_hint_stack_cap"),
                 rs.getString("old_decision_hint_disabled"),
                 rs.getBoolean("old_verify_self_decision_enabled"),
+                rs.getBoolean("old_robust_lint_blocking_enabled"),
+                rs.getBoolean("old_generate_image_enabled"),
                 rs.getString("new_system_prompt"), rs.getString("new_model_id"),
                 rs.getBoolean("new_web_search_enabled"), rs.getBoolean("new_fetch_url_enabled"),
                 rs.getBoolean("new_routing_enabled"), rs.getString("new_routing_strong_model_id"),
@@ -275,6 +291,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 integerOrNull(rs, "new_decision_hint_stack_cap"),
                 rs.getString("new_decision_hint_disabled"),
                 rs.getBoolean("new_verify_self_decision_enabled"),
+                rs.getBoolean("new_robust_lint_blocking_enabled"),
+                rs.getBoolean("new_generate_image_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 createdAt == null ? null : createdAt.toLocalDateTime());
     }

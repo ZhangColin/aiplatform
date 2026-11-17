@@ -3,10 +3,17 @@ package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.InputStream;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
+
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
 /**
  * 基座模板结构断言·健壮件三层（#421，{@link BaselineNextConfigTest} 同缝扩展）：
@@ -87,6 +94,29 @@ class BaselineRobustKitTemplateTest {
         assertThat(dockerfile)
                 .as("基座层应 install 后跑模板测试（pnpm test 狗粮门）")
                 .contains("pnpm install --store-dir /workspace/.pnpm-store && pnpm test");
+    }
+
+    @Test
+    void given_preset_dir_list_when_inspected_then_every_dir_has_template_files()
+            throws Exception {
+        // #541 基座件不改约的机械清单锚定：WorkspaceLayout.BASELINE_PRESET_DIRS
+        //（写保护判据面，DockerExecFilesystem）的每个目录在基座模板正本都有预置
+        // 件文件——预置目录增减而清单未同步（或反之）即红（写保护拦错面/漏面），
+        // 漂移守卫归本缝单点（告知面正本＝栈规则集，不在本测范围）
+        URL root = BaselineRobustKitTemplateTest.class.getClassLoader()
+                .getResource("docker/workspace/baseline");
+        assertThat(root).as("基座模板根应在 classpath").isNotNull();
+        Path rootDir = Path.of(root.toURI());
+        Set<String> templateFiles = Files.walk(rootDir)
+                .filter(Files::isRegularFile)
+                .map(path -> rootDir.relativize(path).toString().replace('\\', '/'))
+                .collect(Collectors.toSet());
+        for (String dir : WorkspaceLayout.BASELINE_PRESET_DIRS) {
+            assertThat(templateFiles.stream()
+                    .anyMatch(file -> file.startsWith(dir + "/")))
+                    .as("预置件目录 %s 在基座模板应有预置件文件（清单与模板不漂移）", dir)
+                    .isTrue();
+        }
     }
 
     /** classpath 读模板文件字节（在场判定；缺位 null）。 */

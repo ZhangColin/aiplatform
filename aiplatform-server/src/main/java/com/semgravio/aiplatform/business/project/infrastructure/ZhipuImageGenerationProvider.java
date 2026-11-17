@@ -16,8 +16,10 @@ import com.semgravio.aiplatform.business.project.domain.port.ImageProviderResult
  * 单次调用固定一张（无 n 参数）；回图走 {@code data[0].url}（URL 时效 30 天，
  * 平台即时转存）；审核拦截＝HTTP 400＋错误码 1301（响应体不再同步生成结果，
  * 被拦截请求是否计费官方无明文——#288 留档未证实，真 key 冒烟时实测核对）。
- * 模型缺省 {@code glm-image}（0.10 元/张，中文文字第一梯队；cogview-4-250304
- * 0.06 元/张为低价档）。key 落环境变量 ZHIPU_API_KEY（.env.local，不进 git）。
+ * 模型缺省 {@code cogview-4-250304}（#545 快档起步，ADR-0052：0.06 元/张、
+ * 生成快，构建轨演示配图与设计线共用 active 供应商；质量不满运营升档＝单价表
+ * 换行/改 model 键零机制；glm-image 0.10 元/张为中文文字高质量档）。key 落
+ * 环境变量 ZHIPU_API_KEY（.env.local，不进 git）。
  */
 @Adapter(PortType.CLIENT)
 public class ZhipuImageGenerationProvider extends OpenAiShapedImageProviderBase {
@@ -25,7 +27,7 @@ public class ZhipuImageGenerationProvider extends OpenAiShapedImageProviderBase 
     public ZhipuImageGenerationProvider(
             @Value("${app.image-generation.zhipu.base-url:https://open.bigmodel.cn}") String baseUrl,
             @Value("${app.image-generation.zhipu.api-key:}") String apiKey,
-            @Value("${app.image-generation.zhipu.model:glm-image}") String model) {
+            @Value("${app.image-generation.zhipu.model:cogview-4-250304}") String model) {
         super(baseUrl, apiKey, model);
     }
 

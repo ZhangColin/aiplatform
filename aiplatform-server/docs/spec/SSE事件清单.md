@@ -66,10 +66,11 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） `slice`（可缺省） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run / `designer` 设计会话（[#289](https://github.com/ZhangColin/aiplatform/issues/289) 设计执行体——事件封闭集零新增、agent 扩值即达，ADR-0025）；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）、designer 同构直播卡（计划区＝设计物清单、agent 标识区分，呈现归 #290）。**工作消息头部标题扩载（[#118](https://github.com/ZhangColin/aiplatform/issues/118)）**：`slice` = `{ title, index?, total? }`——`title` 为用户语言标题（生成轨道 = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、终验 run = 「系统整体验证」（#427——生成轨道末与更新 run 收口后的轨道级验证）、设计轨道 = 设计物标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based 序号与总数，头部呈现「{title}（{index}/{total}）」如「商品浏览（2/5)」）；阶段 0 与更新 run 只携 `title`（无进度）；主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。**一场 run 恰一次**（[#84](https://github.com/ZhangColin/aiplatform/issues/84) 静默重试：编码 run 重试不新发——用户面 run 身份 = 首试 runId 全程不变，重试尝试的内部 runId 不出用户面） |
 | `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口对话轮，如实呈现重提即兜底）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
 | `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡。**定稿收尾卡（[#291](https://github.com/ZhangColin/aiplatform/issues/291)）经平台侧直接发射本事件**（无前置 run-start、无过程事件——定稿是用户显式动作收口、非智能体 run）：runId ＝ 定稿锚（成版 commit 的 Run-Id trailer 对偶锚定本卡）、sessionId ＝ 该件设计会话标识、closing 携 version（成版锚）与 drafts 单条（定稿稿＋triggers 后续触发）；回访经对话史水合同载荷 |
-| `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（ask_user，唯一挂起源——权限确认机制已随透明面化删除，[#219](https://github.com/ZhangColin/aiplatform/issues/219)；破坏性命令直通、过程经 `part-action` 动作卡透明可见）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
+| `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（ask_user，唯一挂起源——权限确认机制已随透明面化删除，[#219](https://github.com/ZhangColin/aiplatform/issues/219)；破坏性命令直通、过程经 `part-action` 动作卡透明可见）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面；`data.questionOrdinal`＝「第 N 问」序号（#538/#549，平台转发前注入——缺口首次出现序 1..k，同缺口重派复用旧号，挂起卡也占号；水合读口顶层 `questionOrdinal` 重算为权威，前端仅试用访谈期渲染） |
 | `run-failed` | `projectId` `runId` `message`（可缺省） `stopped`（可缺省） `failure`（可缺省） | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` = 该场 run 的用户面标识（首试 runId——[#84](https://github.com/ZhangColin/aiplatform/issues/84) 重试不换新锚）。**run 失败为唯一失败终态**——重试全程静默（中间错误与重试信号不出用户面：无逐次 `error`、无重试 `run-start`），前端恢复出口只认本事件。`message`（[#355](https://github.com/ZhangColin/aiplatform/issues/355) 机制检查·终态零原因补齐）＝一句用户面失败原因（末次错误现场经桥映射的人话定型，映射不中截首行定宽 120；原样留档归终态日志/失败留账）——前端失败档原因行消费，缺省不携带。`stopped`（[#359](https://github.com/ZhangColin/aiplatform/issues/359) 生成取消）＝`true` 时本终态由用户主动停止收口（失败账口径：计量如实落账、状态如实转中断；停止＝中断口径非判死——已收口成果保留、不回滚，「继续生成/继续更新」照常可达）——前端失败档文案据此分岔「已停止」（不称中断/失败），`message` 携定型人话；缺省＝重试超限的真失败。**失败面扩载**（[#418](https://github.com/ZhangColin/aiplatform/issues/418) 失败片落库面）：`failure` 对象＝逐尝试墙钟/档位/失败原因/本场累计（schema 见[下节](#失败面-failure-schema418)），**与对话史失败留账行同载荷**（同收尾卡「SSE 扩载与落库同载荷」先例；先落库后发事件）——平台分析口径、前端不渲染（同 durationBreakdown），速度观测不再只看成功者 |
 | `guide-reply` | `projectId` `runId` `prompt`（可缺省） `label` `text` | 平台侧定型文案直达对话面（带「平台」标签气泡，非智能体话语）。三类使用：兜底轻引导（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支——非意见非咨询输入的零产物路径，本事件即该次派发的全部）；在途意见回执（[#360](https://github.com/ZhangColin/aiplatform/issues/360)——首个构建 run 在途时意见轮收口的排队事实告知，`runId` 锚该意见轮、`text` 为定型回执文案「生成完成后将自动落实」，事件封闭集零新增·复用本型）；悬空补救（ADR-0032·[#373](https://github.com/ZhangColin/aiplatform/issues/373)——需求梳理期轮悬空收口（无挂起问答且无 PRD，含判死/savePrd 失败形）的平台如实状态，`runId` 锚该轮、`text` 按可观测失败分形且恒带「继续」指路，同型复用零新增）。`prompt` 为锚定的用户输入（事件到达重建对话面用；回访经对话史水合——#89），在途回执与悬空补救不携带（用户气泡已由所属轮自落，不重复重建） |
 | `acceptance-start` | `projectId` `runId` | 受理开始（[#87](https://github.com/ZhangColin/aiplatform/issues/87) 受理动作卡）：受理轮（迭代期意见轮——项目已生成后的意见链轮）开场的受理事实，**对话区受理动作卡的呈现源**——意见已接住、主智能体正在受理（需求不清则追问；需求变更则改 PRD），衔接轮收口自动派的更新 run 工作消息（原派发阶段「更新 PRD 中」呈现位的归位，不设其余阶段事件依赖）。守卫全过后、受理动作前发射，先于该轮 `run-start` 到达（动作卡先出、解说随后，对话区连续可见）；受理落定**不出新事件**——由该轮 `run-finish` / `error` 收口事件推导（挂起-续跑是同一受理轮，不重发）。场景矩阵收口：咨询轮与纯追问轮（访谈期意见轮）不发 |
+| `intercept-card` | `projectId` `runId` `interceptId` `lane` `prompt` `sourceSelected` `deductionSource`（可缺省） `sourcePoolBalance`（可缺省） | 试用拦截卡（[#533](https://github.com/ZhangColin/aiplatform/issues/533) 计费②门②，ADR-0047「试用拦截面＝平台结构闸」）：试用项目（迭代期已生成）的**意见/兜底**输入在入口三分类后、受理前被拦下的事实呈现——平台侧卡片（显源池/随卡首次选源/确认扣减翻转/充值引导），**非智能体 run**（本事件即该次派发的全部，无 `run-start`）；咨询零产物短路天然放行、下单意图维持订单域旧轨（永不入拦）。`prompt`＝被拦输入原文（卡上引用呈现——**不重建用户气泡**：受理前的拦下不进对话面，恢复受理时由该轮 `run-start` / `guide-reply` 落气泡）；`lane` ∈ `OPINION` / `FALLBACK`（确认扣减后按车道恢复受理：意见回意见轮、兜底回定型轻引导——不重输）；`sourceSelected`＝扣减源是否已选定（`false`＝随卡首次选源「本项目余额／我的账户」，第一笔付费选择永远最先选；后台已充项目池＝入账即选择，`true` 免登录直接确认——销售演示动线）；`deductionSource`＝已选定源码位（1=账户余额 2=项目余额，未定为缺省不携带）；`sourcePoolBalance`＝源池余额快照（分；池未建不携带——直确认/充值引导的判定素材）。被拦输入原文随卡留存（`bil_intercepts` 待决行，**不丢失**）——确认扣减＝付费状态翻转（门②，`FlipGate=2` 留痕、不可逆）落定同事务；走充值引导/中途关闭后**卡可回**：读面 `GET /projects/{id}/intercept` 同形载荷（前端重载/回访重建；确认消费后读面归 null——卡随翻转熄灭）。确认与恢复受理的编排归 `POST /projects/{id}/intercept/confirm`（响应 `runId`＝受理运行标识） |
 
 #### 消息部件事件（`part-*`）
 
@@ -159,19 +160,21 @@ closing: {
         message: "..." }            # no-inline-styles 内联样式——@shadcn/lint 规则名）/
     ]                               # message（诊断原文）。无规范项目与设计会话不携带——
   }                                 # 调色板不收窄、不扫描（基座行为零改变，一等断言）
-  robustKitLint: {                  # 可缺省——基座 lint 两档扫描（#425，#407 裁决）：新基座
-    status: "violations",           # 工作区（健壮件在场探针判据）编码 run 携带（收尾卡「基座
-    retried:   true,                # 件使用」行）；status ∈ passed / violations（分档清单随附）
-    preset: {                       # / unavailable（扫描未执行——如实不假装达标）；retried＝
-      total: 1,                     # 曾发现违规并自动修一轮（与 designLint 共用同一修轮）；
-      violations: [                 # 两档分节（零命中的档不携带）：preset＝预置档（会话存储
-        { file: "src/app/login/actions.ts",  # 件自写——不拦收口、不拦不用，修不完如实标注
-          line: 8,                  # 随收尾卡）/ mandatory＝强制档（数据访问与外部调用裸客户
-          rule: "handwritten-session",  # 端直用——修轮用尽仍余＝收口结构性拒绝〔拒绝回执
-          message: "..." }          # 经重试现场喂回执行体同 run 修，耗尽走段级自愈回滚重跑
-      ]                             # 升档兜底——见 #353/#420〕，故本键不会以「带强制档违规」
-    },                              # 形态出现在收尾卡（分节防御性兼容）；条目＝file/line/
-  }                                 # rule（bare-db-client 裸数据库客户端 / bare-fetch 裸
+  robustKitLint: {                  # 可缺省——基座 lint 两档扫描（#425，#407 裁决；#541 让路）：
+    status: "violations",           # 新基座工作区（健壮件在场探针判据）编码 run 携带（收尾卡
+    retried:   true,                # 「基座件使用」行）；status ∈ passed / violations（分档清单
+    mandatory: {                    # 随附）/ unavailable（扫描未执行——如实不假装达标）；
+      total: 1,                     # retried＝曾发现违规并自动修一轮（阻断形态的强制档修轮
+      violations: [                 # 才标记——让路缺省修轮是样式轮，不伪造基座纠偏叙事）；
+        { file: "src/lib/orders.ts",  # 两档分节（零命中的档不携带），#541 让路缺省＝两档
+          line: 12,                 # 违规都如实随卡标注、不拦收口（强制档裸客户端直用在
+          rule: "bare-db-client",   # 此呈现——收口照扫只标注的落点，前端两档合并计数与
+          message: "..." }          # 清单）；阻断形态（运营开关 robust_lint_blocking_enabled
+      ]                             # 开＝回滚保险）强制档修轮用尽仍余＝收口被拒（拒绝回执
+    },                              # 经重试现场喂回，耗尽走段级自愈回滚重跑——见 #353），
+  }                                 # 该形态不会以「带强制档违规」出现在收尾卡；preset＝预置
+                                    # 档（会话件自写——不拦不用，如实标注）；条目＝file/line/
+                                    # rule（bare-db-client 裸数据库客户端 / bare-fetch 裸
                                     # fetch / handwritten-session 会话自写）/ message（件用法
                                     # 指路——细则正本住工作区 AGENTS.md 本栈写法规则节）；
                                     # 清单截 20、total 如实。存量工作区（健壮件不在场）与

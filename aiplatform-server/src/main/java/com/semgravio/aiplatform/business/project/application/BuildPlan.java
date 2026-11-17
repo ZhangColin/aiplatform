@@ -26,22 +26,36 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *
  * <p><b>结构化输出扩展（#423）</b>：计划同批携带两件结构化产出——①核心旅程清单
  * {@code coreJourneys}（几条「角色＋入口＋关键动作串」，整轨终验的载荷契约，
- * #406）；②每片规模标签 {@code sliceSizes}（小/中/大封闭集，模型路由信号，
- * #414）。两件随计划同生命周期落库（PRD 演进即重产、进程重启不丢），计划补产
- * 兜底同要两件。空清单＝未设（本扩展前的存量计划与旧构造——消费面按「无信号」
- * 处理，存量不回补）。</p>
+ * #406）；②每片规模标签 {@code sliceSizes}（小/中/大封闭集，模型路由信号，#414）。
+ * 两件随计划同生命周期落库（PRD 演进即重产、进程重启不丢），计划补产兜底同要两件。
+ * 空清单＝未设（本扩展前的存量计划与旧构造——消费面按「无信号」处理，存量不回补）。</p>
+ *
+ * <p><b>结构化推迟段（ADR-0050）</b>：计划同批可选携带推迟清单
+ * {@code deferredItems}——本期不做的功能面（业务向默认集＝支付不真扣款/通知站内
+ * 呈现/多角色降单角色；信息量不足的进清单），与 PRD「推迟清单」章同内容、
+ * 随计划同生命周期落库（PRD 演进即重产）。协议约定非机器闸：平台不校验拦截，
+ * 执行体「清单内不做、不自行加回」。缺省空＝未设/本期无显式推迟项（存量不回补）。
+ * 推迟段是软形态——saveBuildPlan 侧形态不整不拒计划（非列表整体作废、条目不洁
+ * 剔除），与上面两件的硬校验刻意不同（无结构校验硬门，#416 前科）。</p>
  */
 public record BuildPlan(List<String> slices, List<Set<Integer>> dependsOn,
-        List<CoreJourney> coreJourneys, List<SliceSizeLabel> sliceSizes) {
+        List<CoreJourney> coreJourneys, List<SliceSizeLabel> sliceSizes,
+        List<String> deferredItems) {
 
     /** 旧平面清单构造（全串行 = 每片依赖前一片）：既有调用/测试零改动的兼容入口。 */
     public BuildPlan(List<String> slices) {
         this(slices, sequentialDependencies(slices));
     }
 
-    /** 依赖形构造（#351；两件结构化扩展未设——存量口径）。 */
+    /** 依赖形构造（#351；结构化扩展未设——存量口径）。 */
     public BuildPlan(List<String> slices, List<Set<Integer>> dependsOn) {
         this(slices, dependsOn, null, null);
+    }
+
+    /** 结构化扩展构造（#423；推迟段未设——本扩展前的存量口径）。 */
+    public BuildPlan(List<String> slices, List<Set<Integer>> dependsOn,
+            List<CoreJourney> coreJourneys, List<SliceSizeLabel> sliceSizes) {
+        this(slices, dependsOn, coreJourneys, sliceSizes, null);
     }
 
     public BuildPlan {
@@ -68,6 +82,7 @@ public record BuildPlan(List<String> slices, List<Set<Integer>> dependsOn,
         dependsOn = resolved;
         coreJourneys = coreJourneys == null ? List.of() : List.copyOf(coreJourneys);
         sliceSizes = sliceSizes == null ? List.of() : List.copyOf(sliceSizes);
+        deferredItems = deferredItems == null ? List.of() : List.copyOf(deferredItems);
         if (!sliceSizes.isEmpty() && sliceSizes.size() != copied.size()) {
             throw new IllegalArgumentException("规模标签数须与切片数一致（或整体未设）");
         }

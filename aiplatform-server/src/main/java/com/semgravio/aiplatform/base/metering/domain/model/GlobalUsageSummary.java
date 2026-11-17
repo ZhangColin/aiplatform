@@ -14,7 +14,8 @@ import com.semgravio.aiplatform.base.metering.domain.enums.Band;
 /**
  * 全平台聚合的用量读模型（#161 平台成本读面①：全局总览）——{@link UsageSummary}
  * （按 subject）的同族口径去掉归属维：总量 + 平台成本（币种分桶）+ 分模型 +
- * 分智能体＋分模型金额按带拆（#499 峰谷维度）。
+ * 分智能体＋分模型金额按带拆（#499 峰谷维度）＋成本观测切片桶（#536：获客成本/
+ * 用户费用两桶，按切片锚对事件时间戳分桶）。
  *
  * <p>{@code cost} = 平台成本（token × 事件时点生效单价的机械乘法，无加价/售价），
  * <b>按币种分桶不折算</b>（键 = ISO 4217 币种）；无生效单价的分量不进 cost
@@ -31,7 +32,8 @@ public record GlobalUsageSummary(
         Map<Currency, BigDecimal> cost,
         List<UsageSummary.ModelUsage> byModel,
         List<AgentKindUsage> byAgentKind,
-        List<ModelBandCost> byModelCost) {
+        List<ModelBandCost> byModelCost,
+        List<CostBucketUsage> byBucket) {
 
     public GlobalUsageSummary {
         // 保序拷贝：cost 键序 = 聚合 SQL 的币种码序（ORDER BY currency）
@@ -40,6 +42,7 @@ public record GlobalUsageSummary(
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
         byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
         byModelCost = byModelCost == null ? List.of() : List.copyOf(byModelCost);
+        byBucket = byBucket == null ? List.of() : List.copyOf(byBucket);
     }
 
     /**

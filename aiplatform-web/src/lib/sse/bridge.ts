@@ -244,6 +244,12 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         const question = parseQuestion(event.id, payload);
         if (question) chat.raiseQuestion(payload.projectId, payload.runId, question);
+        // 五问额度变化点（#538）：上一答在作答 POST 已同步落库，本事件标志续跑轮
+        // 再挂起——而追问挂起轮不发 run-finish（conversation 域唯一失效点），不补
+        // 本失效则「已答 N/5」chip 全程冻在初值 0/5。
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.conversation.quota(payload.projectId),
+        });
         return;
       }
       case "error": {
@@ -311,6 +317,12 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 轮收口即对话史有新条目（发言+回复 / 收尾卡落库）——失效对话域，水合增量
         // 接管 live 片段（#89：闭史以 REST 为准）
         void queryClient.invalidateQueries({ queryKey: queryKeys.conversation.all });
+        // 首建派发门读面（#542 访谈②）：主智能体轮收口＝岔路口置卡/快道直派的变化
+        // 点（服务端轮收口侧落位）——定向失效本键（编码 run 的起跑/收口走上方
+        // projects 域失效，已覆盖）
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.projects.buildGate(payload.projectId),
+        });
         return;
       }
       case "guide-reply": {
@@ -333,6 +345,48 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // run-finish / error 收口即落定（见上两分支）；咨询轮与纯追问轮服务端不发
         const { payload } = platform;
         chat.noteAcceptance(payload.projectId, payload.runId, event.id);
+        return;
+      }
+      case "intercept-card": {
+        // 试用拦截卡（#533 计费②门②）：被拦输入已随卡留存（服务端 bil_intercepts
+        // 待决行）——本事件即该次派发的全部（零 run）；卡内引用原文（用户气泡由
+        // 恢复受理的 run-start/guide-reply 落，不双写）；确认落定/中途关闭归卡组件
+        // （卡可回读面＝GET /projects/{id}/intercept，hook 同步本口）
+        const { payload } = platform;
+        chat.noteIntercept(
+          payload.projectId,
+          {
+            interceptId: payload.interceptId,
+            lane: payload.lane,
+            prompt: payload.prompt,
+            sourceSelected: payload.sourceSelected,
+            deductionSource: payload.deductionSource,
+            sourcePoolBalance: payload.sourcePoolBalance,
+            runId: payload.runId,
+          },
+          event.id,
+          event.id,
+        );
+        return;
+      }
+      case "balance-reminder": {
+        // 余额提醒卡（#537 计费③段间硬门）：被拦输入已留存（bil_balance_holds）／
+        // run 场 intent 已暂存——本事件即该次拦截的全部呈现（零 run）；充值回正
+        // 服务端自动放行，卡随 GET 读面熄灭（hook 同步本口，读面 null → 本面移除）
+        const { payload } = platform;
+        chat.noteBalanceReminder(
+          payload.projectId,
+          {
+            holdId: payload.holdId,
+            lane: payload.lane,
+            prompt: payload.prompt,
+            designItem: payload.designItem,
+            sourcePoolBalance: payload.sourcePoolBalance,
+            runId: payload.runId,
+          },
+          event.id,
+          event.id,
+        );
         return;
       }
       // ---- 消息部件（parts 契约）→ 工作消息 store ----

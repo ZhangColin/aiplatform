@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +44,10 @@ import com.semgravio.aiplatform.business.project.application.dto.command.Message
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationBody;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationRegion;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -65,6 +68,9 @@ class ConversationHistoryTest {
 
     @Autowired
     private ConversationHistoryAppService conversationHistory;
+
+    @Autowired
+    private ConversationEntryRepository entries;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -416,5 +422,167 @@ class ConversationHistoryTest {
         assertThat(conversationHistory.read(projectId))
                 .extracting(ConversationEntryResponse::kind)
                 .containsExactly(1, 2, 5); // user/agent/closing（过程明细不落）
+    }
+
+    @Test
+    void given_answered_question_cards_when_answered_gap_count_then_distinct_answered_only() {
+        // 五问额度计数读口（#538，ADR-0048）：按项目计对话史问答卡行——只计已答卡、
+        // 以问题文本为缺口标识去重（同缺口重派不另计：纠偏/重派同名问题不重复消耗额度）
+        Long projectId = persistedGeneratedProject("9805");
+        entries.save(answeredCard(projectId, "run-1", "目标用户是谁？"));
+        entries.save(answeredCard(projectId, "run-2", "核心流程走哪条？"));
+        entries.save(answeredCard(projectId, "run-3", "目标用户是谁？")); // 同缺口重派（同文本）→ 不另计
+        entries.save(pendingCard(projectId, "run-4", "预算多少？")); // 未答不计
+
+        assertThat(conversationHistory.answeredGapCount(projectId)).isEqualTo(2);
+    }
+
+    @Test
+    void given_no_question_cards_when_answered_gap_count_then_zero() {
+        Long projectId = persistedGeneratedProject("9806");
+
+        assertThat(conversationHistory.answeredGapCount(projectId)).isZero();
+    }
+
+    @Test
+    void given_question_cards_when_read_then_ordinal_by_distinct_gap_first_appearance() {
+        // 五问「第 N 问」序号水合面：按缺口首次出现序 1..k（同缺口重派复用旧号不跳号、
+        // 挂起未答卡也占号——序号锚「问出」而非「答完」，与 live 注入同算法）；
+        // 非问答卡行 questionOrdinal 为 null。
+        Long projectId = persistedGeneratedProject("9810");
+        entries.save(answeredCard(projectId, "run-1", "目标用户是谁？"));
+        entries.save(answeredCard(projectId, "run-2", "核心流程走哪条？"));
+        entries.save(pendingCard(projectId, "run-3", "目标用户是谁？")); // 同缺口重派 → 1
+        entries.save(pendingCard(projectId, "run-4", "预算多少？")); // 新缺口 → 3
+
+        List<ConversationEntryResponse> history = conversationHistory.read(projectId);
+        assertThat(history).extracting(ConversationEntryResponse::questionOrdinal)
+                .containsExactly(null, 1, null, 2, 1, 3); // answer/question 交错序
+    }
+
+    @Test
+    void given_prior_questions_when_recorder_sees_question_raised_then_payload_carries_ordinal() {
+        // 五问「第 N 问」序号 live 面（#538/#549，ADR-0048 服务端单源）：question-raised
+        // 转发 SSE 前在 data 内注入 questionOrdinal——新缺口接已问缺口数续号、同缺口
+        // 重派复用旧号。按「每轮一问」真实契约建模：每轮独立 recorder、挂起卡随该轮
+        // settle 落库，下一卡问出时前序卡已在库。
+        Long projectId = persistedGeneratedProject("9811");
+        entries.save(answeredCard(projectId, "run-1", "目标用户是谁？")); // 已 settle 的缺口 #1
+
+        List<AgentEvent> turn2 = new ArrayList<>();
+        ConversationHistoryAppService.TurnRecorder recorder2 =
+                conversationHistory.recorder(projectId, turn2::add);
+        recorder2.accept(questionRaisedEvent("run-2", "核心流程走哪条？")); // 新缺口 → 2
+        assertThat(ordinalOf(turn2.get(0))).isEqualTo(2);
+        recorder2.settle("run-2", new AgentReply("run-2", null, new AgentSuspension("reply-run-2",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")))));
+
+        // 纠偏/重派同缺口：复用旧号 1（不跳号、不重复占额度）
+        List<AgentEvent> turn3 = new ArrayList<>();
+        ConversationHistoryAppService.TurnRecorder recorder3 =
+                conversationHistory.recorder(projectId, turn3::add);
+        recorder3.accept(questionRaisedEvent("run-3", "目标用户是谁？"));
+        assertThat(ordinalOf(turn3.get(0))).isEqualTo(1);
+        recorder3.settle("run-3", new AgentReply("run-3", null, new AgentSuspension("reply-run-3",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")))));
+
+        // 又一个新缺口：接库内不同缺口数续号 3
+        List<AgentEvent> turn4 = new ArrayList<>();
+        conversationHistory.recorder(projectId, turn4::add)
+                .accept(questionRaisedEvent("run-4", "预算多少？"));
+        assertThat(ordinalOf(turn4.get(0))).isEqualTo(3);
+    }
+
+    @Test
+    void given_no_prior_question_and_broken_payload_when_recorder_sees_question_raised() {
+        // 首场提问序号为 1；data 非对象（形状残缺）原样透传不注入（前端同样不成卡）；
+        // 捕获落库的事件携带序号（settle 落库载荷即转发面，刷新前后同号）。
+        Long projectId = persistedGeneratedProject("9812");
+        List<AgentEvent> seen = new ArrayList<>();
+        ConversationHistoryAppService.TurnRecorder recorder =
+                conversationHistory.recorder(projectId, seen::add);
+
+        recorder.accept(questionRaisedEvent("run-1", "目标用户是谁？"));
+        assertThat(ordinalOf(seen.get(0))).isEqualTo(1);
+        recorder.settle("run-1", new AgentReply("run-1", "先确认一个关键点"));
+        List<ConversationEntryResponse> history = conversationHistory.read(projectId);
+        ConversationEntryResponse card = history.stream()
+                .filter(entry -> entry.kind() == 3).findFirst().orElseThrow();
+        assertThat(((Map<?, ?>) card.question().get(AgentEventTypes.WAIT_DATA_FIELD))
+                .get(AgentEventTypes.QUESTION_ORDINAL_FIELD)).isEqualTo(1);
+
+        AgentEvent broken = new AgentEvent(AgentEventTypes.QUESTION_RAISED,
+                Map.of(AgentEventTypes.RUN_FIELD, "run-x", AgentEventTypes.WAIT_DATA_FIELD, "坏形状"));
+        List<AgentEvent> brokenSeen = new ArrayList<>();
+        conversationHistory.recorder(projectId, brokenSeen::add).accept(broken);
+        assertThat(brokenSeen.get(0)).isSameAs(broken); // 残缺形状原样透传
+    }
+
+    /** question-raised 事件（Map.of 不可变载荷——倒逼真事件的不可变约束，序号注入
+     *  必须复制而非原地 put）。 */
+    private static AgentEvent questionRaisedEvent(String runId, String question) {
+        return new AgentEvent(AgentEventTypes.QUESTION_RAISED, Map.of(
+                AgentEventTypes.RUN_FIELD, runId,
+                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-" + runId,
+                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                        "toolCalls", List.of(Map.of("id", "tc-1", "name", "ask_user")),
+                        "questions", List.of(Map.of(
+                                "header", "提问", "question", question,
+                                "multiple", false, "custom", true, "options", List.of())))));
+    }
+
+    /** 转发事件 data.questionOrdinal 读取（测试断言位）。 */
+    private static int ordinalOf(AgentEvent event) {
+        Map<?, ?> data = (Map<?, ?>) event.payload().get(AgentEventTypes.WAIT_DATA_FIELD);
+        return (Integer) data.get(AgentEventTypes.QUESTION_ORDINAL_FIELD);
+    }
+
+    @Test
+    void given_question_card_without_text_when_answered_gap_count_then_header_fallback() {
+        // 缺口标识缺省回落：载荷无 question 文本时按主题标签（header）计数——
+        // 形状残缺的卡不静默丢失也不重复计数
+        Long projectId = persistedGeneratedProject("9807");
+        entries.save(ConversationEntry.question(projectId, "run-1", new LinkedHashMap<>(Map.of(
+                AgentEventTypes.RUN_FIELD, "run-1",
+                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-h",
+                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                        "questions", List.of(Map.of("header", "目标用户")))))));
+        ConversationEntry answered = ConversationEntry.question(projectId, "run-1",
+                new LinkedHashMap<>(Map.of(
+                        AgentEventTypes.RUN_FIELD, "run-1",
+                        AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-h",
+                        AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                                "questions", List.of(Map.of("header", "目标用户"))))));
+        answered.markAnswered();
+        entries.save(answered);
+        entries.save(ConversationEntry.answer(projectId, "run-1", "种子答复"));
+        entries.save(answered);
+
+        assertThat(conversationHistory.answeredGapCount(projectId)).isEqualTo(1);
+    }
+
+    /** 已答问答卡落库（计数读口种子）：卡置已答＋同 run 作答行（用户已答语义——
+     *  收口作答收口只置位不落作答行，不计入计数）。 */
+    private ConversationEntry answeredCard(Long projectId, String runId, String question) {
+        entries.save(ConversationEntry.answer(projectId, runId, "种子答复"));
+        ConversationEntry card = ConversationEntry.question(projectId, runId, questionPayload(runId, question));
+        card.markAnswered();
+        return card;
+    }
+
+    /** 待答问答卡落库（计数读口种子）。 */
+    private ConversationEntry pendingCard(Long projectId, String runId, String question) {
+        return ConversationEntry.question(projectId, runId, questionPayload(runId, question));
+    }
+
+    private Map<String, Object> questionPayload(String runId, String question) {
+        return new LinkedHashMap<>(Map.of(
+                AgentEventTypes.RUN_FIELD, runId,
+                AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-" + runId,
+                AgentEventTypes.WAIT_DATA_FIELD, Map.of(
+                        "toolCalls", List.of(Map.of("id", "tc-1", "name", "ask_user")),
+                        "questions", List.of(Map.of(
+                                "header", "提问", "question", question,
+                                "multiple", false, "custom", true, "options", List.of())))));
     }
 }

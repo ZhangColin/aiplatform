@@ -1,6 +1,10 @@
 package com.semgravio.aiplatform.base.metering.domain.repository;
 
+import java.time.Instant;
 import java.util.List;
+
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.cartisan.data.jpa.repository.BaseRepository;
 
@@ -33,4 +37,17 @@ public interface PriceEntryRepository extends BaseRepository<PriceEntry, Long> {
      */
     List<PriceEntry> findByProviderAndModelAndTokenKindAndBandOrderByEffectiveFromAsc(
             String provider, String model, TokenKind tokenKind, Band band);
+
+    /**
+     * 计件档（按张/按件）单价行在 {@code at} 时点的生效现值（#531 固定单价项
+     * 报价面）：计件行不带时段带维（band 恒 NULL——与换算匹配同口径），区间
+     * 半开 {@code [effectiveFrom, effectiveTo)}。至多一行（唯一约束防同键同带
+     * 区间重叠）；无生效行返回空清单。
+     */
+    @Query("select p from PriceEntry p"
+            + " where p.provider = :provider and p.model = :model and p.tokenKind = :kind"
+            + " and p.band is null"
+            + " and p.effectiveFrom <= :at and (p.effectiveTo is null or p.effectiveTo > :at)")
+    List<PriceEntry> findEffectivePieceRow(@Param("provider") String provider,
+            @Param("model") String model, @Param("kind") TokenKind kind, @Param("at") Instant at);
 }

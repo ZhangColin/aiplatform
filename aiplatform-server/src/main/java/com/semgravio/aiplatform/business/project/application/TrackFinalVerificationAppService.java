@@ -13,6 +13,7 @@ import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationPlanJourney;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -289,7 +290,7 @@ class TrackFinalVerificationAppService {
                 (attemptRunId, attemptChanges) -> closeFinalVerification(project, captured,
                         journeys.size(), finalRound),
                 VERIFY_LABEL, /* injectKnowledge= */ false, CoderRunAttempts.RunSeat.executor(),
-                RunHeading.titled(FINAL_VERIFY_TITLE));
+                RunHeading.titled(FINAL_VERIFY_TITLE), SegmentType.GENERATION_RUN);
     }
 
     /**
@@ -346,7 +347,7 @@ class TrackFinalVerificationAppService {
                         IterationAppService::lintFixRetryPrompt),
                 (attemptRunId, attemptChanges) -> closeVerificationFix(project, proof),
                 "fix", /* injectKnowledge= */ true, CoderRunAttempts.RunSeat.executor(),
-                RunHeading.titled(IterationAppService.FIX_TITLE));
+                RunHeading.titled(IterationAppService.FIX_TITLE), SegmentType.GENERATION_RUN);
     }
 
     /**

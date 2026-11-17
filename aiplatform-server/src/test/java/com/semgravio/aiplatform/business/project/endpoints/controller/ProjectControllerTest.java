@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.business.project.endpoints.controller;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Map;
 
@@ -26,10 +27,15 @@ import com.cartisan.web.config.BaseEnumConverter;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
+import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
+import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
+import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
+import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
 import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
+import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
 import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
@@ -37,8 +43,10 @@ import com.semgravio.aiplatform.business.project.application.ConversationHistory
 import com.semgravio.aiplatform.business.project.application.PrdReadiness;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
+import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
@@ -123,10 +131,16 @@ class ProjectControllerTest {
     private ConversationHistoryAppService conversationHistoryAppService;
 
     @MockitoBean
+    private InterviewQuotaAppService interviewQuotaAppService;
+
+    @MockitoBean
     private PrdVersionAppService prdVersionAppService;
 
     @MockitoBean
     private DemoVersionAppService demoVersionAppService;
+
+    @MockitoBean
+    private BuildGateAppService buildGateAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -435,20 +449,20 @@ class ProjectControllerTest {
         // （#298，null＝主会话缺省）随面携带
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
                 new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
-                        null, null, null, null, null, false,
+                        null, null, null, null, null, null, false,
                         LocalDateTime.of(2026, 9, 5, 10, 0)),
                 new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
-                        null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
-                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null,
+                        1, null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
                         null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
-                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null,
+                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null, null,
                         null, null,
                         Map.of("orderId", "900123", "event", "quoted"),
                         null, false, LocalDateTime.of(2026, 9, 6, 9, 0)),
-                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null,
+                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null, null,
                         null, null, null,
                         Map.of("error", "模型响应超时", "durationMs", 61200, "attempts",
                                 List.of(Map.of("round", 1, "attempt", 1, "durationMs", 61200,
@@ -466,6 +480,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data[1].kind").value(3))
                 .andExpect(jsonPath("$.data[1].answered").value(false))
                 .andExpect(jsonPath("$.data[1].question.engineRef").value("reply-1"))
+                // 「第 N 问」序号随问答卡读面（#538/#549，服务端单源）
+                .andExpect(jsonPath("$.data[1].questionOrdinal").value(1))
                 .andExpect(jsonPath("$.data[2].kind").value(5))
                 .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
                 .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420))
@@ -492,6 +508,32 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_trial_interview_when_interview_quota_then_progress_wrapped() throws Exception {
+        // 五问额度读面（#538 访谈①）：试用态访谈期「第 N/5」进度的服务端单源——
+        // 已答缺口数 / 总额度 5 原样包裹；chip 数据前端不自算
+        when(interviewQuotaAppService.quotaOf(100L))
+                .thenReturn(new InterviewQuotaResponse(3, 5));
+
+        performAsUser(get("/api/projects/100/interview-quota"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.answered").value(3))
+                .andExpect(jsonPath("$.data.total").value(5));
+    }
+
+    @Test
+    void given_paid_or_post_prd_when_interview_quota_then_null_data() throws Exception {
+        // 非试用态访谈面（付费翻转 / PRD 已产出 / 已生成）：读面整体缺席（data=null）
+        // ——chip 不呈现，非错误面
+        when(interviewQuotaAppService.quotaOf(200L)).thenReturn(null);
+
+        performAsUser(get("/api/projects/200/interview-quota"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 
     @Test
@@ -757,16 +799,62 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
     }
 
-    // ---------- PRD 版本（#330→#462 去门化：确认端点退役，run 起跑自动记行；读面保留） ----------
+    // ---------- PRD 版本（#330→#462 去门化：run 起跑自动记行；#542 付费轨确认端点恢复） ----------
 
     @Test
-    void given_confirm_endpoint_retired_when_post_confirm_then_404() throws Exception {
-        // 去确认门（#462，ADR-0039）：POST /prd/confirm 整段退役——端点 gone（404），
-        // 首 Demo 触发平移到首次 savePrd 落盘回调（PrdArtifactAdapter →
-        // GenerationAppService.dispatchFirstDemoOnPrdProduced），版本行由 Demo 类
-        // run 起跑自动记（PrdVersionAppService.recordOnDemoRunStart）
+    void given_paid_first_build_unrequested_when_post_confirm_then_dispatched() throws Exception {
+        // 付费轨 PRD 确认门恢复（#542，ADR-0049——恢复 #462 之前的原动作形态）：
+        // POST /prd/confirm＝确认即派发首个构建，响应回执 runId（挂 SSE 锚）；确认
+        // 不写版本行（记行归 Demo 类 run 起跑单点，构建基准序零改动）
+        when(buildGateAppService.confirmFirstBuild(100L)).thenReturn(
+                new GenerationAppService.GenerationRun("run-confirm-1"));
+
         performAsUser(post("/api/projects/100/prd/confirm"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-confirm-1"));
+    }
+
+    @Test
+    void given_trial_when_post_confirm_then_prj_084() throws Exception {
+        // 确认门属付费轨首建：试用项目的点火动作＝岔路口「立即生成」（POST /generate）
+        when(buildGateAppService.confirmFirstBuild(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.PRD_CONFIRMATION_NOT_PAID));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4084))
+                .andExpect(jsonPath("$.message").value(
+                        "PRD 确认是付费项目的首建点火动作——试用项目请在岔路口选择「立即生成」"));
+    }
+
+    @Test
+    void given_gate_when_get_build_gate_then_two_read_faces() throws Exception {
+        // 派发门读面（#542）：岔路口卡与确认按钮的呈现条件单读点（互斥两轨）；
+        // forkSettleDue＝#544 引导流到账自动翻转信号（卡∧源已选∧池正）
+        when(buildGateAppService.gateOf(100L)).thenReturn(
+                new BuildGateAppService.BuildGateView(true, false, true));
+
+        performAsUser(get("/api/projects/100/build-gate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.forkCardPending").value(true))
+                .andExpect(jsonPath("$.data.prdConfirmable").value(false))
+                .andExpect(jsonPath("$.data.forkSettleDue").value(true));
+    }
+
+    @Test
+    void given_guide_view_when_continue_discussion_then_envelope() throws Exception {
+        // 「继续讨论」引导流（#544——翻转门①）：随卡选源命令映射与判定回执信封
+        when(buildGateAppService.continueDiscussion(eq(100L), eq(DeductionSource.PROJECT), any()))
+                .thenReturn(new BuildGateAppService.ForkGuideView(true, false, 2, 10_000L));
+
+        performAsUser(post("/api/projects/100/fork/continue-discussion")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"source\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.flipped").value(true))
+                .andExpect(jsonPath("$.data.rechargeRequired").value(false))
+                .andExpect(jsonPath("$.data.deductionSource").value(2))
+                .andExpect(jsonPath("$.data.sourcePoolBalance").value(10000));
     }
 
     @Test
@@ -1115,6 +1203,117 @@ class ProjectControllerTest {
                         .content("{\"content\":\"你好\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    // ---------- 试用拦截卡（#533 计费②门②：卡可回读面 / 确认扣减） ----------
+
+    @Test
+    void given_pending_hold_when_get_intercept_then_card_payload() throws Exception {
+        // 卡可回读面：卡面＝被拦输入引用＋源池显式素材（后台已充项目池＝源已选定
+        // 免登录直确认——sourceSelected=true、余额快照分）
+        when(dispatchAppService.pendingIntercept(100L)).thenReturn(Optional.of(
+                new TrialInterceptAppService.InterceptCard(
+                        "9012345678901", "OPINION", "把主色调改成绿色",
+                        true, 2, 10000L, "run-i")));
+
+        performAsUser(get("/api/projects/100/intercept"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.interceptId").value("9012345678901"))
+                .andExpect(jsonPath("$.data.lane").value("OPINION"))
+                .andExpect(jsonPath("$.data.prompt").value("把主色调改成绿色"))
+                .andExpect(jsonPath("$.data.sourceSelected").value(true))
+                .andExpect(jsonPath("$.data.deductionSource").value(2))
+                .andExpect(jsonPath("$.data.sourcePoolBalance").value(10000))
+                .andExpect(jsonPath("$.data.runId").value("run-i"));
+    }
+
+    @Test
+    void given_pending_when_get_balance_reminder_then_card_returned() throws Exception {
+        // 余额提醒卡读面（#537 计费③，卡可回）：SSE 事件与 GET 同形的卡面
+        when(dispatchAppService.pendingBalanceReminder(100L)).thenReturn(Optional.of(
+                new BalanceReminderAppService.BalanceReminderCard(
+                        "8890123456789", "OPINION", "把报表加个导出",
+                        null, -500L, "run-b")));
+
+        performAsUser(get("/api/projects/100/balance-reminder"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.holdId").value("8890123456789"))
+                .andExpect(jsonPath("$.data.lane").value("OPINION"))
+                .andExpect(jsonPath("$.data.prompt").value("把报表加个导出"))
+                .andExpect(jsonPath("$.data.sourcePoolBalance").value(-500))
+                .andExpect(jsonPath("$.data.runId").value("run-b"));
+    }
+
+    @Test
+    void given_no_pending_when_get_balance_reminder_then_null_data() throws Exception {
+        when(dispatchAppService.pendingBalanceReminder(100L)).thenReturn(Optional.empty());
+
+        performAsUser(get("/api/projects/100/balance-reminder"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void given_no_pending_when_get_intercept_then_null_data() throws Exception {        // 无待决/已付费：data=null（卡随翻转熄灭）
+        when(dispatchAppService.pendingIntercept(100L)).thenReturn(Optional.empty());
+
+        performAsUser(get("/api/projects/100/intercept"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void given_confirm_when_post_intercept_confirm_then_run_id_returned() throws Exception {
+        // 确认扣减＝翻转门②：响应 runId＝受理运行标识；source Integer code 绑定
+        // 枚举（2=项目余额）后透传（BaseEnum 契约，非法值 400）
+        when(dispatchAppService.confirmIntercept(100L, DeductionSource.PROJECT))
+                .thenReturn(new DispatchAppService.DispatchRun("run-resume"));
+
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"source\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-resume"));
+        verify(dispatchAppService).confirmIntercept(100L, DeductionSource.PROJECT);
+    }
+
+    @Test
+    void given_backoffice_topped_project_when_confirm_without_body_then_passed_null_source() throws Exception {
+        // 后台已充项目池（入账即选源）＝免选直确认：请求体可整体缺省（source null）
+        when(dispatchAppService.confirmIntercept(100L, null))
+                .thenReturn(new DispatchAppService.DispatchRun("run-resume-2"));
+
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-resume-2"));
+        verify(dispatchAppService).confirmIntercept(100L, null);
+    }
+
+    @Test
+    void given_invalid_source_code_when_confirm_then_400_without_service_call() throws Exception {
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"source\":9}"))
+                .andExpect(status().isBadRequest());
+        verify(dispatchAppService, never()).confirmIntercept(any(), any());
+    }
+
+    @Test
+    void given_no_pending_when_confirm_then_bill_017_as_409() throws Exception {
+        when(dispatchAppService.confirmIntercept(100L, null))
+                .thenThrow(new ApplicationException(BillingMessage.INTERCEPT_NOT_PENDING));
+
+        performAsUser(post("/api/projects/100/intercept/confirm")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(8017))
+                .andExpect(jsonPath("$.message").value("没有待确认的拦截卡（输入可能已被更新的拦截取代）"));
     }
 
     @Test

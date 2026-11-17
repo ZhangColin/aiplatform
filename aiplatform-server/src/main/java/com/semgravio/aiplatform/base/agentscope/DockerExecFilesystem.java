@@ -55,6 +55,13 @@ import lombok.extern.slf4j.Slf4j;
  * 结果如实暴露，不抛出。#467 穿透面收口后全方法一致：非法路径（空白或含 ..
  * 逃逸）与畸形输出行（文件名含换行/制表符/冒号）一律 fail 结果或跳行——框架壳
  * （FilesystemTool）不兜异常，任何 throw 都会穿透杀 run。</p>
+ *
+ * <p><b>基座件不改约写保护（#541，ADR-0051）</b>：写面（write/edit 回写/delete/
+ * move 两端）落在预置件目录（{@link WorkspaceLayout#BASELINE_PRESET_DIRS}——
+ * 健壮件＋模式件）下即平台侧拒绝——不触容器缝，fail 结果带三通道定制指引（参数
+ * /文案覆盖/wrapper），模型改走合法路径即可自愈（对偶 #440 ①族守卫的模型可见
+ * 拒因形态）。读面不拦（件可读可学）；平台自身写工作区走 exec 通道不经本缝，
+ * 天然不受限。</p>
  */
 @Slf4j
 public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
@@ -396,6 +403,9 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         if (containerPath == null) {
             return WriteResult.fail("路径非法: " + path);
         }
+        if (isBaselinePresetPath(normalizeInputPath(path))) {
+            return presetWriteRejected(path);
+        }
         // 幂等：不存在也算成功（与本地实现同口径）
         ExecOutput out = exec.run("rm -rf -- " + sh(containerPath), null);
         return out.ok() ? WriteResult.ok(path)
@@ -408,6 +418,13 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         String to = containerPathOrNull(toPath);
         if (from == null || to == null) {
             return WriteResult.fail("路径非法: " + fromPath + " -> " + toPath);
+        }
+        // 基座件不改约两端判（#541）：搬出＝删除预置件、搬入＝污染件目录，都拒
+        if (isBaselinePresetPath(normalizeInputPath(fromPath))
+                || isBaselinePresetPath(normalizeInputPath(toPath))) {
+            return WriteResult.fail("基座件不改约（#541）：'" + fromPath + "' → '" + toPath
+                    + "' 涉及基座预置件路径（预置件文件不得编辑、删除或移动）——"
+                    + PRESET_WRITE_GUIDANCE);
         }
         ExecOutput out = exec.run(
                 "test -e " + sh(from) + " && mkdir -p " + sh(parentOf(to))
@@ -474,6 +491,39 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     // ---------- 内部 ----------
 
     /**
+     * 基座件不改约三通道指引（#541 拒因文案共用尾段——模型据此改走合法路径即可
+     * 自愈，对偶 #440 ①族守卫拒命文案形态）。
+     */
+    private static final String PRESET_WRITE_GUIDANCE =
+            "定制只走三通道（参数 props、文案覆盖 props、外层 wrapper 包一层），"
+                    + "三通道满足不了就另写新件、放基座件目录之外。本次写入未执行"
+                    + "（件清单与用法见工作区 AGENTS.md 本栈写法规则节）。";
+
+    /**
+     * 基座件不改约写保护判定（#541，ADR-0051）：工作区锚定相对路径是否落在预置
+     * 件目录（清单正本＝{@link WorkspaceLayout#BASELINE_PRESET_DIRS}——健壮件＋
+     * 模式件）下。路径段精确匹配（{@link #isOrUnder}——src/lib/robustish 不误拦）
+     * ；读面（read/ls/grep/glob）不拦——件可读可学，拦的是写（编辑/删除/搬入
+     * 搬出）。已知边界：shell 面（execute）绕文件缝的写（sed -i 等）不在此拦
+     * ——纪律句由栈规则集教、违规归生产返修缺陷面归纳（同 lint「任意改名直用」
+     * 演进口径）。
+     */
+    private static boolean isBaselinePresetPath(String rel) {
+        for (String dir : WorkspaceLayout.BASELINE_PRESET_DIRS) {
+            if (isOrUnder(rel, dir)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 预置件路径写拒绝（平台侧拒、容器从未执行——fail 结果带三通道指引）。 */
+    private static WriteResult presetWriteRejected(String filePath) {
+        return WriteResult.fail("基座件不改约（#541）：'" + filePath
+                + "' 属基座预置件路径（预置件文件不得编辑或删除）——" + PRESET_WRITE_GUIDANCE);
+    }
+
+    /**
      * 宿主是否 Windows（#440 守卫判定，与
      * {@code DockerEnvironmentBackend#isWindowsHost} 同口径孪生）：os.name 含
      * "win"。①族 argv 双引号问题是任何 Windows JVM→docker.exe 链的平台性确定
@@ -519,6 +569,9 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         if (containerPath == null) {
             return writePathInvalid(filePath);
         }
+        if (isBaselinePresetPath(normalizeInputPath(filePath))) {
+            return presetWriteRejected(filePath);
+        }
         ExecOutput out = exec.run(overwriteWriteCommand(containerPath), content);
         return out.ok() ? WriteResult.ok(filePath)
                 : WriteResult.fail("Error writing file '" + filePath + "': " + out.stderr());
@@ -537,6 +590,9 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         String containerPath = containerPathOrNull(filePath);
         if (containerPath == null) {
             return writePathInvalid(filePath);
+        }
+        if (isBaselinePresetPath(normalizeInputPath(filePath))) {
+            return presetWriteRejected(filePath);
         }
         ExecOutput out = exec.run(
                 "mkdir -p " + sh(parentOf(containerPath)) + " && (set -C; cat > "

@@ -27,6 +27,42 @@ const noop = () => {};
 const noopSelection = () => {};
 
 describe("QuestionCard · CC 式问答卡（#19）", () => {
+  it("「第 N 问」序号（#538/#549）：带 ordinal 渲染徽标，未带不渲染", () => {
+    const withOrdinal = renderToStaticMarkup(
+      <QuestionCard
+        question={card()}
+        ordinal={3}
+        interactive
+        selection={[]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+    expect(withOrdinal).toContain('data-slot="question-ordinal"');
+    expect(withOrdinal).toContain("第 3 问");
+
+    const withoutOrdinal = renderToStaticMarkup(
+      <QuestionCard question={card()} interactive selection={[]} onSelectionChange={noopSelection} onAnswer={noop} />,
+    );
+    expect(withoutOrdinal).not.toContain('data-slot="question-ordinal"');
+  });
+
+  it("「第 N 问」序号已答终态仍呈现（回看访谈可见进度）", () => {
+    const html = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ answered: true })}
+        ordinal={2}
+        interactive={false}
+        selection={[]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+    expect(html).toContain('data-slot="question-ordinal"');
+    expect(html).toContain("第 2 问");
+    expect(html).toContain("已回答");
+  });
+
   it("单选（multiple=false）：选项 chip 即按钮（点即答）、无提交钮", () => {
     const html = renderToStaticMarkup(
       <QuestionCard question={card()} interactive selection={[]} onSelectionChange={noopSelection} onAnswer={noop} />,

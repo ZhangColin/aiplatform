@@ -31,7 +31,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
  * （{@link #effectiveEdgeModelId}，#366 同表同机制）；其提示词仍不属配置面
  * （一次性判定的编排内建）。</p>
  *
- * <p><b>工具面规格（#252）</b>：增强工具开关（web_search/fetch_url）同取生效值，
+ * <p><b>工具面规格（#252；#545 起三件）</b>：增强工具开关（web_search/fetch_url
+ * ＋构建轨出图件 generate_image 的 {@code gi} 件——executor 槽消费，designer 槽
+ * 同名件是骨架不读本件）同取生效值，
  * {@link EffectiveConfig#toolSpec()} 编成规格串随命令入底座——进工厂实例缓存键
  * （开关变更＝规格变＝新实例新装配）并透传工具装配（{@code ProfileToolkitSupplier}
  * 按规格发放，关即不注册）。规格串编解码都在本类（business 单源，底座不解释）。</p>
@@ -89,7 +91,13 @@ public class AgentConfigAppService {
      * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
      * 生成会话形态两开关 #436 同批——单会话连续编码（缺省 true）与切片并行机器
      * （缺省 false），生成轨道派发处读取（{@code GenerationAppService}），仅 run
-     * 执行体行消费。
+     * 执行体行消费；基座 lint 强制档阻断开关 #541 同批——缺省 false＝让路
+     * （强制档违规收口照扫、只随收尾卡标注，不喂修轮不触发失败链；true＝恢复
+     * #425 原阻断形态＝回滚保险），尝试环收口判定处随每次尝试读取
+     * （{@code CoderRunAttempts}），仅 run 执行体行消费；构建轨出图工具开关 #545
+     * 同批——缺省 true＝下放（run 执行体槽位挂载 generate_image、演示配图落
+     * public/），toolSpec 携 gi 件进装配与实例缓存键，关即槽位不挂载（设计执行体
+     * 同名工具是骨架件、不读本开关）。
      */
     public record EffectiveConfig(String systemPrompt, String modelId,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
@@ -100,11 +108,15 @@ public class AgentConfigAppService {
             String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget,
             boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
             boolean finalVerificationGateEnabled,
-            boolean singleSessionGenerationEnabled, boolean parallelSliceMachineEnabled) {
+            boolean singleSessionGenerationEnabled, boolean parallelSliceMachineEnabled,
+            boolean robustLintBlockingEnabled,
+            boolean generateImageEnabled) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
-            return "ws=" + webSearchEnabled + ",fu=" + fetchUrlEnabled;
+            // #545 gi＝构建轨出图工具件（run 执行体槽），与 ws/fu 同缝透传装配
+            return "ws=" + webSearchEnabled + ",fu=" + fetchUrlEnabled
+                    + ",gi=" + generateImageEnabled;
         }
     }
 
@@ -132,7 +144,9 @@ public class AgentConfigAppService {
                 config.proofOfOutputGateEnabled(),
                 config.finalVerificationGateEnabled(),
                 config.singleSessionGenerationEnabled(),
-                config.parallelSliceMachineEnabled());
+                config.parallelSliceMachineEnabled(),
+                config.robustLintBlockingEnabled(),
+                config.generateImageEnabled());
     }
 
     /**

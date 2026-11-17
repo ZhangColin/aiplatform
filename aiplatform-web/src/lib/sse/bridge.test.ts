@@ -251,6 +251,124 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     expect(chat?.turnActive).toBe(false);
   });
 
+  it("intercept-card（#533 门②）→ 拦截卡落对话流（卡内引用原文、不重建用户气泡；重放按事件 id 只收一次；新卡取代旧卡）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "intercept-card",
+      {
+        projectId: "p1",
+        runId: "run-i1",
+        interceptId: "ic-1",
+        lane: "OPINION",
+        prompt: "把主色调改成绿色",
+        sourceSelected: false,
+      },
+      "i1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "intercept-card",
+      {
+        projectId: "p1",
+        runId: "run-i1",
+        interceptId: "ic-1",
+        lane: "OPINION",
+        prompt: "把主色调改成绿色",
+        sourceSelected: false,
+      },
+      "i1:1", // 重放同事件
+    ));
+    // 更新的拦截顶替旧待决（服务端取代）——新卡取代旧卡，只留最新
+    dispatchAgentEvent(agentQc, agentEvent(
+      "intercept-card",
+      {
+        projectId: "p1",
+        runId: "run-i2",
+        interceptId: "ic-2",
+        lane: "FALLBACK",
+        prompt: "你好呀",
+        sourceSelected: true,
+        deductionSource: 2,
+        sourcePoolBalance: 5000,
+      },
+      "i2:1",
+    ));
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      {
+        kind: "intercept",
+        id: "i2:1",
+        settled: false,
+        card: {
+          interceptId: "ic-2",
+          lane: "FALLBACK",
+          prompt: "你好呀",
+          sourceSelected: true,
+          deductionSource: 2,
+          sourcePoolBalance: 5000,
+          runId: "run-i2",
+        },
+      },
+    ]);
+    expect(chat?.turnActive).toBe(false); // 拦下即收口
+  });
+
+  it("balance-reminder（#537 段间硬门）→ 余额提醒卡落对话流（显负额、重放只收一次、新卡取代旧卡；run 场卡无留存）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      {
+        projectId: "p1",
+        runId: "run-b1",
+        holdId: "bh-1",
+        lane: "OPINION",
+        prompt: "把报表加个导出",
+        sourcePoolBalance: -500,
+      },
+      "b1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      {
+        projectId: "p1",
+        runId: "run-b1",
+        holdId: "bh-1",
+        lane: "OPINION",
+        prompt: "把报表加个导出",
+        sourcePoolBalance: -500,
+      },
+      "b1:1", // 重放同事件（GET 回声同形）——不双卡
+    ));
+    // 新拦顶替旧待决（服务端取代）——新卡取代旧卡，只留最新
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      {
+        projectId: "p1",
+        runId: "run-b2",
+        holdId: "bh-2",
+        lane: "DESIGN_REVISION",
+        prompt: "把首页改大气些",
+        designItem: 2,
+        sourcePoolBalance: -1200,
+      },
+      "b2:1",
+    ));
+    // run 场拦截（生成/修正/设计派发）——无留存无原文，取代上一张卡
+    dispatchAgentEvent(agentQc, agentEvent(
+      "balance-reminder",
+      { projectId: "p1", runId: "run-b3", sourcePoolBalance: -300 },
+      "b3:1",
+    ));
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      {
+        kind: "balance-reminder",
+        id: "b3:1",
+        card: { runId: "run-b3", sourcePoolBalance: -300 },
+      },
+    ]);
+    expect(chat?.turnActive).toBe(false); // 拦下即收口
+  });
+
   it("question-raised(QUESTION + data.questions) → 问答卡（engineRef 随卡，作答回传面）", () => {
     // 问答挂起先有对话面 run 登记（run-start agent=main——runId 锚定判定）
     dispatchAgentEvent(agentQc, agentEvent(
@@ -282,6 +400,38 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
       engineRef: "reply-7",
       options: ["企业客户"],
     });
+  });
+
+  it("question-raised → 失效五问额度读面（追问挂起轮不发 run-finish，否则「已答 N/5」chip 冻在 0/5）", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const quota = observeActiveQuery(qc, queryKeys.conversation.quota("p1"));
+    await quota.waitForSettled();
+
+    dispatchAgentEvent(qc, agentEvent(
+      "run-start", { projectId: "p1", runId: "run1", prompt: "做个官网", model: "m1", agent: "main" }, "run1:1"),
+    );
+    // 作答后的续跑轮再挂一问：上一答已在作答 POST 同步落库，本事件是额度变化点
+    dispatchAgentEvent(qc,
+      agentEvent(
+        "question-raised",
+        {
+          projectId: "p1",
+          runId: "run1",
+          sessionId: "main-p1",
+          summary: "面向谁?",
+          engineRef: "reply-7",
+          data: {
+            toolCalls: [{ id: "tc-1", name: "ask_user", input: {} }],
+            questions: [{ header: "目标用户", question: "面向谁?", multiple: false, custom: true, options: [] }],
+          },
+        },
+        "run1:5",
+      ),
+    );
+
+    await vi.waitFor(() => expect(quota.fetchCount()).toBe(2));
+    quota.unsubscribe();
+    qc.clear();
   });
 
   it("非对话 run 的 text 不进对话（编码 run 解说归工作消息部件）", () => {

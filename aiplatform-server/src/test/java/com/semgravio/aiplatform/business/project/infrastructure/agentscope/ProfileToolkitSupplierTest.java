@@ -22,6 +22,7 @@ import com.semgravio.aiplatform.business.project.application.AgentConfigAppServi
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.BuildPlanFacts;
+import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.application.VerificationFacts;
@@ -31,6 +32,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentToolKind;
 import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetcher;
 import com.semgravio.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.semgravio.aiplatform.business.project.infrastructure.InterviewToolGate;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SedimentProposalAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SkillProposalAdapter;
@@ -61,8 +63,10 @@ import reactor.core.publisher.Mono;
 class ProfileToolkitSupplierTest {
 
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
+    private final InterviewToolGate interviewToolGate = mock(InterviewToolGate.class);
     private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
+    private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
     private final BuildPlanFacts buildPlanFacts = new BuildPlanFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
@@ -78,13 +82,12 @@ class ProfileToolkitSupplierTest {
     private final VerificationFacts verificationFacts = new VerificationFacts();
 
     /** 装配读面桩（#424 轮次预算动态供数——仅 verify 工具调用时读，装配不触）。 */
-    private final com.semgravio.aiplatform.business.project.application.AgentConfigAppService
-            agentConfigs = org.mockito.Mockito.mock(
-                    com.semgravio.aiplatform.business.project.application.AgentConfigAppService.class);
+    private final AgentConfigAppService agentConfigs = mock(AgentConfigAppService.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
+        return new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
+                fastLaneFacts, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
                 landedFiles, designSpecs, verificationFacts, agentConfigs, readinessWaiter);
@@ -126,17 +129,49 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_executor_on_project_dev_when_toolkit_then_finish_edit_update_plan_and_propose_skill() {
+    void given_executor_on_project_dev_when_toolkit_then_finish_edit_update_plan_propose_and_image_tool() {
         // 执行体的业务工具面 = 结束工具（#46 修正收口判定）+ 步骤清单（#236 run 级
         // 计划的全量快照观测面——呈现归部件映射表，本工具零副作用）+ 技能自荐
-        // （#259 过程模式沉淀待审——骨架件无开关）：主智能体资产
+        // （#259 过程模式沉淀待审——骨架件无开关）＋出图工具件（#545 图片能力下放
+        // 构建轨，ADR-0052——演示数据配图，缺省挂载、运营开关可关）：主智能体资产
         // 不泄漏（ask_user/savePrd/只读五件都不在执行体面），其余编码工具（含内核
         // shell，#219 透明面化后破坏性命令直通）由 harness 内核自带
         assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null)
                 .getToolNames())
                 .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME,
+                        ProposeSkillTool.NAME, ProposeSedimentTool.NAME,
+                        GenerateImageTool.NAME);
+    }
+
+    @Test
+    void given_build_image_switch_off_when_executor_toolkit_then_image_absent_but_skeleton_stays() {
+        // #545 开关装配面（沿 #252 增强件先例）：gi=false＝构建轨不挂载 generate_image
+        // （回无图现状），骨架四件不动；gi=true/缺件＝挂载；null/坏规格＝缺省开
+        assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "gi=false")
+                .getToolNames())
+                .doesNotContain(GenerateImageTool.NAME)
+                .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME,
                         ProposeSkillTool.NAME, ProposeSedimentTool.NAME);
+        assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "gi=true")
+                .getToolNames())
+                .contains(GenerateImageTool.NAME);
+        assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "ws=false")
+                .getToolNames())
+                .contains(GenerateImageTool.NAME); // 缺 gi 件＝缺省开（坏规格宽容腿）
+    }
+
+    @Test
+    void given_build_image_switch_off_when_designer_toolkit_then_still_mounted() {
+        // 设计执行体发放面行为不变（#545 回归）：构建轨开关只管 executor 槽——
+        // designer 的 generate_image 是骨架件、不读 toolSpec 的 gi 件，关也照挂
+        assertThat(supplier().toolkitFor(AgentProfile.DESIGNER.key(),
+                        new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), "gi=false")
+                .getToolNames())
+                .containsExactly(GenerateImageTool.NAME);
     }
 
     @Test
@@ -249,8 +284,8 @@ class ProfileToolkitSupplierTest {
             String slotKey) {
         RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
-                buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
+                fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
                 readinessWaiter);
@@ -282,7 +317,7 @@ class ProfileToolkitSupplierTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, false, false, null, 3, 2,
-                        true, true, true, true, false));
+                        true, true, true, true, false, false, true));
         var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         Map<String, Object> input = Map.of("checks",
@@ -322,8 +357,8 @@ class ProfileToolkitSupplierTest {
     private void assertProposeLineage(String agentKey, AgentWorkspace workspace, String slotKey) {
         RecordingProposeAdapter recorder = new RecordingProposeAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
-                buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
+                fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
                 readinessWaiter);
@@ -438,17 +473,20 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_spec_round_trip_when_encode_then_decode_preserves_both_switches() {
+    void given_spec_round_trip_when_encode_then_decode_preserves_all_switches() {
         // 编解码对偶单点：EffectiveConfig.toolSpec() 编码 ⇄ toolEnabled 解码值一致
-        // （规格串是底座不解释的透传串，语义只在这两处——漂移即红）
+        // （规格串是底座不解释的透传串，语义只在这两处——漂移即红）；#545 gi 件同律
         for (boolean ws : new boolean[]{true, false}) {
             for (boolean fu : new boolean[]{true, false}) {
-                String spec = new AgentConfigAppService.EffectiveConfig(
-                        "prompt", "model", ws, fu,
-                        false, true, null, null, null, false, false, null, 3, 2, true,
-                        true, true, true, false).toolSpec();
-                assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
-                assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
+                for (boolean gi : new boolean[]{true, false}) {
+                    String spec = new AgentConfigAppService.EffectiveConfig(
+                            "prompt", "model", ws, fu,
+                            false, true, null, null, null, false, false, null, 3, 2, true,
+                            true, true, true, false, false, gi).toolSpec();
+                    assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
+                    assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
+                    assertThat(AgentConfigAppService.toolEnabled(spec, "gi")).as(spec).isEqualTo(gi);
+                }
             }
         }
     }
@@ -471,6 +509,11 @@ class ProfileToolkitSupplierTest {
                 new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), null);
         assertThat(designerToolkit.getToolNames()).containsExactlyInAnyOrderElementsOf(
                 AgentTool.ofSlot("designer").stream().map(AgentTool::toolName).toList());
+        // #545 executor 槽同源：构建轨 generate_image 增强件在枚举在册、装配挂载
+        assertThat(AgentTool.ofSlot("executor").stream()
+                .filter(tool -> tool.toolName().equals(GenerateImageTool.NAME)))
+                .singleElement()
+                .satisfies(tool -> assertThat(tool.kind()).isEqualTo(AgentToolKind.ENHANCEMENT));
         assertThat(AgentTool.ofSlot("main").stream().filter(
                         tool -> tool.kind() == AgentToolKind.ENHANCEMENT).map(AgentTool::toolName))
                 .containsExactlyInAnyOrder(WebSearchTool.NAME, FetchUrlTool.NAME);

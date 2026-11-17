@@ -31,6 +31,7 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.Workspac
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -39,10 +40,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 编排全真链（真模型 + 真 dev 容器 + 真 PG 会话状态/问答答复续跑），仅 SSE 发射边
  * （无订阅者的广播口）一处 mock 收口观测。
  *
- * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
- * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
- * （主智能体停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
- * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=main）。</p>
+ * <p>验收口径：一句话开场 → 实质提问（QUESTION 载荷带前端问答卡形状，经 JSON
+ * 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ <b>答满五问才
+ * 收口</b>（2026-11-17 五问承诺：纯信息答复不构成收敛令，未答满的 savePrd 被
+ * 工具闸拒绝；第 5 答带收口指令→主智能体停止提问，漂移的第 6 问在 ask_user
+ * 工具点被拒因拦回、零问答卡挂出）→ savePrd 产出 PRD（工作区
+ * 文件 + 状态位 + document-updated，修订再执行三更新）→ 同会话上下文延续；
+ * 计量落 UsageEvent（dims.agentKind=main）。</p>
  */
 @IntegrationTest
 class MainAgentSessionSmokeTest {
@@ -54,6 +58,12 @@ class MainAgentSessionSmokeTest {
 
     @Autowired
     private ProjectQueryAppService queryAppService;
+
+    @Autowired
+    private InterviewQuotaAppService interviewQuota;
+
+    @Autowired
+    private ConversationHistoryAppService conversationHistory;
 
     @Autowired
     private ProjectKnowledgeAppService knowledgeAppService;
@@ -151,41 +161,81 @@ class MainAgentSessionSmokeTest {
         // 被模型正当的多选题打爆）
         assertThat(asked).containsKeys("header", "multiple", "custom", "options");
 
-        // 2) 答复 → 续跑 → 第二轮提问（答复循环 ≥2 轮：续跑在同一 run 上再挂起，
-        // 新挂起新 engineRef；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
+        // 2) 答复 → 续跑 → 第二轮提问（答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
         settle(question1, "目标用户是海外企业客户，主要看公司与产品介绍；其余方面我也不确定，你继续问");
         Frame question2 = awaitNextQuestionOf(first.runId(), engineRefOf(question1));
         settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
 
-        // 3) 催促收敛：第二问答复后续跑要么再挂新问（逐问以催促文本答复再催）、要么
-        // 收口（run-finish）——上限 4 轮必收敛。不设「无在悬问开新轮」回退：续跑
-        // 出结果（新挂起/收口/异常）前开新轮会与内核挂起态相撞（ASKING 未批复即
-        // 报错），而 awaitResumeOutcome 本就阻塞到出结果，回退是死重兼竞态源
+        // 3) 五问承诺（2026-11-17 用户裁决）：试用访谈答满 5 个不同缺口前平台拒绝
+        //    提前产 PRD——第 3-5 问一律纯信息答复（不带「没有了/按推荐补全」类
+        //    收敛/托付语义，避免被模型引述为收敛令走快道），续跑应继续挂起提问；
+        //    五问额度读面随每答递增（chip「已答 N/5」的数据源，同口验证）。第 5
+        //    答后续跑带「收口指令」→ 停止提问、产出 PRD（run-finish）。不设「无在
+        //    悬问开新轮」回退（awaitResumeOutcome 阻塞到出结果，回退是死重兼竞态源）
         List<String> seenRefs = new ArrayList<>(
                 List.of(engineRefOf(question1), engineRefOf(question2)));
+        String[] moreAnswers = {
+                "网站要有联系表单，客户提交的线索直接发到我们销售邮箱，你继续问下一个",
+                "首屏要留产品演示视频位，白皮书要能下载，暂时不需要博客，你继续问下一个",
+                "移动端必须适配好，海外访问速度要快，SEO 要重视 Google 收录，你继续问下一个",
+        };
         String outcome = awaitResumeOutcome(allRunIds(), seenRefs);
-        for (int i = 0; i < 4 && !"finished".equals(outcome); i++) {
-            Frame pending = questionFrameByRef(outcome);
-            seenRefs.add(outcome);
-            settle(pending, "不要再继续提问了，现在就结束访谈，直接产出 PRD");
-            outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+        int guard = 0;
+        // 答满五问瞬间的 question-raised 帧数（基线必须在第 5 答落库后、下一次
+        // await 之前采——放到 await 之后会让失效路径里的第 6 张卡混进基线，断言恒真）
+        int questionsAtQuotaFull = -1;
+        while (!"finished".equals(outcome)) {
+            // 答满五问后提问侧闸（AskUserTool 工具点拒因）是主防线：模型漂移再提问
+            // 不挂起、不出 question-raised、同轮转 savePrd；闸漏网的边角挂起才由收口
+            // 纠偏链代答（不落用户作答行、计数不增）——两种情形测试都不得再作答，
+            // 只观测到 run 收口为止
+            if (conversationHistory.answeredGapCount(projectId) >= 5) {
+                outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+            } else {
+                Frame pending = questionFrameByRef(outcome);
+                seenRefs.add(outcome);
+                settle(pending, moreAnswers[conversationHistory.answeredGapCount(projectId) - 2]);
+                if (questionsAtQuotaFull < 0
+                        && conversationHistory.answeredGapCount(projectId) >= 5) {
+                    // 第 5 答已同步落库：此刻的卡数即基线（正常＝5 张、各占一号）
+                    questionsAtQuotaFull = questionRaisedFrameCount();
+                }
+                outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+            }
+            assertThat(guard++).as("五问访谈收口循环超限（事件序：%s）",
+                    frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
+                    .isLessThan(10);
         }
-        assertThat(outcome).as("催促收敛未在限轮内收口（已捕获事件序：%s）",
-                frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
-                .isEqualTo("finished");
+        // 提问侧额度闸（2026-11-17 修：实测第 6 问先出卡再自问自答）：答满五问后
+        // question-raised 帧一个都不许再多——漂移提问在工具点拦下，零第 6 张卡
+        assertThat(questionsAtQuotaFull).as("五问基线已采到（第 5 答落库点）").isNotNegative();
+        assertThat(questionRaisedFrameCount())
+                .as("答满五问后零漂移问答卡挂出（提问侧闸）")
+                .isEqualTo(questionsAtQuotaFull);
+        // 收口时恰答五问（平台代答的漂移问题不落用户作答行；同缺口重派不另计）
+        assertThat(conversationHistory.answeredGapCount(projectId))
+                .as("已答问答缺口数").isEqualTo(5);
+        // PRD 产出即访谈收口：额度读面整体缺席（chip 退场）
+        assertThat(interviewQuota.quotaOf(projectId)).isNull();
 
         // #34 回归守卫：多轮答复续跑后，会话状态任何 tool_use 的 input 不得含
         // answer 键——答复经 block metadata（模型不可见；input 持久化且模型可见，
         // 带 answer 会教模型「ask_user 可自带答案」自答后续提问）
         assertNoAnswerKeyInToolUseInputs();
 
-        // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
-        //    （PRD 读端点直读工作区文件——run 执行体同视图）
+        // 4) 第 5 答收口指令 → savePrd：自然收口（fastLane 不传）——工作区文件 +
+        //    状态位 + document-updated（PRD 读端点直读工作区文件——run 执行体同视图）
         awaitPrdProduced(1);
         assertThat(prdBitOf(projectId)).isNotNull();
         PrdResponse prd = queryAppService.prd(projectId);
         assertThat(prd.content()).as("PRD 正文（真模型产出）").isNotBlank();
         assertThat(prd.updatedAt()).isNotNull();
+
+        // 4a) #542 两入口退役＋岔路口（live 断言）：自然收口不派发——岔路口状态位
+        //     在场（试用态三选卡持久可回）、零编码 run 起跑（快道才直派；旧的
+        //     「照产自动派发」已退役）
+        assertThat(forkStateOf(projectId)).as("岔路口状态位（自然收口置位）").isEqualTo(ForkState.PENDING.getCode());
+        assertThat(executorRunStartCount()).as("自然收口零编码 run 起跑（两入口退役）").isZero();
 
         // 4b) 咨询答询（#86 同会话）：问项目情况——同一 main 会话直接作答（零产物），
         //     随后的修订与回溯仍在同会话连续
@@ -202,6 +252,9 @@ class MainAgentSessionSmokeTest {
         awaitPrdProduced(2);
         assertThat(prdBitOf(projectId)).isAfterOrEqualTo(firstBit);
         assertThat(queryAppService.prd(projectId).content()).isNotBlank();
+        // 意见修订轮再收口：岔路口照旧在场（卡持久可回，未点火不消失）
+        assertThat(forkStateOf(projectId)).isEqualTo(ForkState.PENDING.getCode());
+        assertThat(executorRunStartCount()).isZero();
 
         // 6) 同会话上下文延续：访谈答复在上下文中可回溯（自由补充不丢）
         MainAgentAppService.MainAgentRun recall = appService.runOpinionTurn(projectId,
@@ -366,6 +419,22 @@ class MainAgentSessionSmokeTest {
                 LocalDateTime.class, projectId);
     }
 
+    /** 岔路口状态位（#542 自然收口置位 PENDING——快道/未收口为 NULL）。 */
+    private Object forkStateOf(Long projectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT fork_state FROM prj_projects WHERE id = ?",
+                Object.class, projectId);
+    }
+
+    /** 编码 run 起跑事件计数（#542 两入口退役断言——自然收口零起跑）。 */
+    private long executorRunStartCount() {
+        return frames.stream()
+                .filter(f -> AgentEventTypes.RUN_START.equals(f.type()))
+                .filter(f -> "executor".equals(String.valueOf(f.payload().get(
+                        com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes.AGENT_FIELD))))
+                .count();
+    }
+
     /** 主智能体会话状态正文（#34 守卫的判读源：tool_use input 不含 answer 键）。 */
     private String sessionStateJson() {
         return jdbcTemplate.queryForObject(
@@ -413,6 +482,13 @@ class MainAgentSessionSmokeTest {
     /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源；#83 拆分后纯 QUESTION——kind 键已退役）。 */
     private Frame awaitQuestionOf(String runId) {
         return awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
+    }
+
+    /** 已到达的 question-raised 帧总数（提问侧闸回归断言：答满五问后冻结）。 */
+    private int questionRaisedFrameCount() {
+        return (int) frames.stream()
+                .filter(f -> AgentEventTypes.QUESTION_RAISED.equals(f.type()))
+                .count();
     }
 
     /** 挂起事件的引擎侧请求 id（答复续跑的锚——一轮一值）。 */

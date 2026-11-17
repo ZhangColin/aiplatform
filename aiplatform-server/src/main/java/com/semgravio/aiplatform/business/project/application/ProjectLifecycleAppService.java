@@ -39,6 +39,7 @@ import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanDeferralRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanJourneyRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
@@ -80,6 +81,7 @@ public class ProjectLifecycleAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final GenerationSegmentRepository generationSegments;
     private final GenerationPlanJourneyRepository generationPlanJourneys;
+    private final GenerationPlanDeferralRepository generationPlanDeferrals;
     private final DesignItemRepository designItems;
     private final DesignSpecRepository designSpecs;
     private final PrdVersionRepository prdVersions;
@@ -102,6 +104,7 @@ public class ProjectLifecycleAppService {
                                       ConversationHistoryAppService conversationHistory,
                                       GenerationSegmentRepository generationSegments,
                                       GenerationPlanJourneyRepository generationPlanJourneys,
+                                      GenerationPlanDeferralRepository generationPlanDeferrals,
                                       DesignItemRepository designItems,
                                       DesignSpecRepository designSpecs,
                                       PrdVersionRepository prdVersions,
@@ -123,6 +126,7 @@ public class ProjectLifecycleAppService {
         this.conversationHistory = conversationHistory;
         this.generationSegments = generationSegments;
         this.generationPlanJourneys = generationPlanJourneys;
+        this.generationPlanDeferrals = generationPlanDeferrals;
         this.designItems = designItems;
         this.designSpecs = designSpecs;
         this.prdVersions = prdVersions;
@@ -382,6 +386,7 @@ public class ProjectLifecycleAppService {
             conversationHistory.purgeByProject(projectId);
             generationSegments.deleteByProjectId(projectId);
             generationPlanJourneys.deleteByProjectId(projectId);
+            generationPlanDeferrals.deleteByProjectId(projectId);
             designItems.deleteByProjectId(projectId);
             designSpecs.deleteByProjectId(projectId);
             prdVersions.deleteByProjectId(projectId);

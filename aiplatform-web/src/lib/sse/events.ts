@@ -294,6 +294,53 @@ export type PlatformAgentEvent =
       payload: AgentPayload;
     }
   | {
+      /**
+       * 试用拦截卡（#533 计费②门②）：试用项目（迭代期）意见/兜底输入被结构闸
+       * 拦下——平台侧卡片（显源池/随卡首次选源/确认扣减翻转/充值引导），非智能体
+       * run（本事件即该次派发的全部）；`prompt` 供重建用户气泡（同 guide-reply
+       * 语义）；卡可回读面＝GET /projects/{id}/intercept（同形）。被拦输入原文随卡
+       * 留存（bil_intercepts 待决行）——确认后按 lane 恢复受理（不重输）。
+       */
+      type: "intercept-card";
+      payload: AgentPayload & {
+        /** 留存 id（卡锚）。 */
+        interceptId: string;
+        /** 被拦车道：OPINION=意见 / FALLBACK=兜底。 */
+        lane: string;
+        /** 被拦输入原文（卡上引用呈现）。 */
+        prompt: string;
+        /** 扣减源是否已选定（false＝随卡首次选源「本项目余额／我的账户」）。 */
+        sourceSelected: boolean;
+        /** 已选定扣减源码位（1=账户余额 2=项目余额；未定为缺省不携带）。 */
+        deductionSource?: number;
+        /** 源池余额快照（分；池未建不携带——免登录直确认/充值引导的判定素材）。 */
+        sourcePoolBalance?: number;
+      };
+    }
+  | {
+      /**
+       * 余额提醒卡（#537 计费③段间硬门，ADR-0047「段间硬门段中自由」）：付费
+       * 项目段边界源池≤0 被拦的平台侧卡——显当前负额＋充值入口（到账自动放行
+       * 不手动重试）；被拦输入留存 bil_balance_holds（`holdId` 可空＝run 场拦截
+       * 〔生成/修正/设计派发〕——intent 进程内暂存＋充值回正排空重派，无留存）。
+       * 段内绝不检查绝不中断——本卡只在段边界出现。卡可回读面＝GET
+       * /projects/{id}/balance-reminder（同形）。
+       */
+      type: "balance-reminder";
+      payload: AgentPayload & {
+        /** 留存 id（卡锚；run 场拦截无留存缺省不携带）。 */
+        holdId?: string;
+        /** 被拦车道：OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿。 */
+        lane?: string;
+        /** 被拦输入原文（卡上引用呈现；run 场拦截缺省不携带）。 */
+        prompt?: string;
+        /** 作用域改稿目标件序（仅 DESIGN_REVISION）。 */
+        designItem?: number;
+        /** 源池余额快照（分；显负额素材）。 */
+        sourcePoolBalance?: number;
+      };
+    }
+  | {
       /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口事件前出尾段）。 */
       type: "part-text";
       payload: AgentPayload & { engine: string; source?: string; text: string };
@@ -367,6 +414,8 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "run-failed",
   "guide-reply",
   "acceptance-start",
+  "intercept-card",
+  "balance-reminder",
   "part-text",
   "part-signal",
   "part-action",

@@ -21,8 +21,10 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
+import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
 import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
+import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
 import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
@@ -86,6 +88,14 @@ class ProjectOwnerInterceptorMvcTest {
 
     @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
+
+    /** 五问额度读面（#538 访谈①）：ProjectController 新增构造依赖——切片装配同补。 */
+    @MockitoBean
+    private InterviewQuotaAppService interviewQuotaAppService;
+
+    /** 岔路口与派发门（#542 访谈②）：ProjectController 新增构造依赖——切片装配同补。 */
+    @MockitoBean
+    private BuildGateAppService buildGateAppService;
 
     /** #330 起进 ProjectController 构造的 PRD 版本服务（切片装配补齐）。 */
     @MockitoBean

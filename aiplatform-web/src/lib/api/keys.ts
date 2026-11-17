@@ -24,6 +24,18 @@ export const queryKeys = {
     list: () => ["projects", "list"] as const,
     /** 系统预览地址（#45：run 开始即轮询，探活通过才返回 URL、取到即停）。 */
     preview: (id: string) => ["projects", "preview", id] as const,
+    /**
+     * 待决试用拦截卡（#533 计费②门②，卡可回读面）：被拦输入留存——重载/回访
+     * 重建卡（staleTime 0 挂查询侧）。确认扣减即失效（服务端卡已消费）。
+     */
+    intercept: (id: string) => ["projects", "intercept", id] as const,
+    /**
+     * 首建派发门读面（#542 访谈②）：岔路口三选卡与 PRD 确认按钮的呈现条件
+     * （服务端单源，前端不自算）。挂 projects 域：编码 run 起跑/收口、PRD 写出
+     * （document-updated）随域失效；主智能体轮收口（岔路口置位点）由桥在
+     * run-finish 定向失效本键。
+     */
+    buildGate: (id: string) => ["projects", "build-gate", id] as const,
     /** 文件树（交付文件只读清单，目录由前端合成；run 收口/PRD 写出随 projects 域失效——#27）。 */
     files: (id: string) => ["projects", "files", id] as const,
     /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */
@@ -87,5 +99,26 @@ export const queryKeys = {
     all: ["conversation"] as const,
     /** 项目对话史（全量有序）。 */
     of: (id: string) => ["conversation", id] as const,
+    /**
+     * 五问额度读面（#538 访谈①「第 N/5」进度 chip）：服务端单源（试用态访谈期
+     * {已答,5}；非访谈期 null）。挂 conversation 命名空间：轮收口（run-finish）
+     * 失效整域时本键同失效——收口观测即额度面变化点。
+     */
+    quota: (id: string) => ["conversation", "quota", id] as const,
+  },
+  /**
+   * 账单域（#534 计费④「我的账户」）：账户池余额＋流水（/api/me/billing）与
+   * 项目账单（/api/projects/{id}/billing——池余额/计费态/流水/充值目标）。充值
+   * 到账即失效（余额与流水append-only——充值动作是唯一写面，无 SSE 桥）。
+   */
+  billing: {
+    all: ["billing"] as const,
+    /** 我的账户账单（账户池余额＋流水）。 */
+    account: () => ["billing", "account"] as const,
+    /** 项目账单（项目池余额＋计费态＋流水＋充值目标）。 */
+    project: (id: string) => ["billing", "project", id] as const,
+    /** 待决余额提醒卡读面（#537 计费③——挂 billing 命名空间下吃充值成功
+     *  billing.all 失效：到账即放行，卡随读面熄灭）。 */
+    balanceReminder: (id: string) => ["billing", "balance-reminder", id] as const,
   },
 } as const;

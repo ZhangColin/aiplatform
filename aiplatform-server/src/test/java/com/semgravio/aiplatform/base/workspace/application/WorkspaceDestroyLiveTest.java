@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class WorkspaceDestroyLiveTest {
 
     /** 占卷容器镜像：与 DockerEnvironmentBackend.DEV_IMAGE 同源（本地必有，不另拉）。 */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.17";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
 
     @Autowired
     private WorkspaceLifecycleAppService lifecycle;

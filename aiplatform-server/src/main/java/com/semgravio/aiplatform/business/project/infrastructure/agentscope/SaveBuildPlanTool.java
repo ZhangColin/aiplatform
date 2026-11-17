@@ -38,6 +38,12 @@ import reactor.core.publisher.Mono;
  * 两件随计划同生命周期落库随 PRD 版本演进；结构校验在位——旅程条目结构
  * （role/entry/keyActions 三要素齐）与标签封闭集，非法输出拒绝（模型可见错误、
  * 不落计划事实）。计划补产兜底轮同要两件（补产 prompt 同口径要求）。</p>
+ *
+ * <p><b>结构化推迟段（ADR-0050）</b>：同批可选携带 {@code deferredItems} 推迟
+ * 清单——本期不做的功能面（与 PRD「推迟清单」章同内容），随计划同生命周期落库
+ * 随 PRD 版本演进。软形态无结构校验硬门（#416 前科）：缺省＝本期无显式推迟项；
+ * 形态不整不拒计划——非列表整体作废按未设处理、列表内空白/非字符串项剔除，
+ * 结果文本如实告知收录数。平台对推迟清单不加机器闸（协议约定）。</p>
  */
 public class SaveBuildPlanTool extends ToolBase {
 
@@ -46,6 +52,7 @@ public class SaveBuildPlanTool extends ToolBase {
     private static final String DEPENDS_ON_KEY = "dependsOn";
     private static final String CORE_JOURNEYS_KEY = "coreJourneys";
     private static final String SLICE_SIZES_KEY = "sliceSizes";
+    private static final String DEFERRED_ITEMS_KEY = "deferredItems";
     private static final String ROLE_KEY = "role";
     private static final String ENTRY_KEY = "entry";
     private static final String KEY_ACTIONS_KEY = "keyActions";
@@ -70,7 +77,12 @@ public class SaveBuildPlanTool extends ToolBase {
                         + "覆盖不同角色与主流程。sliceSizes 必传：与 slices 等长的每片规模"
                         + "标签，取值只能是「小」「中」「大」之一——按该片的实现面积估（页面数、"
                         + "接口数、逻辑复杂度）：小＝单点小改、中＝常规功能片、大＝多页面多"
-                        + "接口的重功能片。平台据此把生成拆成「先起服 + 首片 + 并行波」的"
+                        + "接口的重功能片。deferredItems 可选：推迟清单——本期不做的功能面"
+                        + "（与 PRD「推迟清单」章同内容；业务向默认集＝支付停在不真扣款/通知"
+                        + "站内呈现不发真实推送/多角色降单角色，外部集成 PRD 明确涉及时按需"
+                        + "列入，信息量不足的功能也进清单），没有显式推迟项可省略。片数保持"
+                        + "精炼：信息量少＝推迟清单长＋片少，每片端到端完整，典型 3-5 片。"
+                        + "平台据此把生成拆成「先起服 + 首片 + 并行波」的"
                         + "轨道执行，只顺序/并行执行、不解析自由文本。仅首次产出 PRD 时"
                         + "调用，修订 PRD 无需重新产出。")
                 .inputSchema(Map.of(
@@ -108,7 +120,14 @@ public class SaveBuildPlanTool extends ToolBase {
                                                 "type", "string",
                                                 "enum", closedSetTokens()),
                                         "description", "与 slices 等长：每片规模标签，取值只能是"
-                                                + "「小」「中」「大」（按实现面积估）")),
+                                                + "「小」「中」「大」（按实现面积估）"),
+                                DEFERRED_ITEMS_KEY, Map.of(
+                                        "type", "array",
+                                        "items", Map.of("type", "string"),
+                                        "description", "可选，推迟清单：本期不做的功能面（与 PRD"
+                                                + "「推迟清单」章同内容）——业务向默认集＝支付停在不"
+                                                + "真扣款/通知站内呈现不发真实推送/多角色降单角色，"
+                                                + "信息量不足的也进清单；没有显式推迟项可省略")),
                         "required", List.of(SLICES_KEY, CORE_JOURNEYS_KEY, SLICE_SIZES_KEY)))
                 .readOnly(true)
                 .concurrencySafe(true));
@@ -155,8 +174,12 @@ public class SaveBuildPlanTool extends ToolBase {
                     "sliceSizes 须与 slices 等长，且每项只能是「小」「中」「大」之一"
                             + "（按每片实现面积估）"));
         }
+        // 推迟段软解析（ADR-0050 无结构校验硬门）：形态不整不拒计划——
+        // 非列表整体作废按未设处理、不洁项剔除
+        List<String> deferredItems = parseDeferredItems(input.get(DEFERRED_ITEMS_KEY));
         try {
-            buildPlanFacts.record(workspaceId, new BuildPlan(slices, dependsOn, journeys, sizes));
+            buildPlanFacts.record(workspaceId, new BuildPlan(slices, dependsOn, journeys,
+                    sizes, deferredItems));
         }
         catch (IllegalArgumentException e) {
             // 构造校验兜底（2026-11-11 生产事故：模型产出自依赖片序，异常穿透
@@ -165,8 +188,12 @@ public class SaveBuildPlanTool extends ToolBase {
             return Mono.just(ToolResultBlock.error("构建计划未受理：" + e.getMessage()
                     + "（dependsOn 只许引用排在前面的片序 1..N 且不得自依赖）"));
         }
-        return Mono.just(ToolResultBlock.text("构建计划已记录：" + slices.size() + " 个切片、"
-                + journeys.size() + " 条核心旅程。"));
+        String acknowledgement = "构建计划已记录：" + slices.size() + " 个切片、"
+                + journeys.size() + " 条核心旅程。";
+        return Mono.just(ToolResultBlock.text(deferredItems.isEmpty()
+                ? acknowledgement
+                : acknowledgement + "推迟清单 " + deferredItems.size() + " 项（已随计划登记"
+                        + "——清单内不做、不自行加回）。"));
     }
 
     /** slices 解析：非空字符串列表；缺失/空清单/非字符串返回 null（模型可见错误）。 */
@@ -265,6 +292,25 @@ public class SaveBuildPlanTool extends ToolBase {
             sizes.add(size);
         }
         return sizes;
+    }
+
+    /**
+     * deferredItems 软解析（ADR-0050）：推迟清单是可选项且刻意无硬门——
+     * 非列表整体作废返回空（按未设处理，不拒计划）；列表内空白/非字符串项剔除。
+     * 解析结果恒非 null（缺省＝空清单＝本期无显式推迟项）。
+     */
+    private static List<String> parseDeferredItems(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> items = new ArrayList<>(list.size());
+        for (Object item : list) {
+            String text = textOf(item); // 同旅程要素口径：非空字符串净化，不洁项剔除
+            if (text != null) {
+                items.add(text);
+            }
+        }
+        return items;
     }
 
     /** 旅程要素取值：非空字符串净化（trim）；其余形态返回 null。 */

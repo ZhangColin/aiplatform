@@ -1,8 +1,10 @@
 package com.semgravio.aiplatform.base.metering.endpoints.controller;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,10 +22,18 @@ import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
 import com.semgravio.aiplatform.base.metering.domain.model.UsageEvent;
 import com.semgravio.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.semgravio.aiplatform.base.metering.domain.repository.PriceEntryRepository;
+import com.semgravio.aiplatform.business.billing.application.BillingAppService;
+import com.semgravio.aiplatform.business.billing.application.BillingQueryAppService;
+import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
+import com.semgravio.aiplatform.business.billing.application.SegmentSettlementAppService;
+import com.semgravio.aiplatform.business.billing.application.dto.response.ProjectBillingView;
+import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
+import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
@@ -81,6 +91,19 @@ class BackofficeProjectCostSeamTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    /** #536 双边对查夹具：billing 侧应用服务（真库全链路——入账/翻转/段结算/流水读面）。 */
+    @Autowired
+    private PoolTopupAppService poolTopupAppService;
+
+    @Autowired
+    private BillingAppService billingAppService;
+
+    @Autowired
+    private SegmentSettlementAppService segmentSettlementAppService;
+
+    @Autowired
+    private BillingQueryAppService billingQueryAppService;
+
     /** 工作区软引用无 FK：夹具自增占位（隔离只求不撞号）。 */
     private long workspaceSeq = 930100L;
 
@@ -88,10 +111,14 @@ class BackofficeProjectCostSeamTest {
     @AfterEach
     void cleanFixtures() {
         // 清单是全局聚合（断言面是全表和数）：事件表前后全清；单价行只清本类
-        // provider（他类测试的单价夹具不动）；项目夹具全清（本类自建，跨域咬合用）
+        // provider（他类测试的单价夹具不动）；项目夹具全清（本类自建，跨域咬合用）；
+        // bil_ 夹具（切片锚/入账/流水）本类自建，前后全清（弱引用无 FK 直删）
         jdbcTemplate.update("DELETE FROM met_usage_events");
         jdbcTemplate.update("DELETE FROM met_price_entries WHERE provider = ?", PROVIDER);
         jdbcTemplate.update("DELETE FROM prj_projects");
+        jdbcTemplate.update("DELETE FROM bil_project_billing");
+        jdbcTemplate.update("DELETE FROM bil_pools");
+        jdbcTemplate.update("DELETE FROM bil_entries");
     }
 
     // ---------- 清单：窗口聚合＋成本降序＋全未配价排后标注＋无用量不出现 ----------
@@ -326,6 +353,89 @@ class BackofficeProjectCostSeamTest {
                 .andExpect(jsonPath("$.data.costSummary.unpriced").value(false));
     }
 
+    // ---------- 成本观测切片桶（#536）：行内两桶维度＋用户账/成本账双边对查 ----------
+
+    @Test
+    void given_flipped_project_when_project_costs_then_row_bucket_split() throws Exception {
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-usd",
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
+        // 9305111 翻转于 T2：T1 前桶、T2 恰在锚上（归用户费用）、T3 后桶（行成本 0.003）；
+        // 9305222 试用（无计费态行）：全量获客成本桶（行成本 0.002）
+        flipFixture("9305111", T2);
+        report("evt-flip-before", T1, "9305111", "m-usd", Map.of(), 1000);
+        report("evt-flip-at-anchor", T2, "9305111", "m-usd", Map.of(), 500);
+        report("evt-flip-after", T3, "9305111", "m-usd", Map.of(), 1500);
+        report("evt-trial", T1, "9305222", "m-usd", Map.of(), 2000);
+
+        signedGet("/api/backoffice/costs/projects")
+                .andExpect(status().isOk())
+                // 成本降序：翻转行（0.003）在试用行（0.002）前
+                .andExpect(jsonPath("$.data.items", hasSize(2)))
+                // 翻转行：两桶互补不重叠、并集＝行总量/行成本
+                .andExpect(jsonPath("$.data.items[0].projectId").value("9305111"))
+                .andExpect(jsonPath("$.data.items[0].total.input").value(3000))
+                .andExpect(jsonPath("$.data.items[0].cost.USD").value(0.003))
+                .andExpect(jsonPath("$.data.items[0].byBucket", hasSize(2)))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].bucket").value(1))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].bucketName").value("获客成本"))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].tokens.input").value(1000))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].cost.USD").value(0.001))
+                .andExpect(jsonPath("$.data.items[0].byBucket[1].bucket").value(2))
+                .andExpect(jsonPath("$.data.items[0].byBucket[1].bucketName").value("用户费用"))
+                .andExpect(jsonPath("$.data.items[0].byBucket[1].tokens.input").value(2000))
+                .andExpect(jsonPath("$.data.items[0].byBucket[1].cost.USD").value(0.002))
+                // 试用行：单桶全量获客成本（桶 cost 与行 cost 同源相等）
+                .andExpect(jsonPath("$.data.items[1].projectId").value("9305222"))
+                .andExpect(jsonPath("$.data.items[1].total.input").value(2000))
+                .andExpect(jsonPath("$.data.items[1].cost.USD").value(0.002))
+                .andExpect(jsonPath("$.data.items[1].byBucket", hasSize(1)))
+                .andExpect(jsonPath("$.data.items[1].byBucket[0].bucket").value(1))
+                .andExpect(jsonPath("$.data.items[1].byBucket[0].tokens.input").value(2000))
+                .andExpect(jsonPath("$.data.items[1].byBucket[0].cost.USD").value(0.002));
+    }
+
+    @Test
+    void given_settled_paid_project_when_cost_and_ledger_both_queried_then_cross_checkable()
+            throws Exception {
+        // 双边对查（#536 验收）：同一项目——成本观测面用户费用桶金额（CNY 元）×100
+        // ＝用户账扣减行金额（分）：充值→翻转→run 场用量→段收口结算→两读面同数互查
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-settle",
+                TokenKind.INPUT, new BigDecimal("0.000002"), "CNY", T0, null));
+        Project project = newProject("付费对查项目");
+        String subject = project.getId().toString();
+        // 入账即选定项目扣减源；源池余额为正后翻转为付费（门②拦截卡）
+        poolTopupAppService.topup(null, project.getId(), 10000, null, "夹具充值");
+        billingAppService.flipToPaid(project.getId(), FlipGate.INTERCEPT);
+        // 翻转后 run 场用量：1M input × ¥0.000002 = ¥2.00（CNY 计价——用户账扣减同币）
+        Instant afterFlip = Instant.now().plusSeconds(5);
+        usageEventSink.report(new UsageEvent("evt-settle", afterFlip, subject, "run-settle",
+                "session-1", PROVIDER, "m-settle", Map.of(), new TokenUsage(1000000, 0, 0, 0, 0)));
+        segmentSettlementAppService.settleSegment(project.getId(), SegmentType.GENERATION_RUN,
+                "run-settle", Set.of("run-settle"));
+
+        // 成本观测面（项目成本清单读面）：全量落用户费用桶（翻转后用量），桶成本 ¥2.00
+        signedGet("/api/backoffice/costs/projects")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items", hasSize(1)))
+                .andExpect(jsonPath("$.data.items[0].projectId").value(subject))
+                .andExpect(jsonPath("$.data.items[0].total.input").value(1000000))
+                .andExpect(jsonPath("$.data.items[0].cost.CNY").value(2.0))
+                .andExpect(jsonPath("$.data.items[0].byBucket", hasSize(1)))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].bucket").value(2))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].bucketName").value("用户费用"))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].tokens.input").value(1000000))
+                .andExpect(jsonPath("$.data.items[0].byBucket[0].cost.CNY").value(2.0));
+
+        // 用户账面：同项目流水带扣减行——金额 ¥2.00＝200 分、行后余额 10000-200
+        ProjectBillingView view = billingQueryAppService.projectView(project.getId());
+        assertThat(view.paid()).isTrue();
+        assertThat(view.entries()).anySatisfy(entry -> {
+            assertThat(entry.kind()).isEqualTo(2);
+            assertThat(entry.amount()).isEqualTo(-200);
+            assertThat(entry.balanceAfter()).isEqualTo(9800);
+        });
+    }
+
     // ---------- 参数负例：坏窗口 → 404（类型不匹配）、坏分页 → 400（字段明细，框架口径） ----------
 
     @Test
@@ -344,6 +454,16 @@ class BackofficeProjectCostSeamTest {
     }
 
     // ---------- 夹具 ----------
+
+    /** 切片锚夹具（#536）：计费态行直落 bil_project_billing（弱引用无 FK），
+     *  翻转时点取窗口锚以便边界断言精确。 */
+    private void flipFixture(String projectNumericId, Instant flippedAt) {
+        long id = Long.parseLong(projectNumericId);
+        jdbcTemplate.update("INSERT INTO bil_project_billing (id, project_id,"
+                        + " deduction_source, flipped_at, flip_gate)"
+                        + " VALUES (?, ?, 2, ?, 2)",
+                id, id, Timestamp.from(flippedAt));
+    }
 
     /** 签名 GET（无体）：pathWithQuery 原样参与签名计算（与验签 Filter 同构）。 */
     private ResultActions signedGet(String pathWithQuery) throws Exception {

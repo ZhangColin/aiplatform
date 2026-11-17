@@ -67,6 +67,15 @@ public final class WorkspaceLayout {
     public static final String DESIGN_DIR = "design";
 
     /**
+     * 应用静态资源目录（Next.js 约定：根 URL 直引，{@code public/x.png} →
+     * {@code /x.png}）。#545 图片能力下放构建轨（ADR-0052）：出图工具件在构建轨
+     * 的转存落点＝演示数据配图（首屏 hero／关键实体图／空态美化），是应用源码的
+     * 交付资产（进文件树、源码包、版本流），与设计轨 {@link #DESIGN_DIR} 产物
+     * （设计过程稿）两轨分立；不进骨架目录——转存命令 {@code mkdir -p} 幂等自愈。
+     */
+    public static final String PUBLIC_DIR = "public";
+
+    /**
      * 导出物目录（#283/ADR-0027）：平台打包的交付导出件落点（设计资产包 tar、
      * PNG 衍生下载件，#297 写入）。文件区可见；导出件可再生（源都在），但非
      * 缓存语义——随封存保全，不进可重建名单。
@@ -116,6 +125,19 @@ public final class WorkspaceLayout {
 
     /** 版本元数据目录（#91 容器内 git 仓库——版本正本 git log 落点，随卷持久）。 */
     public static final String GIT_DIR = ".git";
+
+    /**
+     * 基座预置件目录清单（#541 基座件不改约，ADR-0051）：预置件（横切健壮件＋
+     * 通用模式件）的工作区落位目录——执行体不得写这些路径（编辑/删除/搬入搬出，
+     * 写保护在 run 执行体文件面 {@code DockerExecFilesystem}，路径段精确匹配），
+     * 定制只走三通道（参数 props/文案覆盖 props/wrapper）。机械清单单源：基座
+     * 模板内容演进（预置目录增减）须同步本表——BaselineEntryFilesTest 锚定
+     * 表与模板内容不漂移；告知正本＝工作区 AGENTS.md 本栈写法规则节（栈规则集，
+     * 随基座 tag 换版——本表只是写保护的判据面，不教用法）。存量工作区无这些
+     * 目录＝零命中零影响。
+     */
+    public static final List<String> BASELINE_PRESET_DIRS = List.of(
+            "src/lib/robust", "src/components/robust", "src/components/patterns");
 
     /**
      * 约定二的目录面（init 骨架幂等落位的清单）：随骨架落位的目录——应用代码占根

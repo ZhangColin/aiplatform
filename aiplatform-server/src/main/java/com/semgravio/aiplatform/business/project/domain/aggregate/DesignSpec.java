@@ -18,6 +18,8 @@ import com.cartisan.core.stereotype.Aggregate;
 import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
+import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
+
 /**
  * 项目设计规范正本行（{@code prj_design_specs}，#295 ADR-0028）：项目级的设计
  * 一致性正本——<b>单一一份、各设计物共用、随定稿刷新</b>（新定稿覆盖旧规范＝
@@ -62,6 +64,15 @@ public class DesignSpec extends Auditable implements AggregateRoot<DesignSpec, L
     @Column(name = "style", length = 500)
     private String style;
 
+    /**
+     * 风格方向来源标记（#543，ADR-0052——NULL＝设计线来源行〔定稿提炼/出图转正〕；
+     * 非空＝生成式来源行〔键＝{@link com.semgravio.aiplatform.business.project.domain.model.StyleDirections}
+     * 库稳定键〕：物化通道据此识别「PRD 风格方向字段→库值映射」正本，首个构建
+     * 派发物化、其后派发按 PRD 字段重物化）。
+     */
+    @Column(name = "direction_key", length = 50)
+    private String directionKey;
+
     protected DesignSpec() {
     }
 
@@ -86,6 +97,18 @@ public class DesignSpec extends Auditable implements AggregateRoot<DesignSpec, L
     }
 
     /**
+     * 风格方向来源正本行（#543——生成式来源：token 面＝库值集直刷，style＝方向
+     * 人读名，directionKey＝方向稳定键；源锚＝PRD 正本路径＋物化锚）。改风格＝
+     * PRD 修订→派发重物化（{@code refreshStyle} 覆写）。
+     */
+    public static DesignSpec styleOf(Long projectId, String sourcePath, String runId,
+            StyleDirections.Direction direction) {
+        DesignSpec spec = new DesignSpec(projectId);
+        spec.refreshStyle(sourcePath, runId, direction.key(), direction.name(), direction.tokens());
+        return spec;
+    }
+
+    /**
      * 刷新为 token 面（覆盖旧规范＝整行覆写：参数面清空）；空 token 集是调用方
      * 「提炼无所得不刷新」口径的防御位（如实拒收——正本行恒有且恰有一面）。
      */
@@ -98,6 +121,7 @@ public class DesignSpec extends Auditable implements AggregateRoot<DesignSpec, L
         this.tokens = tokens;
         this.palette = null;
         this.style = null;
+        this.directionKey = null;
     }
 
     /** 刷新为参数面（覆盖旧规范＝整行覆写：token 面清空）；两面皆空同上防御拒收。 */
@@ -110,6 +134,25 @@ public class DesignSpec extends Auditable implements AggregateRoot<DesignSpec, L
         this.tokens = null;
         this.palette = palette;
         this.style = style;
+        this.directionKey = null;
+    }
+
+    /**
+     * 刷新为风格方向面（#543——生成式来源覆写：token 面＝库值集、风格短语＝方向
+     * 人读名、方向标记随写；空 token 集同上防御拒收）。设计线来源行被风格面
+     * 覆写后不回落（正本恒一行、新覆盖旧——同「随定稿刷新」语义）。
+     */
+    public void refreshStyle(String sourcePath, String runId, String directionKey,
+            String styleName, Map<String, String> tokens) {
+        if (tokens == null || tokens.isEmpty()) {
+            throw new IllegalArgumentException("风格方向面 token 集不能为空（不建行）");
+        }
+        this.sourceDraftPath = sourcePath;
+        this.sourceRunId = runId;
+        this.tokens = tokens;
+        this.palette = null;
+        this.style = styleName;
+        this.directionKey = directionKey;
     }
 
     @PrePersist

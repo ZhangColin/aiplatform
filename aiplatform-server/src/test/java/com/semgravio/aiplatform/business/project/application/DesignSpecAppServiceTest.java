@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -36,6 +37,7 @@ import com.semgravio.aiplatform.base.workspace.application.dto.command.Workspace
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.model.DesignSpecs;
+import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -77,6 +79,8 @@ class DesignSpecAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // 风格层 kill-switch 归位（缺省生效态——测试间共享行，绝不把关停态留给下游）
+        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = TRUE WHERE id = 1");
     }
 
     // ---------- 界面类：定稿确定性直提 ----------
@@ -268,10 +272,13 @@ class DesignSpecAppServiceTest {
             """;
 
     @Test
-    void given_no_spec_when_dispatch_materialize_then_zero_writes_and_false() {
-        // 一等断言（#296 验收⑤后半）：无规范项目派发零物化零写入——基座行为
-        // 零改变（主链路不动摇）
+    void given_existing_generated_project_without_spec_when_dispatch_then_zero_writes_and_false() {
+        // 一等断言（#296 验收⑤后半＋#543 存量不迁移）：已生成项目（存量）无规范
+        // 派发零物化零写入——基座行为零改变（新项目首个构建的缺省套物化归
+        // 风格分支断言面）
         Project project = persistedProject();
+        project.markGenerated();
+        projectRepository.save(project);
         assertThat(appService.materializeAtDispatch(project)).isFalse();
         verify(workspaceLifecycleAppService, never()).exec(anyString(), any());
         verify(workspaceLifecycleAppService, never())
@@ -470,7 +477,188 @@ class DesignSpecAppServiceTest {
                 .doesNotThrowAnyException();
     }
 
+    // ---------- 风格方向来源（#543，ADR-0052 切片①） ----------
+
+    /** 含风格方向字段的系统形 PRD（关键约束节——物化通道的读面对象）。 */
+    private static final String PRD_WITH_DIRECTION = """
+            # PRD
+            ## 关键约束
+            - 风格方向：清新教育（微调：圆角再大一点）
+            - 数据存储采用平台内建数据库
+            """;
+
+    @Test
+    void given_style_field_in_prd_when_first_dispatch_then_style_direction_materialized() {
+        // 灵魂用例（#543 验收③）：新项目首个构建派发——平台读 PRD 字段→库值映射
+        // 确定性物化四件（:root 刷库值＋收窄块／风格规则文件〔人读规则句＝库件〕／
+        // lint 配置），正本行带 direction_key 标记（生成式来源可识别、可重物化）
+        Project project = persistedProject();
+        givenFileContent("/docs/PRD.md", PRD_WITH_DIRECTION);
+        givenFileContent("/src/app/globals.css", BASELINE_CSS);
+        givenPlatformWriteSucceeds();
+
+        assertThat(appService.materializeAtDispatch(project)).isTrue();
+
+        // 正本行：token 面＝库值集、方向标记、源锚＝PRD 正本
+        assertThat(specRows(project.getId())).singleElement().satisfies(row -> {
+            assertThat(row.get("source_draft_path")).isEqualTo("docs/PRD.md");
+            assertThat(row.get("source_run_id")).isEqualTo("style-materialization");
+            assertThat(row.get("direction_key")).isEqualTo("fresh-education");
+            assertThat(row.get("style")).isEqualTo("清新教育");
+            assertThat(tokensFace(row))
+                    .isEqualTo(StyleDirections.byName("清新教育").tokens());
+        });
+        // 写面：css 刷库值、DESIGN.md 出方向规则句、lint 配置在场
+        Map<String, String> writes = writtenFiles();
+        assertThat(writes.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("src/app/globals.css"))
+                .findFirst().orElseThrow().getValue())
+                .contains("--primary: oklch(0.52 0.11 180);")
+                .contains("--radius: 0.875rem;")
+                .contains("--color-*: initial;");
+        String designMd = writes.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("DESIGN.md"))
+                .findFirst().orElseThrow().getValue();
+        assertThat(designMd)
+                .contains("# 设计规范")
+                .contains("风格方向：清新教育")
+                .contains("## 风格方向规则（清新教育）")
+                .contains("圆角偏大")          // 人读规则句＝库双件直陈
+                .contains("遵守条目");
+        assertThat(writes.entrySet().stream()
+                .filter(entry -> entry.getKey().contains(".oxlintrc.json"))
+                .count()).isEqualTo(1);
+    }
+
+    @Test
+    void given_missing_or_unknown_field_when_first_dispatch_then_default_direction_fallback() {
+        // 兜底断言（#543 验收③后半）：字段缺失/库无此名/PRD 不可读＝落缺省套——
+        // 生成不被风格层卡死
+        Project noField = persistedProject();
+        givenFileContent("/docs/PRD.md", "# PRD\n## 关键约束\n- 无风格行\n");
+        givenFileContent("/src/app/globals.css", BASELINE_CSS);
+        givenPlatformWriteSucceeds();
+        assertThat(appService.materializeAtDispatch(noField)).isTrue();
+        assertThat(specRows(noField.getId())).singleElement()
+                .satisfies(row -> assertThat(row.get("direction_key"))
+                        .isEqualTo(StyleDirections.DEFAULT_KEY));
+
+        Project unknown = persistedProject();
+        givenFileContent("/docs/PRD.md", "## 关键约束\n- 风格方向：赛博朋克\n");
+        assertThat(appService.materializeAtDispatch(unknown)).isTrue();
+        assertThat(specRows(unknown.getId())).singleElement()
+                .satisfies(row -> assertThat(row.get("direction_key"))
+                        .isEqualTo(StyleDirections.DEFAULT_KEY));
+    }
+
+    @Test
+    void given_switch_off_when_dispatch_then_back_to_no_spec_status_quo() {
+        // 读面测试（#543 验收⑤——沿收口开关测试先例）：kill-switch 关＝回无规范
+        // 现状——物化零动作零写入、正本不建行、收口不扫；风格来源行在场同律
+        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = FALSE WHERE id = 1");
+        Project project = persistedProject();
+        givenFileContent("/docs/PRD.md", PRD_WITH_DIRECTION);
+        givenPlatformWriteSucceeds();
+
+        assertThat(appService.materializeAtDispatch(project)).isFalse();
+        assertThat(specRows(project.getId())).isEmpty();
+        verify(workspaceLifecycleAppService, never()).exec(anyString(), any());
+        verify(workspaceLifecycleAppService, never())
+                .execWithStdin(anyString(), any(), any());
+        assertThat(appService.lintClosingPayload(project)).isNull();
+
+        // 已物化的风格来源行：关＝收口不扫（无规范现状）
+        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = TRUE WHERE id = 1");
+        givenFileContent("/src/app/globals.css", BASELINE_CSS);
+        assertThat(appService.materializeAtDispatch(project)).isTrue();
+        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = FALSE WHERE id = 1");
+        verify(workspaceLifecycleAppService, never()).exec(anyString(),
+                argThat(command -> command != null && command.command().contains("oxlint")));
+        assertThat(appService.lintClosingPayload(project)).isNull();
+    }
+
+    @Test
+    void given_style_source_row_when_prd_direction_changed_then_rematerialized_on_dispatch() {
+        // 重物化（改风格＝对话→PRD 修订→派发对齐，零新通道）：风格来源行每次
+        // 派发按 PRD 字段重刷——方向换了即换肤，正本行随刷
+        Project project = persistedProject();
+        givenFileContent("/docs/PRD.md", PRD_WITH_DIRECTION);
+        givenFileContent("/src/app/globals.css", BASELINE_CSS);
+        givenPlatformWriteSucceeds();
+        assertThat(appService.materializeAtDispatch(project)).isTrue();
+
+        clearInvocations(workspaceLifecycleAppService);
+        workspaceFiles.put("docs/PRD.md", "## 关键约束\n- 风格方向：沉稳金融\n");
+        assertThat(appService.materializeAtDispatch(project)).isTrue();
+
+        assertThat(specRows(project.getId())).singleElement().satisfies(row -> {
+            assertThat(row.get("direction_key")).isEqualTo("calm-finance");
+            assertThat(row.get("style")).isEqualTo("沉稳金融");
+        });
+        Map<String, String> writes = writtenFiles();
+        assertThat(writes.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("src/app/globals.css"))
+                .findFirst().orElseThrow().getValue())
+                .contains("--primary: oklch(0.42 0.10 275);")
+                .doesNotContain("oklch(0.52 0.11 180)");
+        assertThat(writes.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("DESIGN.md"))
+                .findFirst().orElseThrow().getValue())
+                .contains("## 风格方向规则（沉稳金融）");
+    }
+
+    @Test
+    void given_existing_generated_project_without_spec_when_update_dispatch_then_no_style_migration() {
+        // 存量不迁移：无正本的已生成项目（风格层落地前的存量）更新 run 起手——
+        // 不补风格层（零动作零写入）
+        Project project = persistedProject();
+        project.markGenerated();
+        projectRepository.save(project);
+        givenFileContent("/docs/PRD.md", PRD_WITH_DIRECTION);
+
+        assertThat(appService.materializeAtDispatch(project)).isFalse();
+        assertThat(specRows(project.getId())).isEmpty();
+        verify(workspaceLifecycleAppService, never())
+                .execWithStdin(anyString(), any(), any());
+    }
+
+    @Test
+    void given_design_line_spec_when_dispatch_then_direction_key_absent_and_generic_rules() {
+        // 设计线来源行不受影响（#295 语义不动）：direction_key 恒 NULL、规则文件
+        // 走定稿叙述——风格层零误伤
+        Project project = persistedProject();
+        givenFileContent("/design/home-1.html", INTERFACE_DRAFT);
+        appService.refreshAtFinalize(project, "/design/home-1.html", "run-final-1");
+        givenFileContent("/src/app/globals.css", BASELINE_CSS);
+        givenPlatformWriteSucceeds();
+
+        assertThat(appService.materializeAtDispatch(project)).isTrue();
+
+        assertThat(specRows(project.getId())).singleElement()
+                .satisfies(row -> assertThat(row.get("direction_key")).isNull());
+        assertThat(writtenFiles().entrySet().stream()
+                .filter(entry -> entry.getKey().contains("DESIGN.md"))
+                .findFirst().orElseThrow().getValue())
+                .contains("视觉正源（定稿设计稿")
+                .doesNotContain("风格方向规则");
+    }
+
     // ---------- 工具 ----------
+
+    /** 捕获平台落盘写（命令 → 正文）——风格分支断言面。 */
+    private Map<String, String> writtenFiles() {
+        ArgumentCaptor<WorkspaceExecCommand> commands =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        ArgumentCaptor<byte[]> payloads = ArgumentCaptor.forClass(byte[].class);
+        verify(workspaceLifecycleAppService, atLeastOnce())
+                .execWithStdin(anyString(), commands.capture(), payloads.capture());
+        Map<String, String> writes = new LinkedHashMap<>();
+        for (int i = 0; i < commands.getAllValues().size(); i++) {
+            writes.put(commands.getAllValues().get(i).command(),
+                    new String(payloads.getAllValues().get(i), StandardCharsets.UTF_8));
+        }
+        return writes;
+    }
 
     /** 容器读桩的工作区文件表（相对路径 → 正文；不在表内＝读取 exit 1）。 */
     private final Map<String, String> workspaceFiles = new LinkedHashMap<>();
@@ -507,7 +695,7 @@ class DesignSpecAppServiceTest {
     /** 正本行读口（jsonb 文本形态空白不定，读侧归一后断言）。 */
     private List<Map<String, Object>> specRows(Long projectId) {
         return jdbcTemplate.queryForList(
-                "SELECT source_draft_path, source_run_id, tokens, palette, style"
+                "SELECT source_draft_path, source_run_id, tokens, palette, style, direction_key"
                         + " FROM prj_design_specs WHERE project_id = ?",
                 projectId);
     }

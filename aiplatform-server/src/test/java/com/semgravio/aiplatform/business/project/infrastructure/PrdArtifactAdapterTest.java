@@ -75,6 +75,10 @@ class PrdArtifactAdapterTest {
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString())
                 .containsEntry(ProjectEventTypes.DOCUMENT_TYPE_FIELD,
                         ProjectEventTypes.DOCUMENT_TYPE_PRD);
+        // #542 两入口退役：首产回调只登记事实不派发——首建点火时点不落位
+        // （点火＝岔路口「立即生成」/付费确认/快道收口观测）
+        assertThat(projectRepository.findById(projectId).orElseThrow()
+                .getGenerationRequestedAt()).isNull();
     }
 
     @Test

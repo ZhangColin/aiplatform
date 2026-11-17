@@ -455,9 +455,10 @@ export function SystemPanel({
               <PanelHint>
                 <Monitor className="size-5 text-muted-foreground" />
                 <p>系统生成后，这里会出现可以操作的你的系统</p>
-                {/* idle 档也挂「继续生成」（#222 单出口）：面板仅存在于 PRD 产出后
-                    ——本档 = 未起跑/存量无轨道（含旧机制卡死项目），重发 /generate
-                    即计划重派起跑；正常流片刻后自动转生成中档 */}
+                {/* idle 档也挂「继续生成」（#222 单出口；#542 派发门）：面板仅存在
+                    于 PRD 产出后——本档 = 岔路口/确认门待点火（试用态卡面「立即生成」
+                    与本键同单出口）或未起跑/存量无轨道（含旧机制卡死项目），重发
+                    /generate 即起跑（计划缺失走补产链自动续派） */}
                 {resume}
               </PanelHint>
             )}

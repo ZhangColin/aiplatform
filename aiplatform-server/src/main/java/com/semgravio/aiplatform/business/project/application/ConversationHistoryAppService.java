@@ -1,9 +1,13 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -85,8 +89,10 @@ public class ConversationHistoryAppService {
     }
 
     /** 消息附件 → 原始 JSON 数组（圈注与图片物料两形态；空/全无效形态返回 null
-     *  ——不入库空数组，回访 chip 重建以本数组为准）。 */
-    private static List<Map<String, Object>> toJsonMaps(List<MessageAttachment> attachments) {
+     *  ——不入库空数组，回访 chip 重建以本数组为准）。public static：拦截留存
+     *  随拦附件序列化同口径复用（#533——载荷形状单源，对话史/留存两处只存取
+     *  不各自发明）。 */
+    public static List<Map<String, Object>> toJsonMaps(List<MessageAttachment> attachments) {
         if (attachments == null || attachments.isEmpty()) {
             return null;
         }
@@ -113,6 +119,22 @@ public class ConversationHistoryAppService {
                     entries.save(question);
                 });
         entries.save(ConversationEntry.answer(projectId, runId, answerText));
+    }
+
+    /**
+     * 收口作答置位（#538 纠偏收口——「平台代答」为词汇表回避词，本机制定名收口
+     * 作答）：挂起卡由平台收口作答——只置 run 内最近待答卡 answered、<b>不落作答
+     * 行</b>（收口作答非用户话语，对话面不见假用户发言；作答文本经 resume 工具
+     * 结果通道给模型）。读模型自洽口径同 {@link #recordAnswer}。
+     */
+    @Transactional
+    public void markAnswered(String runId) {
+        entries.findFirstByRunIdAndKindAndAnsweredFalseOrderByIdDesc(runId,
+                        ConversationEntryKind.QUESTION)
+                .ifPresent(question -> {
+                    question.markAnswered();
+                    entries.save(question);
+                });
     }
 
     /**
@@ -210,6 +232,116 @@ public class ConversationHistoryAppService {
     }
 
     /**
+     * 已答问答缺口计数读口（#538 五问额度程序计数权威，ADR-0048）：按项目计对话
+     * 史问答卡行——只计<b>用户已答</b>卡（同 run 有问答作答行——收口作答收口的卡
+     * 只置位不落作答行，不计入「第 N/5」进度）、以问题文本为缺口标识去重（同缺口
+     * 重派不另计：纠偏/重派同名问题不重复消耗额度）。「第 N/5」进度与额度收口
+     * 判定同读本口（服务端单源，前端不自算）。
+     */
+    public int answeredGapCount(Long projectId) {
+        Set<String> answeredRuns = entries
+                .findByProjectIdAndKindOrderByIdAsc(projectId, ConversationEntryKind.ANSWER)
+                .stream()
+                .map(ConversationEntry::getRunId)
+                .collect(Collectors.toSet());
+        Set<String> gaps = new HashSet<>();
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.QUESTION)) {
+            // 未答卡（挂起待答）与收口作答卡（无作答行）都不计——额度锚「用户答完」
+            if (!Boolean.TRUE.equals(entry.getAnswered())
+                    || !answeredRuns.contains(entry.getRunId())) {
+                continue;
+            }
+            gaps.add(gapKeyOf(entry));
+        }
+        return gaps.size();
+    }
+
+    /** 缺口标识：问题文本优先（去首尾空白），缺省回落主题标签（header）；皆无
+     *  则按条目 id 计（形状残缺的卡各计一个，不静默丢失）。 */
+    private static String gapKeyOf(ConversationEntry entry) {
+        String text = firstQuestionText(entry.getQuestion());
+        return text != null ? text : "#" + entry.getId();
+    }
+
+    /**
+     * 问答卡条目 id → 「第 N 问」序号（#538/#549，ADR-0048 程序计数权威）：按 id 升序
+     * 走查全部问答卡，缺口首次出现给 1..k 连续号，同缺口（gapKeyOf——问题文本回落
+     * header、再回落条目 id）重派复用旧号不跳号。<b>计数面是「已问出的全部卡」</b>
+     * ——挂起待答卡、收口作答（只置位无作答行）卡都占号，这保证挂起卡的号恰等于
+     * 「已答 N/5」chip 的 N+1（每轮一问、上一卡答完下一卡才问出）。非问答卡不入图。
+     */
+    private Map<Long, Integer> questionOrdinalByEntryId(Long projectId) {
+        Map<Long, Integer> byEntryId = new HashMap<>();
+        Map<String, Integer> byGap = new HashMap<>();
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.QUESTION)) {
+            Integer ordinal = byGap.computeIfAbsent(gapKeyOf(entry),
+                    key -> byGap.size() + 1);
+            byEntryId.put(entry.getId(), ordinal);
+        }
+        return byEntryId;
+    }
+
+    /**
+     * 到来问题的缺口序号：库内已问出卡的缺口序位图中，同缺口复用旧号（纠偏/重派
+     * 不跳号），新缺口＝不同缺口数＋1；incomingGapKey 为 null（载荷形状残缺）按
+     * 新缺口给号。前序卡已在各自轮 settle 时落库，本读只依赖库不依赖本轮状态。
+     */
+    private int incomingQuestionOrdinal(Long projectId, String incomingGapKey) {
+        Map<String, Integer> ordinals = new HashMap<>();
+        int next = 1;
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.QUESTION)) {
+            ordinals.putIfAbsent(gapKeyOf(entry), next);
+            next = ordinals.size() + 1;
+        }
+        Integer existing = incomingGapKey == null ? null : ordinals.get(incomingGapKey);
+        return existing != null ? existing : next;
+    }
+
+    /**
+     * 「第 N 问」序号 live 注入（#538/#549，ADR-0048 服务端单源）：question-raised
+     * 转发 SSE 与落库前，把序号放进 data.questionOrdinal——前端问答卡直接呈现，
+     * 不自算。<b>载荷复制不原地改</b>：mapper 产出的事件载荷可能为不可变 Map 且正被
+     * 重放缓冲持有；data 非对象（形状残缺）原样透传，前端 parseQuestion 同样不成卡。
+     */
+    AgentEvent enrichQuestionOrdinal(Long projectId, AgentEvent event) {
+        Object rawData = event.payload().get(AgentEventTypes.WAIT_DATA_FIELD);
+        if (!(rawData instanceof Map<?, ?> rawMap)) {
+            return event;
+        }
+        int ordinal = incomingQuestionOrdinal(projectId,
+                firstQuestionText(event.payload()));
+        Map<String, Object> data = new LinkedHashMap<>();
+        rawMap.forEach((key, value) -> data.put(String.valueOf(key), value));
+        data.put(AgentEventTypes.QUESTION_ORDINAL_FIELD, ordinal);
+        Map<String, Object> payload = new LinkedHashMap<>(event.payload());
+        payload.put(AgentEventTypes.WAIT_DATA_FIELD, data);
+        return new AgentEvent(event.type(), payload);
+    }
+
+    /** 问答卡载荷 → 首个问题文本（data.questions[0].question，缺省回落 header）。 */
+    @SuppressWarnings("unchecked")
+    private static String firstQuestionText(Map<String, Object> payload) {
+        Object data = payload == null ? null : payload.get(AgentEventTypes.WAIT_DATA_FIELD);
+        if (!(data instanceof Map<?, ?> dataMap)) {
+            return null;
+        }
+        Object questions = ((Map<String, Object>) dataMap).get("questions");
+        if (!(questions instanceof List<?> list) || list.isEmpty()
+                || !(list.get(0) instanceof Map<?, ?> first)) {
+            return null;
+        }
+        Object text = ((Map<String, Object>) first).get("question");
+        if (text instanceof String s && !s.isBlank()) {
+            return s.trim();
+        }
+        Object header = ((Map<String, Object>) first).get("header");
+        return header instanceof String h && !h.isBlank() ? h.trim() : null;
+    }
+
+    /**
      * 对话史读口（水合载荷）：项目全量按 id 升序（写入序即对话序）。归档项目照读
      * （对话区只读终态）。会话来源标识随行（#298 后台对接件——对话史含设计会话）：
      * 设计会话收尾卡（closing 携 {@code drafts} 稿清单——SSE 收口扩载契约键，仅
@@ -223,8 +355,10 @@ public class ConversationHistoryAppService {
         if (!projectRepository.existsById(projectId)) {
             throw new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND);
         }
+        Map<Long, Integer> ordinalByEntryId = questionOrdinalByEntryId(projectId);
         return entries.findByProjectIdOrderByIdAsc(projectId).stream()
-                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry)))
+                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry),
+                        ordinalByEntryId.get(entry.getId())))
                 .toList();
     }
 
@@ -264,12 +398,17 @@ public class ConversationHistoryAppService {
             this.sink = sink;
         }
 
-        /** sink 面：转发 + 捕获问答卡（幂等——一轮多问以后到为准，随各自 settle 落）。 */
+        /** sink 面：转发（问答卡先注入「第 N 问」序号——live 呈现面服务端单源）
+         *  + 捕获（幂等——一轮多问以后到为准，随各自 settle 落；捕获注入后事件，
+         *  落库载荷即同号，read() 重算为权威覆盖）。 */
         @Override
         public void accept(AgentEvent event) {
-            sink.accept(event);
-            if (AgentEventTypes.QUESTION_RAISED.equals(event.type())) {
-                question = event;
+            AgentEvent forward = AgentEventTypes.QUESTION_RAISED.equals(event.type())
+                    ? enrichQuestionOrdinal(projectId, event)
+                    : event;
+            sink.accept(forward);
+            if (AgentEventTypes.QUESTION_RAISED.equals(forward.type())) {
+                question = forward;
             }
         }
 

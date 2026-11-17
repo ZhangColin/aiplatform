@@ -16,16 +16,19 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 基座 lint 两档收口扫描（#425，#407 裁决——同设计规范 lint 先例 #296：容器内
- * 执行、违规清单喂回执行体修一轮）：新基座工作区（健壮件在场探针判据，#421）的
- * 编码 run 收口扫描，判据两档——
+ * 执行）：新基座工作区（健壮件在场探针判据，#421）的编码 run 收口照扫，判据
+ * 两档——
  * <ul>
  * <li><b>强制档</b>（{@code mandatory}）：数据访问与 HTTP 调用的<b>裸客户端直用</b>
  * ——裸 pg/redis 客户端（{@code new Pool/Client/Redis}、{@code createClient}）与
- * 裸 {@code fetch}。修不完走收口拒绝回路（尝试环结构性拒绝、段级自愈升档兜底
- * ——判定归 {@code CoderRunAttempts}，本件只出事实）。</li>
+ * 裸 {@code fetch}。#541 让路缺省＝违规只随收尾卡标注、不喂修轮、不触发失败链
+ * （收口链路无分岔）；阻断形态（喂修轮＋结构性拒绝＋段级自愈升档兜底）＝运营
+ * 开关 {@code robust_lint_blocking_enabled} 回滚形态，判定归
+ * {@code CoderRunAttempts}，本件只出事实。</li>
  * <li><b>预置档</b>（{@code preset}）：会话存储件<b>自写</b>——手写 cookie 会话
- * （{@code cookies()} 直用）与裸密码哈希原语（scrypt/bcrypt/pbkdf2）。修不完
- * 如实标注收尾卡、不拦收口、<b>不拦不用</b>（未用会话件＝零命中，非违规）。</li>
+ * （{@code cookies()} 直用）与裸密码哈希原语（scrypt/bcrypt/pbkdf2）。违规
+ * 如实标注收尾卡、不拦收口、<b>不拦不用</b>（未用会话件＝零命中，非违规）
+ * ——#471 目标形态，#541 后两档缺省同为「照扫只标注」。</li>
  * </ul>
  * 经基座件的合法用法不误报：件目录（src/lib/robust、src/components/robust——
  * 件自身实现天然含这些原语）在 grep 侧排除（{@code --exclude-dir=robust}）＋
@@ -236,20 +239,24 @@ public class RobustKitLintAppService {
                 .toList();
     }
 
-    /** 强制档仍有违规（收口结构性拒绝的判据——预置档不在此判）。 */
+    /**
+     * 强制档仍有违规（#541 起消费面＝运营开关回滚形态的阻断判据——让路缺省下
+     * 尝试环不消费、只随收尾卡标注；预置档不在此判）。
+     */
     public static boolean mandatoryViolationsRemain(Map<String, Object> payload) {
         return !tierViolationsOf(payload, TIER_MANDATORY).isEmpty();
     }
 
-    /** 载荷是否带任何档违规（修轮喂回判据——与设计规范 lint 违规同轮）。 */
+    /** 载荷是否带任何档违规（#541 起消费面＝阻断形态修轮喂回判据——让路缺省不喂修轮）。 */
     public static boolean hasViolations(Map<String, Object> payload) {
         return !(tierViolationsOf(payload, TIER_MANDATORY).isEmpty()
                 && tierViolationsOf(payload, TIER_PRESET).isEmpty());
     }
 
     /**
-     * 修轮现场（喂回执行体的携带物——对偶设计规范 lint 修轮先例）：分档违规清单
-     * 逐条原样（file:line 规则：message），强制档点名「修不完会被拒收口」。
+     * 修轮现场（阻断形态下喂回执行体的携带物——对偶设计规范 lint 修轮先例）：
+     * 分档违规清单逐条原样（file:line 规则：message），强制档点名「修不完会被
+     * 拒收口」（该语义只在阻断形态成立——让路缺省本现场不被调用）。
      */
     public static String fixRoundScene(Map<String, Object> payload) {
         StringBuilder scene = new StringBuilder(
@@ -264,8 +271,9 @@ public class RobustKitLintAppService {
     }
 
     /**
-     * 强制档拒绝回执（修轮用尽仍违规的结构性拒绝——对偶 #420 产出证明拒绝回执形）：
-     * 执行体据此定位修什么；喂回经重试现场，耗尽走段级自愈重跑（升档兜底）。
+     * 强制档拒绝回执（阻断形态〔运营开关回滚〕下修轮用尽仍违规的结构性拒绝——
+     * 对偶 #420 产出证明拒绝回执形）：执行体据此定位修什么；喂回经重试现场，
+     * 耗尽走段级自愈重跑（升档兜底）。让路缺省下收口不被拒、本回执不可达。
      */
     public static String rejectionReceipt(Map<String, Object> payload) {
         StringBuilder receipt = new StringBuilder(

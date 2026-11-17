@@ -34,7 +34,10 @@ public enum ErrorCodePrefix {
     IDN("IDN_", 6, "business.identity"),
 
     /** base.skills：技能库（skl_） */
-    SKL("SKL_", 7, "base.skills");
+    SKL("SKL_", 7, "base.skills"),
+
+    /** business.billing：充值余额计费（bil_ 表前缀；码前缀 BILL_，#533 拦截卡 REST 面起走线） */
+    BILL("BILL_", 8, "business.billing");
 
     private final String prefix;
     private final int domainCode;

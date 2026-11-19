@@ -196,7 +196,18 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 // 吞、靠 run 重试环自愈分钟级。开启＝resume 时对无结果 pending 调用
                 // 自动补 ERROR 结果继续走（模型看见工具失败事实自行续作，WARN 遥测
                 // 落框架日志）——最小修复，不叠旁路恢复层（#412 递减效应引证）
-                .enablePendingToolRecovery(true);
+                .enablePendingToolRecovery(true)
+                // 内层重试关闭·内核旋钮（#555 / ADR-0053 ①）：平台 INNER_RETRY_DISABLED
+                // 压的 maxAttempts=1 只到模型 configuredOptions——内核 ReActAgent 无条件
+                // 烧 modelConfig(maxRetries 缺省 3) 进每次调用的 callOptions，
+                // ModelUtils.applyTimeoutAndRetry 的 mergeOptions(callOptions,
+                // configuredOptions) 第一参字段级优先压过之（且 retryOn=null 时内核挂
+                // 恒真 filter：401 也重试、耗尽 RetryExhaustedException 裹走真错误——
+                // 上游 open bug #2861）。旋钮经 modelConfig.maxRetries→callOptions
+                // executionConfig 与平台关闭一致，内核重试面＝1：401 类真错误单发裸上抛
+                // （外层分类路由见 #552 ② failover；框架压缩中间件另有吞模型错误重放
+                // 一轮的独立缺陷，#561）。子智能体工厂同款（subagentFactory）
+                .maxRetries(1);
         skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
                 .forEach(builder::skillRepository);
         // 平台中间件挂载位（#261 首件＝技能加载计数）：全形态挂观测中间件；
@@ -503,6 +514,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     // pending tool 恢复开（#431）：故障面正在子级——子级同款开启
                     // （根因与机制见 buildAgent 处注释）
                     .enablePendingToolRecovery(true)
+                    // 内层重试关闭·内核旋钮（#555 / ADR-0053 ①，同主装配——机制与
+                    // 修法见 buildAgent 处注释）
+                    .maxRetries(1)
                     .stateStore(stateStore);
             if (isolatedRoot != null) {
                 sub.workspace(isolatedRoot).abstractFilesystem(containerFs);

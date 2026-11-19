@@ -21,6 +21,8 @@ import com.sun.net.httpserver.HttpServer;
 
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.ExecutionConfig;
+import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.ModelHttpException;
 import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import io.agentscope.extensions.model.openai.exception.OpenAIException;
@@ -143,11 +145,17 @@ class ModelStreamRetryInjectionTest {
     }
 
     private List<ChatResponse> streamWithScope(ModelComposition composition) {
+        return streamWithScope(composition, null);
+    }
+
+    /** callOptions 可显式注入（#555 非 null 形态用例——既有用例 null＝既有行为）。 */
+    private List<ChatResponse> streamWithScope(ModelComposition composition,
+            GenerateOptions callOptions) {
         // 计量上下文随订阅链传递（#324）：订阅点 contextWrite 写入（runTurn 同形态）
         return AgentscopeHarnessAgentFactory
                 .streamLayer(composition.raw(), "deepseek:deepseek-v4-flash",
                         composition.properties())
-                .stream(List.of(), null, null)
+                .stream(List.of(), null, callOptions)
                 .contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, new MeteringScope(
                         "run-live", "s-live", new UsageContext("prj-live", Map.of()),
                         Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC),
@@ -209,6 +217,35 @@ class ModelStreamRetryInjectionTest {
         assertThat(requests.get()).isEqualTo(3);
         // 恒败零数据块 → 计量面零事件（无 usage 可报，不发明零事件——路径未被破坏）
         assertThat(composition.events()).isEmpty();
+    }
+
+    @Test
+    @Timeout(60)
+    void given_non_null_call_options_with_kernel_shaped_ec_when_stream_then_inner_retry_revived() {
+        // 非 null callOptions 注入（#555 / ADR-0053 ①「绿灯假象」根因层）：既有用例
+        // callOptions 传 null——mergeOptions(null, configured) 短路返回 configured
+        // （maxAttempts=1）恒单发，从未复现「内核构造非 null callOptions」这一层。
+        // 本用例传内核修前形态的 callOptions（ReActAgent.buildGenerateOptions 烧的
+        // executionConfig(maxAttempts=3)——旋钮缺失时的真实产物）：merge 第一参
+        // 字段级优先压过平台 INNER_RETRY_DISABLED、且 retryOn=null 挂恒真 filter——
+        // 401 也被内核重试、耗尽 RetryExhaustedException 裹走真错误。钉住「这个
+        // callOptions 形态致命」＝主装配旋钮（maxRetries(1)，行为级断言见
+        // AgentscopeInnerRetryKnobTest）存在的理由；任何让 agent 链 callOptions 回到
+        // 该形态的回归（旋钮丢失/框架缺省变更）由那边的行为级用例抓红。
+        statusScript = new int[] {401};
+        ModelComposition composition = composition();
+        GenerateOptions kernelShapedCallOptions = GenerateOptions.builder()
+                .executionConfig(ExecutionConfig.builder()
+                        .maxAttempts(3)
+                        .build())
+                .build();
+
+        assertThatThrownBy(() -> streamWithScope(composition, kernelShapedCallOptions))
+                // 被重试机制的皮裹走（形态对照：修后主装配是裸 AuthenticationException）
+                .hasMessageContaining("Retries exhausted");
+
+        // 内层复活：首试 + 2 重试（平台层对 401 分类拒不重试——3 发全来自内核）
+        assertThat(requests.get()).isEqualTo(3);
     }
 
     @Test

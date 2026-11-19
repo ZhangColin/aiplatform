@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
@@ -161,7 +162,8 @@ public class ProjectNamingAppService implements DisposableBean {
      * ——后台改档下一轮取名即生效）。
      */
     private String converseForName(Long projectId, String requirement) {
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(
+        // #557 整候选队列（边缘点同获链式切换——resolve 面之一）
+        ModelCandidateQueue model = modelTiers.resolveQueue(
                 agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING));
         AgentCommand command = new AgentCommand(
                 EventsAppService.newRunId(),
@@ -183,7 +185,9 @@ public class ProjectNamingAppService implements DisposableBean {
                 /* workspaceReadOnly= */ false,
                 /* workspaceNoShell= */ false,
                 /* heading= */ null,
-                /* toolSpec= */ null);
+                /* toolSpec= */ null,
+                // #557 候选队列（failover 装配面）
+                model);
         AgentReply reply = agentClient.converse(command, event -> {
         });
         return sanitize(reply.text());

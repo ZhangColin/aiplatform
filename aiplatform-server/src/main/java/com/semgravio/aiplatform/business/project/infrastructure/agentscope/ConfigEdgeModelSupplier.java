@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.business.project.infrastructure.agentscope;
 import org.springframework.stereotype.Component;
 
 import com.semgravio.aiplatform.base.agentscope.EdgeModelSupplier;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
@@ -14,7 +15,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * ModelTierAppService} 解析单点，ADR-0031）——底座侧消费面（压缩装配/技能预检）
  * 的反转接线（知识在业务层、消费在底座，base 不依赖 business，先例
  * {@code ProfileToolkitSupplier}）。动态查库、不缓存：后台改档下一轮装配/调用
- * 自然生效。
+ * 自然生效。#557 起携整候选队列（failover 装配面——边缘档位同获链式切换）。
  */
 @Component
 public class ConfigEdgeModelSupplier implements EdgeModelSupplier {
@@ -45,13 +46,11 @@ public class ConfigEdgeModelSupplier implements EdgeModelSupplier {
         if (tierKey == null) {
             return null;
         }
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(tierKey);
-        return new EdgeModel(model.modelString(), model.channel());
+        return new EdgeModel(modelTiers.resolveQueue(tierKey));
     }
 
     private EdgeModel resolve(AgentEdgePoint point) {
-        ModelTierAppService.ResolvedModel model =
-                modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point));
-        return new EdgeModel(model.modelString(), model.channel());
+        return new EdgeModel(modelTiers.resolveQueue(
+                agentConfigs.effectiveEdgeModelId(point)));
     }
 }

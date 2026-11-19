@@ -10,7 +10,12 @@ import org.junit.jupiter.api.Test;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
+import java.util.List;
+
 import com.semgravio.aiplatform.base.agentscope.EdgeModelSupplier;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidate;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
+import com.semgravio.aiplatform.base.agentscope.ModelChannel;
 
 /**
  * 边缘/子智能体模型供数适配器（#366＋#424）：verify 子智能体档位覆盖的解析腿
@@ -43,9 +48,9 @@ class ConfigEdgeModelSupplierTest {
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, false, false, "pro", 5, 2, true, true, true,
                         true, false, false, true));
-        when(modelTiers.resolve("pro")).thenReturn(new ModelTierAppService.ResolvedModel(
-                "pro", "volcengine", "deepseek-v4-pro-ga-260731",
-                "https://ark.example/api/v3", "sk-a", false));
+        when(modelTiers.resolveQueue("pro")).thenReturn(new ModelCandidateQueue("pro",
+                List.of(new ModelCandidate("volcengine", "deepseek-v4-pro-ga-260731",
+                        new ModelChannel("https://ark.example/api/v3", "sk-a", false)))));
 
         EdgeModelSupplier.EdgeModel model = supplier.subagentModel();
 

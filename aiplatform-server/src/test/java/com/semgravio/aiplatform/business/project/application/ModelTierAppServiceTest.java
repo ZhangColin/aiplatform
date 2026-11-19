@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.ModelChannel;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.business.project.application.ModelTierAppService.ResolvedModel;
 import com.cartisan.core.exception.ApplicationException;
 
@@ -163,6 +164,33 @@ class ModelTierAppServiceTest {
 
         assertThat(queue).hasSize(1);
         assertThat(queue.get(0).thinkingEnabled()).isTrue();
+    }
+
+    @Test
+    void given_candidate_rows_when_resolve_queue_then_base_shaped_ordered_queue() {
+        // #557 底座消费形：档位键 → ModelCandidateQueue（tierKey＋有序候选，逐候选
+        // 通道注入件携带）——failover 装配面的读腿；首候选与双字段同源
+        seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
+        seedChannel("t-ark2", "https://ark2.example/api/v3", "sk-ark2-test", true);
+        seedTier("t-queue", "t-ark", "tier-row-model", true, null);
+        seedCandidate("t-queue", 2, "t-ark2", "backup-model");
+        seedCandidate("t-queue", 1, "t-ark", "primary-model");
+
+        ModelCandidateQueue queue = modelTiers.resolveQueue("t-queue");
+
+        assertThat(queue.tierKey()).isEqualTo("t-queue");
+        assertThat(queue.size()).isEqualTo(2);
+        assertThat(queue.first().modelString()).isEqualTo("t-ark:primary-model");
+        assertThat(queue.first().channel().apiKey()).isEqualTo("sk-ark-test");
+        assertThat(queue.candidates().get(1).modelString()).isEqualTo("t-ark2:backup-model");
+        // 派生双字段单点（命令面以此填 modelString/modelChannel）
+        assertThat(queue.modelString()).isEqualTo("t-ark:primary-model");
+        assertThat(queue.channel().baseUrl()).isEqualTo(BASE_URL);
+        // 整队列指纹：候选序与内容全量入键（任一变＝指纹变）
+        String fingerprint = queue.fingerprint();
+        assertThat(queue.fingerprint()).isEqualTo(fingerprint);
+        assertThat(ModelCandidateQueue.single("t-ark:primary-model",
+                queue.first().channel()).fingerprint()).isNotEqualTo(fingerprint);
     }
 
     @Test

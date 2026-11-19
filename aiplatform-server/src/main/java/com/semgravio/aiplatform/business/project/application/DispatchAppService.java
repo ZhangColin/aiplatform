@@ -14,6 +14,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
@@ -500,7 +501,8 @@ public class DispatchAppService {
     private ClassifyOutcome classify(Long projectId, String prompt) {
         String runId = EventsAppService.newRunId();
         String sessionId = CLASSIFY_SESSION_PREFIX + runId;
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(
+        // #557 整候选队列（边缘点同获链式切换——resolve 面之一）
+        ModelCandidateQueue model = modelTiers.resolveQueue(
                 agentConfigs.effectiveEdgeModelId(AgentEdgePoint.CLASSIFICATION));
         AgentCommand command = new AgentCommand(
                 runId,
@@ -521,7 +523,9 @@ public class DispatchAppService {
                 /* workspaceReadOnly= */ false,
                 /* workspaceNoShell= */ false,
                 /* heading= */ null,
-                /* toolSpec= */ null); // 一次性判定无配置语境：空工具面、无规格
+                /* toolSpec= */ null, // 一次性判定无配置语境：空工具面、无规格
+                // #557 候选队列（failover 装配面）
+                model);
         try {
             AgentReply reply = agentClient.converse(command, event -> {
             });

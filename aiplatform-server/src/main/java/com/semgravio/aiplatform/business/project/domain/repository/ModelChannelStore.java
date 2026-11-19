@@ -6,6 +6,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierSwitchTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
 
 /**
@@ -76,4 +77,11 @@ public interface ModelChannelStore {
 
     /** 档位留痕读面：该档位全部留痕按时间倒序（最近先）。 */
     List<ModelTierTrace> findTierTraces(String tierKey);
+
+    /**
+     * 运行期切候选留痕追加（#557，ADR-0053 ③，append-only）：FailoverModel 每次
+     * 链式切换一痕——写腿经 base 端口 {@code ModelSwitchTraceSink} 适配进来
+     * （观察面：库故障不烧穿生成流，适配层吞错记日志）。
+     */
+    void insertTierSwitchTrace(ModelTierSwitchTrace trace);
 }

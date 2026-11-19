@@ -7,6 +7,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.extern.slf4j.Slf4j;
 
+import com.semgravio.aiplatform.base.agentscope.ModelCandidate;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.ModelChannel;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
@@ -27,7 +29,7 @@ import com.cartisan.core.exception.ApplicationException;
  * <p><b>队列数据源（软着陆）</b>：档位<b>未配置</b>候选行时回退档位行现列
  * （单元素队列——既有引用零迁移即等价）；配置了候选行则候选表是唯一队列源
  * （含全停用＝显式下线，报错不回落现列）。运行期故障的候选内重试/切换收口在
- * 模型包装层（T3 {@code FailoverModel}——本读面只做配置态校验）。</p>
+ * 模型包装层（#557 {@code FailoverModel} 已落地——本读面只做配置态校验）。</p>
  *
  * <p><b>报错语义（无静默回落）</b>：档位缺行、档位停用、无启用候选、任一启用
  * 候选的通道停用/key 空皆明确报错——apiKey 落库为唯一正本，不回落环境变量
@@ -53,8 +55,8 @@ public class ModelTierAppService {
     }
 
     /**
-     * 首选候选解析（既有单点读面，五个 resolve 消费面不变——T3 FailoverModel
-     * 落地时逐面升级为整队列）。语义＝{@link #resolveCandidates} 队列首元素。
+     * 首选候选解析（T2 读面契约保留：首候选＝主选）。语义＝{@link #resolveCandidates}
+     * 队列首元素；装配面（#557 起）一律走 {@link #resolveQueue}（整队列 failover 面）。
      *
      * @param tierKey 档位语义键（绑定面引用值；空＝调用方缺省腿未收编，属编程错误）
      */
@@ -64,10 +66,27 @@ public class ModelTierAppService {
     }
 
     /**
+     * 整队列解析的底座消费形（#557，ADR-0053 ③）：档位键 → 候选队列
+     * （{@link ModelCandidateQueue}——failover 装配面）。主链调用面
+     * （三座对话轮/生成尝试/派发/边缘点）一律经此携队列：多候选＝运行期链式
+     * 切换（FailoverModel 收口模型包装层，五个 resolve 面免费获得）、单候选＝
+     * 既有装配行为不变（软着陆）。首候选与模型串/通道双字段同源（调用面从
+     * {@link ModelCandidateQueue#modelString()}/{@link ModelCandidateQueue#channel()}
+     * 派生双字段——构建面单点保证不漂移）。
+     */
+    @Transactional(readOnly = true)
+    public ModelCandidateQueue resolveQueue(String tierKey) {
+        List<ResolvedModel> queue = resolveCandidates(tierKey);
+        return new ModelCandidateQueue(tierKey, queue.stream()
+                .map(ResolvedModel::asCandidate)
+                .toList());
+    }
+
+    /**
      * 整队列解析（#556 候选队列读面）：档位键 → 启用候选有序列表（priority
      * 升序）。候选行未配置时回退档位行现列单元素（软着陆——单候选路径行为
      * 不变）。每个候选独立校验其通道行（启用态＋key 非空）——任一启用候选
-     * 配置态坏＝响亮报错（运行期切换是 T3 职责，读面无静默跳过）。
+     * 配置态坏＝响亮报错（运行期切换是 FailoverModel 职责，读面无静默跳过）。
      */
     @Transactional(readOnly = true)
     public List<ResolvedModel> resolveCandidates(String tierKey) {
@@ -139,6 +158,11 @@ public class ModelTierAppService {
         /** base 层通道注入件（随命令透传：创建上下文＋实例缓存键指纹）。 */
         public ModelChannel channel() {
             return new ModelChannel(baseUrl, apiKey, thinkingEnabled);
+        }
+
+        /** 底座候选元素形（#557 队列装配腿：resolveQueue 映射单点）。 */
+        public ModelCandidate asCandidate() {
+            return new ModelCandidate(providerKey, modelName, channel());
         }
     }
 }

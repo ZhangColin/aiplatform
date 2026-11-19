@@ -150,9 +150,9 @@ class AgentscopeSkillStageSuppressionTest {
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
                 (agentKey, workspace) -> List.of(new ProbeSkillRepository()), SUBAGENTS,
-                NO_MIDDLEWARES, EDGE_MODELS, new AgentscopeProperties());
+                NO_MIDDLEWARES, EDGE_MODELS, new AgentscopeProperties(), null);
         return factory.obtain("platform-agent-363", "sys", PROBE_MODEL,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
+                null, null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
     }
 
     private static Optional<HarnessSkillMiddleware> skillMiddlewareOf(HarnessAgent agent) {

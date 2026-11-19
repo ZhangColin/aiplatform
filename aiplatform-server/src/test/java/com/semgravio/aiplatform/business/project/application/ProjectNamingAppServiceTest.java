@@ -1,5 +1,6 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -12,6 +13,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidate;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.ModelChannel;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -271,10 +274,9 @@ class ProjectNamingAppServiceTest {
         lenient().when(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING))
                 .thenReturn(tierKey);
         ModelTierAppService modelTiers = mock(ModelTierAppService.class);
-        lenient().when(modelTiers.resolve(tierKey)).thenReturn(
-                new ModelTierAppService.ResolvedModel(
-                        tierKey, "volcengine", modelName, "https://ark.example/api/v3",
-                        "sk-test-ark", false));
+        lenient().when(modelTiers.resolveQueue(tierKey)).thenReturn(new ModelCandidateQueue(
+                tierKey, List.of(new ModelCandidate("volcengine", modelName,
+                        new ModelChannel("https://ark.example/api/v3", "sk-test-ark", false)))));
         return new ProjectNamingAppService(agentClient, agentConfigs, modelTiers,
                 projectRepository, eventsAppService, Runnable::run);
     }

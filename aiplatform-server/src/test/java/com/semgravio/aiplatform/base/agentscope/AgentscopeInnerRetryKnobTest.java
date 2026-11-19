@@ -154,9 +154,9 @@ class AgentscopeInnerRetryKnobTest {
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), (agentKey, workspace, toolSpec) -> new Toolkit(),
                 (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
-                (agentKey, workspace) -> List.of(), edges, new AgentscopeProperties());
+                (agentKey, workspace) -> List.of(), edges, new AgentscopeProperties(), null);
         return factory.obtain("inner-retry-knob", "sys", "volcengine:deepseek-v4-flash",
-                channel(), new AgentWorkspace.Local(null), null, null);
+                channel(), null, new AgentWorkspace.Local(null), null, null);
     }
 
     /** 异常链展平（内核/外层尝试环可能各包一层——裸与裹的判定看全链）。 */

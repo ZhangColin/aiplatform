@@ -142,7 +142,7 @@ class AgentscopeCompactionOffloadSuppressionTest {
         properties.setCompactionTriggerTokens(LOW_TRIGGER_TOKENS);
 
         CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
-                properties, new EdgeModelSupplier.EdgeModel(PROBE_MODEL, null));
+                properties, new EdgeModelSupplier.EdgeModel(PROBE_MODEL, null), null);
 
         assertThat(config.isOffloadBeforeCompact())
                 .as("平台压缩配置必须关停压缩前会话树 offload（#379 宿主泄漏正源）")
@@ -165,9 +165,9 @@ class AgentscopeCompactionOffloadSuppressionTest {
         InMemoryAgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS,
-                NO_MIDDLEWARES, EDGE_MODELS, properties);
+                NO_MIDDLEWARES, EDGE_MODELS, properties, null);
         HarnessAgent agent = factory.obtain("platform-agent-379", "sys", PROBE_MODEL,
-                null, new AgentWorkspace.Local(workspaceRoot), "main", null);
+                null, null, new AgentWorkspace.Local(workspaceRoot), "main", null);
         try {
             RuntimeContext ctx = RuntimeContext.builder()
                     .sessionId("sess-379").userId("user-379").build();

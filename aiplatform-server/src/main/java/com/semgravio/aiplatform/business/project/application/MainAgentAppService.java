@@ -17,6 +17,7 @@ import com.semgravio.aiplatform.base.agentscope.AgentResume;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentSuspension;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -421,7 +422,7 @@ public class MainAgentAppService {
         String sessionId = sessionIdOf(projectId);
         conversationHistory.recordAnswer(projectId, runId, answerText);
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
+        ModelCandidateQueue model = modelTiers.resolveQueue(main.modelId());
 
         AgentResume resume = new AgentResume(
                 runId,
@@ -430,6 +431,7 @@ public class MainAgentAppService {
                 Long.toString(project.getWorkspaceId()),
                 model.modelString(),
                 model.channel(),
+                model, // #557 续跑与首轮同队列（failover 装配面）
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
                         + interviewTailsOf(project) + STYLE_DIRECTION_CATALOG_TAIL,
                 replyId,
@@ -791,7 +793,7 @@ public class MainAgentAppService {
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
         // #460 兜底盘问投递：收口记账的会话下一轮 system prompt 尾附轻提醒（消费即清）
-        return mainCommandWith(project, runId, prompt, main, modelTiers.resolve(main.modelId()),
+        return mainCommandWith(project, runId, prompt, main, modelTiers.resolveQueue(main.modelId()),
                 sedimentNudgeTailOf(project.getId()));
     }
 
@@ -807,13 +809,13 @@ public class MainAgentAppService {
      * #correctiveModelOf}）。
      */
     private AgentCommand correctiveCommand(Project project, String runId,
-            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model) {
+            AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model) {
         return correctiveCommandWith(project, runId, main, model, CORRECTIVE_REDIRECT_PROMPT);
     }
 
     /** 纠偏命令构建（微指令参数化——#462 统一微指令与 #538 收口微指令两形同缝）。 */
     private AgentCommand correctiveCommandWith(Project project, String runId,
-            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model,
+            AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model,
             String correctivePrompt) {
         // 纠偏轮不带沉淀兜底盘问尾注（mainCommandWith 尾注腿传空串）：纠偏是格式失格的
         // 确定性纠正，不混入沉淀提醒（记账不被消费，下轮正常投递）
@@ -871,7 +873,7 @@ public class MainAgentAppService {
      * {@link MainAgentProperties}（#371：携增强工具的慢轮不被总墙钟掐死）。
      */
     private AgentCommand mainCommandWith(Project project, String runId, String prompt,
-            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model,
+            AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model,
             String sedimentNudgeTail) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
@@ -895,7 +897,9 @@ public class MainAgentAppService {
                 /* workspaceReadOnly= */ true,
                 /* workspaceNoShell= */ false,
                 /* heading= */ null,
-                main.toolSpec());
+                main.toolSpec(),
+                // #557 候选队列（续跑与首轮同队列——多候选＝failover 装配面）
+                model);
     }
 
     /** 会话标识派生（projectId → main-{projectId} 稳定绑定）。 */
@@ -1193,7 +1197,7 @@ public class MainAgentAppService {
             return;
         }
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelTierAppService.ResolvedModel model = correctiveModelOf(main, attempt);
+        ModelCandidateQueue model = correctiveModelOf(main, attempt);
         if (model == null) {
             // 路由关的纯人工定档姿态：不自动升档（第 1 轮失格即播报，同非额度链语义）
             quotaCorrectiveRounds.remove(sessionId);
@@ -1226,7 +1230,7 @@ public class MainAgentAppService {
         }
         conversationHistory.markAnswered(pending.runId());
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
+        ModelCandidateQueue model = modelTiers.resolveQueue(main.modelId());
         AgentResume resume = new AgentResume(
                 pending.runId(),
                 sessionId,
@@ -1234,6 +1238,7 @@ public class MainAgentAppService {
                 Long.toString(project.getWorkspaceId()),
                 model.modelString(),
                 model.channel(),
+                model, // #557 续跑与首轮同队列（failover 装配面）
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
                         + interviewTailsOf(project) + STYLE_DIRECTION_CATALOG_TAIL, // 收口指令在场（额度用尽态）＋风格目录尾注
                 pending.suspension().engineRef(),
@@ -1275,7 +1280,7 @@ public class MainAgentAppService {
      * {@link #CORRECTIVE_ROUND_CAP}）。收口走常规重入观测。
      */
     private void converseClosureCorrective(Project project, String sessionId,
-            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model) {
+            AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model) {
         Long projectId = project.getId();
         String runId = EventsAppService.newRunId();
         AgentCommand command = correctiveCommandWith(project, runId, main, model,
@@ -1301,7 +1306,7 @@ public class MainAgentAppService {
     private void submitCorrectiveRound(Project project, String sessionId, String originRunId,
             boolean prdSaveFailed, int attempt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelTierAppService.ResolvedModel model = correctiveModelOf(main, attempt);
+        ModelCandidateQueue model = correctiveModelOf(main, attempt);
         if (model == null) {
             markDanglingInterview(project, originRunId,
                     prdSaveFailed ? DANGLING_REMEDY_PRD_FAILED : DANGLING_REMEDY_GENERIC);
@@ -1361,15 +1366,15 @@ public class MainAgentAppService {
      * 直接播报、不自动升档。强档取路由面生效值（运营可换、不发版，ADR-0031），
      * 缺省 {@link ModelRoutingAppService#DEFAULT_STRONG_MODEL_ID}。
      */
-    private ModelTierAppService.ResolvedModel correctiveModelOf(
+    private ModelCandidateQueue correctiveModelOf(
             AgentConfigAppService.EffectiveConfig main, int attempt) {
         if (attempt == 1) {
-            return modelTiers.resolve(main.modelId());
+            return modelTiers.resolveQueue(main.modelId());
         }
         if (!main.routingEnabled()) {
             return null;
         }
-        return modelTiers.resolve(main.routingStrongModelId() != null
+        return modelTiers.resolveQueue(main.routingStrongModelId() != null
                 ? main.routingStrongModelId()
                 : ModelRoutingAppService.DEFAULT_STRONG_MODEL_ID);
     }

@@ -21,6 +21,9 @@ import io.agentscope.core.event.ConfirmResult;
  * @param modelChannel      模型通道注入件（主链非空——续跑与首轮同通道，业务侧
  *                          从运营配置重新解析，不信挂起载荷；null＝测试形，语义同
  *                         {@link AgentCommand#modelChannel()}）
+ * @param modelQueue        候选队列（#557：可空——非空时语义同
+ *                         {@link AgentCommand#modelQueue()}，续跑与首轮同队列，
+ *                         业务侧从运营配置重新解析重建，不信挂起载荷）
  * @param systemPrompt      系统提示词（可空 → 配置默认）
  * @param replyId           挂起的引擎侧请求 id（计量幂等键后缀）
  * @param confirmResults    待确认工具的批复清单（与挂起 toolCalls 一一对应）
@@ -50,6 +53,7 @@ public record AgentResume(
         String workspaceId,
         String modelString,
         ModelChannel modelChannel,
+        ModelCandidateQueue modelQueue,
         String systemPrompt,
         String replyId,
         List<ConfirmResult> confirmResults,

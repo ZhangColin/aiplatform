@@ -35,10 +35,26 @@ public interface EdgeModelSupplier {
     EdgeModel subagentModel();
 
     /**
-     * 解析产物（档位解析的底座消费形）：模型串（前缀:实际模型名——前缀即协议
-     * 路由）＋通道注入件（baseUrl/apiKey/thinking，进创建上下文；可空＝无通道
-     * 语境，SDK 回落内置 provider 缺省——测试形）。
+     * 解析产物（档位解析的底座消费形，#557 起整队列）：候选队列
+     * （{@link ModelCandidateQueue}——首候选＝模型串＋通道注入，多候选＝failover
+     * 面，装配见 {@code AgentscopeHarnessAgentFactory#failoverLayer}）。兼容构造
+     * （模型串＋通道件直构单候选队列）＝测试形/单候选路径。
      */
-    record EdgeModel(String modelString, ModelChannel channel) {
+    record EdgeModel(ModelCandidateQueue queue) {
+
+        /** 兼容构造：模型串＋通道件直构单候选队列（无档位语境——切换不留痕）。 */
+        public EdgeModel(String modelString, ModelChannel channel) {
+            this(ModelCandidateQueue.single(modelString, channel));
+        }
+
+        /** 首选候选模型串（前缀:实际模型名——前缀即协议路由）。 */
+        public String modelString() {
+            return queue.first().modelString();
+        }
+
+        /** 首选候选通道注入件（可空＝无通道语境，SDK 回落内置 provider 缺省）。 */
+        public ModelChannel channel() {
+            return queue.first().channel();
+        }
     }
 }

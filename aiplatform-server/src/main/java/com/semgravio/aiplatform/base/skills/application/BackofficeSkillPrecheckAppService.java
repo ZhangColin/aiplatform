@@ -164,7 +164,9 @@ public class BackofficeSkillPrecheckAppService {
                 /* workspaceReadOnly= */ false,
                 /* workspaceNoShell= */ false,
                 /* heading= */ null,
-                /* toolSpec= */ null);
+                /* toolSpec= */ null,
+                // #557 候选队列（边缘点同获链式切换——failover 装配面）
+                model.queue());
         try {
             AgentReply reply = agentClient.converse(command, event -> {
             });

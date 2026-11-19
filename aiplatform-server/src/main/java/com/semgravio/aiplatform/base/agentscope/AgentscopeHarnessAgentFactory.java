@@ -68,7 +68,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     interface AgentBuilder {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
-                ModelChannel modelChannel, EdgeModelSupplier.EdgeModel compaction,
+                ModelChannel modelChannel, ModelCandidateQueue modelQueue,
+                EdgeModelSupplier.EdgeModel compaction,
                 EdgeModelSupplier.EdgeModel subagent, AgentWorkspace workspace, String agentKey,
                 String toolSpec);
     }
@@ -78,6 +79,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     private final AgentStateStore stateStore;
     private final AgentToolkitSupplier toolkitSupplier;
     private final EdgeModelSupplier edgeModels;
+    private final ModelSwitchTraceSink switchTraceSink;
 
     /** 内核内置件名（wait_async_results）与坑参数名（timeout_seconds，#482）。 */
     private static final String WAIT_ASYNC_RESULTS_TOOL = "wait_async_results";
@@ -88,26 +90,34 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
-            EdgeModelSupplier edgeModels, AgentscopeProperties properties) {
-        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel,
+            EdgeModelSupplier edgeModels, AgentscopeProperties properties,
+            ModelSwitchTraceSink switchTraceSink) {
+        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel, modelQueue,
                 compaction, subagent, workspace, agentKey, toolSpec) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
-                        middlewareSupplier,
-                        name, sysPrompt, modelString, modelChannel, compaction, subagent, workspace,
-                        agentKey, toolSpec, properties),
-                edgeModels);
+                        middlewareSupplier, switchTraceSink,
+                        name, sysPrompt, modelString, modelChannel, modelQueue, compaction,
+                        subagent, workspace, agentKey, toolSpec, properties),
+                edgeModels, switchTraceSink);
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
             AgentBuilder builder, EdgeModelSupplier edgeModels) {
+        this(stateStore, toolkitSupplier, builder, edgeModels, null);
+    }
+
+    AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
+            AgentBuilder builder, EdgeModelSupplier edgeModels, ModelSwitchTraceSink switchTraceSink) {
         this.stateStore = stateStore;
         this.toolkitSupplier = toolkitSupplier;
         this.builder = builder;
         this.edgeModels = edgeModels;
+        this.switchTraceSink = switchTraceSink;
     }
 
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
-            ModelChannel modelChannel, AgentWorkspace workspace, String agentKey, String toolSpec) {
+            ModelChannel modelChannel, ModelCandidateQueue modelQueue, AgentWorkspace workspace,
+            String agentKey, String toolSpec) {
         // 压缩档位随装配解析（#366 边缘点收编：compaction 档位库值优先缺省 → 解析
         // 单点，每次 obtain 动态查——后台改档下一轮命令构建即生效）
         EdgeModelSupplier.EdgeModel compaction = edgeModels.compactionModel();
@@ -118,20 +128,22 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 人格/工作区/工具面的 agent 当同规格静默复用）；toolSpec 是工具面规格
         // （#252 增强工具开关）：工具集构建时固化（Toolkit 静态注册、无技能线的
         // 动态视图缝），规格变＝实例变——开关变更下一轮命令构建即新装配；
-        // modelChannel.fingerprint() 是生效配置指纹（ADR-0031）：同模型串下换
-        // key/换地址＝指纹变＝新实例——守「改配置即生效、进行中 run 不定格」；
+        // 生效配置指纹（ADR-0031）：同模型串下换 key/换地址＝指纹变＝新实例——守
+        // 「改配置即生效、进行中 run 不定格」。#557 起队列形优先：modelQueue 非
+        // 空时整队列指纹（任一候选变＝新实例——failover 面对全队列成立），双字段
+        // 形（modelChannel.fingerprint()）为无队列测试形保留；
         // 压缩档位同入指纹（#366）：改压缩档即新实例；子智能体档位同律（#424）
-        String key = name + "|" + modelString + "|"
-                + (modelChannel == null ? "" : modelChannel.fingerprint()) + "|"
+        String channelFingerprint = modelQueue != null ? modelQueue.fingerprint()
+                : (modelChannel == null ? "" : modelChannel.fingerprint());
+        String key = name + "|" + modelString + "|" + channelFingerprint + "|"
                 + sysPrompt + "|" + workspace.identity()
                 + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec)
-                + "|cx=" + compaction.modelString() + "@"
-                + (compaction.channel() == null ? "" : compaction.channel().fingerprint())
-                + "|sg=" + (subagent == null ? "" : subagent.modelString() + "@"
-                        + (subagent.channel() == null ? "" : subagent.channel().fingerprint()));
+                // 边缘档位（压缩/子智能体）整队列指纹：#557 队列化后任一候选变＝新实例
+                + "|cx=" + compaction.queue().fingerprint()
+                + "|sg=" + (subagent == null ? "" : subagent.queue().fingerprint());
         return agents.computeIfAbsent(key,
-                k -> builder.build(name, sysPrompt, modelString, modelChannel, compaction,
-                        subagent, workspace, agentKey, toolSpec));
+                k -> builder.build(name, sysPrompt, modelString, modelChannel, modelQueue,
+                        compaction, subagent, workspace, agentKey, toolSpec));
     }
 
     @Override
@@ -150,7 +162,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
+            ModelSwitchTraceSink switchTraceSink,
             String name, String sysPrompt, String modelString, ModelChannel modelChannel,
+            ModelCandidateQueue modelQueue,
             EdgeModelSupplier.EdgeModel compaction, EdgeModelSupplier.EdgeModel subagent,
             AgentWorkspace workspace, String agentKey,
             String toolSpec, AgentscopeProperties properties) {
@@ -162,16 +176,19 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 复用同一实例（计量边界连续，子智能体轮次同归当轮用量）。通道注入件
         // （ADR-0031）随解析进创建上下文：baseUrl/apiKey/enableThinking 注入
         // SDK（覆盖依赖库默认地址与环境变量），前缀路由到平台注册工厂
-        // （volcengine）或内置 provider（deepseek 等）
-        Model model = streamLayer(
-                ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
-                modelString, properties);
+        // （volcengine）或内置 provider（deepseek 等）。#557 起队列形：命令携
+        // modelQueue（档位解析的整队列产物）时主模型经 failoverLayer 装配
+        // （多候选＝FailoverModel 链式切换、单候选＝streamLayer 直装行为不变）
+        Model model = modelQueue != null
+                ? failoverLayer(modelQueue, properties, switchTraceSink)
+                : streamLayer(
+                        ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
+                        modelString, properties);
         // 委派子智能体档位（#424 片轻验）：覆盖档独立解析同款流层包装（计量外圈＋
-        // 断流重试同构）；null＝随父级实例（缺省同执行体档——含路由升档，计量
-        // 边界连续的既有口径不变）
-        Model subagentModel = subagent == null ? model : streamLayer(
-                ModelRegistry.resolve(subagent.modelString(), creationContextOf(subagent.channel())),
-                subagent.modelString(), properties);
+        // 断流重试同构；#557 起整队列 failover 同构）；null＝随父级实例（缺省同
+        // 执行体档——含路由升档，计量边界连续的既有口径不变）
+        Model subagentModel = subagent == null ? model
+                : failoverLayer(subagent.queue(), properties, switchTraceSink);
         // 项目工作区容器文件面（ProjectDev/ProjectReadOnly 共用；子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
@@ -229,7 +246,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩档位解析产物（#366 边缘
         // 点收编——档位键经 EdgeModelSupplier 反转读配置面），让压缩在
         // context_length_exceeded 前触发；阈值取值依据见 AgentscopeProperties。
-        builder.compaction(compactionConfig(properties, compaction));
+        builder.compaction(compactionConfig(properties, compaction, switchTraceSink));
         switch (workspace) {
             case AgentWorkspace.Local local -> {
                 if (local.root() != null) {
@@ -604,6 +621,26 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     /**
+     * 候选队列装配（#557，ADR-0053 ③——主模型/子智能体/压缩三处共用装配面）：
+     * 单候选队列＝{@link #streamLayer} 直装（无切换面，行为与既有单候选路径一致
+     * ——软着陆）；多候选＝{@link FailoverModel}（持队列、懒装配候选[i+1]、切换
+     * 留痕经 {@link ModelSwitchTraceSink}）。逐候选装配同形（前缀路由＋通道注入＋
+     * streamLayer——每候选自己的计量归属〔provider 前缀随候选走，按账号计量〕与
+     * #321 候选内重试）。
+     */
+    static Model failoverLayer(ModelCandidateQueue queue, AgentscopeProperties properties,
+            ModelSwitchTraceSink switchTraceSink) {
+        java.util.function.Function<ModelCandidate, Model> assembler = candidate -> streamLayer(
+                ModelRegistry.resolve(candidate.modelString(),
+                        creationContextOf(candidate.channel())),
+                candidate.modelString(), properties);
+        if (queue.size() == 1) {
+            return assembler.apply(queue.first());
+        }
+        return new FailoverModel(queue, assembler, switchTraceSink);
+    }
+
+    /**
      * 内层（框架模型内建）重试关闭的执行配置（#321）：agentscope 2.0.1 的
      * {@code OpenAIChatModel.Builder.build()} 经 {@code ensureDefaultExecutionConfig}
      * 把 {@code ExecutionConfig.MODEL_DEFAULTS} 烧进 configuredOptions——内层
@@ -659,8 +696,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 压缩配置装配：把配置的触发阈值 + 压缩档位解析产物落到 {@link CompactionConfig}
      * ——压缩模型来自 {@link EdgeModelSupplier}（#366 边缘点收编：compaction 档位
      * 库值优先缺省 flash，通道注入同主模型链——换压缩档/换通道不发版），保留量/裁剪
-     * 走框架缺省。压缩（摘要）模型同经 {@link #streamLayer} 包装（#109
-     * 计量 + #321 断流重试，内层重试同关）：压缩链的摘要与 flushBeforeCompact
+     * 走框架缺省。压缩（摘要）模型同经候选队列装配（#109 计量 + #321 断流重试 +
+     * #557 failover——边缘档位同获链式切换）：压缩链的摘要与 flushBeforeCompact
      * 记忆抽取共用该模型实例直调 stream()，包装后用量归入当前轮计量（flash 档与
      * 主模型 pro 档各自归位）、断流同获流层重试。
      *
@@ -676,17 +713,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * （惰性，罩不住本链）。</p>
      */
     static CompactionConfig compactionConfig(AgentscopeProperties properties,
-            EdgeModelSupplier.EdgeModel compaction) {
+            EdgeModelSupplier.EdgeModel compaction, ModelSwitchTraceSink switchTraceSink) {
         CompactionConfig.Builder config = CompactionConfig.builder();
         if (properties.getCompactionTriggerTokens() != null) {
             config.triggerTokens(properties.getCompactionTriggerTokens());
         }
         // #379 宿主泄漏正源（见方法 javadoc）——框架缺省开，必须显式关
         config.offloadBeforeCompact(false);
-        config.model(streamLayer(
-                ModelRegistry.resolve(compaction.modelString(),
-                        creationContextOf(compaction.channel())),
-                compaction.modelString(), properties));
+        config.model(failoverLayer(compaction.queue(), properties, switchTraceSink));
         return config.build();
     }
 }

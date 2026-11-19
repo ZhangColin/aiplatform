@@ -63,6 +63,16 @@ final class MeteringScope {
         return context.getOrDefault(CONTEXT_KEY, null);
     }
 
+    /** run 寻址（包内消费：#557 切换留痕的 run 上下文腿——同订阅态来源）。 */
+    String runId() {
+        return runId;
+    }
+
+    /** 会话寻址（包内消费：同 {@link #runId()}）。 */
+    String sessionId() {
+        return sessionId;
+    }
+
     /**
      * 判死标记（#374 可观测兜底）：runTurn 判死（超时/异常）路径调用。此后收口的
      * 模型调用即僵尸调用证据（取消盲区：SSE 阻塞读等下一行、非流式调用自然完成）

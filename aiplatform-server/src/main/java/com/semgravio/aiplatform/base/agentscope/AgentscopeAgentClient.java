@@ -296,22 +296,26 @@ public class AgentscopeAgentClient {
      * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
      * 同型位置参数的错位面；工作区形态随命令/续跑请求原样携带——主智能体的问答
      * 挂起续跑同只读面，不漂移成读写面；toolSpec 工具面规格串同携——续跑与首轮
-     * 同规格，#252；modelChannel 通道注入件同携——续跑与首轮同通道，ADR-0031）。
+     * 同规格，#252；modelChannel 通道注入件同携——续跑与首轮同通道，ADR-0031；
+     * modelQueue 候选队列同携——续跑与首轮同队列，#557）。
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
-            ModelChannel modelChannel, String systemPrompt, String workspaceId, String agentKey,
+            ModelChannel modelChannel, ModelCandidateQueue modelQueue, String systemPrompt,
+            String workspaceId, String agentKey,
             boolean workspaceReadOnly, boolean workspaceNoShell, String toolSpec) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
-                    command.modelString(), command.modelChannel(), command.systemPrompt(),
+                    command.modelString(), command.modelChannel(), command.modelQueue(),
+                    command.systemPrompt(),
                     command.workspaceId(), command.agentKey(), command.workspaceReadOnly(),
                     command.workspaceNoShell(), command.toolSpec());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
-                    resume.modelString(), resume.modelChannel(), resume.systemPrompt(),
+                    resume.modelString(), resume.modelChannel(), resume.modelQueue(),
+                    resume.systemPrompt(),
                     resume.workspaceId(), resume.agentKey(), resume.workspaceReadOnly(),
                     /* noShell= */ false, resume.toolSpec());
         }
@@ -345,8 +349,8 @@ public class AgentscopeAgentClient {
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly(),
                 spec.workspaceNoShell());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
-                modelRef.toModelString(), spec.modelChannel(), workspace, spec.agentKey(),
-                spec.toolSpec());
+                modelRef.toModelString(), spec.modelChannel(), spec.modelQueue(), workspace,
+                spec.agentKey(), spec.toolSpec());
         // 每迭代平台开销观察面（#453）下发属性袋——执行体中间件每迭代取来掐表回写
         IterationOverheadFacts overhead = new IterationOverheadFacts();
         RuntimeContext ctx = runtimeContext(spec.sessionId(), spec.userId(), spec.runId(), sink);

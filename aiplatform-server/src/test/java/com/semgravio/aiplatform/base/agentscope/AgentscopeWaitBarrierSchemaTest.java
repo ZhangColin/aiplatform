@@ -303,13 +303,13 @@ class AgentscopeWaitBarrierSchemaTest {
                     public EdgeModel subagentModel() {
                         return null;
                     }
-                }, new AgentscopeProperties());
+                }, new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-wait", "sys",
                 "volcengine:deepseek-v4-flash-ga-260731",
                 new ModelChannel("https://ark.cn-beijing.volces.com/api/v3",
                         System.getenv("VOLCENGINE_API_KEY"), false),
-                new AgentWorkspace.Local(null), null, null);
+                null, new AgentWorkspace.Local(null), null, null);
 
         try {
             AgentTool waitTool = agent.getToolkit().getTool(WAIT_TOOL);

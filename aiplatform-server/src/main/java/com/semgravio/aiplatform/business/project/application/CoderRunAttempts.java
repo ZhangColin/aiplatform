@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
 import com.semgravio.aiplatform.base.agentscope.AgentTurnFailure;
@@ -529,7 +530,8 @@ class CoderRunAttempts {
                 // 档位键 → 模型串＋通道注入（ADR-0031 解析单点）：路由选定档或座
                 // 生效档统一在此解析——供应商/凭证/档位配置变更下一次尝试起跑即生效
                 String attemptModelId = tier != null ? tier.modelId() : agent.modelId();
-                ModelTierAppService.ResolvedModel model = modelTiers.resolve(attemptModelId);
+                // #557 整候选队列（多候选＝failover 装配面，五个 resolve 面之一）
+                ModelCandidateQueue model = modelTiers.resolveQueue(attemptModelId);
                 AgentCommand command = new AgentCommand(
                         attemptRunId,
                         attempt == 1 ? (round == 1 ? knowledgePrefix : "") + prompts.first()
@@ -555,7 +557,9 @@ class CoderRunAttempts {
                         /* workspaceReadOnly= */ false,
                         seat.workspaceNoShell(),
                         heading,
-                        agent.toolSpec());
+                        agent.toolSpec(),
+                        // #557 候选队列（生成尝试同获链式切换——多候选＝failover）
+                        model);
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
                         eventBridge.sink(project));

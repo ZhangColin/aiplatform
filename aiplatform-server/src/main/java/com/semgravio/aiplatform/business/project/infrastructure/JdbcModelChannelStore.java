@@ -13,6 +13,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierSwitchTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
 
@@ -147,6 +148,14 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
+    /** 运行期切候选留痕（#557 append-only；created_at 显式落切换时刻——不依赖库时钟）。 */
+    private static final String INSERT_TIER_SWITCH_TRACE_SQL = """
+            INSERT INTO prj_model_tier_switch_traces
+                (id, tier_key, from_provider_key, from_model_name,
+                 to_provider_key, to_model_name, trigger_error, run_id, session_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+
     private static final String FIND_TIER_TRACES_SQL = """
             SELECT id, tier_key, old_provider_key, old_model_name, old_display_name,
                    old_enabled, old_thinking_enabled, new_provider_key, new_model_name,
@@ -258,6 +267,15 @@ public class JdbcModelChannelStore implements ModelChannelStore {
                 trace.newProviderKey(), trace.newModelName(),
                 trace.newDisplayName(), trace.newEnabled(), trace.newThinkingEnabled(),
                 trace.operatorId(), trace.operatorName());
+    }
+
+    @Override
+    public void insertTierSwitchTrace(ModelTierSwitchTrace trace) {
+        jdbcTemplate.update(INSERT_TIER_SWITCH_TRACE_SQL, trace.id(), trace.tierKey(),
+                trace.fromProviderKey(), trace.fromModelName(),
+                trace.toProviderKey(), trace.toModelName(), trace.triggerError(),
+                trace.runId(), trace.sessionId(),
+                trace.createdAt() == null ? null : java.sql.Timestamp.valueOf(trace.createdAt()));
     }
 
     @Override

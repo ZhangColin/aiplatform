@@ -183,7 +183,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 ? failoverLayer(modelQueue, properties, switchTraceSink)
                 : streamLayer(
                         ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
-                        modelString, properties);
+                        modelString, vendorOf(modelChannel), properties);
         // 委派子智能体档位（#424 片轻验）：覆盖档独立解析同款流层包装（计量外圈＋
         // 断流重试同构；#557 起整队列 failover 同构）；null＝随父级实例（缺省同
         // 执行体档——含路由升档，计量边界连续的既有口径不变）
@@ -614,10 +614,17 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 发射只来自末次尝试）下整流收口上报与单次直调同形，重试不破坏既有计量
      * 路径；重试的重订阅也无需跨线程传播计量上下文——计量 scope 经 Reactor 订阅链
      * {@code Context} 传递（#324），重试在内圈重订阅不跨订阅链、raw 模型无计量依赖。
-     * 主模型与压缩模型共用此装配。
+     * 主模型与压缩模型共用此装配。vendor（ADR-0053 ②）随通道件入计量归因（可空
+     * ＝无通道语境，模型边界回落前缀同值）。
      */
+    static Model streamLayer(Model resolved, String modelString, String vendor,
+            AgentscopeProperties properties) {
+        return MeteredModel.wrap(RetryingModel.wrap(resolved, properties), modelString, vendor);
+    }
+
+    /** 兼容形（无通道语境的测试面：vendor 空——计量边界回落 provider 前缀）。 */
     static Model streamLayer(Model resolved, String modelString, AgentscopeProperties properties) {
-        return MeteredModel.wrap(RetryingModel.wrap(resolved, properties), modelString);
+        return streamLayer(resolved, modelString, null, properties);
     }
 
     /**
@@ -625,19 +632,24 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 单候选队列＝{@link #streamLayer} 直装（无切换面，行为与既有单候选路径一致
      * ——软着陆）；多候选＝{@link FailoverModel}（持队列、懒装配候选[i+1]、切换
      * 留痕经 {@link ModelSwitchTraceSink}）。逐候选装配同形（前缀路由＋通道注入＋
-     * streamLayer——每候选自己的计量归属〔provider 前缀随候选走，按账号计量〕与
-     * #321 候选内重试）。
+     * streamLayer——每候选自己的计量归属〔provider 前缀与 vendor 均随候选的通道行
+     * 走，按账号/按供应商双维度〕与 #321 候选内重试）。
      */
     static Model failoverLayer(ModelCandidateQueue queue, AgentscopeProperties properties,
             ModelSwitchTraceSink switchTraceSink) {
         java.util.function.Function<ModelCandidate, Model> assembler = candidate -> streamLayer(
                 ModelRegistry.resolve(candidate.modelString(),
                         creationContextOf(candidate.channel())),
-                candidate.modelString(), properties);
+                candidate.modelString(), vendorOf(candidate.channel()), properties);
         if (queue.size() == 1) {
             return assembler.apply(queue.first());
         }
         return new FailoverModel(queue, assembler, switchTraceSink);
+    }
+
+    /** 候选通道件的 vendor 腿（无通道语境＝null——模型边界回落 provider 前缀）。 */
+    private static String vendorOf(ModelChannel channel) {
+        return channel == null ? null : channel.vendor();
     }
 
     /**

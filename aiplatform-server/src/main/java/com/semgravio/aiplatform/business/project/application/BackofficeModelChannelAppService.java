@@ -120,7 +120,9 @@ public class BackofficeModelChannelAppService {
         String baseUrl = requireBaseUrl(safe.baseUrl());
         String apiKey = blankToNull(safe.apiKey());
         boolean enabled = safe.enabled() == null || safe.enabled();
-        ModelProvider created = new ModelProvider(providerKey, baseUrl, apiKey, enabled,
+        // vendor 落空（现写面无 vendor 语义——受控值写面随 #559；解析层归一
+        // provider_key 同值，不阻断装配）
+        ModelProvider created = new ModelProvider(providerKey, null, baseUrl, apiKey, enabled,
                 operator.id(), operator.name(), null);
         persistProvider(null, created, operator);
         return BackofficeModelProviderResponse.of(requireProvider(providerKey));
@@ -147,8 +149,9 @@ public class BackofficeModelChannelAppService {
         // 不被意外复启；显式 true/false 才翻转。与 agent-configs 开关「缺省归一
         // true」不同属有意：那边 null 有回落枚举缺省语义，这边行恒存在无回落概念）
         boolean enabled = safe.enabled() == null ? current.enabled() : safe.enabled();
-        ModelProvider next = new ModelProvider(current.providerKey(), baseUrl, apiKey, enabled,
-                operator.id(), operator.name(), null);
+        // vendor 保持现值（值面不含 vendor——更新不触碰，受控值写面随 #559）
+        ModelProvider next = new ModelProvider(current.providerKey(), current.vendor(), baseUrl,
+                apiKey, enabled, operator.id(), operator.name(), null);
         persistProvider(current, next, operator);
         return BackofficeModelProviderResponse.of(
                 channelStore.findProvider(providerKey)); // 幂等回执同形（无动即现行态）

@@ -123,7 +123,12 @@ public class ModelTierAppService {
         return queue;
     }
 
-    /** 单候选解析：通道行校验（缺行 FK 兜底/停用/key 空）＋解析束组装。 */
+    /**
+     * 单候选解析：通道行校验（缺行 FK 兜底/停用/key 空）＋解析束组装。vendor 归一
+     * （ADR-0053 ②）：行有 vendor 用行值（deepseek/deepseek-2 同填 deepseek），
+     * 空（pre-T5 写面建的行）回落 provider_key 同值——V79 历史回填同款语义，
+     * 解析产物 vendor 恒非空。
+     */
     private ResolvedModel resolveCandidate(String tierKey, String providerKey, String modelName,
             boolean thinkingEnabled) {
         ModelProvider provider = tierStore.findProvider(providerKey);
@@ -139,15 +144,16 @@ public class ModelTierAppService {
             throw new ApplicationException(ProjectMessage.MODEL_PROVIDER_KEY_MISSING,
                     provider.providerKey());
         }
-        return new ResolvedModel(tierKey, provider.providerKey(), modelName,
+        String vendor = ModelChannel.normalizedVendor(provider.providerKey(), provider.vendor());
+        return new ResolvedModel(tierKey, provider.providerKey(), vendor, modelName,
                 provider.baseUrl(), provider.apiKey(), thinkingEnabled);
     }
 
     /**
-     * 生效解析束：档位键、通道键、实际模型名、通道注入面（baseUrl/apiKey/
-     * thinking）。
+     * 生效解析束：档位键、通道键、归一供应商、实际模型名、通道注入面
+     * （baseUrl/apiKey/thinking）。
      */
-    public record ResolvedModel(String tierKey, String providerKey, String modelName,
+    public record ResolvedModel(String tierKey, String providerKey, String vendor, String modelName,
             String baseUrl, String apiKey, boolean thinkingEnabled) {
 
         /** 对话轨道模型串（前缀:实际模型名——前缀即协议路由）。 */
@@ -155,9 +161,9 @@ public class ModelTierAppService {
             return providerKey + ":" + modelName;
         }
 
-        /** base 层通道注入件（随命令透传：创建上下文＋实例缓存键指纹）。 */
+        /** base 层通道注入件（随命令透传：创建上下文＋实例缓存键指纹＋vendor 计量腿）。 */
         public ModelChannel channel() {
-            return new ModelChannel(baseUrl, apiKey, thinkingEnabled);
+            return new ModelChannel(baseUrl, apiKey, thinkingEnabled, vendor);
         }
 
         /** 底座候选元素形（#557 队列装配腿：resolveQueue 映射单点）。 */

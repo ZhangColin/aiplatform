@@ -16,8 +16,8 @@ import java.util.List;
  *
  * <p>{@link #fingerprint()} 是<b>整队列生效配置指纹</b>：进智能体实例缓存键
  * （{@code AgentscopeHarnessAgentFactory#obtain}）——任一候选换 key/换地址/换
- * 模型＝指纹变＝新实例（「改配置即生效、进行中 run 不定格」对整个队列成立，
- * apiKey 只以 {@link ModelChannel#fingerprint()} 的摘要形入指纹）。</p>
+ * 模型/换 vendor＝指纹变＝新实例（「改配置即生效、进行中 run 不定格」对整个
+ * 队列成立，apiKey 只以 {@link ModelChannel#fingerprint()} 的摘要形入指纹）。</p>
  *
  * @param tierKey    档位语义键（可空＝测试形；切换留痕的归档腿）
  * @param candidates 启用候选有序列表（非空；priority 升序）

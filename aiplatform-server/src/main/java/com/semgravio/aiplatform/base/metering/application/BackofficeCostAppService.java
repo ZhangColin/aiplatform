@@ -94,7 +94,7 @@ public class BackofficeCostAppService {
 
     /**
      * unpriced 全局警示（用量驱动）：窗口内有 token 用量且事件时点无生效价的
-     * (provider, model, 档位) 按档位汇总 token——只计无价分量；已配价档位与
+     * (vendor, model, 档位) 按档位汇总 token——只计无价分量；已配价档位与
      * 无用量档位不出现（静态配价缺口不做：无用量＝无实际损失）。单条聚合 SQL
      * 自带一致性，不另起事务。
      */

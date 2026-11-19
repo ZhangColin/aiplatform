@@ -43,6 +43,10 @@
 # ——重复执行零新插；中断续跑收敛（缺哪个键补哪个键，带维度各自独立）。既有键集
 # 取自清单翻页全量（页大小 100，翻到取尽），价史超百行也不漏判。
 #
+# #558/ADR-0053 ②起 provider 列语义＝归一供应商（vendor）：换算匹配挂计量事件的
+# vendor 腿——同 vendor 多账号（deepseek/deepseek-2）共用本表一组行、新账号通道行
+# 零价格复制；本脚本行值（deepseek/zhipu/…）即 vendor 词表，数据与幂等口径零改动。
+#
 # 用法：./scripts/backoffice-price-seed.sh
 # 凭据：BACKOFFICE_API_KEY / BACKOFFICE_API_SECRET（或 .env.local /
 #   app-registry bootstrap 现取，同 backoffice-quote.sh）；不传操作者头——

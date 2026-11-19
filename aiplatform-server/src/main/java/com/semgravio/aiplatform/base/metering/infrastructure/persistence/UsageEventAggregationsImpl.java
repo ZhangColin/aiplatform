@@ -45,12 +45,15 @@ import com.semgravio.aiplatform.base.metering.domain.repository.UsageEventAggreg
  *
  * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张 #288＋按件
  * #531 固定单价项族）经
- * {@code CROSS JOIN LATERAL VALUES} 展开后与单价表按 (provider, model, kind) + ts 落
- * {@code [effective_from, effective_to)} 区间匹配；时段带维（#499，ADR-0044 读时归段）
- * ＝事件 ts 经时段规则表归带（峰/谷，epoch 数学派生 UTC 星期/分钟、免会话时区坑）
- * 后按带选价——无规则行通道回落 NULL 带行（存量语义）、按张档不受带影响。金额按
- * 币种分桶不折算；有用量无生效单价行的 (provider, model, 档位, 带) 进 unpriced
- * （分量不进 cost，不伪装 0、不阻断查询）。</p>
+ * {@code CROSS JOIN LATERAL VALUES} 展开后与单价表按 (vendor, model, kind) + ts 落
+ * {@code [effective_from, effective_to)} 区间匹配（ADR-0053 ②：单价/时段规则匹配键
+ * 挂供应商 vendor——供应商定价本就是 vendor 级，同 vendor 多账号〔deepseek/deepseek-2〕
+ * 共用一组行、历史事件 vendor 同值回填故换算不漂移）；时段带维（#499，ADR-0044
+ * 读时归段）＝事件 ts 经时段规则表归带（峰/谷，epoch 数学派生 UTC 星期/分钟、免
+ * 会话时区坑）后按带选价——无规则行供应商回落 NULL 带行（存量语义）、按张档不受
+ * 带影响。金额按币种分桶不折算；有用量无生效单价行的 (vendor, model, 档位, 带)
+ * 进 unpriced（分量不进 cost，不伪装 0、不阻断查询）。模型视角聚合（byModel）
+ * ＝vendor+model 跨账号合并（按账号＝事件 provider 腿原生自持）。</p>
  */
 @Component
 public class UsageEventAggregationsImpl implements UsageEventAggregations {
@@ -105,9 +108,12 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
     /** 事件 ts 的 UTC 日分钟（0..1439，与规则 start_minute/end_minute 同口径）。 */
     private static final String EVENT_MINUTE = "(FLOOR(" + EVENT_EPOCH + " / 60)::int % 1440)";
 
-    /** 时段规则行在事件 ts 时点生效（别名恒为 r；[from, to) 半开与单价表同口径）。 */
+    /**
+     * 时段规则行在事件 ts 时点生效（别名恒为 r；[from, to) 半开与单价表同口径）。
+     * 匹配键挂 vendor（ADR-0053 ②）——供应商级时段定义，同 vendor 多账号共用。
+     */
     private static final String RULE_OPEN =
-            "r.provider = e.provider AND r.effective_from <= e.ts"
+            "r.provider = e.vendor AND r.effective_from <= e.ts"
                     + " AND (r.effective_to IS NULL OR e.ts < r.effective_to)";
 
     /** 事件 ts 命中规则窗口行：ts 星期 ∈ day_mask ∧ ts UTC 分钟 ∈ [start, end)。 */
@@ -117,7 +123,7 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     + " AND " + EVENT_MINUTE + " < r.end_minute";
 
     /**
-     * 事件 ts 归带（读时归段单点）：通道无生效规则行 → NULL（不看时段，存量语义）；
+     * 事件 ts 归带（读时归段单点）：供应商无生效规则行 → NULL（不看时段，存量语义）；
      * 命中窗口行 → 该行带（多行命中取 MIN(band) 确定性兜底）；有规则行但无窗口命中
      * → 补带——声明了峰窗 → 谷、只声明谷窗 → 峰（DeepSeek 峰窗显式声明、其余谷，
      * 谷不种行）。带码单点取自 {@link Band}。
@@ -151,12 +157,14 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
 
     /**
      * 事件时点生效区间匹配（单价表别名恒为 p；与事件 ts 落 [from, to) 半开同口径）。
-     * 时段带维（#499，ADR-0044 读时归段）：token 档按 {@link #EVENT_BAND} 归带匹配
-     * 对应带单价行、无规则行通道回落 NULL 带行（存量语义）；计件档（按张/按件）
-     * 不受 band 影响（只匹配 NULL 带行——计件行不带维度）。
+     * 匹配键挂 vendor（ADR-0053 ②）：单价行 {@code provider} 列语义＝供应商——
+     * 同 vendor 多账号共用一组行（新账号零价格复制），历史事件 vendor 同值回填故
+     * 换算不漂移。时段带维（#499，ADR-0044 读时归段）：token 档按 {@link #EVENT_BAND}
+     * 归带匹配对应带单价行、无规则行供应商回落 NULL 带行（存量语义）；计件档
+     * （按张/按件）不受 band 影响（只匹配 NULL 带行——计件行不带维度）。
      */
     private static final String PRICE_MATCH =
-            "p.provider = e.provider AND p.model = e.model AND p.token_kind = part.kind"
+            "p.provider = e.vendor AND p.model = e.model AND p.token_kind = part.kind"
                     + " AND e.ts >= p.effective_from AND (p.effective_to IS NULL OR e.ts < p.effective_to)"
                     + " AND (part.kind IN (" + COUNT_BASED_KINDS + ") AND p.band IS NULL"
                     + " OR part.kind NOT IN (" + COUNT_BASED_KINDS + ") AND ("
@@ -177,18 +185,18 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
         TokenUsage total = totalOf(where, args.toArray());
         // 平台成本：五档展开 × 时点生效单价，币种分桶不折算（A6 §2）
         Map<Currency, BigDecimal> cost = costBuckets(from, to, subject);
-        // 未配价标注：有 token 但事件时点无生效单价行的 (provider, model, 档位, 带)
+        // 未配价标注：有 token 但事件时点无生效单价行的 (vendor, model, 档位, 带)
         // ——带维归因事件归带（按张档不受带影响落空），峰行有谷行无时谷段分量进此面
         List<Object> unpricedArgs = CollUtil.newArrayList();
         String unpricedWhere = whereOf(unpricedArgs, subject, from, to, "part.tokens > 0",
                 "NOT EXISTS (SELECT 1 FROM met_price_entries p WHERE " + PRICE_MATCH + ")");
         List<UsageSummary.UnpricedUsage> unpriced = jdbcTemplate.query(
-                "SELECT e.provider, e.model, part.kind, " + UNPRICED_BAND
+                "SELECT e.vendor, e.model, part.kind, " + UNPRICED_BAND
                         + " FROM met_usage_events e"
                         + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
                         + unpricedWhere
-                        + " GROUP BY e.provider, e.model, part.kind, " + UNPRICED_BAND
-                        + " ORDER BY e.provider, e.model, part.kind, " + UNPRICED_BAND,
+                        + " GROUP BY e.vendor, e.model, part.kind, " + UNPRICED_BAND
+                        + " ORDER BY e.vendor, e.model, part.kind, " + UNPRICED_BAND,
                 unpricedArgs.toArray(), (rs, rowNum) -> new UsageSummary.UnpricedUsage(
                         rs.getString(1), rs.getString(2),
                         BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)),
@@ -237,16 +245,17 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
 
     @Override
     public List<UnpricedTierUsage> aggregateUnpricedTiers(Instant from, Instant to) {
-        // 用量驱动：窗口内有用量且事件时点无生效价的档位汇总 token（只计无价分量）
+        // 用量驱动：窗口内有用量且事件时点无生效价的档位汇总 token（只计无价分量；
+        // 列键＝vendor——补价动作的匹配对象是供应商级单价行）
         List<Object> args = CollUtil.newArrayList();
         return jdbcTemplate.query(
-                "SELECT e.provider, e.model, part.kind, " + UNPRICED_BAND + ", SUM(part.tokens)"
+                "SELECT e.vendor, e.model, part.kind, " + UNPRICED_BAND + ", SUM(part.tokens)"
                         + " FROM met_usage_events e"
                         + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
                         + whereOf(args, null, from, to, "part.tokens > 0",
                         "NOT EXISTS (SELECT 1 FROM met_price_entries p WHERE " + PRICE_MATCH + ")")
-                        + " GROUP BY e.provider, e.model, part.kind, " + UNPRICED_BAND
-                        + " ORDER BY e.provider, e.model, part.kind, " + UNPRICED_BAND,
+                        + " GROUP BY e.vendor, e.model, part.kind, " + UNPRICED_BAND
+                        + " ORDER BY e.vendor, e.model, part.kind, " + UNPRICED_BAND,
                 args.toArray(), (rs, rowNum) -> new UnpricedTierUsage(
                         rs.getString(1), rs.getString(2),
                         BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)), readBand(rs, 4),
@@ -341,12 +350,16 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                 args, (rs, rowNum) -> readTokens(rs, 1));
     }
 
-    /** 分模型查询（按 subject/全局两口径共用，差异全在 where）。 */
+    /**
+     * 分模型查询（按 subject/全局两口径共用，差异全在 where）。模型视角＝
+     * vendor+model（ADR-0053 ②）——跨账号同名模型合并；按账号口径走事件
+     * provider 腿（行级原生自持，不做预聚合面）。
+     */
     private List<UsageSummary.ModelUsage> byModelOf(String where, Object[] args) {
         return jdbcTemplate.query(
-                "SELECT e.provider, e.model, " + TOKEN_SUMS
+                "SELECT e.vendor, e.model, " + TOKEN_SUMS
                         + " FROM met_usage_events e" + where
-                        + " GROUP BY e.provider, e.model ORDER BY e.provider, e.model",
+                        + " GROUP BY e.vendor, e.model ORDER BY e.vendor, e.model",
                 args, (rs, rowNum) -> new UsageSummary.ModelUsage(
                         rs.getString(1), rs.getString(2), readTokens(rs, 3)));
     }
@@ -371,20 +384,21 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
     }
 
     /**
-     * 分模型金额按带拆查询（全局总览峰/谷拆分维度）：(provider, model, 带) × 币种
+     * 分模型金额按带拆查询（全局总览峰/谷拆分维度）：(vendor, model, 带) × 币种
      * 分桶——只含已配价分量（无价分量走 unpriced 面，互补不重叠）；带取所配单价行
-     * {@code band}（NULL＝不区分时段分量；按张行不受带影响、恒落 NULL 桶）。
+     * {@code band}（NULL＝不区分时段分量；按张行不受带影响、恒落 NULL 桶）。模型
+     * 视角＝vendor+model 跨账号合并（同 {@link #byModelOf}）。
      */
     private List<GlobalUsageSummary.ModelBandCost> byModelCostOf(Instant from, Instant to) {
         List<Object> args = CollUtil.newArrayList();
         Map<List<Object>, Map<Currency, BigDecimal>> grouped = jdbcTemplate.query(
-                "SELECT e.provider, e.model, p.band, p.currency, SUM(part.tokens * p.unit_price)"
+                "SELECT e.vendor, e.model, p.band, p.currency, SUM(part.tokens * p.unit_price)"
                         + " FROM met_usage_events e"
                         + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
                         + " JOIN met_price_entries p ON " + PRICE_MATCH
                         + whereOf(args, null, from, to, "part.tokens > 0")
-                        + " GROUP BY e.provider, e.model, p.band, p.currency"
-                        + " ORDER BY e.provider, e.model, p.band, p.currency",
+                        + " GROUP BY e.vendor, e.model, p.band, p.currency"
+                        + " ORDER BY e.vendor, e.model, p.band, p.currency",
                 args.toArray(), rs -> {
                     Map<List<Object>, Map<Currency, BigDecimal>> rows = new LinkedHashMap<>();
                     while (rs.next()) {

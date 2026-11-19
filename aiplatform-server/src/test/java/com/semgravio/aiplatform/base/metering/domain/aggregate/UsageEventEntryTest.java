@@ -23,8 +23,8 @@ class UsageEventEntryTest {
     @Test
     void given_valid_event_when_of_then_fields_mapped_and_tokens_readable() {
         UsageEvent event = new UsageEvent("evt-1", TS, "proj-1", "run-1", "session-1",
-                "deepseek", "deepseek-v4-pro",
-                Map.of("agentKind", "ba"), new TokenUsage(100, 50, 20, 5, 0));
+                "deepseek", "deepseek", "deepseek-v4-pro",
+                Map.of("agentKind", "ba"), new TokenUsage(100, 50, 20, 5, 0), 0, 0);
 
         UsageEventEntry entry = UsageEventEntry.of(event);
 
@@ -32,10 +32,29 @@ class UsageEventEntryTest {
         assertThat(entry.getTs()).isEqualTo(TS);
         assertThat(entry.getSubject()).isEqualTo("proj-1");
         assertThat(entry.getProvider()).isEqualTo("deepseek");
+        assertThat(entry.getVendor()).isEqualTo("deepseek");
         assertThat(entry.getDims()).containsEntry("agentKind", "ba");
         // 五档逐列映射，tokens() 读回协议形
         assertThat(entry.tokens()).isEqualTo(new TokenUsage(100, 50, 20, 5, 0));
         assertThat(entry.getId()).isEqualTo("evt-1");
+    }
+
+    @Test
+    void given_blank_or_null_vendor_when_of_then_rejected() {
+        // vendor 缺腿即拒（ADR-0053 ②）：单价匹配挂 vendor——缺＝读面静默缺价源头
+        assertIncomplete(new UsageEvent("evt-1", TS, "proj-1", null, null,
+                "deepseek", " ", "deepseek-v4-pro", null, TokenUsage.ZERO, 0, 0));
+        assertIncomplete(new UsageEvent("evt-1", TS, "proj-1", null, null,
+                "deepseek", null, "deepseek-v4-pro", null, TokenUsage.ZERO, 0, 0));
+    }
+
+    @Test
+    void given_convenience_constructors_when_of_then_vendor_defaults_to_provider() {
+        // 便捷构造 vendor＝provider 同值（供应商即账号本体的供数方与既有口径）
+        assertThat(new UsageEvent("evt-t", TS, "proj-1", null, null,
+                "zhipu", "glm-image", null, TokenUsage.ZERO).vendor()).isEqualTo("zhipu");
+        assertThat(new UsageEvent("evt-i", TS, "proj-1", null, null,
+                "zhipu", "glm-image", null, TokenUsage.ZERO, 1).vendor()).isEqualTo("zhipu");
     }
 
     @Test
@@ -47,17 +66,17 @@ class UsageEventEntryTest {
     @Test
     void given_missing_required_fields_when_of_then_rejected() {
         assertIncomplete(new UsageEvent(" ", TS, "proj-1", null, null,
-                "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO));
+                "deepseek", "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO, 0, 0));
         assertIncomplete(new UsageEvent("evt-1", null, "proj-1", null, null,
-                "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO));
+                "deepseek", "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO, 0, 0));
         assertIncomplete(new UsageEvent("evt-1", TS, null, null, null,
-                "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO));
+                "deepseek", "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO, 0, 0));
         assertIncomplete(new UsageEvent("evt-1", TS, "proj-1", null, null,
-                null, "deepseek-v4-pro", null, TokenUsage.ZERO));
+                null, "deepseek", "deepseek-v4-pro", null, TokenUsage.ZERO, 0, 0));
         assertIncomplete(new UsageEvent("evt-1", TS, "proj-1", null, null,
-                "deepseek", null, null, TokenUsage.ZERO));
+                "deepseek", "deepseek", null, null, TokenUsage.ZERO, 0, 0));
         assertIncomplete(new UsageEvent("evt-1", TS, "proj-1", null, null,
-                "deepseek", "deepseek-v4-pro", null, null));
+                "deepseek", "deepseek", "deepseek-v4-pro", null, null, 0, 0));
         assertIncomplete(null);
     }
 

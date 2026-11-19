@@ -12,7 +12,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 一单种入）。窗口项字段合法性由聚合守卫裁决（METER_013）；同通道生效区间
  * 重叠（同起点或跨区间）服务端校验 METER_008（对称单价表）。
  *
- * @param provider      模型提供方（与 UsageEvent.provider 同键＝匹配键全键）
+ * @param provider      供应商（与 UsageEvent.vendor 同键＝匹配键全键，ADR-0053 ②
+ *                      ——归段匹配挂事件 vendor 腿；存量行通道键同值）
  * @param windows       时段窗口清单（≥1 项；一项＝规则表一行，同生效区间）
  * @param effectiveFrom 生效起点（可空＝缺省即时；可回溯——种子口径覆盖存量事件；
  *                      含未来时点＝预发布；同通道重叠 METER_008）

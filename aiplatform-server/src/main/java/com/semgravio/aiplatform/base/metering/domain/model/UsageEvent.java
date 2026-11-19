@@ -12,8 +12,12 @@ import com.semgravio.aiplatform.base.metering.domain.error.MeteringMessage;
  *
  * <p>字段语义：{@code eventId} 调用方生成的幂等键（重复上报 first-write-wins）；
  * {@code subject} 不透明归属 id（业务层传 projectId，底座不解释）；{@code runId}/
- * {@code sessionId} 运行与会话寻址（可空——非 run 级来源可不带）；{@code provider}/
- * {@code model} 模型标识（单价表匹配键——无引擎维度，单栈后引擎不进协议）；
+ * {@code sessionId} 运行与会话寻址（可空——非 run 级来源可不带）；{@code provider}
+ * 账号维度（通道行键——按账号统计的归属腿）；{@code vendor} 供应商维度（归一
+ * 供应商——按模型统计〔vendor+model 跨账号合并〕与单价表/峰谷规则的匹配键，
+ * ADR-0053 ②；与 provider 同值＝供应商即账号本体〔图片/搜索等供数方、历史
+ * 回填行〕，不同值＝同供应商多账号〔deepseek/deepseek-2 同填 deepseek〕）；
+ * {@code model} 实际模型名；
  * {@code dims} 业务维度透传（终态口径 projectId + agentKind(ba/coder) + sessionId，
  * 底座不解释，可空）；{@code tokens} 五档互斥分解（见 {@link TokenUsage}）；
  * {@code images} 按张用量（#288 图片生成与模型调用并列的计量事件——按张事件
@@ -29,6 +33,7 @@ public record UsageEvent(
         String runId,
         String sessionId,
         String provider,
+        String vendor,
         String model,
         Map<String, String> dims,
         TokenUsage tokens,
@@ -50,18 +55,22 @@ public record UsageEvent(
         }
     }
 
-    /** token 事件便捷构造（按张/按件用量 = 0；既有模型调用计量口径不变）。 */
+    /**
+     * token 事件便捷构造（按张/按件用量 = 0；vendor 归一 provider 同值——供应商
+     * 即账号本体的供数方〔图片/搜索等〕与既有模型调用面计量口径不变）。
+     */
     public UsageEvent(
             String eventId, Instant ts, String subject, String runId, String sessionId,
             String provider, String model, Map<String, String> dims, TokenUsage tokens) {
-        this(eventId, ts, subject, runId, sessionId, provider, model, dims, tokens, 0, 0);
+        this(eventId, ts, subject, runId, sessionId, provider, provider, model, dims, tokens, 0, 0);
     }
 
-    /** 按张事件便捷构造（token 五档为零、按件用量 = 0；#288 口径不变）。 */
+    /** 按张事件便捷构造（token 五档为零、按件用量 = 0；vendor 同值口径同上，#288）。 */
     public UsageEvent(
             String eventId, Instant ts, String subject, String runId, String sessionId,
             String provider, String model, Map<String, String> dims, TokenUsage tokens,
             long images) {
-        this(eventId, ts, subject, runId, sessionId, provider, model, dims, tokens, images, 0);
+        this(eventId, ts, subject, runId, sessionId, provider, provider, model, dims, tokens,
+                images, 0);
     }
 }

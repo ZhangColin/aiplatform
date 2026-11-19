@@ -57,9 +57,10 @@ class ModelTierAppServiceTest {
         // 深度思考不配置＝显式关（#370：缺省 false 与 #369 活体结论一致——不配置
         // ＝显式关，「深度思考不默认拖慢首 token」承诺不破）
         assertThat(resolved.thinkingEnabled()).isFalse();
-        // 命令构建消费面：base 层通道注入件（baseUrl/key/thinking）
+        // 命令构建消费面：base 层通道注入件（baseUrl/key/thinking＋vendor——seed 行
+        // 未配 vendor，解析归一 provider_key 同值）
         assertThat(resolved.channel())
-                .isEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", false));
+                .isEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", false, "t-ark"));
     }
 
     @Test
@@ -73,7 +74,7 @@ class ModelTierAppServiceTest {
 
         assertThat(resolved.thinkingEnabled()).isTrue();
         assertThat(resolved.channel())
-                .isEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", true));
+                .isEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", true, "t-ark"));
         // 开关腿进通道指纹：改开关＝新指纹＝新实例（改配置即生效、进行中 run 不定格）
         assertThat(resolved.channel().fingerprint())
                 .isNotEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", false).fingerprint());
@@ -241,11 +242,59 @@ class ModelTierAppServiceTest {
                 .containsExactly("deepseek:deepseek-flash");
     }
 
+    @Test
+    void given_provider_vendor_when_resolve_then_channel_and_queue_carry_vendor() {
+        // ADR-0053 ②：vendor 随通道行走解析产物——通道注入件携 vendor 进计量归因
+        // （按账号 provider＋供应商 vendor 双维度）；主备两候选各自带各自通道行的
+        // vendor（failover 切候选后计量随实际命中通道行归因）
+        seedChannel("t-ds2", "t-vendor", "https://api.deepseek.com", "sk-ds2", true);
+        seedChannel("t-ds3", "t-vendor", "https://api.deepseek.com", "sk-ds3", true);
+        seedTier("t-queue", "t-ds2", "primary-model", true, null);
+        seedCandidate("t-queue", 1, "t-ds2", "primary-model");
+        seedCandidate("t-queue", 2, "t-ds3", "backup-model");
+
+        ResolvedModel resolved = modelTiers.resolve("t-queue");
+        ModelCandidateQueue queue = modelTiers.resolveQueue("t-queue");
+
+        assertThat(resolved.vendor()).isEqualTo("t-vendor");
+        assertThat(resolved.channel().vendor()).isEqualTo("t-vendor");
+        assertThat(queue.candidates()).extracting(c -> c.channel().vendor())
+                .containsExactly("t-vendor", "t-vendor");
+    }
+
+    @Test
+    void given_provider_vendor_unconfigured_when_resolve_then_falls_back_to_provider_key() {
+        // pre-T5 写面建的行无 vendor（列可空）→ 解析归一 vendor＝provider_key（V79
+        // 历史同值回填同款语义，软着陆——写面带 vendor 受控值随 #559）
+        seedChannel("t-novendor", null, BASE_URL, "sk-ark-test", true);
+        seedTier("t-flash", "t-novendor", "deepseek-v4-flash-ga-260731", true, null);
+
+        ResolvedModel resolved = modelTiers.resolve("t-flash");
+
+        assertThat(resolved.vendor()).isEqualTo("t-novendor");
+        assertThat(resolved.channel().vendor()).isEqualTo("t-novendor");
+    }
+
+    @Test
+    void given_vendor_change_when_channel_fingerprint_then_new_instance_key() {
+        // vendor 进通道指纹（生效配置语义：改 vendor＝新实例，进行中 run 不定格
+        // ——缓存的 MeteredModel 不滞留旧 vendor 归因）
+        ModelChannel vendorA = new ModelChannel(BASE_URL, "sk-a", false, "t-vendor");
+        ModelChannel vendorB = new ModelChannel(BASE_URL, "sk-a", false, "t-vendor-x");
+
+        assertThat(vendorA.fingerprint()).isNotEqualTo(vendorB.fingerprint());
+    }
+
     private void seedChannel(String providerKey, String baseUrl, String apiKey, boolean enabled) {
+        seedChannel(providerKey, null, baseUrl, apiKey, enabled);
+    }
+
+    private void seedChannel(String providerKey, String vendor, String baseUrl, String apiKey,
+            boolean enabled) {
         jdbcTemplate.update(
-                "INSERT INTO prj_model_providers (provider_key, base_url, api_key, enabled) "
-                        + "VALUES (?, ?, ?, ?)",
-                providerKey, baseUrl, apiKey, enabled);
+                "INSERT INTO prj_model_providers (provider_key, vendor, base_url, api_key, enabled) "
+                        + "VALUES (?, ?, ?, ?, ?)",
+                providerKey, vendor, baseUrl, apiKey, enabled);
     }
 
     /** 建档位夹具（thinkingEnabled null＝不写列——走库缺省，缺省腿断言语境）。 */

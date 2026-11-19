@@ -34,13 +34,13 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             """;
 
     private static final String FIND_PROVIDER_SQL = """
-            SELECT provider_key, base_url, api_key, enabled,
+            SELECT provider_key, vendor, base_url, api_key, enabled,
                    operator_id, operator_name, updated_at
             FROM prj_model_providers WHERE provider_key = ?
             """;
 
     private static final String FIND_ALL_PROVIDERS_SQL = """
-            SELECT provider_key, base_url, api_key, enabled,
+            SELECT provider_key, vendor, base_url, api_key, enabled,
                    operator_id, operator_name, updated_at
             FROM prj_model_providers ORDER BY provider_key
             """;
@@ -59,7 +59,11 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             ORDER BY priority, provider_key, model_name
             """;
 
-    /** 整行 upsert：值面四件＋操作者两列；冲突分支全量重写（维护面无部分更新语义）。 */
+    /**
+     * 整行 upsert：值面四件＋操作者两列；冲突分支全量重写（维护面无部分更新语义）。
+     * vendor 列不落（#559/T5 写面带受控值；现写面无 vendor 语义——列既有值随
+     * upsert 不写而保留）。
+     */
     private static final String SAVE_PROVIDER_SQL = """
             INSERT INTO prj_model_providers
                 (provider_key, base_url, api_key, enabled, operator_id, operator_name)
@@ -295,7 +299,8 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     private static ModelProvider mapProvider(ResultSet rs, int rowNum)
             throws SQLException {
         Timestamp updatedAt = rs.getTimestamp("updated_at");
-        return new ModelProvider(rs.getString("provider_key"), rs.getString("base_url"),
+        return new ModelProvider(rs.getString("provider_key"), rs.getString("vendor"),
+                rs.getString("base_url"),
                 rs.getString("api_key"), rs.getBoolean("enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());

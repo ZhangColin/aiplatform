@@ -26,7 +26,10 @@ import com.semgravio.aiplatform.base.metering.domain.model.Operator;
  * 单价行（{@code met_price_entries}，A6 §1）：provider × model × 档位 × 时段带 ×
  * 币种 × 生效区间的档位单价（token 档位每 token、按张档每张——#288 档位维度扩「token
  * 档位与按张」；时段带峰/谷——#498/ADR-0044，NULL＝不区分时段）——平台成本换算的
- * 匹配数据，base.metering 私有表（不经端口暴露，业务层零感知）。
+ * 匹配数据，base.metering 私有表（不经端口暴露，业务层零感知）。<b>provider 列
+ * 语义＝归一供应商（vendor，ADR-0053 ②）</b>：换算匹配挂事件的 vendor 腿——供应商
+ * 定价本就是 vendor 级，同 vendor 多账号（deepseek/deepseek-2）共用一组行、新账号
+ * 通道行零价格复制；存量行列值＝通道键同值（历史回填），换算结果不漂移。
  *
  * <p><b>改价 = 关旧行开新行</b>（append 式不 UPDATE 单价）：{@code unitPrice} 等
  * 匹配列只插入不写，唯 {@code effectiveTo} 可落（关行）；事件按 ts 落

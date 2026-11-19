@@ -14,7 +14,8 @@ package com.semgravio.aiplatform.base.agentscope;
  *
  * @param providerKey 通道键（＝模型串前缀＝计量 provider 归属；一行＝endpoint×账号 key）
  * @param modelName   实际模型名（计量 model 归属/单价行匹配腿）
- * @param channel     通道注入件（可空＝测试形）
+ * @param channel     通道注入件（可空＝测试形；vendor＝计量供应商维度腿，ADR-0053 ②
+ *                    ——随候选的通道行走，切候选后单价匹配/模型视角随实际命中行归因）
  */
 public record ModelCandidate(String providerKey, String modelName, ModelChannel channel) {
 

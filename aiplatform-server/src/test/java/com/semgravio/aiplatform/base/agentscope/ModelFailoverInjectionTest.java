@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
+import com.semgravio.aiplatform.base.metering.domain.model.UsageEvent;
+
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.Model;
@@ -146,10 +148,15 @@ class ModelFailoverInjectionTest {
     /** 平台注册工厂前缀（volcengine 工厂同款接线——baseUrl/key 全由创建上下文带入）。 */
     private static final String PROBE_PREFIX = "fofail";
 
+    /** 备账号通道键（同 vendor 不同账号——deepseek/deepseek-2 主备形态的测试形）。 */
+    private static final String PROBE_PREFIX_2 = "fofail2";
+
     @BeforeAll
     static void registerProbeFactory() {
         ModelRegistry.registerFactory(PROBE_PREFIX + ":(.+)", (modelId, context) -> build(
                 modelId.substring(PROBE_PREFIX.length() + 1), context));
+        ModelRegistry.registerFactory(PROBE_PREFIX_2 + ":(.+)", (modelId, context) -> build(
+                modelId.substring(PROBE_PREFIX_2.length() + 1), context));
     }
 
     private static Model build(String modelId, ModelCreationContext context) {
@@ -238,6 +245,57 @@ class ModelFailoverInjectionTest {
         assertThat(trace.toModelName()).isEqualTo("model-1");
         assertThat(trace.triggerError()).contains("401");
         assertThat(trace.runId()).isEqualTo("run-fo");
+    }
+
+    @Test
+    @Timeout(60)
+    void given_primary_401_when_switch_then_usage_event_attributed_to_hit_account_and_vendor() {
+        // #558 AC1：failover 命中备账号通道行后，用量事件按实际命中通道行归因——
+        // 账号级（provider＝备账号键）＋供应商级（vendor 随通道行，跨账号合并键）
+        // 双维度；主备两候选同 vendor（deepseek/deepseek-2 形）
+        primary.statusScript = new int[] {401};
+        backup.statusScript = new int[] {200};
+        List<UsageEvent> reported =
+                new ArrayList<>();
+        Model model = AgentscopeHarnessAgentFactory.failoverLayer(new ModelCandidateQueue("pro",
+                List.of(
+                        new ModelCandidate(PROBE_PREFIX, "model-0",
+                                new ModelChannel(primary.baseUrl(), "sk-0", false, "fovendor")),
+                        new ModelCandidate(PROBE_PREFIX_2, "model-1",
+                                new ModelChannel(backup.baseUrl(), "sk-1", false, "fovendor")))),
+                properties, traces::add);
+
+        model.stream(List.of(), null, null)
+                .contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, new MeteringScope(
+                        "run-fo", "s-fo", new UsageContext("prj-fo", Map.of()),
+                        Clock.fixed(Instant.parse("2026-11-19T12:00:00Z"), ZoneOffset.UTC),
+                        reported::add, "prefix-fo")))
+                .collectList()
+                .block(Duration.ofSeconds(30));
+
+        // 计量收口在信号线程（doFinally）——与下游终端信号无 happens-before，有界
+        // 等待收口再断言（同 MeteredModelTest.awaitReported 口径）
+        awaitReported(reported);
+        // 恰一条事件（401 候选零 usage 不报），归因＝备账号＋供应商
+        assertThat(reported).hasSize(1);
+        assertThat(reported.get(0).provider()).isEqualTo(PROBE_PREFIX_2);
+        assertThat(reported.get(0).vendor()).isEqualTo("fovendor");
+        assertThat(reported.get(0).model()).isEqualTo("model-1");
+    }
+
+    /** 有界等待 doFinally 计量收口（跨线程收口消竞态；超时后断言自然红）。 */
+    private static void awaitReported(
+            List<UsageEvent> reported) {
+        long deadline = System.currentTimeMillis() + 2000;
+        while (reported.isEmpty() && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(5);
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     @Test

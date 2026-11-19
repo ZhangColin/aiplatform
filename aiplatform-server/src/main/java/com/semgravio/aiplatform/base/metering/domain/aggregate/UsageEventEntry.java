@@ -56,6 +56,15 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
     @Column(name = "provider", nullable = false, updatable = false, length = 50)
     private String provider;
 
+    /**
+     * 供应商维度（ADR-0053 ②，V79 列＋历史同值回填）：与 provider 同值＝供应商即
+     * 账号本体；不同值＝同供应商多账号（deepseek/deepseek-2 同填 deepseek）。
+     * 单价表/峰谷规则匹配键与模型视角聚合（vendor+model）的腿——通道行将来可删、
+     * 历史事件维度自持（volcengine 行已删的教训）。
+     */
+    @Column(name = "vendor", nullable = false, updatable = false, length = 50)
+    private String vendor;
+
     @Column(name = "model", nullable = false, updatable = false, length = 100)
     private String model;
 
@@ -96,6 +105,7 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
         this.runId = event.runId();
         this.sessionId = event.sessionId();
         this.provider = event.provider();
+        this.vendor = event.vendor();
         this.model = event.model();
         this.dims = normalizeDims(event.dims());
         TokenUsage tokens = event.tokens();
@@ -109,12 +119,14 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
     }
 
     /**
-     * 从协议事件落成存储行（必填校验：eventId/ts/subject/provider/model/tokens）。
+     * 从协议事件落成存储行（必填校验：eventId/ts/subject/provider/vendor/model/
+     * tokens——vendor 缺腿即拒，事件缺供应商维度＝读面匹配静默缺价的源头）。
      */
     public static UsageEventEntry of(UsageEvent event) {
         if (event == null || isBlank(event.eventId()) || event.ts() == null
                 || isBlank(event.subject()) || isBlank(event.provider())
-                || isBlank(event.model()) || event.tokens() == null) {
+                || isBlank(event.vendor()) || isBlank(event.model())
+                || event.tokens() == null) {
             throw new DomainException(MeteringMessage.USAGE_EVENT_FIELDS_INCOMPLETE);
         }
         return new UsageEventEntry(event);

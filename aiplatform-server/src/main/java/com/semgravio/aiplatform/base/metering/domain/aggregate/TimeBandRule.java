@@ -20,10 +20,12 @@ import com.semgravio.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.semgravio.aiplatform.base.metering.domain.model.Operator;
 
 /**
- * 时段规则行（{@code met_time_band_rules}，#497／ADR-0044 峰谷 1/4）：通道 ×
+ * 时段规则行（{@code met_time_band_rules}，#497／ADR-0044 峰谷 1/4）：供应商 ×
  * 生效区间 × 星期口径 × UTC 窗口行——供应商峰谷定价的时段定义（base.metering
- * 私有表，不经端口暴露）。行粒度＝一个 UTC 窗口：一次开行原子落 N 行窗口行＝
- * 一个规则版本；生效区间重叠校验按通道（同版本多行共享起点，版本内不自撞）。
+ * 私有表，不经端口暴露）。<b>provider 列语义＝归一供应商（vendor，ADR-0053 ②）</b>：
+ * 归段匹配挂事件的 vendor 腿——同 vendor 多账号共用一组窗口行；存量行列值＝通道键
+ * 同值（历史回填），归段结果不漂移。行粒度＝一个 UTC 窗口：一次开行原子落 N 行窗口行＝
+ * 一个规则版本；生效区间重叠校验按供应商（同版本多行共享起点，版本内不自撞）。
  *
  * <p><b>生命周期与单价表同构</b>（关行开新行，append 式）：匹配列只插入不写，
  * 唯 {@code effectiveTo} 可落（关行）；改窗/停用在版本级——寻址当前版本任一

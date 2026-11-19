@@ -183,7 +183,7 @@ class GenerationAppServiceTest {
 
     @BeforeEach
     void ensureChannelKeyForRealResolution() {
-        // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行，
+        // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行（V79 收敛后＝deepseek 官方），
         // 测试环境无 key 注入——幂等补测试 key
         ModelTierSeed.ensureChannelKey(jdbcTemplate);
         // #543 风格物化写面缺省桩（首个构建派发＝平台确定性写基座四件）：通用成功，
@@ -205,6 +205,9 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // 档位夹具归零（先子后父：候选行 FK 指档位——V79 起候选表在库）
+        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-%'");
+        jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
         // #543 风格层 kill-switch 归位（缺省生效态——共享行，绝不把关停态留给下游）
         jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = TRUE WHERE id = 1");
     }
@@ -2587,7 +2590,7 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand stage0 = command.getAllValues().get(0);
         assertThat(stage0.systemPrompt()).isEqualTo("执行体覆盖协议：开工先列步骤。");
-        assertThat(stage0.modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+        assertThat(stage0.modelString()).isEqualTo("deepseek:deepseek-v4-pro");
         assertThat(stage0.toolSpec()).isEqualTo("ws=true,fu=true,gi=true");
     }
 
@@ -5367,9 +5370,9 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "volcengine:deepseek-v4-flash-ga-260731", // 阶段 0 首试——无信号、快档
-                "volcengine:deepseek-v4-pro-ga-260813",   // 阶段 0 重试——失败升档
-                "volcengine:deepseek-v4-flash-ga-260731"); // 切片首试——新段重新判定、快档
+                "deepseek:deepseek-flash", // 阶段 0 首试——无信号、快档
+                "deepseek:deepseek-v4-pro",   // 阶段 0 重试——失败升档
+                "deepseek:deepseek-flash"); // 切片首试——新段重新判定、快档
         assertThat(commands.getAllValues().get(0).sessionId())
                 .isEqualTo(commands.getAllValues().get(1).sessionId());
 
@@ -5437,7 +5440,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "volcengine:deepseek-v4-pro-ga-260813", "volcengine:deepseek-v4-pro-ga-260813");
+                "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro");
 
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -5480,8 +5483,8 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "volcengine:deepseek-v4-flash-ga-260731",
-                "volcengine:deepseek-v4-pro-ga-260813");
+                "deepseek:deepseek-flash",
+                "deepseek:deepseek-v4-pro");
         // 留档快照：升档理由带规模标签判定快照（标签＋生效映射）
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -5498,11 +5501,16 @@ class GenerationAppServiceTest {
     @Test
     void given_manual_override_with_routing_on_when_retry_then_escalation_crosses_override() {
         // 路由判定优先、人工覆盖兜底：覆盖是基础档不是钉死——首试走人工档、
-        // 重试升强档（升档越过覆盖）；下一段回落人工档
+        // 重试升强档（升档越过覆盖）；下一段回落人工档。doubao-flagship 已随
+        // V79 退场（火山下线收尾）——人工档用 t- 夹具档位行（挂 deepseek 通道）
         Long projectId = persistedProject("9853");
         jdbcTemplate.update("""
+                INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled, display_name)
+                VALUES ('t-manual', 'deepseek', 'deepseek-chat-manual', TRUE, '人工档夹具')
+                """);
+        jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs (agent_key, model_id)
-                VALUES ('executor', 'doubao-flagship')
+                VALUES ('executor', 't-manual')
                 """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -5513,9 +5521,9 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "volcengine:doubao-seed-2-1-pro-260915", // 首试——无信号、人工档兜底
-                "volcengine:deepseek-v4-pro-ga-260813",   // 重试——失败升档（越过人工档）
-                "volcengine:doubao-seed-2-1-pro-260915"); // 切片首试——新段回落人工档
+                "deepseek:deepseek-chat-manual", // 首试——无信号、人工档兜底
+                "deepseek:deepseek-v4-pro",   // 重试——失败升档（越过人工档）
+                "deepseek:deepseek-chat-manual"); // 切片首试——新段回落人工档
 
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -5524,7 +5532,7 @@ class GenerationAppServiceTest {
                 .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
                 .get("modelTier");
         assertThat(tier)
-                .containsEntry("modelId", "doubao-flagship")
+                .containsEntry("modelId", "t-manual")
                 .containsEntry("source", "routed")
                 .doesNotContainKey("reasons"); // 兜底判定——只记为什么升
     }
@@ -5546,7 +5554,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "volcengine:deepseek-v4-pro-ga-260813", "volcengine:deepseek-v4-pro-ga-260813", "volcengine:deepseek-v4-pro-ga-260813");
+                "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro");
 
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -5580,7 +5588,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "volcengine:deepseek-v4-flash-ga-260731", "volcengine:deepseek-v4-flash-ga-260731", "volcengine:deepseek-v4-flash-ga-260731");
+                "deepseek:deepseek-flash", "deepseek:deepseek-flash", "deepseek:deepseek-flash");
     }
 
     /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */

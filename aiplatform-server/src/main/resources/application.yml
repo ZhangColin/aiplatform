@@ -13,9 +13,13 @@ spring:
     baseline-version: "0"
     locations: classpath:db/migration
     # #365 · 模型供应商通道种子 key 注入（ADR-0031：apiKey 落库唯一正本、git 永不
-    # 含 key 字面——部署环境注入种子（V44 一次性 INSERT），本机 dev 直写库，后续换
-    # key 走后台维护面（#367）；变量只在迁移执行时读一次，非运行期回落（缺失即空、
-    # 装配明确报错）。ARK_API_KEY 是图片域名（image-generation），对话线独立成对。
+    # 含 key 字面——部署环境注入种子（V44/V79 一次性 INSERT），本机 dev 直写库，
+    # 后续换 key 走后台维护面（#367）；变量只在迁移执行时读一次，非运行期回落
+    # （缺失即空、装配明确报错）。VOLCENGINE_API_KEY 已退场（#556/V79，ADR-0053
+    # ④——火山下线收尾）：placeholder 仅为 V44 重放保留（Flyway 只增不改，全新库
+    # V44 仍引用；V79 随即清火山行＝净效果 deepseek 单通道），环境里可删。
+    # DEEPSEEK_API_KEY 是现役种子（deepseek 官方通道）。ARK_API_KEY 是图片域名
+    # （image-generation），对话线独立成对。
     placeholders:
       volcengineApiKey: ${VOLCENGINE_API_KEY:}
       deepseekApiKey: ${DEEPSEEK_API_KEY:}

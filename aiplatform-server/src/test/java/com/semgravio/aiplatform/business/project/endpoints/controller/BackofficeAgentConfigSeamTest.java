@@ -88,7 +88,9 @@ class BackofficeAgentConfigSeamTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_agent_config_traces");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
-        // 绑定校验例的档位夹具（t- 前缀归零——种子档位行不动）
+        // 绑定校验例的档位夹具（t- 前缀归零——种子档位行不动；先子后父：候选行
+        // FK 指档位——V79 起候选表在库）
+        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-%'");
         jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
     }
 
@@ -376,16 +378,19 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // 策略覆盖写（开关关＋强档换＋阈值换＋映射换）→ GET 生效值＝库值、覆盖标记
         // true；留痕前后快照含路由四件（映射留存储形逗号接 token）；清空（null）
-        // 回落代码缺省。强档键取种子档位 doubao-flagship（#367 起改档即时校验
-        // 档位键——裸名已写不进去）
+        // 回落代码缺省。强档键取夹具档位 t-strong（doubao-flagship 已随 V79 退场；
+        // #367 起改档即时校验档位键——裸名已写不进去）
+        jdbcTemplate.update(
+                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                        + "VALUES ('t-strong', 'deepseek', 'some-strong-model', TRUE)");
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"routingEnabled": false, "routingStrongModelId": "doubao-flagship",
+                {"routingEnabled": false, "routingStrongModelId": "t-strong",
                  "routingFileCountThreshold": 50,
                  "routingEscalatingSizeLabels": ["中", "大"]}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("doubao-flagship"))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("t-strong"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(true))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(50))
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabels").isArray())
@@ -395,7 +400,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isFalse();
-        assertThat(executor.routingStrongModelId()).isEqualTo("doubao-flagship");
+        assertThat(executor.routingStrongModelId()).isEqualTo("t-strong");
         assertThat(executor.routingEscalatingSizeLabels())
                 .containsExactlyInAnyOrder(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE);
 
@@ -408,7 +413,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldRoutingEscalatingSizeLabels").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("doubao-flagship"))
+                .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("t-strong"))
                 .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(50))
                 .andExpect(jsonPath("$.data[0].newRoutingEscalatingSizeLabels").value("中,大"))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
@@ -551,19 +556,22 @@ class BackofficeAgentConfigSeamTest {
     @Test
     void given_verify_face_updated_when_get_and_traces_then_effective_and_snapshots()
             throws Exception {
-        // 覆盖写（verify 档钉 doubao-flagship＋预算 5）→ GET 生效值＝库值、覆盖
-        // 标记 true；留痕前后快照含验证面两件；清空（null）回落缺省（档随执行体、
-        // 预算 3）
+        // 覆盖写（verify 档钉夹具档 t-verify＋预算 5——doubao-flagship 已随 V79
+        // 退场）→ GET 生效值＝库值、覆盖标记 true；留痕前后快照含验证面两件；
+        // 清空（null）回落缺省（档随执行体、预算 3）
+        jdbcTemplate.update(
+                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                        + "VALUES ('t-verify', 'deepseek', 'some-verify-model', TRUE)");
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"verifyModelId": "doubao-flagship", "verifyRoundBudget": 5}
+                {"verifyModelId": "t-verify", "verifyRoundBudget": 5}
                 """)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifyModelId").value("doubao-flagship"))
+                .andExpect(jsonPath("$.data.verifyModelId").value("t-verify"))
                 .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(true))
                 .andExpect(jsonPath("$.data.verifyRoundBudget").value(5))
                 .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.verifyModelId()).isEqualTo("doubao-flagship");
+        assertThat(executor.verifyModelId()).isEqualTo("t-verify");
         assertThat(executor.verifyRoundBudget()).isEqualTo(5);
 
         signedGet("executor/traces")
@@ -571,7 +579,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].oldVerifyModelId").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldVerifyRoundBudget").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].newVerifyModelId").value("doubao-flagship"))
+                .andExpect(jsonPath("$.data[0].newVerifyModelId").value("t-verify"))
                 .andExpect(jsonPath("$.data[0].newVerifyRoundBudget").value(5))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
 
@@ -1078,7 +1086,7 @@ class BackofficeAgentConfigSeamTest {
         // 停用档夹具（t- 前缀，teardown 归零——种子档位是他测真链路依赖）
         jdbcTemplate.update(
                 "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
-                        + "VALUES ('t-off', 'volcengine', 'some-off-model', FALSE)");
+                        + "VALUES ('t-off', 'deepseek', 'some-off-model', FALSE)");
 
         // 三座 modelId/路由强档与边缘点档位：缺行键 400 PRJ_074、停用键 400 PRJ_075
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-nope\"}")
@@ -1121,7 +1129,7 @@ class BackofficeAgentConfigSeamTest {
                     .andExpect(jsonPath("$.data.defaultModelId").value("flash"))
                     .andExpect(jsonPath("$.data.operatorId").value(nullValue()))
                     .andExpect(jsonPath("$.data.operatorName").value(nullValue()));
-            // 缝 2（装配读面＋解析单点）：缺省 flash → volcengine 通道模型串
+            // 缝 2（装配读面＋解析单点）：缺省 flash → deepseek 通道模型串（V79 收敛后种子）
             assertThat(agentConfigs.effectiveEdgeModelId(point)).isEqualTo("flash");
             assertThat(modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point)).modelString())
                     .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
@@ -1144,7 +1152,7 @@ class BackofficeAgentConfigSeamTest {
                     .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
             assertThat(agentConfigs.effectiveEdgeModelId(point)).isEqualTo("pro");
             assertThat(modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point)).modelString())
-                    .isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+                    .isEqualTo("deepseek:deepseek-v4-pro");
         }
 
         // 清空覆盖（PUT 全量语义同款：null/缺省/纯空白＝清空）→ 回落代码缺省 flash

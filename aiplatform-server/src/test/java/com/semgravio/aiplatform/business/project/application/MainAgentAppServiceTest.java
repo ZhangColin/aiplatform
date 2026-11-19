@@ -178,7 +178,7 @@ class MainAgentAppServiceTest {
     @BeforeEach
     void defaultAgentReplies() {
         // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行
-        // （flash → volcengine 通道），测试环境无 key 注入——幂等补测试 key
+        // （flash → deepseek 通道，V79 收敛后种子），测试环境无 key 注入——幂等补测试 key
         ModelTierSeed.ensureChannelKey(jdbcTemplate);
         // 轮落定点读 converse/resume 返回维护挂起问答会合锚——默认回复形状兜底
         // （个别用例自带脚本后打桩覆盖之，Mockito 后桩胜出）。同测重打桩时 when()
@@ -365,7 +365,7 @@ class MainAgentAppServiceTest {
         assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。"
                 + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
                 + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
-        assertThat(overridden.getValue().modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+        assertThat(overridden.getValue().modelString()).isEqualTo("deepseek:deepseek-v4-pro");
         // 开关库值编入规格串（ws 关、fu 缺省开；#545 gi 件恒随——main 槽不消费）
         assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true,gi=true");
 
@@ -2322,7 +2322,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         assertThat(commands.getAllValues().get(2).modelString())
-                .isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+                .isEqualTo("deepseek:deepseek-v4-pro");
     }
 
     @Test

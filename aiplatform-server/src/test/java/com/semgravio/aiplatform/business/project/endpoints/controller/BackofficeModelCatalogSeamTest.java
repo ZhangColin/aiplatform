@@ -120,6 +120,8 @@ class BackofficeModelCatalogSeamTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'executor'");
         jdbcTemplate.update("DELETE FROM prj_model_tier_traces WHERE tier_key LIKE 't-cat%'");
         jdbcTemplate.update("DELETE FROM prj_model_provider_traces WHERE provider_key LIKE 't-cat%'");
+        // 先子后父：候选行 FK 指档位/通道（V79 起）——反序撞外键
+        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-cat%'");
         jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-cat%'");
         jdbcTemplate.update("DELETE FROM prj_model_providers WHERE provider_key LIKE 't-cat%'");
     }

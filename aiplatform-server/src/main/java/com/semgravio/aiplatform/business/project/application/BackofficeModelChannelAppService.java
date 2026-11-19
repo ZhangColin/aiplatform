@@ -165,7 +165,7 @@ public class BackofficeModelChannelAppService {
     public void deleteProvider(String providerKey, Operator operator) {
         requireOperator(operator);
         ModelProvider current = requireProvider(providerKey);
-        if (channelStore.providerReferencedByTiers(providerKey)) {
+        if (channelStore.providerReferenced(providerKey)) {
             throw new ApplicationException(ProjectMessage.MODEL_PROVIDER_DELETE_REFERENCED);
         }
         channelStore.deleteProvider(providerKey);
@@ -322,6 +322,13 @@ public class BackofficeModelChannelAppService {
             return;
         }
         channelStore.saveTier(next);
+        // 首选候选镜像（#556，ADR-0053 ③：档位行现列＝首选候选）：V79 起候选表
+        // 非空＝resolve 队列唯一数据源——写面改档须同步物化 priority 1 候选，
+        // 否则对带候选行的档位（flash/pro 种子）改档静默失效（demo 改档 SOP
+        // 失真）。镜像只跟指向，档位级启停仍由档位行 enabled 管（resolve 先检）；
+        // 候选 CRUD 全面化（多候选编排/行级启停）在 T5。
+        channelStore.saveTierPrimaryCandidate(next.tierKey(), next.providerKey(),
+                next.modelName(), operator.id(), operator.name());
         channelStore.insertTierTrace(tierTrace(next.tierKey(), current, next, operator));
         log.info("[model-channel] 档位变更 {}（{}:{}，enabled {}，thinking {}）", next.tierKey(),
                 next.providerKey(), next.modelName(), next.enabled(), next.thinkingEnabled());

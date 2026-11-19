@@ -62,9 +62,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * {@code C:\workspace} 无本会话孤儿转录。</p>
  *
  * <p><b>运行口径</b>：live 车道手跑——
- * {@code REHEARSAL_434_GO=yes REHEARSAL_434_VOLCENGINE_API_KEY=<真key> mvn test -P live
+ * {@code REHEARSAL_434_GO=yes REHEARSAL_434_DEEPSEEK_API_KEY=<真key> mvn test -P live
  * -Dtest=SingleSessionLongRunRehearsalLiveTest}。
- * 环境变量闸门防误触发 60 分钟真模型连跑（烧 volcengine 平台通道，不烧本地
+ * 环境变量闸门防误触发 60 分钟真模型连跑（烧 deepseek 平台通道，不烧本地
  * 智能体 token）；真 key 经 env 注入测试库、跑完还原（测试库种子是占位 key）。
  * 三开关（收口硬门）保持缺省＝生产现行为。</p>
  */
@@ -80,12 +80,13 @@ class SingleSessionLongRunRehearsalLiveTest {
     private static final Duration RUN_CAP = capFromEnv();
 
     /**
-     * 真模型 key 注入（env 闸门）：测试库种子是占位 key（sk-test-ark），连跑需真
-     * volcengine key——经环境变量 {@code REHEARSAL_434_VOLCENGINE_API_KEY} 注入
-     * （key 不落仓、不进代码；缺省跳过本类，防占位 key 中途烧一轮失败）。key 取法：
-     * dev 库（docker aiplatform-pg 容器）{@code prj_model_providers} 行。
+     * 真模型 key 注入（env 闸门）：测试库种子是占位 key（sk-test-deepseek），连跑
+     * 需真 deepseek key——经环境变量 {@code REHEARSAL_434_DEEPSEEK_API_KEY} 注入
+     * （key 不落仓、不进代码；缺省跳过本类，防占位 key 中途烧一轮失败；V79 起种子
+     * ＝deepseek 单通道，#556/ADR-0053 火山下线收尾）。key 取法：dev 库（docker
+     * aiplatform-pg 容器）{@code prj_model_providers} 行。
      */
-    private static final String VOLCENGINE_KEY_ENV = "REHEARSAL_434_VOLCENGINE_API_KEY";
+    private static final String DEEPSEEK_KEY_ENV = "REHEARSAL_434_DEEPSEEK_API_KEY";
     /** 全局安全闸（60 分钟连跑＋收口与测量余量）。 */
     private static final int TIMEOUT_SECONDS = 5400;
 
@@ -143,9 +144,9 @@ class SingleSessionLongRunRehearsalLiveTest {
         Assumptions.assumeTrue("yes".equals(System.getenv("REHEARSAL_434_GO")),
                 "未设 REHEARSAL_434_GO=yes——60 分钟真模型连跑需显式 consent");
         Assumptions.assumeTrue(
-                System.getenv(VOLCENGINE_KEY_ENV) != null
-                        && !System.getenv(VOLCENGINE_KEY_ENV).isBlank(),
-                "未设 " + VOLCENGINE_KEY_ENV + " ——真模型 key 需显式注入（占位 key 烧失败）");
+                System.getenv(DEEPSEEK_KEY_ENV) != null
+                        && !System.getenv(DEEPSEEK_KEY_ENV).isBlank(),
+                "未设 " + DEEPSEEK_KEY_ENV + " ——真模型 key 需显式注入（占位 key 烧失败）");
     }
 
     @AfterEach
@@ -385,15 +386,15 @@ class SingleSessionLongRunRehearsalLiveTest {
     // ---------- 供应商 key 注入（env → 测试库，跑完还原） ----------
 
     /**
-     * 注入真实 volcengine key（env → 测试库，跑完还原）。注意：注入窗内共享测试库的
+     * 注入真实 deepseek key（env → 测试库，跑完还原）。注意：注入窗内共享测试库的
      * 其他 live  run 也会用到这把 key——本排练独占 dev 栈期间方可开跑（并行会话须
      * 先协调，见并行会话共享 infra 排练资源口径）。
      */
     private void syncProviderKeysFromDevDb() {
         providerKeyBackup.addAll(jdbcTemplate.queryForList(
                 "SELECT provider_key, api_key, base_url FROM prj_model_providers"));
-        jdbcTemplate.update("UPDATE prj_model_providers SET api_key = ? WHERE provider_key = 'volcengine'",
-                System.getenv(VOLCENGINE_KEY_ENV));
+        jdbcTemplate.update("UPDATE prj_model_providers SET api_key = ? WHERE provider_key = 'deepseek'",
+                System.getenv(DEEPSEEK_KEY_ENV));
     }
 
     private void restoreProviderKeys() {

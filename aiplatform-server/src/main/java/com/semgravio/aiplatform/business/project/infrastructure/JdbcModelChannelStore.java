@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
 
@@ -49,6 +50,14 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             FROM prj_model_tiers ORDER BY tier_key
             """;
 
+    /** 全部候选行（含停用行——启停过滤归解析语义）；priority 升序＝队列序。 */
+    private static final String FIND_TIER_CANDIDATES_SQL = """
+            SELECT tier_key, priority, provider_key, model_name, enabled,
+                   operator_id, operator_name, updated_at
+            FROM prj_model_tier_candidates WHERE tier_key = ?
+            ORDER BY priority, provider_key, model_name
+            """;
+
     /** 整行 upsert：值面四件＋操作者两列；冲突分支全量重写（维护面无部分更新语义）。 */
     private static final String SAVE_PROVIDER_SQL = """
             INSERT INTO prj_model_providers
@@ -82,6 +91,23 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     private static final String DELETE_PROVIDER_SQL =
             "DELETE FROM prj_model_providers WHERE provider_key = ?";
 
+    /** 档位删除：候选行先随档清（档位配置＝行＋队列一个整体，不留孤儿候选）。 */
+    private static final String DELETE_TIER_CANDIDATES_SQL =
+            "DELETE FROM prj_model_tier_candidates WHERE tier_key = ?";
+
+    /** 首选候选镜像 upsert（键＝tier_key+priority 1；写面改档伴随写，#556）。 */
+    private static final String SAVE_TIER_PRIMARY_CANDIDATE_SQL = """
+            INSERT INTO prj_model_tier_candidates
+                (tier_key, priority, provider_key, model_name, enabled, operator_id, operator_name)
+            VALUES (?, 1, ?, ?, TRUE, ?, ?)
+            ON CONFLICT (tier_key, priority) DO UPDATE SET
+                provider_key = EXCLUDED.provider_key,
+                model_name = EXCLUDED.model_name,
+                operator_id = EXCLUDED.operator_id,
+                operator_name = EXCLUDED.operator_name,
+                updated_at = CURRENT_TIMESTAMP
+            """;
+
     private static final String DELETE_TIER_SQL =
             "DELETE FROM prj_model_tiers WHERE tier_key = ?";
 
@@ -91,8 +117,11 @@ public class JdbcModelChannelStore implements ModelChannelStore {
                 WHERE model_id = ? OR routing_strong_model_id = ?)
             """;
 
-    private static final String PROVIDER_REFERENCED_SQL =
-            "SELECT EXISTS (SELECT 1 FROM prj_model_tiers WHERE provider_key = ?)";
+    /** 引用守卫：档位行直引或候选行引用（V79 起候选 FK 指通道——都是引用）。 */
+    private static final String PROVIDER_REFERENCED_SQL = """
+            SELECT EXISTS (SELECT 1 FROM prj_model_tiers WHERE provider_key = ?)
+                OR EXISTS (SELECT 1 FROM prj_model_tier_candidates WHERE provider_key = ?)
+            """;
 
     private static final String INSERT_PROVIDER_TRACE_SQL = """
             INSERT INTO prj_model_provider_traces
@@ -157,6 +186,12 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
+    public List<ModelTierCandidate> findTierCandidates(String tierKey) {
+        return jdbcTemplate.query(FIND_TIER_CANDIDATES_SQL,
+                JdbcModelChannelStore::mapTierCandidate, tierKey);
+    }
+
+    @Override
     public void saveProvider(ModelProvider provider) {
         jdbcTemplate.update(SAVE_PROVIDER_SQL, provider.providerKey(), provider.baseUrl(),
                 provider.apiKey(), provider.enabled(), provider.operatorId(), provider.operatorName());
@@ -170,12 +205,21 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
+    public void saveTierPrimaryCandidate(String tierKey, String providerKey, String modelName,
+            String operatorId, String operatorName) {
+        jdbcTemplate.update(SAVE_TIER_PRIMARY_CANDIDATE_SQL,
+                tierKey, providerKey, modelName, operatorId, operatorName);
+    }
+
+    @Override
     public void deleteProvider(String providerKey) {
         jdbcTemplate.update(DELETE_PROVIDER_SQL, providerKey);
     }
 
     @Override
     public void deleteTier(String tierKey) {
+        // 先子后父：候选行 FK 指档位（V79），反序撞外键
+        jdbcTemplate.update(DELETE_TIER_CANDIDATES_SQL, tierKey);
         jdbcTemplate.update(DELETE_TIER_SQL, tierKey);
     }
 
@@ -186,9 +230,9 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public boolean providerReferencedByTiers(String providerKey) {
+    public boolean providerReferenced(String providerKey) {
         Boolean referenced = jdbcTemplate.queryForObject(
-                PROVIDER_REFERENCED_SQL, Boolean.class, providerKey);
+                PROVIDER_REFERENCED_SQL, Boolean.class, providerKey, providerKey);
         return Boolean.TRUE.equals(referenced);
     }
 
@@ -235,6 +279,16 @@ public class JdbcModelChannelStore implements ModelChannelStore {
         Timestamp updatedAt = rs.getTimestamp("updated_at");
         return new ModelProvider(rs.getString("provider_key"), rs.getString("base_url"),
                 rs.getString("api_key"), rs.getBoolean("enabled"),
+                rs.getString("operator_id"), rs.getString("operator_name"),
+                updatedAt == null ? null : updatedAt.toLocalDateTime());
+    }
+
+    private static ModelTierCandidate mapTierCandidate(ResultSet rs, int rowNum)
+            throws SQLException {
+        Timestamp updatedAt = rs.getTimestamp("updated_at");
+        return new ModelTierCandidate(rs.getString("tier_key"), rs.getInt("priority"),
+                rs.getString("provider_key"), rs.getString("model_name"),
+                rs.getBoolean("enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }

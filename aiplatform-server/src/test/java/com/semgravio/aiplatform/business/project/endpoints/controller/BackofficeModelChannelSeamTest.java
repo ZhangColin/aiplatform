@@ -100,6 +100,8 @@ class BackofficeModelChannelSeamTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'executor'");
         jdbcTemplate.update("DELETE FROM prj_model_tier_traces WHERE tier_key LIKE 't-%'");
         jdbcTemplate.update("DELETE FROM prj_model_provider_traces WHERE provider_key LIKE 't-%'");
+        // 先子后父：候选行 FK 指档位/通道（V79 起）——反序撞外键
+        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-%'");
         jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
         jdbcTemplate.update("DELETE FROM prj_model_providers WHERE provider_key LIKE 't-%'");
     }
@@ -108,43 +110,44 @@ class BackofficeModelChannelSeamTest {
 
     @Test
     void given_seed_rows_when_list_and_get_then_api_key_masked_everywhere() throws Exception {
-        // 清单读面：种子两通道皆掩码形（**** 前缀）、写者 null（种子写入）。volcengine
-        // key 随测试环境（env 注入＝真值〔#369 真模型冒烟〕/未注入＝ModelTierSeed 补
-        // 测试假值）——明文不泄漏断言取库内现值验，掩码形不钉 fixture 字面
-        String volcKey = jdbcTemplate.queryForObject(
-                "SELECT api_key FROM prj_model_providers WHERE provider_key = 'volcengine'",
+        // 清单读面：种子通道（V79 收敛后＝deepseek 单通道）掩码形（**** 前缀）、
+        // 写者 null（种子写入）。deepseek key 由 test profile placeholder 种入
+        // （sk-test-deepseek）——明文不泄漏断言取库内现值验，掩码形不钉 fixture 字面
+        String seedKey = jdbcTemplate.queryForObject(
+                "SELECT api_key FROM prj_model_providers WHERE provider_key = 'deepseek'",
                 String.class);
         String listBody = signedRequest(get(PROVIDERS_PATH), PROVIDERS_PATH, null, null, null)
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(listBody)
                 .contains("****")
-                .doesNotContain(volcKey)
+                .doesNotContain(seedKey)
                 .doesNotContain("sk-test-deepseek");
 
-        signedRequest(get(PROVIDERS_PATH + "/volcengine"),
-                        PROVIDERS_PATH + "/volcengine", null, null, null)
+        signedRequest(get(PROVIDERS_PATH + "/deepseek"),
+                        PROVIDERS_PATH + "/deepseek", null, null, null)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.providerKey").value("volcengine"))
-                .andExpect(jsonPath("$.data.baseUrl").value("https://ark.cn-beijing.volces.com/api/v3"))
+                .andExpect(jsonPath("$.data.providerKey").value("deepseek"))
+                .andExpect(jsonPath("$.data.baseUrl").value("https://api.deepseek.com"))
                 .andExpect(jsonPath("$.data.apiKeyMasked").value(startsWith("****")))
                 .andExpect(jsonPath("$.data.enabled").value(true))
                 .andExpect(jsonPath("$.data.operatorId").value(nullValue()));
 
-        // 档位清单（V44/V45 种子形状）：语义键/通道/模型名/显示名/启用态
+        // 档位清单（V79 收敛后种子形状）：语义键/通道/模型名/显示名/启用态
         signedRequest(get(TIERS_PATH), TIERS_PATH, null, null, null)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].tierKey").value("doubao-flagship"))
-                .andExpect(jsonPath("$.data[0].displayName").value("豆包旗舰"))
-                .andExpect(jsonPath("$.data[1].tierKey").value("flash"))
-                .andExpect(jsonPath("$.data[1].providerKey").value("volcengine"))
-                .andExpect(jsonPath("$.data[1].modelName").value("deepseek-v4-flash-ga-260731"))
-                .andExpect(jsonPath("$.data[1].displayName").value("快模型档"))
-                .andExpect(jsonPath("$.data[1].enabled").value(true))
-                .andExpect(jsonPath("$.data[2].tierKey").value("pro"))
-                .andExpect(jsonPath("$.data[2].displayName").value("强模型档"));
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].tierKey").value("flash"))
+                .andExpect(jsonPath("$.data[0].providerKey").value("deepseek"))
+                .andExpect(jsonPath("$.data[0].modelName").value("deepseek-flash"))
+                .andExpect(jsonPath("$.data[0].displayName").value("快模型档"))
+                .andExpect(jsonPath("$.data[0].enabled").value(true))
+                .andExpect(jsonPath("$.data[1].tierKey").value("pro"))
+                .andExpect(jsonPath("$.data[1].providerKey").value("deepseek"))
+                .andExpect(jsonPath("$.data[1].modelName").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data[1].displayName").value("强模型档"));
 
-        // 未知寻址：通道/档位各自 404
+        // 未知寻址：通道/档位各自 404（volcengine 已随 V79 退场＝未知寻址）
         signedRequest(get(PROVIDERS_PATH + "/t-none"), PROVIDERS_PATH + "/t-none", null, null, null)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(PROVIDER_NOT_FOUND_CODE));
@@ -284,6 +287,73 @@ class BackofficeModelChannelSeamTest {
     }
 
     // ---------- 删除守卫：被引用即 409（不留悬空引用）；删成留痕 new 全 null ----------
+
+    @Test
+    void given_tier_written_via_backoffice_when_resolve_then_primary_candidate_mirrored()
+            throws Exception {
+        // #556 首选候选镜像不变式：V79 起候选表非空＝队列唯一数据源，写面（创建/
+        // PUT 改档）须同步 priority 1 候选＝档位行现列——否则对带候选行的档位
+        // （flash/pro 种子）改档静默失效，T5 前 demo 改档 SOP 失真。镜像只跟
+        // 指向（provider/model），档位级启停仍由档位行 enabled 管（resolve 先检）。
+        createProvider("t-mirp", "https://mir.example", "sk-mir-9999");
+        createTier("t-mir", "t-mirp", "mir-model-v1");
+
+        // 创建即物化首选候选（读面与档位行现列等价）
+        assertThat(candidateModelOf("t-mir", 1)).isEqualTo("t-mirp:mir-model-v1");
+        assertThat(modelTiers.resolve("t-mir").modelString()).isEqualTo("t-mirp:mir-model-v1");
+
+        // 手工加的 priority 2 备胎（T5 前经 SQL 配的多通道形态）：PUT 改主选不动备胎
+        jdbcTemplate.update(
+                "INSERT INTO prj_model_tier_candidates (tier_key, priority, provider_key, model_name) "
+                        + "VALUES ('t-mir', 2, 't-mirp', 'mir-backup-model')");
+        createProvider("t-mirp2", "https://mir2.example", "sk-mir2-0000");
+        putTier("t-mir", "{\"providerKey\": \"t-mirp2\", \"modelName\": \"mir-model-v2\"}")
+                .andExpect(status().isOk());
+
+        assertThat(candidateModelOf("t-mir", 1)).isEqualTo("t-mirp2:mir-model-v2");
+        assertThat(candidateModelOf("t-mir", 2)).isEqualTo("t-mirp:mir-backup-model");
+        // 队列序与读面：主选＝新指向、备胎随后（改档即生效——demo SOP 语义不破）
+        assertThat(modelTiers.resolveCandidates("t-mir"))
+                .extracting(ModelTierAppService.ResolvedModel::modelString)
+                .containsExactly("t-mirp2:mir-model-v2", "t-mirp:mir-backup-model");
+    }
+
+    @Test
+    void given_candidate_rows_when_delete_tier_then_candidates_cascade_and_provider_guarded()
+            throws Exception {
+        // V79 起候选行 FK 指档位/通道（#556）：档位删成＝候选随档整删（档位配置是
+        // 一个整体，不留孤儿候选行）；通道仅被候选行引用（无档位行直引）同样 409
+        // ——候选引用也是引用，裸 FK 500 不可读
+        createProvider("t-candp", "https://cand.example", "sk-cand-7777");
+        createProvider("t-candp2", "https://cand2.example", "sk-cand2-8888");
+        createTier("t-cand", "t-candp", "cand-model-1"); // 写面创建即镜像 priority 1 候选
+        jdbcTemplate.update(
+                "INSERT INTO prj_model_tier_candidates (tier_key, priority, provider_key, model_name) "
+                        + "VALUES ('t-cand', 2, 't-candp2', 'cand-model-2')");
+
+        // 通道被候选行引用且无档位行直引（t-candp2）：409 同码（守卫扩展面——
+        // 旧检查只看档位行，此例删成即库级 FK 500）
+        signedRequest(delete(PROVIDERS_PATH + "/t-candp2"), PROVIDERS_PATH + "/t-candp2", null,
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(PROVIDER_DELETE_REFERENCED_CODE));
+
+        // 未被智能体配置绑定的档位删成：候选行随档级联清（库无残留）
+        signedRequest(delete(TIERS_PATH + "/t-cand"), TIERS_PATH + "/t-cand", null,
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        Integer candidateResidue = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_model_tier_candidates WHERE tier_key = 't-cand'",
+                Integer.class);
+        assertThat(candidateResidue).isZero();
+        // 引用全清后两通道皆删成
+        signedRequest(delete(PROVIDERS_PATH + "/t-candp"), PROVIDERS_PATH + "/t-candp", null,
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        signedRequest(delete(PROVIDERS_PATH + "/t-candp2"), PROVIDERS_PATH + "/t-candp2", null,
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+    }
 
     @Test
     void given_delete_when_referenced_then_409_and_after_unbind_cascade_ok() throws Exception {
@@ -641,6 +711,20 @@ class BackofficeModelChannelSeamTest {
             request.header("X-User-Name", operatorName);
         }
         return mockMvc.perform(request);
+    }
+
+    /** 档位 PUT 直发（JSON 体原样，缺省操作者）。 */
+    private ResultActions putTier(String tierKey, String body) throws Exception {
+        String path = TIERS_PATH + "/" + tierKey;
+        return signedRequest(put(path), path, body, OPERATOR_ID, OPERATOR_NAME);
+    }
+
+    /** 候选行指向读（provider:model@priority——镜像断言面）。 */
+    private String candidateModelOf(String tierKey, int priority) {
+        return jdbcTemplate.queryForObject(
+                "SELECT provider_key || ':' || model_name FROM prj_model_tier_candidates "
+                        + "WHERE tier_key = ? AND priority = ?",
+                String.class, tierKey, priority);
     }
 
     private String plaintextKeyOf(String providerKey) {

@@ -5,6 +5,7 @@ import java.util.List;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
 
 /**
@@ -31,11 +32,26 @@ public interface ModelChannelStore {
     /** 全部档位行（后台清单读面与绑定下拉数据源；键序稳定返回）。 */
     List<ModelTier> findAllTiers();
 
+    /**
+     * 该档位的全部候选行（含停用行——启停过滤是解析语义，归 {@code
+     * ModelTierAppService}；priority 升序、同序按通道键/模型名稳定排序）。
+     * 空列表＝档位未配置候选（解析回退档位行现列，软着陆 ADR-0053 ③）。
+     */
+    List<ModelTierCandidate> findTierCandidates(String tierKey);
+
     /** 通道行整行 upsert（键＝provider_key；后台维护面唯一写口）。 */
     void saveProvider(ModelProvider provider);
 
     /** 档位行整行 upsert（键＝tier_key；后台维护面唯一写口）。 */
     void saveTier(ModelTier tier);
+
+    /**
+     * 首选候选镜像 upsert（键＝tier_key+priority 1；档位行写口的伴随写）：
+     * 档位行现列＝首选候选（ADR-0053 ③ 软着陆不变式）——写面改档同步物化
+     * priority 1 候选，带候选行的档位改档不静默失效。候选 CRUD 全面化在 T5。
+     */
+    void saveTierPrimaryCandidate(String tierKey, String providerKey, String modelName,
+            String operatorId, String operatorName);
 
     /** 通道行删除（引用守卫在应用层先查，此处纯删）。 */
     void deleteProvider(String providerKey);
@@ -46,8 +62,8 @@ public interface ModelChannelStore {
     /** 档位是否被智能体运营配置引用（model_id/routing_strong_model_id 任一＝档位键）。 */
     boolean tierBoundByAgentConfigs(String tierKey);
 
-    /** 通道是否被档位行引用（provider_key 外键的先检面——裸 FK 报错不可读）。 */
-    boolean providerReferencedByTiers(String providerKey);
+    /** 通道是否被引用（档位行直引或候选行引用——V79 起候选 FK 也指通道；裸 FK 报错不可读的先检面）。 */
+    boolean providerReferenced(String providerKey);
 
     /** 通道变更留痕追加（append-only，仅实际变更落痕）。 */
     void insertProviderTrace(ModelProviderTrace trace);

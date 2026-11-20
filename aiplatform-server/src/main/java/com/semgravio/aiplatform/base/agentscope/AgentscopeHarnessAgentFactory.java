@@ -214,6 +214,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 // 自动补 ERROR 结果继续走（模型看见工具失败事实自行续作，WARN 遥测
                 // 落框架日志）——最小修复，不叠旁路恢复层（#412 递减效应引证）
                 .enablePendingToolRecovery(true)
+                // 会话誊本写面关停（#553 升级 2.0.5 最小适配）：2.0.5 起框架恒挂
+                // TranscriptMiddleware——每轮收尾把对话誊本追加写 agents/<id>/
+                // sessions/*.jsonl（容器姿态经 abstractFilesystem 落工作区卷、Local
+                // 姿态纯宿主 NIO），#379 已裁决该形态的宿主/工作区 jsonl 是「无读者
+                // 孤儿副本」（会话正本在 PG cat_agent_state）；平台无 SessionSearch/
+                // Operate 消费面，显式关停延续既有决议
+                .disableTranscript()
                 // 内层重试关闭·内核旋钮（#555 / ADR-0053 ①）：平台 INNER_RETRY_DISABLED
                 // 压的 maxAttempts=1 只到模型 configuredOptions——内核 ReActAgent 无条件
                 // 烧 modelConfig(maxRetries 缺省 3) 进每次调用的 callOptions，
@@ -531,6 +538,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     // pending tool 恢复开（#431）：故障面正在子级——子级同款开启
                     // （根因与机制见 buildAgent 处注释）
                     .enablePendingToolRecovery(true)
+                    // 会话誊本写面关停（#553，同主装配——机制与依据见 buildAgent 处注释）
+                    .disableTranscript()
                     // 内层重试关闭·内核旋钮（#555 / ADR-0053 ①，同主装配——机制与
                     // 修法见 buildAgent 处注释）
                     .maxRetries(1)

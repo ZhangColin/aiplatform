@@ -20,8 +20,10 @@
         <maven.compiler.target>21</maven.compiler.target>
         <postgresql.version>42.7.4</postgresql.version>
         <pitest.junit5.plugin.version>1.2.3</pitest.junit5.plugin.version>
-        <!-- 对话智能体内核（ADR-0002：AgentScope Java 2.0，基座票 #44） -->
-        <agentscope.version>2.0.1</agentscope.version>
+        <!-- 对话智能体内核（ADR-0002：AgentScope Java 2.0，基座票 #44；#553 跟随升级
+             2.0.1→2.0.5：#561 压缩中间件吞错重放已修＋timeout/流重试内核改进；删除面
+             API 本仓零使用、AgentStateStore 新增面全 default 无感） -->
+        <agentscope.version>2.0.5</agentscope.version>
     </properties>
 
     <dependencies>

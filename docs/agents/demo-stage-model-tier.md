@@ -30,6 +30,11 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 2. **查生效值**：`GET /api/backoffice/agent-configs/executor`——生效 `modelId` ＋覆盖标记 `modelIdOverridden` ＋缺省预览 `defaultModelId`。
 3. **回滚**：`GET /api/backoffice/agent-configs/executor/traces` 取某痕旧值快照，把旧值 `PUT` 回写（即一次新变更、留新痕——不做版本树）。
 
+**主备候选（高可用）配置与演练（ADR-0053，#560 收口移交）**：单通道 401/403/402（认证失效/余额）类故障下平台命令面自动切备候选、无需人工干预（机制面 `FailoverModel` 收口，切换留痕 `prj_model_tier_switch_traces` 运营可见）。**当前态＝种子单候选**（flash/pro 各一 deepseek 官方行）——failover 机制在位但**备候选缺位**，主备配置是运营动作：
+
+1. **备账号 key 就位后配置**（不发版不重启，改完下一轮命令构建即生效）：先建备通道行 `POST /api/backoffice/model-providers`（同供应商多账号行 vendor 显式同填 deepseek；前缀即协议路由——通道行键取受支持前缀，OpenAI 兼容端点用 `openai` 键＋base_url 指实际端点），再经候选面 `POST /api/backoffice/model-tiers/{tierKey}/candidates` 追加备选（curl 执行面同 `backoffice-model-channel.sh` 的 `add-candidate`）。
+2. **定期活体演练**（建议随改档窗口跑）：`ModelFailoverDrillLiveTest`（live 车道，`set -a; source .env.local; set +a && mvn test -P live -Dtest=ModelFailoverDrillLiveTest`）——测试库 flash 主候选注入假 key（真 401）→ 经真实解析链＋平台命令面验证自动切备、生成成功、留痕与计量归因（2026-11-20 全绿收口：假 key 真 401→切换留痕→备候选生成成功；演练自注入自还原，红先查 `.env.local` key 死活——本日旧 dev key 曾在供应商侧失效，法证靠全量落盘日志）。
+
 **边缘调用点同面改档（#366）**：项目取名（`naming`）、上下文压缩（`compaction`）、入口分类（`classification`）、技能预检（`precheck`）四件一次性轻调用的模型档位收编同一配置面——端点 `/api/backoffice/agent-configs/edge/{edgeKey}`（GET/PUT/traces 同制，值面仅模型档位：`{"modelId": "pro"}`；缺省一律 `flash`）。改档下一轮调用即生效（装配动态查库）。
 
 **verify 验证子智能体档位与轮次预算（#424 片轻验常开）**：verify 子智能体（片轻验的执行侧）的档位与单场轮次预算收编在 **executor 行**（同一 PUT 通道）——

@@ -13,7 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                    越界 PRJ_090）
  * @param enabled     行级启停（缺省 true；false＝读面剔除不参队——显式下线单候选）
  */
-public record ModelTierCandidateCreateCommand(
+public record ModelConfigCandidateCreateCommand(
         @Schema(description = "通道键（一行＝endpoint×账号 key；须已在通道面建行）",
                 example = "deepseek-2")
         String providerKey,

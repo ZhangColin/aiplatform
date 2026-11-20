@@ -4,14 +4,14 @@ import java.time.LocalDateTime;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidateTrace;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigCandidateTrace;
 
 /**
  * 候选编排留痕读面行（#559/T5）：一次编排（增/删/排序/启停/换指向）中每个实际
  * 变更身份的前后快照＋操作者＋时刻，倒序最近先。快照以候选身份（通道×实际
  * 模型名）为轴——移动/换位在该轴上＝同身份 priority 前后可见；新增痕 old 全
  * null、删除痕 new 全 null。回滚＝按痕旧值写回（重排/重建候选＝一次新编排留
- * 新痕，不做版本树）。append-only 跨行存活（档位删除后留痕仍可读）。
+ * 新痕，不做版本树）。append-only 跨行存活（配置删除后留痕仍可读）。
  *
  * @param id             留痕标识（TSID 十进制串）
  * @param oldPriority    变更前队列序（新增痕＝null）
@@ -26,7 +26,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate
  * @param operatorName   变更操作者名（直读展示）
  * @param operatedAt     变更动作时刻
  */
-public record BackofficeModelTierCandidateTraceResponse(
+public record BackofficeModelConfigCandidateTraceResponse(
         @Schema(description = "留痕标识（TSID 十进制串）")
         String id,
         @Schema(description = "变更前队列序（null＝新增痕——候选此前不在队列）")
@@ -53,8 +53,8 @@ public record BackofficeModelTierCandidateTraceResponse(
         LocalDateTime operatedAt) {
 
     /** 留痕行 → 读面行。 */
-    public static BackofficeModelTierCandidateTraceResponse of(ModelTierCandidateTrace trace) {
-        return new BackofficeModelTierCandidateTraceResponse(Long.toString(trace.id()),
+    public static BackofficeModelConfigCandidateTraceResponse of(ModelConfigCandidateTrace trace) {
+        return new BackofficeModelConfigCandidateTraceResponse(Long.toString(trace.id()),
                 trace.oldPriority(), trace.oldProviderKey(), trace.oldModelName(),
                 trace.oldEnabled(),
                 trace.newPriority(), trace.newProviderKey(), trace.newModelName(),

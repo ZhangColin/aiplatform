@@ -89,7 +89,7 @@ class ModelFailoverLiveSmokeTest {
         }
         // 切换留痕：真 401 触发、主备指向如实
         assertThat(traces).hasSize(1);
-        assertThat(traces.get(0).tierKey()).isEqualTo("flash");
+        assertThat(traces.get(0).configKey()).isEqualTo("flash");
         assertThat(traces.get(0).triggerError()).contains("401");
         assertThat(traces.get(0).fromProviderKey()).isEqualTo("deepseek");
         assertThat(traces.get(0).toProviderKey()).isEqualTo("deepseek");

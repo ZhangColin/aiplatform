@@ -59,8 +59,8 @@ class AgentscopeHarnessAgentFactoryTest {
             (agentKey, workspace) -> List.of();
 
     /**
-     * 边缘模型固定桩（#366 压缩档位装配腿）：无通道语境的 deepseek 串——SDK 内置
-     * provider 缺省路径，工厂测试不依赖库/通道注册（档位链装配断言归 business 侧；
+     * 边缘模型固定桩（#366 压缩配置装配腿）：无通道语境的 deepseek 串——SDK 内置
+     * provider 缺省路径，工厂测试不依赖库/通道注册（配置链装配断言归 business 侧；
      * 走替身 builder 的实例键测试用本桩，真构建测试用 {@link #volcEdgeModels()}）。
      */
     private static final EdgeModelSupplier EDGE_MODELS = new EdgeModelSupplier() {
@@ -179,9 +179,9 @@ null,                 new AgentWorkspace.Local(null), null, null);
 
     @Test
     void given_subagent_tier_override_when_obtain_then_passed_through_and_keyed_per_tier() {
-        // #424 片轻验：verify 子智能体档位覆盖经 EdgeModelSupplier 供数——非空即
+        // #424 片轻验：verify 子智能体配置覆盖经 EdgeModelSupplier 供数——非空即
         // 透传 builder（子智能体独立档），null＝随父级（执行体生效档，缺省同档
-        // 不降）；档位入实例缓存键（改档＝新实例——后台改档下一轮命令构建即生效，
+        // 不降）；配置入实例缓存键（改档＝新实例——后台改档下一轮命令构建即生效，
         // 进行中 run 不定格）
         List<EdgeModelSupplier.EdgeModel> passed = new ArrayList<>();
         List<HarnessAgent> created = new ArrayList<>();
@@ -225,7 +225,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
         assertThat(passed.get(1).modelString()).isEqualTo("deepseek:deepseek-v4-pro");
         assertThat(created).hasSize(2);
 
-        // 同档重取＝复用（档位入键的稳定性：同值不重建）
+        // 同档重取＝复用（配置入键的稳定性：同值不重建）
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 null, new AgentWorkspace.Local(null), null, null);
         assertThat(created).hasSize(2);
@@ -920,7 +920,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
     }
 
     /**
-     * 压缩显式配置（#108 / ADR-0012；#366 边缘点收编）：触发阈值 400K + 压缩档位
+     * 压缩显式配置（#108 / ADR-0012；#366 边缘点收编）：触发阈值 400K + 压缩配置
      * 解析产物（模型来自 {@link EdgeModelSupplier} 注入，非 yml——缺省 flash 档
      * 由配置面保证）。模型解析走主通道（volcengine 工厂，通道件携 key——
      * #369 退场确认后无 DEEPSEEK_API_KEY 环境腿），无 key 跳过。
@@ -943,7 +943,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
 
     @Test
     void given_pro_tier_compaction_model_when_compaction_config_then_resolved_string_lands() {
-        // 模型来自解析产物（档位链半边）：EdgeModel 换 pro 串即落 pro——配置面改档
+        // 模型来自解析产物（配置链半边）：EdgeModel 换 pro 串即落 pro——配置面改档
         // 经供数口直达装配，properties 无模型键可回
         requireVolcengineKey();
 
@@ -958,7 +958,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
 
     @Test
     void given_same_main_spec_when_compaction_tier_changes_then_new_instance() {
-        // #366 压缩档位入实例缓存键（生效配置指纹半边）：后台改 compaction 档，
+        // #366 压缩配置入实例缓存键（生效配置指纹半边）：后台改 compaction 档，
         // 同主规格下一轮 obtain 即新实例——改配置即生效、进行中 run 不定格
         List<HarnessAgent> created = new ArrayList<>();
         ModelChannel compactionChannel =

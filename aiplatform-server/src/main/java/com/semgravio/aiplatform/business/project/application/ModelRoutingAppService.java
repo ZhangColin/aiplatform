@@ -19,13 +19,13 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 模型路由判定（#354，ADR-0030——简单活快模型、难活强模型；信号面 #426 修订）：
  * run 执行体（{@link AgentProfile#EXECUTOR}——Demo 阶段〔首 Demo ＋ 迭代〕全部
- * 任务由其承载，模型档位正本 #341）的模型档位按任务特征可观测信号自动选档。调用
+ * 任务由其承载，模型配置正本 #341）的模型配置按任务特征可观测信号自动选档。调用
  * 点＝{@code CoderRunAttempts} 每次尝试的命令构建（起跑时读档口径，进行中 run
  * 不定格）。
  *
  * <p><b>协同口径（路由判定优先、人工覆盖兜底）</b>：路由开＝信号升强档优先
  * （路由判定），无信号回落<b>人工档兜底</b>（库覆盖 → 枚举缺省——覆盖即基础档，
- * 快档位可经 modelId 配置、不关路由）；路由关＝<b>钉死位</b>（显式关断即钉死，
+ * 快配置可经 modelConfigKey 覆盖、不关路由）；路由关＝<b>钉死位</b>（显式关断即钉死，
  * 人工档恒生效——对账/对比场景的定档通道）。主智能体/设计执行体不参与路由
  * （调用方只在 executor 座调用本服务）。</p>
  *
@@ -46,8 +46,8 @@ import lombok.extern.slf4j.Slf4j;
  * 不发版），null＝回落本类代码缺省。</p>
  *
  * <p><b>决策可观测（哪段用了哪档、为什么——留档可查）</b>：每次判定结构化
- * 日志（档位/来源/理由/信号）+ 收尾卡 closing.modelTier（随对话史落库——
- * 档位 + 来源 + 升档理由 + 判定依据快照〔含规模标签判定快照〕；失败段以日志为
+ * 日志（配置/来源/理由/信号）+ 收尾卡 closing.modelTier（随对话史落库——
+ * 配置 + 来源 + 升档理由 + 判定依据快照〔含规模标签判定快照〕；失败段以日志为
  * 留档面）。</p>
  */
 @Service
@@ -55,10 +55,10 @@ import lombok.extern.slf4j.Slf4j;
 public class ModelRoutingAppService {
 
     /**
-     * 强模型档代码缺省（路由升档落点；运营配置面 routingStrongModelId 可换、
-     * 不发版）。ADR-0031 起值＝档位语义键（prj_model_tiers 行）。
+     * 强模型档代码缺省（路由升档落点；运营配置面 routingStrongModelConfigKey 可换、
+     * 不发版）。ADR-0031 起值＝配置语义键（prj_model_configs 行）。
      */
-    public static final String DEFAULT_STRONG_MODEL_ID = "pro";
+    public static final String DEFAULT_STRONG_MODEL_CONFIG_KEY = "pro";
 
     /**
      * 文件面阈值代码缺省：<b>应用文件面</b>（已跟踪文件数扣基座基数）≥ 此值即
@@ -77,7 +77,7 @@ public class ModelRoutingAppService {
     public static final Set<SliceSizeLabel> DEFAULT_ESCALATING_SIZE_LABELS =
             Set.of(SliceSizeLabel.LARGE);
 
-    /** 档位来源词表（closing.modelTier.source 与日志共用）：路由判定/钉死/枚举缺省。 */
+    /** 配置来源词表（closing.modelTier.source 与日志共用）：路由判定/钉死/枚举缺省。 */
     public static final String SOURCE_ROUTED = "routed";
     public static final String SOURCE_PINNED = "pinned";
     public static final String SOURCE_DEFAULT = "default";
@@ -121,17 +121,17 @@ public class ModelRoutingAppService {
     }
 
     /**
-     * 一次路由判定的收场：命令构建消费档位键（模型串与通道注入由
-     * {@code ModelTierAppService#resolve} 解析——判定层不越层）；收尾卡留档消费
+     * 一次路由判定的收场：命令构建消费配置键（模型串与通道注入由
+     * {@code ModelConfigAppService#resolve} 解析——判定层不越层）；收尾卡留档消费
      * {@link #payload()} 面（哪段用了哪档、为什么）。
      */
-    public record TierSelection(String modelId, String source,
+    public record ConfigSelection(String modelConfigKey, String source,
             List<String> reasons, Map<String, Object> signals) {
 
-        /** 收尾卡留档载荷（closing.modelTier）：档位 + 来源 + 升档理由 + 判定依据快照。 */
+        /** 收尾卡留档载荷（closing.modelTier）：配置 + 来源 + 升档理由 + 判定依据快照。 */
         public Map<String, Object> payload() {
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("modelId", modelId);
+            payload.put("modelId", modelConfigKey); // 键＝持久化留档契约（closing.modelTier.*），#554 改名不改数据面
             payload.put("source", source);
             if (!reasons.isEmpty()) {
                 payload.put("reasons", reasons);
@@ -153,7 +153,7 @@ public class ModelRoutingAppService {
      * @param attempt    本轮第几次尝试（≥2＝重试升档信号）
      * @param round      第几轮（≥2＝回滚重跑升档信号，#353 外环）
      */
-    public TierSelection select(AgentConfigAppService.EffectiveConfig effective,
+    public ConfigSelection select(AgentConfigAppService.EffectiveConfig effective,
             String workspaceId, int attempt, int round, SegmentSignals signals) {
         SliceSizeLabel sizeLabel = signals == null ? null : signals.sizeLabel();
         if (!effective.routingEnabled()) {
@@ -174,14 +174,14 @@ public class ModelRoutingAppService {
      * 升档判定；失败重试信号（重试/回滚重跑）不受两开关影响、常开。开关开＝恢复
      * 对应判据（阈值/映射旋钮照旧生效）。
      */
-    static TierSelection decide(AgentConfigAppService.EffectiveConfig effective, int attempt,
+    static ConfigSelection decide(AgentConfigAppService.EffectiveConfig effective, int attempt,
             int round, Integer fileCount, SliceSizeLabel sizeLabel) {
         int fileThreshold = effective.routingFileCountThreshold() != null
                 ? effective.routingFileCountThreshold() : DEFAULT_FILE_COUNT_THRESHOLD;
         Set<SliceSizeLabel> escalating = effective.routingEscalatingSizeLabels() != null
                 ? effective.routingEscalatingSizeLabels() : DEFAULT_ESCALATING_SIZE_LABELS;
-        String strongModelId = effective.routingStrongModelId() != null
-                ? effective.routingStrongModelId() : DEFAULT_STRONG_MODEL_ID;
+        String strongModelConfigKey = effective.routingStrongModelConfigKey() != null
+                ? effective.routingStrongModelConfigKey() : DEFAULT_STRONG_MODEL_CONFIG_KEY;
         boolean fileSignalOn = effective.routingFileCountSignalEnabled();
         boolean sizeSignalOn = effective.routingSizeLabelSignalEnabled();
         Map<String, Object> signalFacts = new LinkedHashMap<>();
@@ -195,8 +195,8 @@ public class ModelRoutingAppService {
         signalFacts.put("sizeLabelSignalEnabled", sizeSignalOn);
         if (!effective.routingEnabled()) {
             // 钉死位＝路由关：人工档恒生效（覆盖或枚举缺省——既有口径）
-            return new TierSelection(effective.modelId(),
-                    effective.modelIdOverridden() ? SOURCE_PINNED : SOURCE_DEFAULT,
+            return new ConfigSelection(effective.modelConfigKey(),
+                    effective.modelConfigKeyOverridden() ? SOURCE_PINNED : SOURCE_DEFAULT,
                     List.of(), signalFacts);
         }
         List<String> reasons = new ArrayList<>();
@@ -218,8 +218,8 @@ public class ModelRoutingAppService {
             reasons.add("规模标签升档（" + sizeLabel.getName() + "）");
         }
         // 路由判定优先：信号升强档；无信号回落人工档兜底（覆盖即基础档 → 枚举缺省）
-        String modelId = escalate ? strongModelId : effective.modelId();
-        return new TierSelection(modelId, SOURCE_ROUTED, reasons, signalFacts);
+        String modelConfigKey = escalate ? strongModelConfigKey : effective.modelConfigKey();
+        return new ConfigSelection(modelConfigKey, SOURCE_ROUTED, reasons, signalFacts);
     }
 
     /**

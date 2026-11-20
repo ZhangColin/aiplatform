@@ -5,7 +5,7 @@ import java.time.Instant;
 /**
  * 运行期切候选留痕端口（ADR-0053 ③，#557）：{@code FailoverModel} 每次链式切换的
  * append-only 留痕出口——「何时/从哪候选切到哪/触发错误/run 上下文」落
- * {@code prj_model_tier_switch_traces}（备账号被烧运营可见）。知识在业务侧
+ * {@code prj_model_config_switch_traces}（备账号被烧运营可见）。知识在业务侧
  * （SQL 归宿 {@code ModelChannelStore}），消费在底座（base 不依赖 business）——
  * 反转口先例 {@link EdgeModelSupplier}/{@code AgentToolkitSupplier}，单体进程内
  * Spring 接线。
@@ -22,7 +22,7 @@ public interface ModelSwitchTraceSink {
     /**
      * 一次候选切换的事实束。
      *
-     * @param tierKey         档位语义键（切换的归档腿）
+     * @param configKey         配置语义键（切换的归档腿）
      * @param fromProviderKey 切出候选通道键
      * @param fromModelName   切出候选实际模型名
      * @param toProviderKey   切入候选通道键
@@ -32,7 +32,7 @@ public interface ModelSwitchTraceSink {
      * @param sessionId       会话上下文（可空，同上）
      * @param occurredAt      切换时刻
      */
-    record Trace(String tierKey, String fromProviderKey, String fromModelName,
+    record Trace(String configKey, String fromProviderKey, String fromModelName,
             String toProviderKey, String toModelName, String triggerError,
             String runId, String sessionId, Instant occurredAt) {
     }

@@ -66,7 +66,7 @@ public class ProjectNamingAppService implements DisposableBean {
 
     private final AgentscopeAgentClient agentClient;
     private final AgentConfigAppService agentConfigs;
-    private final ModelTierAppService modelTiers;
+    private final ModelConfigAppService modelConfigs;
     private final ProjectRepository projectRepository;
     private final EventsAppService eventsAppService;
     /** 提交通道（生产=虚拟线程池；测试=直通同步）。 */
@@ -76,12 +76,12 @@ public class ProjectNamingAppService implements DisposableBean {
 
     @Autowired
     public ProjectNamingAppService(AgentscopeAgentClient agentClient,
-            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
+            AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             ProjectRepository projectRepository,
             EventsAppService eventsAppService) {
         this.agentClient = agentClient;
         this.agentConfigs = agentConfigs;
-        this.modelTiers = modelTiers;
+        this.modelConfigs = modelConfigs;
         this.projectRepository = projectRepository;
         this.eventsAppService = eventsAppService;
         this.ownedExecutor = Executors.newSingleThreadExecutor(runnable -> {
@@ -94,12 +94,12 @@ public class ProjectNamingAppService implements DisposableBean {
 
     /** 测试便利构造（直通道，无生命周期）。 */
     ProjectNamingAppService(AgentscopeAgentClient agentClient,
-            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
+            AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             ProjectRepository projectRepository,
             EventsAppService eventsAppService, Executor executor) {
         this.agentClient = agentClient;
         this.agentConfigs = agentConfigs;
-        this.modelTiers = modelTiers;
+        this.modelConfigs = modelConfigs;
         this.projectRepository = projectRepository;
         this.eventsAppService = eventsAppService;
         this.executor = executor;
@@ -158,13 +158,13 @@ public class ProjectNamingAppService implements DisposableBean {
 
     /**
      * 静默轻调用取名：naming-{projectId} 一次性会话、本地工作区、模型走边缘点
-     * 档位链（#366：naming 档位库值优先缺省 flash → 解析单点产模型串＋通道注入
-     * ——后台改档下一轮取名即生效）。
+     * 配置链（#366：naming 配置库值优先缺省 flash → 解析单点产模型串＋通道注入
+     * ——后台改配置下一轮取名即生效）。
      */
     private String converseForName(Long projectId, String requirement) {
         // #557 整候选队列（边缘点同获链式切换——resolve 面之一）
-        ModelCandidateQueue model = modelTiers.resolveQueue(
-                agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING));
+        ModelCandidateQueue model = modelConfigs.resolveQueue(
+                agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.NAMING));
         AgentCommand command = new AgentCommand(
                 EventsAppService.newRunId(),
                 requirement,

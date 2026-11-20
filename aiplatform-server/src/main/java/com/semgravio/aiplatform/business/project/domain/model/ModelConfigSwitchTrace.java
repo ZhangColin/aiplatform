@@ -9,11 +9,11 @@ import java.time.LocalDateTime;
  * ——不在计量订阅树上的装配面切换）。写腿经 {@code ModelSwitchTraceSink} 端口
  * （base）→ {@code PersistingModelSwitchTraceSink} 适配（business）落库；运营
  * 可见面＝「备账号被烧」的运行期事实（与配置面留痕 {@link ModelProviderTrace}/
- * {@link ModelTierTrace} 互补：那两份记「配置怎么改的」，本份记「运行期怎么切的」）。
+ * {@link ModelConfigTrace} 互补：那两份记「配置怎么改的」，本份记「运行期怎么切的」）。
  *
  * @param id              留痕标识（TSID，写痕用例生成）
- * @param tierKey         档位语义键（无 FK——留痕跨一切存活，V79 口径）
- * @param fromProviderKey 切出候选通道键（首切可空——语义上从档位现列起）
+ * @param configKey         配置语义键（无 FK——留痕跨一切存活，V79 口径）
+ * @param fromProviderKey 切出候选通道键（首切可空——语义上从配置现列起）
  * @param fromModelName   切出候选实际模型名
  * @param toProviderKey   切入候选通道键
  * @param toModelName     切入候选实际模型名
@@ -22,9 +22,9 @@ import java.time.LocalDateTime;
  * @param sessionId       会话上下文（可空，同上）
  * @param createdAt       切换时刻
  */
-public record ModelTierSwitchTrace(
+public record ModelConfigSwitchTrace(
         long id,
-        String tierKey,
+        String configKey,
         String fromProviderKey,
         String fromModelName,
         String toProviderKey,

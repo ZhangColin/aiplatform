@@ -151,7 +151,7 @@ class DesignProcessAppServiceTest {
     @BeforeEach
     void ensureChannelKeyForRealResolution() {
         // 真解析链护卫（ADR-0031）：测试环境无 key 注入——幂等补测试 key
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         // #543 风格物化写面缺省桩（定稿自动起首个构建＝平台确定性写基座四件）：
         // 通用成功；用例专属 exec 分岔桩在测试体内后注册覆盖（Mockito 后桩优先）
         when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
@@ -1490,7 +1490,7 @@ class DesignProcessAppServiceTest {
         givenPrdContent(DESIGN_PRD);
         givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0));
         jdbcTemplate.update(
-                "INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id) VALUES (?, ?, ?)",
+                "INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key) VALUES (?, ?, ?)",
                 "designer", "运营覆盖的设计协议", "flash");
 
         appService.dispatchDesignOnTurnClose(projectId, null);
@@ -1499,7 +1499,7 @@ class DesignProcessAppServiceTest {
         verify(agentClient, times(2)).converse(commands.capture(), any());
         assertThat(commands.getAllValues().get(0).systemPrompt()).isEqualTo("运营覆盖的设计协议");
         assertThat(commands.getAllValues().get(0).modelString())
-                .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+                .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
     }
 
     // ---------- 事件封闭集零新增（一等断言：出现什么/不出现什么） ----------

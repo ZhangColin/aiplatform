@@ -41,7 +41,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       被覆写、已就位的档位行指向不动、候选不重复种。</li>
  * </ul>
  *
- * <p>全新库首启（V44 种火山→V79 收敛）＝第一用例的天然形态，不再单独测。
+ * <p>断言面＝<b>migrate() 到最新（V81 改名后）的终态</b>：表/列用新名
+ * （prj_model_configs/config_key——#554 概念改名迁移），造数语句在 migrate()
+ * 之前执行、保持 V80 态旧名（回放 fixture 固有形态）。全新库首启（V44 种火山→
+ * V79 收敛→V81 改名）＝第一用例的天然形态，不再单独测。
  * 回放 schema 与 Spring 上下文 public schema 同库不同派，互不触碰；随跑随弃。</p>
  */
 @IntegrationTest
@@ -97,19 +100,19 @@ class ModelChannelHaMigrationReplayTest {
         // volcengine 零残留（通道行、档位行）；doubao-flagship 随火山档位行消亡
         assertThat(queryStrings("SELECT provider_key FROM " + REPLAY_SCHEMA
                 + ".prj_model_providers")).containsExactly("deepseek");
-        assertThat(queryStrings("SELECT tier_key FROM " + REPLAY_SCHEMA
-                + ".prj_model_tiers ORDER BY tier_key")).containsExactly("flash", "pro");
+        assertThat(queryStrings("SELECT config_key FROM " + REPLAY_SCHEMA
+                + ".prj_model_configs ORDER BY config_key")).containsExactly("flash", "pro");
         // flash/pro 收敛 deepseek 官方模型（单价行模型名对齐）
         assertThat(queryStrings("SELECT provider_key || ':' || model_name FROM " + REPLAY_SCHEMA
-                + ".prj_model_tiers WHERE tier_key = 'flash'"))
+                + ".prj_model_configs WHERE config_key = 'flash'"))
                 .containsExactly("deepseek:deepseek-flash");
         assertThat(queryStrings("SELECT provider_key || ':' || model_name FROM " + REPLAY_SCHEMA
-                + ".prj_model_tiers WHERE tier_key = 'pro'"))
+                + ".prj_model_configs WHERE config_key = 'pro'"))
                 .containsExactly("deepseek:deepseek-v4-pro");
         // 候选种子：flash/pro 各一现役候选（主选单元素队列，与档位行现列同值）
-        assertThat(queryStrings("SELECT tier_key || '#' || priority || ' ' || provider_key"
+        assertThat(queryStrings("SELECT config_key || '#' || priority || ' ' || provider_key"
                 + " || ':' || model_name || ' enabled=' || enabled FROM " + REPLAY_SCHEMA
-                + ".prj_model_tier_candidates ORDER BY tier_key"))
+                + ".prj_model_config_candidates ORDER BY config_key"))
                 .containsExactly("flash#1 deepseek:deepseek-flash enabled=true",
                         "pro#1 deepseek:deepseek-v4-pro enabled=true");
         // vendor 归一回填：通道行 vendor＝provider_key
@@ -120,10 +123,10 @@ class ModelChannelHaMigrationReplayTest {
                 + ".met_usage_events ORDER BY event_id"))
                 .containsExactly("deepseek→deepseek", "volcengine→volcengine");
         // 切换留痕表落地（append-only 空表——写腿随 T3）
-        assertThat(countRows("prj_model_tier_switch_traces")).isZero();
+        assertThat(countRows("prj_model_config_switch_traces")).isZero();
         // V80 后台写面 schema（#559/T5，migrate() 随跑到位）：候选编排留痕表落地
         // （append-only 空表）＋通道留痕 vendor 快照腿
-        assertThat(countRows("prj_model_tier_candidate_traces")).isZero();
+        assertThat(countRows("prj_model_config_candidate_traces")).isZero();
         assertThat(queryStrings("SELECT column_name FROM information_schema.columns"
                 + " WHERE table_schema = '" + REPLAY_SCHEMA + "' AND table_name"
                 + " = 'prj_model_provider_traces' AND column_name LIKE '%vendor'"))
@@ -156,7 +159,7 @@ class ModelChannelHaMigrationReplayTest {
         assertThat(queryStrings("SELECT api_key FROM " + REPLAY_SCHEMA
                 + ".prj_model_providers WHERE provider_key = 'deepseek'"))
                 .containsExactly("sk-prod-real-key-123456");
-        assertThat(countRows("prj_model_tier_candidates")).isEqualTo(2);
+        assertThat(countRows("prj_model_config_candidates")).isEqualTo(2);
         assertThat(queryStrings("SELECT provider_key FROM " + REPLAY_SCHEMA
                 + ".prj_model_providers")).containsExactly("deepseek");
     }

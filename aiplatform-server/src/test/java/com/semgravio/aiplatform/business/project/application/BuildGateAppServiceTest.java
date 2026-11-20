@@ -96,7 +96,7 @@ class BuildGateAppServiceTest {
 
     @BeforeEach
     void seed() {
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         // 主智能体轮与编码 run 全链默认成功脚本（确认即派发的全链走真轨道）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);

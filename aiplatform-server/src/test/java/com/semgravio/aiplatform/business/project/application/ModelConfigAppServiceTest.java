@@ -14,23 +14,23 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.ModelChannel;
 import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
-import com.semgravio.aiplatform.business.project.application.ModelTierAppService.ResolvedModel;
+import com.semgravio.aiplatform.business.project.application.ModelConfigAppService.ResolvedModel;
 import com.cartisan.core.exception.ApplicationException;
 
 /**
- * Seam B（#365／spec #364 测试决议）：档位解析服务层——档位键 → 档位行 → 通道行 →
+ * Seam B（#365／spec #364 测试决议）：配置解析服务层——配置键 → 配置行 → 通道行 →
  * 模型串（前缀:实际模型名）＋创建上下文（baseUrl/apiKey/enableThinking）的解析
- * 单点。只经 {@link ModelTierAppService#resolve} 公共面观测（外部可观测行为＝解析
+ * 单点。只经 {@link ModelConfigAppService#resolve} 公共面观测（外部可观测行为＝解析
  * 结果与报错路径），不打真 API。fixture 用独立键（t- 前缀）不与 V44 种子行
  * （volcengine/flash——其他测试的真链路依赖）串场。
  */
 @IntegrationTest
-class ModelTierAppServiceTest {
+class ModelConfigAppServiceTest {
 
     private static final String BASE_URL = "https://ark.example/api/v3";
 
     @Autowired
-    private ModelTierAppService modelTiers;
+    private ModelConfigAppService modelConfigs;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -38,9 +38,9 @@ class ModelTierAppServiceTest {
     @BeforeEach
     @AfterEach
     void cleanFixtures() {
-        // 先子后父：候选行 FK 指档位/通道，清序反了撞外键
-        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-%'");
-        jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
+        // 先子后父：候选行 FK 指配置/通道，清序反了撞外键
+        jdbcTemplate.update("DELETE FROM prj_model_config_candidates WHERE config_key LIKE 't-%'");
+        jdbcTemplate.update("DELETE FROM prj_model_configs WHERE config_key LIKE 't-%'");
         jdbcTemplate.update("DELETE FROM prj_model_providers WHERE provider_key LIKE 't-%'");
     }
 
@@ -49,7 +49,7 @@ class ModelTierAppServiceTest {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
-        ResolvedModel resolved = modelTiers.resolve("t-flash");
+        ResolvedModel resolved = modelConfigs.resolve("t-flash");
 
         assertThat(resolved.modelString()).isEqualTo("t-ark:deepseek-v4-flash-ga-260731");
         assertThat(resolved.baseUrl()).isEqualTo(BASE_URL);
@@ -65,12 +65,12 @@ class ModelTierAppServiceTest {
 
     @Test
     void given_tier_row_thinking_enabled_when_resolve_then_context_carries_tier_value() {
-        // #370：thinking 终值位从编译常量改档位行——跟档位/模型走（换模型行为
+        // #370：thinking 终值位从编译常量改配置行——跟配置/模型走（换模型行为
         // 自动跟随、doubao 与 DeepSeek 可不同设），装配单点读行值
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedTier("t-think", "t-ark", "deepseek-v4-pro-ga-260813", true, true);
 
-        ResolvedModel resolved = modelTiers.resolve("t-think");
+        ResolvedModel resolved = modelConfigs.resolve("t-think");
 
         assertThat(resolved.thinkingEnabled()).isTrue();
         assertThat(resolved.channel())
@@ -84,7 +84,7 @@ class ModelTierAppServiceTest {
     void given_missing_tier_when_resolve_then_explicit_error_no_invented_default() {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
 
-        assertThatThrownBy(() -> modelTiers.resolve("t-nonexistent"))
+        assertThatThrownBy(() -> modelConfigs.resolve("t-nonexistent"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("t-nonexistent");
     }
@@ -94,7 +94,7 @@ class ModelTierAppServiceTest {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", false, null);
 
-        assertThatThrownBy(() -> modelTiers.resolve("t-flash"))
+        assertThatThrownBy(() -> modelConfigs.resolve("t-flash"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("停用");
     }
@@ -104,7 +104,7 @@ class ModelTierAppServiceTest {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", false);
         seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
-        assertThatThrownBy(() -> modelTiers.resolve("t-flash"))
+        assertThatThrownBy(() -> modelConfigs.resolve("t-flash"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("停用");
     }
@@ -114,7 +114,7 @@ class ModelTierAppServiceTest {
         seedChannel("t-ark", BASE_URL, null, true);
         seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
-        assertThatThrownBy(() -> modelTiers.resolve("t-flash"))
+        assertThatThrownBy(() -> modelConfigs.resolve("t-flash"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("apiKey");
     }
@@ -122,14 +122,14 @@ class ModelTierAppServiceTest {
     @Test
     void given_candidate_rows_when_resolve_candidates_then_ordered_queue_first_wins() {
         // ADR-0053 ③：候选表非空＝队列数据源（priority 升序），首候选＝主选——
-        // 档位行现列被压过（现列只在候选表空时兜底，见下一用例）
+        // 配置行现列被压过（现列只在候选表空时兜底，见下一用例）
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedChannel("t-ark2", "https://ark2.example/api/v3", "sk-ark2-test", true);
-        seedTier("t-queue", "t-ark2", "tier-row-model", true, null);
+        seedTier("t-queue", "t-ark2", "config-row-model", true, null);
         seedCandidate("t-queue", 2, "t-ark2", "backup-model");
         seedCandidate("t-queue", 1, "t-ark", "primary-model");
 
-        List<ResolvedModel> queue = modelTiers.resolveCandidates("t-queue");
+        List<ResolvedModel> queue = modelConfigs.resolveCandidates("t-queue");
 
         assertThat(queue).hasSize(2);
         assertThat(queue.get(0).modelString()).isEqualTo("t-ark:primary-model");
@@ -137,17 +137,17 @@ class ModelTierAppServiceTest {
         assertThat(queue.get(1).modelString()).isEqualTo("t-ark2:backup-model");
         assertThat(queue.get(1).apiKey()).isEqualTo("sk-ark2-test");
         // 单点读面（五个 resolve 消费面不变）：resolve＝首候选
-        assertThat(modelTiers.resolve("t-queue").modelString())
+        assertThat(modelConfigs.resolve("t-queue").modelString())
                 .isEqualTo("t-ark:primary-model");
     }
 
     @Test
     void given_no_candidate_rows_when_resolve_candidates_then_single_element_from_tier_row() {
-        // 软着陆（AC：单候选回退下行为不变）：候选表空 → 档位行现列单元素队列
+        // 软着陆（AC：单候选回退下行为不变）：候选表空 → 配置行现列单元素队列
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
-        List<ResolvedModel> queue = modelTiers.resolveCandidates("t-flash");
+        List<ResolvedModel> queue = modelConfigs.resolveCandidates("t-flash");
 
         assertThat(queue).hasSize(1);
         assertThat(queue.get(0).modelString()).isEqualTo("t-ark:deepseek-v4-flash-ga-260731");
@@ -156,12 +156,12 @@ class ModelTierAppServiceTest {
 
     @Test
     void given_candidate_rows_when_resolve_candidates_then_tier_thinking_applies_to_all() {
-        // thinking 是档位行为属性（#370）：候选行不带开关列——全队列继承档位行值
+        // thinking 是配置行为属性（#370）：候选行不带开关列——全队列继承配置行值
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
-        seedTier("t-queue", "t-ark", "tier-row-model", true, true);
+        seedTier("t-queue", "t-ark", "config-row-model", true, true);
         seedCandidate("t-queue", 1, "t-ark", "primary-model");
 
-        List<ResolvedModel> queue = modelTiers.resolveCandidates("t-queue");
+        List<ResolvedModel> queue = modelConfigs.resolveCandidates("t-queue");
 
         assertThat(queue).hasSize(1);
         assertThat(queue.get(0).thinkingEnabled()).isTrue();
@@ -169,17 +169,17 @@ class ModelTierAppServiceTest {
 
     @Test
     void given_candidate_rows_when_resolve_queue_then_base_shaped_ordered_queue() {
-        // #557 底座消费形：档位键 → ModelCandidateQueue（tierKey＋有序候选，逐候选
+        // #557 底座消费形：配置键 → ModelCandidateQueue（configKey＋有序候选，逐候选
         // 通道注入件携带）——failover 装配面的读腿；首候选与双字段同源
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedChannel("t-ark2", "https://ark2.example/api/v3", "sk-ark2-test", true);
-        seedTier("t-queue", "t-ark", "tier-row-model", true, null);
+        seedTier("t-queue", "t-ark", "config-row-model", true, null);
         seedCandidate("t-queue", 2, "t-ark2", "backup-model");
         seedCandidate("t-queue", 1, "t-ark", "primary-model");
 
-        ModelCandidateQueue queue = modelTiers.resolveQueue("t-queue");
+        ModelCandidateQueue queue = modelConfigs.resolveQueue("t-queue");
 
-        assertThat(queue.tierKey()).isEqualTo("t-queue");
+        assertThat(queue.configKey()).isEqualTo("t-queue");
         assertThat(queue.size()).isEqualTo(2);
         assertThat(queue.first().modelString()).isEqualTo("t-ark:primary-model");
         assertThat(queue.first().channel().apiKey()).isEqualTo("sk-ark-test");
@@ -196,12 +196,12 @@ class ModelTierAppServiceTest {
 
     @Test
     void given_all_candidates_disabled_when_resolve_then_explicit_error_no_tier_row_fallback() {
-        // 全候选停用＝运营显式下线（无静默回落档位现列——与通道停用同 Doctrine）
+        // 全候选停用＝运营显式下线（无静默回落配置现列——与通道停用同 Doctrine）
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
-        seedTier("t-queue", "t-ark", "tier-row-model", true, null);
+        seedTier("t-queue", "t-ark", "config-row-model", true, null);
         seedCandidate("t-queue", 1, "t-ark", "primary-model", false);
 
-        assertThatThrownBy(() -> modelTiers.resolve("t-queue"))
+        assertThatThrownBy(() -> modelConfigs.resolve("t-queue"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("候选");
     }
@@ -212,11 +212,11 @@ class ModelTierAppServiceTest {
         // 切换是 T3 FailoverModel 的职责，配置态坏走响亮失败）
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
         seedChannel("t-ark2", "https://ark2.example/api/v3", "sk-ark2-test", false);
-        seedTier("t-queue", "t-ark", "tier-row-model", true, null);
+        seedTier("t-queue", "t-ark", "config-row-model", true, null);
         seedCandidate("t-queue", 1, "t-ark", "primary-model");
         seedCandidate("t-queue", 2, "t-ark2", "backup-model");
 
-        assertThatThrownBy(() -> modelTiers.resolveCandidates("t-queue"))
+        assertThatThrownBy(() -> modelConfigs.resolveCandidates("t-queue"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("停用");
     }
@@ -228,16 +228,16 @@ class ModelTierAppServiceTest {
         // ADR-0053 ④；全新库 V44 种火山→V79 收敛，净效果＝deepseek 无火山依赖）。
         // key 值随测试环境（placeholder 注入＝假值/live 环境注入真值）——断言守
         // 「非空不回落＋明文不入指纹」，不钉 fixture 字面
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
 
-        ResolvedModel resolved = modelTiers.resolve("flash");
+        ResolvedModel resolved = modelConfigs.resolve("flash");
 
         assertThat(resolved.modelString()).isEqualTo("deepseek:deepseek-flash");
         assertThat(resolved.baseUrl()).isEqualTo("https://api.deepseek.com");
         assertThat(resolved.apiKey()).isNotBlank();
         assertThat(resolved.channel().fingerprint()).doesNotContain(resolved.apiKey());
-        // 候选种子：flash 一现役候选（主选单元素队列——与档位行现列同值）
-        assertThat(modelTiers.resolveCandidates("flash"))
+        // 候选种子：flash 一现役候选（主选单元素队列——与配置行现列同值）
+        assertThat(modelConfigs.resolveCandidates("flash"))
                 .extracting(ResolvedModel::modelString)
                 .containsExactly("deepseek:deepseek-flash");
     }
@@ -253,8 +253,8 @@ class ModelTierAppServiceTest {
         seedCandidate("t-queue", 1, "t-ds2", "primary-model");
         seedCandidate("t-queue", 2, "t-ds3", "backup-model");
 
-        ResolvedModel resolved = modelTiers.resolve("t-queue");
-        ModelCandidateQueue queue = modelTiers.resolveQueue("t-queue");
+        ResolvedModel resolved = modelConfigs.resolve("t-queue");
+        ModelCandidateQueue queue = modelConfigs.resolveQueue("t-queue");
 
         assertThat(resolved.vendor()).isEqualTo("t-vendor");
         assertThat(resolved.channel().vendor()).isEqualTo("t-vendor");
@@ -269,7 +269,7 @@ class ModelTierAppServiceTest {
         seedChannel("t-novendor", null, BASE_URL, "sk-ark-test", true);
         seedTier("t-flash", "t-novendor", "deepseek-v4-flash-ga-260731", true, null);
 
-        ResolvedModel resolved = modelTiers.resolve("t-flash");
+        ResolvedModel resolved = modelConfigs.resolve("t-flash");
 
         assertThat(resolved.vendor()).isEqualTo("t-novendor");
         assertThat(resolved.channel().vendor()).isEqualTo("t-novendor");
@@ -297,33 +297,33 @@ class ModelTierAppServiceTest {
                 providerKey, vendor, baseUrl, apiKey, enabled);
     }
 
-    /** 建档位夹具（thinkingEnabled null＝不写列——走库缺省，缺省腿断言语境）。 */
-    private void seedTier(String tierKey, String providerKey, String modelName, boolean enabled,
+    /** 建配置夹具（thinkingEnabled null＝不写列——走库缺省，缺省腿断言语境）。 */
+    private void seedTier(String configKey, String providerKey, String modelName, boolean enabled,
             Boolean thinkingEnabled) {
         if (thinkingEnabled == null) {
             jdbcTemplate.update(
-                    "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                    "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled) "
                             + "VALUES (?, ?, ?, ?)",
-                    tierKey, providerKey, modelName, enabled);
+                    configKey, providerKey, modelName, enabled);
             return;
         }
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled, "
+                "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled, "
                         + "thinking_enabled) VALUES (?, ?, ?, ?, ?)",
-                tierKey, providerKey, modelName, enabled, thinkingEnabled);
+                configKey, providerKey, modelName, enabled, thinkingEnabled);
     }
 
     /** 建候选行夹具（enabled 缺省 true）。 */
-    private void seedCandidate(String tierKey, int priority, String providerKey, String modelName) {
-        seedCandidate(tierKey, priority, providerKey, modelName, true);
+    private void seedCandidate(String configKey, int priority, String providerKey, String modelName) {
+        seedCandidate(configKey, priority, providerKey, modelName, true);
     }
 
-    private void seedCandidate(String tierKey, int priority, String providerKey, String modelName,
+    private void seedCandidate(String configKey, int priority, String providerKey, String modelName,
             boolean enabled) {
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tier_candidates "
-                        + "(tier_key, priority, provider_key, model_name, enabled) "
+                "INSERT INTO prj_model_config_candidates "
+                        + "(config_key, priority, provider_key, model_name, enabled) "
                         + "VALUES (?, ?, ?, ?, ?)",
-                tierKey, priority, providerKey, modelName, enabled);
+                configKey, priority, providerKey, modelName, enabled);
     }
 }

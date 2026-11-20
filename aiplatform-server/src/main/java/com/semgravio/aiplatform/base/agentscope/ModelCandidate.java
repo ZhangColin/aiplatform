@@ -4,7 +4,7 @@ package com.semgravio.aiplatform.base.agentscope;
  * 候选队列元素（ADR-0053 ③，#557）：一个候选＝「通道行 × 实际模型名」的解析产物
  * ——通道注入件（{@link ModelChannel}：baseUrl/apiKey/thinking，进创建上下文）
  * ＋计量/留痕腿（providerKey＝通道键、modelName＝实际模型名）。候选队列
- * （{@link ModelCandidateQueue}）由业务侧档位解析（{@code ModelTierAppService}
+ * （{@link ModelCandidateQueue}）由业务侧配置解析（{@code ModelConfigAppService}
  * {@code resolveQueue}）产出随命令/装配透传；运行期链式切换收口在
  * {@code FailoverModel}（模型包装层——主/子智能体、压缩、边缘点全部 resolve 面免费
  * 获得同一切换语义）。

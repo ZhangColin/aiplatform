@@ -18,7 +18,7 @@ Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威（子项目旧词�
 
 ### Demo 阶段模型档
 
-Demo 阶段（首 Demo ＋ 迭代，run 执行体承载）模型档的初档与改档 SOP（运营配置面改档即生效、不发版、进行中 run 不定格）。见 `docs/agents/demo-stage-model-tier.md`。
+Demo 阶段（首 Demo ＋ 迭代，run 执行体承载）模型配置的初档与改配置 SOP（运营配置面改配置即生效、不发版、进行中 run 不定格）。见 `docs/agents/demo-stage-model-config.md`。
 
 ### Live 车道防腐
 

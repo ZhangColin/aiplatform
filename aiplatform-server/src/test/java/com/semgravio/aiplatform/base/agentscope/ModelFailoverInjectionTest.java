@@ -240,7 +240,7 @@ class ModelFailoverInjectionTest {
         // 切换留痕：何时/从哪到哪/触发错误/run 上下文
         assertThat(traces).hasSize(1);
         ModelSwitchTraceSink.Trace trace = traces.get(0);
-        assertThat(trace.tierKey()).isEqualTo("pro");
+        assertThat(trace.configKey()).isEqualTo("pro");
         assertThat(trace.fromModelName()).isEqualTo("model-0");
         assertThat(trace.toModelName()).isEqualTo("model-1");
         assertThat(trace.triggerError()).contains("401");

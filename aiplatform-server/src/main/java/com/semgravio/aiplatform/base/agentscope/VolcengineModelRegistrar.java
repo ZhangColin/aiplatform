@@ -19,12 +19,12 @@ import java.util.Map;
  * SPI provider、不改依赖库）；火山方舟是 OpenAI 兼容协议，工厂直构
  * {@link OpenAIChatModel}（默认 formatter——无需特化兼容层）。
  *
- * <p>凭证与地址全由<b>创建上下文</b>带入（装配链：档位行 → 通道行 →
+ * <p>凭证与地址全由<b>创建上下文</b>带入（装配链：配置行 → 通道行 →
  * {@link ModelChannel} → {@code AgentscopeHarnessAgentFactory#creationContextOf}）
  * ——baseUrl/apiKey 无本类缺省值、无环境变量回落：key 空＝明确报错（库为唯一
  * 正本，故障一眼可查）。enableThinking 非空 → 请求体 {@code thinking} 参数
  * （方舟 DeepSeek V4 系均标深度思考、不传参默认开/关未确证——装配层显式表态
- * 不留给模型默认；值随档位行走，#370 运营配置、缺省关＝#369 活体结论）。</p>
+ * 不留给模型默认；值随配置行走，#370 运营配置、缺省关＝#369 活体结论）。</p>
  *
  * <p>注册幂等性：{@code registerFactory} newest-first、同行为重复注册无副作用
  * （Spring 上下文重建/测试复注册皆可）；SDK 前缀（deepseek 等）不经本类——走

@@ -398,12 +398,12 @@ class SpringDocBackofficeContractTest {
                 .as("systemPrompt 应自描述清空回落语义")
                 .contains("清空覆盖")
                 .contains("枚举默认");
-        assertThat(property(project, "AgentConfigUpdateCommand", "modelId").path("description")
+        assertThat(property(project, "AgentConfigUpdateCommand", "modelConfigKey").path("description")
                 .asText(""))
-                .as("modelId 应自描述清空回落语义")
+                .as("modelConfigKey 应自描述清空回落语义")
                 .contains("清空覆盖");
         // 覆盖标记与默认预览：生效值来源可判（身份与配置分治——枚举仍是缺省正本）
-        for (String field : List.of("systemPromptOverridden", "modelIdOverridden")) {
+        for (String field : List.of("systemPromptOverridden", "modelConfigKeyOverridden")) {
             JsonNode flag = property(project, "BackofficeAgentConfigResponse", field);
             assertThat(flag.path("type").asText(null))
                     .as("%s 应渲染 type=boolean", field)
@@ -417,8 +417,8 @@ class SpringDocBackofficeContractTest {
                 .as("defaultSystemPrompt 应自描述回落落点语义")
                 .contains("清空覆盖");
         // 留痕读面：old/new 快照对齐全（旧值快照＝回滚写回依据——回滚即新变更不留版本树）
-        for (String field : List.of("oldSystemPrompt", "oldModelId", "newSystemPrompt",
-                "newModelId", "oldWebSearchEnabled", "newWebSearchEnabled", "operatorId",
+        for (String field : List.of("oldSystemPrompt", "oldModelConfigKey", "newSystemPrompt",
+                "newModelConfigKey", "oldWebSearchEnabled", "newWebSearchEnabled", "operatorId",
                 "operatedAt")) {
             assertThat(property(project, "BackofficeAgentConfigTraceResponse", field).isMissingNode())
                     .as("BackofficeAgentConfigTraceResponse.%s 缺字段（契约漂移）", field)

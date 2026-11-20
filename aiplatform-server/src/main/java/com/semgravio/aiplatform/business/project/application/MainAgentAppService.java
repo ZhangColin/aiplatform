@@ -111,7 +111,7 @@ public class MainAgentAppService {
     private final AgentSessionExecutor sessionExecutor;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final AgentConfigAppService agentConfigs;
-    private final ModelTierAppService modelTiers;
+    private final ModelConfigAppService modelConfigs;
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
@@ -258,7 +258,7 @@ public class MainAgentAppService {
     public MainAgentAppService(ProjectRepository projectRepository,
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
-            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
+            AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             OrderQueryAppService orderQueryAppService,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             DesignProcessAppService designProcessAppService,
@@ -274,7 +274,7 @@ public class MainAgentAppService {
         this.sessionExecutor = sessionExecutor;
         this.knowledgeAppService = knowledgeAppService;
         this.agentConfigs = agentConfigs;
-        this.modelTiers = modelTiers;
+        this.modelConfigs = modelConfigs;
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
@@ -422,7 +422,7 @@ public class MainAgentAppService {
         String sessionId = sessionIdOf(projectId);
         conversationHistory.recordAnswer(projectId, runId, answerText);
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelCandidateQueue model = modelTiers.resolveQueue(main.modelId());
+        ModelCandidateQueue model = modelConfigs.resolveQueue(main.modelConfigKey());
 
         AgentResume resume = new AgentResume(
                 runId,
@@ -793,7 +793,7 @@ public class MainAgentAppService {
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
         // #460 兜底盘问投递：收口记账的会话下一轮 system prompt 尾附轻提醒（消费即清）
-        return mainCommandWith(project, runId, prompt, main, modelTiers.resolveQueue(main.modelId()),
+        return mainCommandWith(project, runId, prompt, main, modelConfigs.resolveQueue(main.modelConfigKey()),
                 sedimentNudgeTailOf(project.getId()));
     }
 
@@ -805,7 +805,7 @@ public class MainAgentAppService {
     /**
      * 纠偏轮命令（#445；<b>#462 统一微指令修订</b>——ADR-0036 补记）：同主对话命令的
      * 会话/配置/计量/只读面（system prompt 与工具规格同取 MAIN 生效值——纠偏轮也是
-     * 主智能体的轮），prompt 换统一纠偏微指令、模型档位按轮次解析（{@link
+     * 主智能体的轮），prompt 换统一纠偏微指令、模型配置按轮次解析（{@link
      * #correctiveModelOf}）。
      */
     private AgentCommand correctiveCommand(Project project, String runId,
@@ -866,9 +866,9 @@ public class MainAgentAppService {
                     + "平台按推荐补全缺口、立即为你整理需求文档。";
 
     /** 主对话命令构建（配置束与解析后模型参数化——对话轮与纠偏轮共用，#445）。
-     * systemPrompt/模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、
+     * systemPrompt/模型配置/增强工具开关经运营配置读面取生效值（#251 库值优先、
      * 缺省回落枚举默认——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入
-     * toolSpec 随命令透传装配）；档位键→模型串与通道注入经 {@link ModelTierAppService}
+     * toolSpec 随命令透传装配）；配置键→模型串与通道注入经 {@link ModelConfigAppService}
      * 解析（ADR-0031——供应商/凭证配置变更同轮生效）；对话轮活超时阈值取
      * {@link MainAgentProperties}（#371：携增强工具的慢轮不被总墙钟掐死）。
      */
@@ -1230,7 +1230,7 @@ public class MainAgentAppService {
         }
         conversationHistory.markAnswered(pending.runId());
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelCandidateQueue model = modelTiers.resolveQueue(main.modelId());
+        ModelCandidateQueue model = modelConfigs.resolveQueue(main.modelConfigKey());
         AgentResume resume = new AgentResume(
                 pending.runId(),
                 sessionId,
@@ -1302,7 +1302,7 @@ public class MainAgentAppService {
         });
     }
 
-    /** 纠偏轮单轮派发：档位解析（null＝不升档的直接播报收口）→ 命令构建 → 串行执行 → 成功判据 → 推进/收口。 */
+    /** 纠偏轮单轮派发：配置解析（null＝不升档的直接播报收口）→ 命令构建 → 串行执行 → 成功判据 → 推进/收口。 */
     private void submitCorrectiveRound(Project project, String sessionId, String originRunId,
             boolean prdSaveFailed, int attempt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
@@ -1361,22 +1361,22 @@ public class MainAgentAppService {
     }
 
     /**
-     * 纠偏轮档位解析：第 1 轮＝主智能体生效档（库值优先、缺省回落枚举——与对话轮
+     * 纠偏轮配置解析：第 1 轮＝主智能体生效档（库值优先、缺省回落枚举——与对话轮
      * 同腿）；第 2 轮＝升强档，路由开关关（纯人工定档运营姿态）返回 null——调用方
      * 直接播报、不自动升档。强档取路由面生效值（运营可换、不发版，ADR-0031），
-     * 缺省 {@link ModelRoutingAppService#DEFAULT_STRONG_MODEL_ID}。
+     * 缺省 {@link ModelRoutingAppService#DEFAULT_STRONG_MODEL_CONFIG_KEY}。
      */
     private ModelCandidateQueue correctiveModelOf(
             AgentConfigAppService.EffectiveConfig main, int attempt) {
         if (attempt == 1) {
-            return modelTiers.resolveQueue(main.modelId());
+            return modelConfigs.resolveQueue(main.modelConfigKey());
         }
         if (!main.routingEnabled()) {
             return null;
         }
-        return modelTiers.resolveQueue(main.routingStrongModelId() != null
-                ? main.routingStrongModelId()
-                : ModelRoutingAppService.DEFAULT_STRONG_MODEL_ID);
+        return modelConfigs.resolveQueue(main.routingStrongModelConfigKey() != null
+                ? main.routingStrongModelConfigKey()
+                : ModelRoutingAppService.DEFAULT_STRONG_MODEL_CONFIG_KEY);
     }
 
     /** 收口即消费：意见锚与修订事实同口径清掉（不留过轮）——归档 / 未产出 PRD /

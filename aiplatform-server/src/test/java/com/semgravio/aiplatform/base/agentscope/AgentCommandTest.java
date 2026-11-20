@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link AgentCommand} 入参校验：runId/prompt/sessionId/modelString 必填
- * （modelString＝档位解析产物——ADR-0031/#366 起全部调用面经档位解析携串，无配置
+ * （modelString＝配置解析产物——ADR-0031/#366 起全部调用面经配置解析携串，无配置
  * 缺省回落），其余可空各取默认；workspaceId/streamCorrelation 透传 + 信封契约校验。
  */
 class AgentCommandTest {

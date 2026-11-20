@@ -3,12 +3,12 @@ package com.semgravio.aiplatform.business.project.domain.model;
 import java.time.LocalDateTime;
 
 /**
- * 模型档位变更留痕（#367，append-only，照 {@code AgentConfigTrace} 机制）：
+ * 模型配置变更留痕（#367，append-only，照 {@code AgentConfigTrace} 机制）：
  * 一次实际变更（值面有动）的前后全量值快照＋操作者，回滚＝旧值写回即一次新变更。
  * 创建痕 old 全 null、删除痕 new 全 null（生命周期口径同 {@link ModelProviderTrace}）。
  *
  * @param id                  留痕标识（TSID，写痕用例生成）
- * @param tierKey             档位语义键（无 FK——留痕跨行存活）
+ * @param configKey             配置语义键（无 FK——留痕跨行存活）
  * @param oldProviderKey      变更前所属通道（创建痕＝null）
  * @param oldModelName        变更前实际模型名（创建痕＝null）
  * @param oldDisplayName      变更前显示名（null＝无显示名）
@@ -23,9 +23,9 @@ import java.time.LocalDateTime;
  * @param operatorName        变更操作者名（直读展示）
  * @param createdAt           留痕时刻（＝变更动作时刻）
  */
-public record ModelTierTrace(
+public record ModelConfigTrace(
         long id,
-        String tierKey,
+        String configKey,
         String oldProviderKey,
         String oldModelName,
         String oldDisplayName,

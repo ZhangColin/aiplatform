@@ -9,13 +9,13 @@ import org.springframework.stereotype.Component;
 
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.semgravio.aiplatform.base.agentscope.ModelSwitchTraceSink;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierSwitchTrace;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigSwitchTrace;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
 
 /**
  * 运行期切候选留痕落库适配器（#557，ADR-0053 ③）：base 层 {@link ModelSwitchTraceSink}
- * 端口的业务实现——FailoverModel 每次链式切换的事实束转 {@link ModelTierSwitchTrace}
- * 经 {@link ModelChannelStore} 落 {@code prj_model_tier_switch_traces}
+ * 端口的业务实现——FailoverModel 每次链式切换的事实束转 {@link ModelConfigSwitchTrace}
+ * 经 {@link ModelChannelStore} 落 {@code prj_model_config_switch_traces}
  * （append-only，id＝TSID 写痕时生成——照 V45 两留痕表机制）。
  *
  * <p><b>边界知识在此归位</b>：触发错误摘要在 base 层产全量（异常类签名＋文案），
@@ -30,7 +30,7 @@ public class PersistingModelSwitchTraceSink implements ModelSwitchTraceSink {
     private static final Logger logger =
             LoggerFactory.getLogger(PersistingModelSwitchTraceSink.class);
 
-    /** 触发错误摘要的库列上限（prj_model_tier_switch_traces.trigger_error）。 */
+    /** 触发错误摘要的库列上限（prj_model_config_switch_traces.trigger_error）。 */
     private static final int TRIGGER_ERROR_MAX = 500;
 
     private final ModelChannelStore channelStore;
@@ -41,9 +41,9 @@ public class PersistingModelSwitchTraceSink implements ModelSwitchTraceSink {
 
     @Override
     public void record(Trace trace) {
-        channelStore.insertTierSwitchTrace(new ModelTierSwitchTrace(
+        channelStore.insertConfigSwitchTrace(new ModelConfigSwitchTrace(
                 TsidGenerator.newInstance().generate(),
-                trace.tierKey(),
+                trace.configKey(),
                 trace.fromProviderKey(), trace.fromModelName(),
                 trace.toProviderKey(), trace.toModelName(),
                 truncate(trace.triggerError()),

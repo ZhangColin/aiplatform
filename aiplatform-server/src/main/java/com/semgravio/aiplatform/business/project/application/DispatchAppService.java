@@ -44,8 +44,8 @@ import lombok.extern.slf4j.Slf4j;
  * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
  *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
- * 一次性会话（{@code classify-{runId}}，模型档走边缘点档位链——classification
- * 档位库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
+ * 一次性会话（{@code classify-{runId}}，模型档走边缘点配置链——classification
+ * 配置库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
  * 烧重档）、空 sink 无事件、不触项目工作区），
  * 同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，异步化会
  * 拿不到真锚）。</p>
@@ -142,7 +142,7 @@ public class DispatchAppService {
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
     private final AgentConfigAppService agentConfigs;
-    private final ModelTierAppService modelTiers;
+    private final ModelConfigAppService modelConfigs;
     private final ConversationHistoryAppService conversationHistory;
     private final DesignProcessAppService designProcessAppService;
     private final BillingAppService billingAppService;
@@ -152,7 +152,7 @@ public class DispatchAppService {
 
     public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
-            ModelTierAppService modelTiers,
+            ModelConfigAppService modelConfigs,
             ConversationHistoryAppService conversationHistory,
             DesignProcessAppService designProcessAppService,
             BillingAppService billingAppService,
@@ -163,7 +163,7 @@ public class DispatchAppService {
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.agentConfigs = agentConfigs;
-        this.modelTiers = modelTiers;
+        this.modelConfigs = modelConfigs;
         this.conversationHistory = conversationHistory;
         this.designProcessAppService = designProcessAppService;
         this.billingAppService = billingAppService;
@@ -489,10 +489,10 @@ public class DispatchAppService {
     }
 
     /**
-     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档走边缘点档位链
-     * （#366 收编：classification 档位库值优先缺省 flash——配置读面
-     * {@link AgentConfigAppService#effectiveEdgeModelId} → 解析单点
-     * {@link ModelTierAppService#resolve} 产模型串＋通道注入，后台改档下一轮派发
+     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档走边缘点配置链
+     * （#366 收编：classification 配置库值优先缺省 flash——配置读面
+     * {@link AgentConfigAppService#effectiveEdgeModelConfigKey} → 解析单点
+     * {@link ModelConfigAppService#resolve} 产模型串＋通道注入，后台改配置下一轮派发
      * 即生效）、空 sink（无 SSE 事件）、不触项目工作区、计量 agentKind=classify。
      * 返回分类结果＋本次判定的 runId（#537 段收口接线：判定轮翻转后计费，随可计费
      * 车道的轮结算／兜底路径单独结算）。失败 / 超时 / 输出不可解析一律回落意见链
@@ -502,13 +502,13 @@ public class DispatchAppService {
         String runId = EventsAppService.newRunId();
         String sessionId = CLASSIFY_SESSION_PREFIX + runId;
         // #557 整候选队列（边缘点同获链式切换——resolve 面之一）
-        ModelCandidateQueue model = modelTiers.resolveQueue(
-                agentConfigs.effectiveEdgeModelId(AgentEdgePoint.CLASSIFICATION));
+        ModelCandidateQueue model = modelConfigs.resolveQueue(
+                agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.CLASSIFICATION));
         AgentCommand command = new AgentCommand(
                 runId,
                 prompt,
                 CLASSIFY_SYSTEM_PROMPT,
-                model.modelString(), // 边缘点档位解析产物（缺省 flash 档）
+                model.modelString(), // 边缘点配置解析产物（缺省 flash 档）
                 model.channel(), // 通道注入：key/baseUrl 入 SDK，不吃环境变量
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义

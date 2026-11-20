@@ -4,10 +4,10 @@ import java.time.LocalDateTime;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigTrace;
 
 /**
- * 模型档位变更留痕读面行（#367）：一次实际变更的前后全量值快照＋操作者＋时刻，
+ * 模型配置变更留痕读面行（#367）：一次实际变更的前后全量值快照＋操作者＋时刻，
  * 倒序最近先；append-only、回滚＝旧值写回即一次新变更。创建痕 old 全 null、
  * 删除痕 new 全 null。
  *
@@ -26,7 +26,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
  * @param operatorName       变更操作者名（直读展示）
  * @param operatedAt         变更动作时刻
  */
-public record BackofficeModelTierTraceResponse(
+public record BackofficeModelConfigTraceResponse(
         @Schema(description = "留痕标识（TSID 十进制串）")
         String id,
         @Schema(description = "变更前所属通道键（null＝创建痕）", example = "volcengine")
@@ -57,8 +57,8 @@ public record BackofficeModelTierTraceResponse(
         LocalDateTime operatedAt) {
 
     /** 留痕行 → 读面行。 */
-    public static BackofficeModelTierTraceResponse of(ModelTierTrace trace) {
-        return new BackofficeModelTierTraceResponse(Long.toString(trace.id()),
+    public static BackofficeModelConfigTraceResponse of(ModelConfigTrace trace) {
+        return new BackofficeModelConfigTraceResponse(Long.toString(trace.id()),
                 trace.oldProviderKey(), trace.oldModelName(), trace.oldDisplayName(),
                 trace.oldEnabled(), trace.oldThinkingEnabled(),
                 trace.newProviderKey(), trace.newModelName(), trace.newDisplayName(),

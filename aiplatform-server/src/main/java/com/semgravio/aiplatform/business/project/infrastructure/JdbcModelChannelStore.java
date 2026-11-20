@@ -11,16 +11,16 @@ import org.springframework.stereotype.Component;
 
 import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidateTrace;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierSwitchTrace;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfig;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigCandidate;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigCandidateTrace;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigSwitchTrace;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfigTrace;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
 
 /**
- * 模型供应商通道/档位存取实现（JdbcTemplate 原生 SQL，照 {@code JdbcAgentConfigStore}
- * 先例）：装配读腿（{@link #findTier}/{@link #findProvider}）每轮命令构建时查；
+ * 模型供应商通道/配置存取实现（JdbcTemplate 原生 SQL，照 {@code JdbcAgentConfigStore}
+ * 先例）：装配读腿（{@link #findConfig}/{@link #findProvider}）每轮命令构建时查；
  * 写腿（后台维护面 CRUD＋留痕）整行 upsert＋append-only。留痕读面不带 apiKey
  * 掩码——掩码是应用层读面职责（{@code ModelProvider#maskApiKey} 单点），存取层
  * 如实搬运（明文与行本体同保护级）。
@@ -28,10 +28,10 @@ import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelS
 @Component
 public class JdbcModelChannelStore implements ModelChannelStore {
 
-    private static final String FIND_TIER_SQL = """
-            SELECT tier_key, provider_key, model_name, display_name, enabled,
+    private static final String FIND_CONFIG_SQL = """
+            SELECT config_key, provider_key, model_name, display_name, enabled,
                    thinking_enabled, operator_id, operator_name, updated_at
-            FROM prj_model_tiers WHERE tier_key = ?
+            FROM prj_model_configs WHERE config_key = ?
             """;
 
     private static final String FIND_PROVIDER_SQL = """
@@ -46,17 +46,17 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             FROM prj_model_providers ORDER BY provider_key
             """;
 
-    private static final String FIND_ALL_TIERS_SQL = """
-            SELECT tier_key, provider_key, model_name, display_name, enabled,
+    private static final String FIND_ALL_CONFIGS_SQL = """
+            SELECT config_key, provider_key, model_name, display_name, enabled,
                    thinking_enabled, operator_id, operator_name, updated_at
-            FROM prj_model_tiers ORDER BY tier_key
+            FROM prj_model_configs ORDER BY config_key
             """;
 
     /** 全部候选行（含停用行——启停过滤归解析语义）；priority 升序＝队列序。 */
-    private static final String FIND_TIER_CANDIDATES_SQL = """
-            SELECT tier_key, priority, provider_key, model_name, enabled,
+    private static final String FIND_CONFIG_CANDIDATES_SQL = """
+            SELECT config_key, priority, provider_key, model_name, enabled,
                    operator_id, operator_name, updated_at
-            FROM prj_model_tier_candidates WHERE tier_key = ?
+            FROM prj_model_config_candidates WHERE config_key = ?
             ORDER BY priority, provider_key, model_name
             """;
 
@@ -78,12 +78,12 @@ public class JdbcModelChannelStore implements ModelChannelStore {
                 updated_at = CURRENT_TIMESTAMP
             """;
 
-    private static final String SAVE_TIER_SQL = """
-            INSERT INTO prj_model_tiers
-                (tier_key, provider_key, model_name, display_name, enabled,
+    private static final String SAVE_CONFIG_SQL = """
+            INSERT INTO prj_model_configs
+                (config_key, provider_key, model_name, display_name, enabled,
                  thinking_enabled, operator_id, operator_name)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (tier_key) DO UPDATE SET
+            ON CONFLICT (config_key) DO UPDATE SET
                 provider_key = EXCLUDED.provider_key,
                 model_name = EXCLUDED.model_name,
                 display_name = EXCLUDED.display_name,
@@ -97,16 +97,16 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     private static final String DELETE_PROVIDER_SQL =
             "DELETE FROM prj_model_providers WHERE provider_key = ?";
 
-    /** 档位删除：候选行先随档清（档位配置＝行＋队列一个整体，不留孤儿候选）。 */
-    private static final String DELETE_TIER_CANDIDATES_SQL =
-            "DELETE FROM prj_model_tier_candidates WHERE tier_key = ?";
+    /** 配置删除：候选行先随档清（配置＝行＋队列一个整体，不留孤儿候选）。 */
+    private static final String DELETE_CONFIG_CANDIDATES_SQL =
+            "DELETE FROM prj_model_config_candidates WHERE config_key = ?";
 
-    /** 首选候选镜像 upsert（键＝tier_key+priority 1；写面改档伴随写，#556）。 */
-    private static final String SAVE_TIER_PRIMARY_CANDIDATE_SQL = """
-            INSERT INTO prj_model_tier_candidates
-                (tier_key, priority, provider_key, model_name, enabled, operator_id, operator_name)
+    /** 首选候选镜像 upsert（键＝config_key+priority 1；写面改配置伴随写，#556）。 */
+    private static final String SAVE_CONFIG_PRIMARY_CANDIDATE_SQL = """
+            INSERT INTO prj_model_config_candidates
+                (config_key, priority, provider_key, model_name, enabled, operator_id, operator_name)
             VALUES (?, 1, ?, ?, TRUE, ?, ?)
-            ON CONFLICT (tier_key, priority) DO UPDATE SET
+            ON CONFLICT (config_key, priority) DO UPDATE SET
                 provider_key = EXCLUDED.provider_key,
                 model_name = EXCLUDED.model_name,
                 operator_id = EXCLUDED.operator_id,
@@ -114,26 +114,26 @@ public class JdbcModelChannelStore implements ModelChannelStore {
                 updated_at = CURRENT_TIMESTAMP
             """;
 
-    private static final String DELETE_TIER_SQL =
-            "DELETE FROM prj_model_tiers WHERE tier_key = ?";
+    private static final String DELETE_CONFIG_SQL =
+            "DELETE FROM prj_model_configs WHERE config_key = ?";
 
     /** 候选行插入（整队重写的成员语句——#559/T5 编排写口）。 */
-    private static final String INSERT_TIER_CANDIDATE_SQL = """
-            INSERT INTO prj_model_tier_candidates
-                (tier_key, priority, provider_key, model_name, enabled, operator_id, operator_name)
+    private static final String INSERT_CONFIG_CANDIDATE_SQL = """
+            INSERT INTO prj_model_config_candidates
+                (config_key, priority, provider_key, model_name, enabled, operator_id, operator_name)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """;
 
-    /** 绑定引用守卫：档位键出现在三座/边缘点的模型档位或路由强档覆盖列即被引用。 */
-    private static final String TIER_BOUND_SQL = """
+    /** 绑定引用守卫：配置键出现在三座/边缘点的模型配置或路由强档覆盖列即被引用。 */
+    private static final String CONFIG_BOUND_SQL = """
             SELECT EXISTS (SELECT 1 FROM prj_agent_configs
-                WHERE model_id = ? OR routing_strong_model_id = ?)
+                WHERE model_config_key = ? OR routing_strong_model_config_key = ?)
             """;
 
-    /** 引用守卫：档位行直引或候选行引用（V79 起候选 FK 指通道——都是引用）。 */
+    /** 引用守卫：配置行直引或候选行引用（V79 起候选 FK 指通道——都是引用）。 */
     private static final String PROVIDER_REFERENCED_SQL = """
-            SELECT EXISTS (SELECT 1 FROM prj_model_tiers WHERE provider_key = ?)
-                OR EXISTS (SELECT 1 FROM prj_model_tier_candidates WHERE provider_key = ?)
+            SELECT EXISTS (SELECT 1 FROM prj_model_configs WHERE provider_key = ?)
+                OR EXISTS (SELECT 1 FROM prj_model_config_candidates WHERE provider_key = ?)
             """;
 
     private static final String INSERT_PROVIDER_TRACE_SQL = """
@@ -151,9 +151,9 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             ORDER BY created_at DESC, id DESC
             """;
 
-    private static final String INSERT_TIER_TRACE_SQL = """
-            INSERT INTO prj_model_tier_traces
-                (id, tier_key, old_provider_key, old_model_name, old_display_name,
+    private static final String INSERT_CONFIG_TRACE_SQL = """
+            INSERT INTO prj_model_config_traces
+                (id, config_key, old_provider_key, old_model_name, old_display_name,
                  old_enabled, old_thinking_enabled, new_provider_key, new_model_name,
                  new_display_name, new_enabled, new_thinking_enabled, operator_id,
                  operator_name)
@@ -161,37 +161,37 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             """;
 
     /** 运行期切候选留痕（#557 append-only；created_at 显式落切换时刻——不依赖库时钟）。 */
-    private static final String INSERT_TIER_SWITCH_TRACE_SQL = """
-            INSERT INTO prj_model_tier_switch_traces
-                (id, tier_key, from_provider_key, from_model_name,
+    private static final String INSERT_CONFIG_SWITCH_TRACE_SQL = """
+            INSERT INTO prj_model_config_switch_traces
+                (id, config_key, from_provider_key, from_model_name,
                  to_provider_key, to_model_name, trigger_error, run_id, session_id, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-    private static final String FIND_TIER_TRACES_SQL = """
-            SELECT id, tier_key, old_provider_key, old_model_name, old_display_name,
+    private static final String FIND_CONFIG_TRACES_SQL = """
+            SELECT id, config_key, old_provider_key, old_model_name, old_display_name,
                    old_enabled, old_thinking_enabled, new_provider_key, new_model_name,
                    new_display_name, new_enabled, new_thinking_enabled, operator_id,
                    operator_name, created_at
-            FROM prj_model_tier_traces WHERE tier_key = ?
+            FROM prj_model_config_traces WHERE config_key = ?
             ORDER BY created_at DESC, id DESC
             """;
 
     /** 候选编排留痕（#559/T5 append-only；created_at 显式落——一次编排多痕共享
      *  事务时间戳，编排内单调纳秒偏移保证读面次序确定）。 */
-    private static final String INSERT_TIER_CANDIDATE_TRACE_SQL = """
-            INSERT INTO prj_model_tier_candidate_traces
-                (id, tier_key, old_priority, old_provider_key, old_model_name, old_enabled,
+    private static final String INSERT_CONFIG_CANDIDATE_TRACE_SQL = """
+            INSERT INTO prj_model_config_candidate_traces
+                (id, config_key, old_priority, old_provider_key, old_model_name, old_enabled,
                  new_priority, new_provider_key, new_model_name, new_enabled,
                  operator_id, operator_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-    private static final String FIND_TIER_CANDIDATE_TRACES_SQL = """
-            SELECT id, tier_key, old_priority, old_provider_key, old_model_name, old_enabled,
+    private static final String FIND_CONFIG_CANDIDATE_TRACES_SQL = """
+            SELECT id, config_key, old_priority, old_provider_key, old_model_name, old_enabled,
                    new_priority, new_provider_key, new_model_name, new_enabled, operator_id,
                    operator_name, created_at
-            FROM prj_model_tier_candidate_traces WHERE tier_key = ?
+            FROM prj_model_config_candidate_traces WHERE config_key = ?
             ORDER BY created_at DESC, id DESC
             """;
 
@@ -202,8 +202,8 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public ModelTier findTier(String tierKey) {
-        List<ModelTier> rows = jdbcTemplate.query(FIND_TIER_SQL, JdbcModelChannelStore::mapTier, tierKey);
+    public ModelConfig findConfig(String configKey) {
+        List<ModelConfig> rows = jdbcTemplate.query(FIND_CONFIG_SQL, JdbcModelChannelStore::mapConfig, configKey);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
@@ -220,14 +220,14 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public List<ModelTier> findAllTiers() {
-        return jdbcTemplate.query(FIND_ALL_TIERS_SQL, JdbcModelChannelStore::mapTier);
+    public List<ModelConfig> findAllConfigs() {
+        return jdbcTemplate.query(FIND_ALL_CONFIGS_SQL, JdbcModelChannelStore::mapConfig);
     }
 
     @Override
-    public List<ModelTierCandidate> findTierCandidates(String tierKey) {
-        return jdbcTemplate.query(FIND_TIER_CANDIDATES_SQL,
-                JdbcModelChannelStore::mapTierCandidate, tierKey);
+    public List<ModelConfigCandidate> findConfigCandidates(String configKey) {
+        return jdbcTemplate.query(FIND_CONFIG_CANDIDATES_SQL,
+                JdbcModelChannelStore::mapConfigCandidate, configKey);
     }
 
     @Override
@@ -238,27 +238,27 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public void saveTier(ModelTier tier) {
-        jdbcTemplate.update(SAVE_TIER_SQL, tier.tierKey(), tier.providerKey(),
-                tier.modelName(), tier.displayName(), tier.enabled(),
-                tier.thinkingEnabled(), tier.operatorId(), tier.operatorName());
+    public void saveConfig(ModelConfig config) {
+        jdbcTemplate.update(SAVE_CONFIG_SQL, config.configKey(), config.providerKey(),
+                config.modelName(), config.displayName(), config.enabled(),
+                config.thinkingEnabled(), config.operatorId(), config.operatorName());
     }
 
     @Override
-    public void saveTierPrimaryCandidate(String tierKey, String providerKey, String modelName,
+    public void saveConfigPrimaryCandidate(String configKey, String providerKey, String modelName,
             String operatorId, String operatorName) {
-        jdbcTemplate.update(SAVE_TIER_PRIMARY_CANDIDATE_SQL,
-                tierKey, providerKey, modelName, operatorId, operatorName);
+        jdbcTemplate.update(SAVE_CONFIG_PRIMARY_CANDIDATE_SQL,
+                configKey, providerKey, modelName, operatorId, operatorName);
     }
 
     @Override
-    public void replaceTierCandidates(String tierKey, List<ModelTierCandidate> candidates) {
-        jdbcTemplate.update(DELETE_TIER_CANDIDATES_SQL, tierKey);
+    public void replaceConfigCandidates(String configKey, List<ModelConfigCandidate> candidates) {
+        jdbcTemplate.update(DELETE_CONFIG_CANDIDATES_SQL, configKey);
         if (candidates.isEmpty()) {
             return;
         }
-        jdbcTemplate.batchUpdate(INSERT_TIER_CANDIDATE_SQL, candidates.stream()
-                .map(candidate -> new Object[] {candidate.tierKey(), candidate.priority(),
+        jdbcTemplate.batchUpdate(INSERT_CONFIG_CANDIDATE_SQL, candidates.stream()
+                .map(candidate -> new Object[] {candidate.configKey(), candidate.priority(),
                         candidate.providerKey(), candidate.modelName(), candidate.enabled(),
                         candidate.operatorId(), candidate.operatorName()})
                 .toList());
@@ -270,15 +270,15 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public void deleteTier(String tierKey) {
-        // 先子后父：候选行 FK 指档位（V79），反序撞外键
-        jdbcTemplate.update(DELETE_TIER_CANDIDATES_SQL, tierKey);
-        jdbcTemplate.update(DELETE_TIER_SQL, tierKey);
+    public void deleteConfig(String configKey) {
+        // 先子后父：候选行 FK 指配置（V79），反序撞外键
+        jdbcTemplate.update(DELETE_CONFIG_CANDIDATES_SQL, configKey);
+        jdbcTemplate.update(DELETE_CONFIG_SQL, configKey);
     }
 
     @Override
-    public boolean tierBoundByAgentConfigs(String tierKey) {
-        Boolean bound = jdbcTemplate.queryForObject(TIER_BOUND_SQL, Boolean.class, tierKey, tierKey);
+    public boolean configBoundByAgentConfigs(String configKey) {
+        Boolean bound = jdbcTemplate.queryForObject(CONFIG_BOUND_SQL, Boolean.class, configKey, configKey);
         return Boolean.TRUE.equals(bound);
     }
 
@@ -306,8 +306,8 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public void insertTierTrace(ModelTierTrace trace) {
-        jdbcTemplate.update(INSERT_TIER_TRACE_SQL, trace.id(), trace.tierKey(),
+    public void insertConfigTrace(ModelConfigTrace trace) {
+        jdbcTemplate.update(INSERT_CONFIG_TRACE_SQL, trace.id(), trace.configKey(),
                 trace.oldProviderKey(), trace.oldModelName(), trace.oldDisplayName(),
                 trace.oldEnabled(), trace.oldThinkingEnabled(),
                 trace.newProviderKey(), trace.newModelName(),
@@ -316,8 +316,8 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public void insertTierSwitchTrace(ModelTierSwitchTrace trace) {
-        jdbcTemplate.update(INSERT_TIER_SWITCH_TRACE_SQL, trace.id(), trace.tierKey(),
+    public void insertConfigSwitchTrace(ModelConfigSwitchTrace trace) {
+        jdbcTemplate.update(INSERT_CONFIG_SWITCH_TRACE_SQL, trace.id(), trace.configKey(),
                 trace.fromProviderKey(), trace.fromModelName(),
                 trace.toProviderKey(), trace.toModelName(), trace.triggerError(),
                 trace.runId(), trace.sessionId(),
@@ -325,13 +325,13 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public List<ModelTierTrace> findTierTraces(String tierKey) {
-        return jdbcTemplate.query(FIND_TIER_TRACES_SQL, JdbcModelChannelStore::mapTierTrace, tierKey);
+    public List<ModelConfigTrace> findConfigTraces(String configKey) {
+        return jdbcTemplate.query(FIND_CONFIG_TRACES_SQL, JdbcModelChannelStore::mapConfigTrace, configKey);
     }
 
     @Override
-    public void insertTierCandidateTrace(ModelTierCandidateTrace trace) {
-        jdbcTemplate.update(INSERT_TIER_CANDIDATE_TRACE_SQL, trace.id(), trace.tierKey(),
+    public void insertConfigCandidateTrace(ModelConfigCandidateTrace trace) {
+        jdbcTemplate.update(INSERT_CONFIG_CANDIDATE_TRACE_SQL, trace.id(), trace.configKey(),
                 trace.oldPriority(), trace.oldProviderKey(), trace.oldModelName(),
                 trace.oldEnabled(),
                 trace.newPriority(), trace.newProviderKey(), trace.newModelName(),
@@ -341,14 +341,14 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     }
 
     @Override
-    public List<ModelTierCandidateTrace> findTierCandidateTraces(String tierKey) {
-        return jdbcTemplate.query(FIND_TIER_CANDIDATE_TRACES_SQL,
-                JdbcModelChannelStore::mapTierCandidateTrace, tierKey);
+    public List<ModelConfigCandidateTrace> findConfigCandidateTraces(String configKey) {
+        return jdbcTemplate.query(FIND_CONFIG_CANDIDATE_TRACES_SQL,
+                JdbcModelChannelStore::mapConfigCandidateTrace, configKey);
     }
 
-    private static ModelTier mapTier(ResultSet rs, int rowNum) throws SQLException {
+    private static ModelConfig mapConfig(ResultSet rs, int rowNum) throws SQLException {
         Timestamp updatedAt = rs.getTimestamp("updated_at");
-        return new ModelTier(rs.getString("tier_key"), rs.getString("provider_key"),
+        return new ModelConfig(rs.getString("config_key"), rs.getString("provider_key"),
                 rs.getString("model_name"), rs.getString("display_name"), rs.getBoolean("enabled"),
                 rs.getBoolean("thinking_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
@@ -365,10 +365,10 @@ public class JdbcModelChannelStore implements ModelChannelStore {
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }
 
-    private static ModelTierCandidate mapTierCandidate(ResultSet rs, int rowNum)
+    private static ModelConfigCandidate mapConfigCandidate(ResultSet rs, int rowNum)
             throws SQLException {
         Timestamp updatedAt = rs.getTimestamp("updated_at");
-        return new ModelTierCandidate(rs.getString("tier_key"), rs.getInt("priority"),
+        return new ModelConfigCandidate(rs.getString("config_key"), rs.getInt("priority"),
                 rs.getString("provider_key"), rs.getString("model_name"),
                 rs.getBoolean("enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
@@ -389,10 +389,10 @@ public class JdbcModelChannelStore implements ModelChannelStore {
                 createdAt == null ? null : createdAt.toLocalDateTime());
     }
 
-    private static ModelTierTrace mapTierTrace(ResultSet rs, int rowNum)
+    private static ModelConfigTrace mapConfigTrace(ResultSet rs, int rowNum)
             throws SQLException {
         Timestamp createdAt = rs.getTimestamp("created_at");
-        return new ModelTierTrace(rs.getLong("id"), rs.getString("tier_key"),
+        return new ModelConfigTrace(rs.getLong("id"), rs.getString("config_key"),
                 rs.getString("old_provider_key"), rs.getString("old_model_name"),
                 rs.getString("old_display_name"), nullableBoolean(rs, "old_enabled"),
                 nullableBoolean(rs, "old_thinking_enabled"),
@@ -415,10 +415,10 @@ public class JdbcModelChannelStore implements ModelChannelStore {
         return rs.wasNull() ? null : value;
     }
 
-    private static ModelTierCandidateTrace mapTierCandidateTrace(ResultSet rs, int rowNum)
+    private static ModelConfigCandidateTrace mapConfigCandidateTrace(ResultSet rs, int rowNum)
             throws SQLException {
         Timestamp createdAt = rs.getTimestamp("created_at");
-        return new ModelTierCandidateTrace(rs.getLong("id"), rs.getString("tier_key"),
+        return new ModelConfigCandidateTrace(rs.getLong("id"), rs.getString("config_key"),
                 nullableInt(rs, "old_priority"), rs.getString("old_provider_key"),
                 rs.getString("old_model_name"), nullableBoolean(rs, "old_enabled"),
                 nullableInt(rs, "new_priority"), rs.getString("new_provider_key"),

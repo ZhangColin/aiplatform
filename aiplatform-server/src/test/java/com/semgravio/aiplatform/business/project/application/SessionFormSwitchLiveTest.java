@@ -98,7 +98,7 @@ class SessionFormSwitchLiveTest {
     @BeforeEach
     void seedChannelKey() {
         // 命令构建的真解析链（ADR-0031）需要测试 key（假值——智能体边界已 mock）
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
     }
 
     @AfterEach

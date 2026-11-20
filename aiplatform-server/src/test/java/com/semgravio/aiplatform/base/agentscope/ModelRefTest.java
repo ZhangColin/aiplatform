@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link ModelRef} 模型串解析（形状校验单点）：ADR-0031 起前缀即协议路由——
- * 供应商通道键开放词表（volcengine/deepseek/未来新通道），前缀合法性由档位解析
+ * 供应商通道键开放词表（volcengine/deepseek/未来新通道），前缀合法性由配置解析
  * 与 {@code ModelRegistry} 装配保障，本类只守 provider:model 形状。
  */
 class ModelRefTest {

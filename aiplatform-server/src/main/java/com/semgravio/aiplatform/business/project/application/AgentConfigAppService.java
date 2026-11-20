@@ -18,17 +18,17 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 /**
  * 智能体运营配置装配读面（#251，ADR-0021「库值优先、缺省回落」解析单点）：
  * {@code MainAgentAppService}（主智能体命令/续跑构建）与 {@code CoderRunAttempts}
- * （执行体命令构建）装配 systemPrompt／模型档位键时一律经本服务取<b>生效值</b>
+ * （执行体命令构建）装配 systemPrompt／模型配置键时一律经本服务取<b>生效值</b>
  * ——库有覆盖值用库值，无覆盖（行不存在或列 null）回落 {@link AgentProfile} 枚举
- * 默认。枚举仍是身份与缺省正本，本服务只是覆盖态的读腿；档位键 → 模型串与通道
- * 注入的解析在 {@code ModelTierAppService}（ADR-0031 装配链）。
+ * 默认。枚举仍是身份与缺省正本，本服务只是覆盖态的读腿；配置键 → 模型串与通道
+ * 注入的解析在 {@code ModelConfigAppService}（ADR-0031 装配链）。
  *
  * <p>动态查库、不缓存：每次 {@code effectiveOf} 一次主键 SELECT，配置变更后
  * 下一轮命令构建自然反映（对话轮本身是秒级 LLM 调用，读取代价可忽略）；智能体
  * 实例层不必感知——工厂缓存键已含 sysPrompt 与解析后的模型串＋通道指纹
  * （{@code AgentscopeAgentClient#prepareFor}），新值即新实例，进行中 run 不定格。
- * 边缘调用点（取名/压缩/分类/预检）的<b>模型档位</b>同走本面
- * （{@link #effectiveEdgeModelId}，#366 同表同机制）；其提示词仍不属配置面
+ * 边缘调用点（取名/压缩/分类/预检）的<b>模型配置</b>同走本面
+ * （{@link #effectiveEdgeModelConfigKey}，#366 同表同机制）；其提示词仍不属配置面
  * （一次性判定的编排内建）。</p>
  *
  * <p><b>工具面规格（#252；#545 起三件）</b>：增强工具开关（web_search/fetch_url
@@ -77,15 +77,15 @@ public class AgentConfigAppService {
     }
 
     /**
-     * 生效配置束（一次查库同取——prompt 与档位在命令构建处恒结伴，工具开关
+     * 生效配置束（一次查库同取——prompt 与配置在命令构建处恒结伴，工具开关
      * #252 同批；模型路由策略 #354 同批——路由判定消费，阈值/强档的代码缺省
-     * 回落归 {@code ModelRoutingAppService}；验证面两件 #424 同批——verify 档位
+     * 回落归 {@code ModelRoutingAppService}；验证面两件 #424 同批——verify 配置
      * 覆盖（null＝随执行体生效档）与轮次预算生效值）：生效 systemPrompt、生效
-     * 档位键（ADR-0031：语义键，模型串与通道注入由 {@code ModelTierAppService
+     * 配置键（ADR-0031：语义键，模型串与通道注入由 {@code ModelConfigAppService
      * #resolve} 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关
-     * 生效态、档位覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
+     * 生效态、配置覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
      * 结构性信号两开关 #454 同批——文件面/规模标签信号缺省 false＝不参与升档判定
-     * （失败重试信号常开不受影响），路由判定处随生效配置同取；verify 档位覆盖与
+     * （失败重试信号常开不受影响），路由判定处随生效配置同取；verify 配置覆盖与
      * 轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
      * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
      * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
@@ -99,13 +99,13 @@ public class AgentConfigAppService {
      * public/），toolSpec 携 gi 件进装配与实例缓存键，关即槽位不挂载（设计执行体
      * 同名工具是骨架件、不读本开关）。
      */
-    public record EffectiveConfig(String systemPrompt, String modelId,
+    public record EffectiveConfig(String systemPrompt, String modelConfigKey,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
-            boolean modelIdOverridden, boolean routingEnabled,
-            String routingStrongModelId, Integer routingFileCountThreshold,
+            boolean modelConfigKeyOverridden, boolean routingEnabled,
+            String routingStrongModelConfigKey, Integer routingFileCountThreshold,
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
             boolean routingFileCountSignalEnabled, boolean routingSizeLabelSignalEnabled,
-            String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget,
+            String verifyModelConfigKey, int verifyRoundBudget, int finalVerifyFixBudget,
             boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
             boolean finalVerificationGateEnabled,
             boolean singleSessionGenerationEnabled, boolean parallelSliceMachineEnabled,
@@ -129,13 +129,13 @@ public class AgentConfigAppService {
         AgentOperationalConfig config =
                 override != null ? override : AgentOperationalConfig.defaults(profile.key());
         return new EffectiveConfig(config.effectiveSystemPrompt(profile.systemPrompt()),
-                config.effectiveModelId(profile.modelId()),
+                config.effectiveModelConfigKey(profile.modelConfigKey()),
                 config.webSearchEnabled(), config.fetchUrlEnabled(),
-                config.modelId() != null, config.routingEnabled(),
-                config.routingStrongModelId(), config.routingFileCountThreshold(),
+                config.modelConfigKey() != null, config.routingEnabled(),
+                config.routingStrongModelConfigKey(), config.routingFileCountThreshold(),
                 config.routingEscalatingSizeLabels(),
                 config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled(),
-                config.verifyModelId(),
+                config.verifyModelConfigKey(),
                 config.verifyRoundBudget() != null
                         ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET,
                 config.finalVerifyFixBudget() != null
@@ -150,16 +150,16 @@ public class AgentConfigAppService {
     }
 
     /**
-     * 边缘调用点生效档位键（#366，库值优先、缺省回落 {@link AgentEdgePoint#modelId()}
-     * ——缺省腿单点，三座同机制同表）：值面仅模型档位（边缘行其余覆盖列结构性
-     * 缺省），模型串与通道注入由 {@code ModelTierAppService#resolve} 在调用侧解析。
+     * 边缘调用点生效配置键（#366，库值优先、缺省回落 {@link AgentEdgePoint#modelConfigKey()}
+     * ——缺省腿单点，三座同机制同表）：值面仅模型配置（边缘行其余覆盖列结构性
+     * 缺省），模型串与通道注入由 {@code ModelConfigAppService#resolve} 在调用侧解析。
      */
     @Transactional(readOnly = true)
-    public String effectiveEdgeModelId(AgentEdgePoint point) {
+    public String effectiveEdgeModelConfigKey(AgentEdgePoint point) {
         AgentOperationalConfig override = configStore.find(point.key());
         AgentOperationalConfig config =
                 override != null ? override : AgentOperationalConfig.defaults(point.key());
-        return config.effectiveModelId(point.modelId());
+        return config.effectiveModelConfigKey(point.modelConfigKey());
     }
 
     /**
@@ -167,7 +167,7 @@ public class AgentConfigAppService {
      * #453-2 起装配腿经 5s TTL 进程内缓存降频，本服务本身保持动态查库不缓存）：
      * 库值优先、缺省回落代码缺省（总开关缺省开＝#437 落地态；阈值/上限缺省 3；
      * 禁用集 null/空＝全启用——逗号串解码宽容坏 token，非法值在写口已被
-     * PRJ_083 拒掉）。运营面改档经 TTL 窗口（≤5s）即生效，不发版、进行中 run
+     * PRJ_083 拒掉）。运营面改配置经 TTL 窗口（≤5s）即生效，不发版、进行中 run
      * 不定格；装配不进 agent 实例缓存键（改配置无需重建实例）。
      */
     @Transactional(readOnly = true)
@@ -197,7 +197,7 @@ public class AgentConfigAppService {
      * #453-2 起装配腿经 5s TTL 进程内缓存降频，本服务本身保持动态查库不缓存）：
      * 库值优先、缺省 true＝自决开（#435 自决化现状维持）；false＝自决关闭——中间件
      * 注入提示层指令（生成过程中不自发委派 verify，平台驱动验证腿不受影响）。运营
-     * 面改档经 TTL 窗口（≤5s）即生效，不发版、进行中 run 不定格；装配不进
+     * 面改配置经 TTL 窗口（≤5s）即生效，不发版、进行中 run 不定格；装配不进
      * agent 实例缓存键（改配置无需重建实例，与 #437 决策提示同逻辑）。
      */
     @Transactional(readOnly = true)

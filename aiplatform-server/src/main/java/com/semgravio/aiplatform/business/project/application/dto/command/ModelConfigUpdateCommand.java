@@ -3,7 +3,7 @@ package com.semgravio.aiplatform.business.project.application.dto.command;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * 模型档位更新命令（#367，PUT 全量语义）：请求体即档位行终态——providerKey/
+ * 模型配置更新命令（#367，PUT 全量语义）：请求体即配置行终态——providerKey/
  * modelName/displayName 全量替换（displayName 可空＝清显示名回落语义键）；enabled
  * 缺省＝<b>保持现值</b>（终态字段不因缺省翻转——停用档换模型名/换通道不被意外
  * 复启，显式 true/false 才翻转；与 agent-configs 开关口径之别同通道面 javadoc）。
@@ -15,7 +15,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param enabled         缺省＝保持现值；显式 true/false 才翻转
  * @param thinkingEnabled 深度思考开关（#370；缺省＝保持现值，显式 true/false 才翻转）
  */
-public record ModelTierUpdateCommand(
+public record ModelConfigUpdateCommand(
         @Schema(description = "所属通道键（终态全量替换，必填且须已存在）",
                 example = "volcengine")
         String providerKey,

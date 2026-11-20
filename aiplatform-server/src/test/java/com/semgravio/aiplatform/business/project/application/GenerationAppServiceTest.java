@@ -183,9 +183,9 @@ class GenerationAppServiceTest {
 
     @BeforeEach
     void ensureChannelKeyForRealResolution() {
-        // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行（V79 收敛后＝deepseek 官方），
+        // 真解析链护卫（ADR-0031）：命令构建经 ModelConfigAppService 解析种子配置行（V79 收敛后＝deepseek 官方），
         // 测试环境无 key 注入——幂等补测试 key
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         // #543 风格物化写面缺省桩（首个构建派发＝平台确定性写基座四件）：通用成功，
         // 用例专属注入（合并冲突/磁盘满等）在测试体内后注册，按 Mockito 后桩优先
         // 覆盖本位；断言「零写入」的用例走 verify(never())（桩不产生调用）
@@ -205,9 +205,9 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
-        // 档位夹具归零（先子后父：候选行 FK 指档位——V79 起候选表在库）
-        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-%'");
-        jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
+        // 配置夹具归零（先子后父：候选行 FK 指配置——V79 起候选表在库）
+        jdbcTemplate.update("DELETE FROM prj_model_config_candidates WHERE config_key LIKE 't-%'");
+        jdbcTemplate.update("DELETE FROM prj_model_configs WHERE config_key LIKE 't-%'");
         // #543 风格层 kill-switch 归位（缺省生效态——共享行，绝不把关停态留给下游）
         jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = TRUE WHERE id = 1");
     }
@@ -1238,7 +1238,7 @@ class GenerationAppServiceTest {
     @SuppressWarnings("unchecked")
     void given_attempts_exhausted_when_generate_then_failure_face_persisted_same_payload_as_sse() {
         givenPerSliceSessions();
-        // #418 灵魂用例（观测地基批）：重试耗尽转终态——失败面（逐尝试墙钟/档位/失败
+        // #418 灵魂用例（观测地基批）：重试耗尽转终态——失败面（逐尝试墙钟/配置/失败
         // 原因/本场累计）随 run-failed SSE 扩载与对话史落库同载荷（同收尾卡「SSE 扩载
         // 与落库同载荷」先例）——失败作废可归因（#313「33% 失败作废」从此可测），
         // 速度观测不再只看成功者；平台分析口径、前端不渲染（同 durationBreakdown）
@@ -1251,7 +1251,7 @@ class GenerationAppServiceTest {
                 SINGLE_SLICE_PLAN);
 
         // SSE 扩载：run-failed 载荷携 failure 面——逐尝试条数 = 烧满重试次数（每条带
-        // 轮次/档位/墙钟/桶）、error = 末次错误现场原文、durationMs = 本场累计墙钟
+        // 轮次/配置/墙钟/桶）、error = 末次错误现场原文、durationMs = 本场累计墙钟
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), payloads.capture());
         assertThat(payloads.getValue().get(EventsAppService.RUN_FIELD)).isEqualTo(run.runId());
@@ -1268,7 +1268,7 @@ class GenerationAppServiceTest {
                 .containsExactly(IntStream
                         .rangeClosed(1, properties.getMaxAttempts()).boxed().toArray(Integer[]::new));
         assertThat(attempts).allSatisfy(attempt -> {
-            assertThat(String.valueOf(attempt.get("modelId"))).isNotBlank(); // 逐尝试档位可归因
+            assertThat(String.valueOf(attempt.get("modelId"))).isNotBlank(); // 逐尝试配置可归因
             assertThat(((Number) attempt.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
         });
         // 落库同载荷：对话史读回失败留账行（kind=8，锚失败 runId）——失败面与 SSE
@@ -1332,7 +1332,7 @@ class GenerationAppServiceTest {
         givenPerSliceSessions();
         // #418 回滚重跑失败（AC④行为不变·仅增落库面）：两轮皆败转终态——失败面跨轮
         // 累计（回滚重跑轮不清账，#323 口径）：首轮 3 试＋重跑轮 3 试逐条带轮次与
-        // 档位（重跑轮升档可归因），库中读回完整失败面
+        // 配置（重跑轮升档可归因），库中读回完整失败面
         Long projectId = persistedProject("9862");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
@@ -2457,7 +2457,7 @@ class GenerationAppServiceTest {
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
-    // ---------- 生成态四态投影（#222：REST 档位与「继续生成」出口的推导输入） ----------
+    // ---------- 生成态四态投影（#222：REST 配置与「继续生成」出口的推导输入） ----------
 
     @Test
     void given_generation_lifecycle_when_detail_then_four_state_projection() {
@@ -2483,7 +2483,7 @@ class GenerationAppServiceTest {
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.GENERATING);
 
-        // 起跑后重试耗尽转终态失败 → 生成中断（「继续生成」出口的档位；进程重启丢
+        // 起跑后重试耗尽转终态失败 → 生成中断（「继续生成」出口的配置；进程重启丢
         // 在途标记同落此档——有轨道片行而未生成不在途）
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("阶段0起服失败"))
@@ -2553,7 +2553,7 @@ class GenerationAppServiceTest {
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("0.0.0.0:8081").contains("docs/PRD.md");
-        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(value.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         // #322 活超时替换一次性总墙钟：编码命令只携静默判死阈值，不再携总时长上限
         assertThat(value.timeout()).isNull();
         assertThat(value.silenceTimeout()).isEqualTo(properties.getSilenceTimeout());
@@ -2569,7 +2569,7 @@ class GenerationAppServiceTest {
     @Test
     void given_executor_config_override_when_generate_then_stage0_command_carries_library_values() {
         // #251 装配断言（真命令构建缝，ADR-0021 库值优先）：设执行体运营配置库行后
-        // 编码命令实取库值（prompt 与模型档位两腿）；缺省回落腿由上方枚举默认断言钉死。
+        // 编码命令实取库值（prompt 与模型配置两腿）；缺省回落腿由上方枚举默认断言钉死。
         // #341 起 Demo 阶段（executor）缺省＝快模型档，故覆盖档取强模型档以示库值
         // 优先（覆盖值≠缺省值，断言才有别于回落腿）。
         // #252 增强工具开关同批编入 toolSpec（进缓存键保持规格一致）；#545 起
@@ -2580,7 +2580,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("已生成");
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key)
                 VALUES ('executor', ?, 'pro')
                 """, "执行体覆盖协议：开工先列步骤。");
 
@@ -3008,7 +3008,7 @@ class GenerationAppServiceTest {
         givenPerSliceSessions();
         // #420 AC②：空转拒绝耗尽（原地补做三连拒——拒绝回执喂回仍零 diff）→ 段级
         // 自愈回滚重跑（复用 #353 既有机制：留账＋回滚段起点＋新会话重跑一轮，不建
-        // 新通道），重跑轮仍空转→转终态 run-failed；逐尝试档位经既有路由「重试／
+        // 新通道），重跑轮仍空转→转终态 run-failed；逐尝试配置经既有路由「重试／
         // 回滚重跑升档」信号自动升档（attempt+1／round+1——flash→pro，路由面零改动）
         Long projectId = persistedProject("9839");
         givenClosingGatesOpen();
@@ -3051,9 +3051,9 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_idle_rejections_then_escalated_model_tiers_recorded_in_failure_face() {
+    void given_idle_rejections_then_escalated_model_configs_recorded_in_failure_face() {
         givenPerSliceSessions();
-        // #420 AC② 升档留档：空转拒绝驱动尝试环重试——逐尝试档位经既有路由信号
+        // #420 AC② 升档留档：空转拒绝驱动尝试环重试——逐尝试配置经既有路由信号
         // 自动升档（attempt≥2 重试升档、round 2 回滚重跑升档：flash→pro），失败面
         // attempts[].modelId 可归因（#418 落库面承载——平台分析口径）
         Long projectId = persistedProject("9840");
@@ -5400,11 +5400,11 @@ class GenerationAppServiceTest {
         // 留档可查：modelTier 随收尾卡落对话史（JSONB 同载荷）——哪段用了哪档的
         // 持久留档面（失败段无收尾卡、以结构化日志为面）
         List<Map<String, Object>> closings = jdbcTemplate.queryForList(
-                "SELECT closing->'modelTier'->>'modelId' AS tier_model_id FROM"
+                "SELECT closing->'modelTier'->>'modelId' AS model_config_key FROM"
                         + " prj_conversation_entries WHERE project_id = ? AND kind = ?"
                         + " ORDER BY id",
                 projectId, ConversationEntryKind.CLOSING.getCode());
-        assertThat(closings).extracting(row -> row.get("tier_model_id")).containsExactly(
+        assertThat(closings).extracting(row -> row.get("model_config_key")).containsExactly(
                 "pro", // 阶段 0 收口——重试升档后的强档
                 "flash"); // 切片收口——快档
     }
@@ -5502,14 +5502,14 @@ class GenerationAppServiceTest {
     void given_manual_override_with_routing_on_when_retry_then_escalation_crosses_override() {
         // 路由判定优先、人工覆盖兜底：覆盖是基础档不是钉死——首试走人工档、
         // 重试升强档（升档越过覆盖）；下一段回落人工档。doubao-flagship 已随
-        // V79 退场（火山下线收尾）——人工档用 t- 夹具档位行（挂 deepseek 通道）
+        // V79 退场（火山下线收尾）——人工档用 t- 夹具配置行（挂 deepseek 通道）
         Long projectId = persistedProject("9853");
         jdbcTemplate.update("""
-                INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled, display_name)
+                INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled, display_name)
                 VALUES ('t-manual', 'deepseek', 'deepseek-chat-manual', TRUE, '人工档夹具')
                 """);
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, model_id)
+                INSERT INTO prj_agent_configs (agent_key, model_config_key)
                 VALUES ('executor', 't-manual')
                 """);
         givenSessionExecutorRunsInline();
@@ -5528,10 +5528,10 @@ class GenerationAppServiceTest {
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payloads.capture());
-        Map<String, Object> tier = (Map<String, Object>) ((Map<String, Object>) payloads
+        Map<String, Object> config = (Map<String, Object>) ((Map<String, Object>) payloads
                 .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
                 .get("modelTier");
-        assertThat(tier)
+        assertThat(config)
                 .containsEntry("modelId", "t-manual")
                 .containsEntry("source", "routed")
                 .doesNotContainKey("reasons"); // 兜底判定——只记为什么升
@@ -5542,7 +5542,7 @@ class GenerationAppServiceTest {
         // 钉死位＝路由关＋人工档：人工档恒生效——失败重试不升档（既有口径）
         Long projectId = persistedProject("9854");
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, model_id, routing_enabled)
+                INSERT INTO prj_agent_configs (agent_key, model_config_key, routing_enabled)
                 VALUES ('executor', 'pro', false)
                 """);
         givenSessionExecutorRunsInline();
@@ -5559,10 +5559,10 @@ class GenerationAppServiceTest {
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payloads.capture());
-        Map<String, Object> tier = (Map<String, Object>) ((Map<String, Object>) payloads
+        Map<String, Object> config = (Map<String, Object>) ((Map<String, Object>) payloads
                 .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
                 .get("modelTier");
-        assertThat(tier)
+        assertThat(config)
                 .containsEntry("modelId", "pro")
                 .containsEntry("source", "pinned")
                 .doesNotContainKey("reasons");

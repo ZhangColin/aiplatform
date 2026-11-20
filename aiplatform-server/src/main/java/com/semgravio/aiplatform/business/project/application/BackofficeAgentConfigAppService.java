@@ -27,7 +27,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalCo
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.AgentTool;
 import com.semgravio.aiplatform.business.project.domain.model.AgentToolKind;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfig;
 import com.semgravio.aiplatform.business.project.domain.model.Operator;
 import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigStore;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
@@ -37,13 +37,13 @@ import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHin
  * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：三座智能体（main/
  * executor/designer——{@link AgentProfile#byKey} 单点寻址）的覆盖态读／全量写／
  * 变更留痕读，＋边缘调用点四件（取名/压缩/分类/预检，#366 同表收编——值面仅
- * 模型档位，{@link AgentEdgePoint#byKey} 寻址）的档位读／写／留痕读。装配读腿
+ * 模型配置，{@link AgentEdgePoint#byKey} 寻址）的配置读／写／留痕读。装配读腿
  * （库值优先、缺省回落）在 {@link AgentConfigAppService}（运行面），本服务只做
  * 后台管理面。
  *
  * <p>写语义＝PUT 全量替换：请求体即覆盖态终态，值面八件（systemPrompt、模型
- * 档位、两工具开关、路由策略四件〔#354〕）同写；null/空白＝清空覆盖回落枚举
- * 默认。改档（modelId 与路由强档、边缘点档位）即时校验档位键存在且启用
+ * 配置、两工具开关、路由策略四件〔#354〕）同写；null/空白＝清空覆盖回落枚举
+ * 默认。改配置（modelConfigKey 与路由强档、边缘点配置）即时校验配置键存在且启用
  * （#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底）。变更留痕
  * append-only（操作者＋变更前后全量值快照）：值面有动才落痕——幂等回执（同值
  * 重写）不落痕不写行（留痕链每痕都是真实变更，回滚才可逐痕回溯）；回滚＝把留痕
@@ -63,7 +63,7 @@ public class BackofficeAgentConfigAppService {
                     null, null, null, null, null, null, null, null, null, null, null, null,
                     null, null, null, null);
 
-    /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
+    /** 边缘点空命令归一（体缺落 null 形＝清空配置覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
             new EdgeModelUpdateCommand(null);
 
@@ -107,17 +107,17 @@ public class BackofficeAgentConfigAppService {
         AgentConfigUpdateCommand safe = command == null ? EMPTY_COMMAND : command;
         AgentOperationalConfig current = currentOf(profile.key());
         AgentOperationalConfig next = new AgentOperationalConfig(profile.key(),
-                blankToNull(safe.systemPrompt()), blankToNull(safe.modelId()),
+                blankToNull(safe.systemPrompt()), blankToNull(safe.modelConfigKey()),
                 safe.webSearchEnabled() == null || safe.webSearchEnabled(),
                 safe.fetchUrlEnabled() == null || safe.fetchUrlEnabled(),
                 safe.routingEnabled() == null || safe.routingEnabled(),
-                blankToNull(safe.routingStrongModelId()),
+                blankToNull(safe.routingStrongModelConfigKey()),
                 safe.routingFileCountThreshold(), requireValidSizeLabels(safe.routingEscalatingSizeLabels()),
                 // #454 缺省口径：结构性信号两开关 null＝关（翻转缺省 false——不参与
                 // 升档判定；失败重试信号不受两开关影响、常开）
                 safe.routingFileCountSignalEnabled() != null && safe.routingFileCountSignalEnabled(),
                 safe.routingSizeLabelSignalEnabled() != null && safe.routingSizeLabelSignalEnabled(),
-                blankToNull(safe.verifyModelId()), requireValidRoundBudget(safe.verifyRoundBudget()),
+                blankToNull(safe.verifyModelConfigKey()), requireValidRoundBudget(safe.verifyRoundBudget()),
                 requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
                 safe.verificationPresenceGateEnabled() != null && safe.verificationPresenceGateEnabled(),
                 safe.proofOfOutputGateEnabled() != null && safe.proofOfOutputGateEnabled(),
@@ -139,12 +139,12 @@ public class BackofficeAgentConfigAppService {
                 // 不重置——写口唯一＝窄幅工具开关 toggleTool
                 current.generateImageEnabled(),
                 operator.id(), operator.name(), null);
-        // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
+        // 绑定即时校验（#367，ADR-0031）：改配置写的配置键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
         // 枚举/代码正本，装配面自会校验）
-        requireBindableTier(next.modelId());
-        requireBindableTier(next.routingStrongModelId());
-        requireBindableTier(next.verifyModelId());
+        requireBindableConfig(next.modelConfigKey());
+        requireBindableConfig(next.routingStrongModelConfigKey());
+        requireBindableConfig(next.verifyModelConfigKey());
         AgentOperationalConfig persisted =
                 persistIfChanged(profile.key(), current, next, operator);
         return BackofficeAgentConfigResponse.of(profile,
@@ -193,13 +193,13 @@ public class BackofficeAgentConfigAppService {
         AgentProfile profile = AgentProfile.byKey(tool.slot()).orElseThrow();
         AgentOperationalConfig current = currentOf(profile.key());
         AgentOperationalConfig next = new AgentOperationalConfig(profile.key(),
-                current.systemPrompt(), current.modelId(),
+                current.systemPrompt(), current.modelConfigKey(),
                 tool == AgentTool.WEB_SEARCH ? enabled : current.webSearchEnabled(),
                 tool == AgentTool.FETCH_URL ? enabled : current.fetchUrlEnabled(),
-                current.routingEnabled(), current.routingStrongModelId(),
+                current.routingEnabled(), current.routingStrongModelConfigKey(),
                 current.routingFileCountThreshold(), current.routingEscalatingSizeLabels(),
                 current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
-                current.verifyModelId(), current.verifyRoundBudget(),
+                current.verifyModelConfigKey(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
                 current.finalVerificationGateEnabled(),
@@ -218,13 +218,13 @@ public class BackofficeAgentConfigAppService {
     public record ToolToggle(AgentTool tool, boolean enabled) {
     }
 
-    // ---------- 边缘调用点（#366：值面仅模型档位，同表同留痕机制） ----------
+    // ---------- 边缘调用点（#366：值面仅模型配置，同表同留痕机制） ----------
 
     /**
-     * 边缘调用点档位读面（GET）：生效值（库值或代码缺省档位键）＋覆盖标记＋缺省
+     * 边缘调用点配置读面（GET）：生效值（库值或代码缺省配置键）＋覆盖标记＋缺省
      * 预览＋最近写者。无覆盖行＝回落代码缺省（覆盖标记 false、写者 null）。
      *
-     * @throws ApplicationException PRJ_064 边缘调用点不存在（档位面只有四点）
+     * @throws ApplicationException PRJ_064 边缘调用点不存在（配置面只有四点）
      */
     @Transactional(readOnly = true)
     public BackofficeEdgeModelConfigResponse edgeConfig(String edgeKey) {
@@ -233,10 +233,10 @@ public class BackofficeAgentConfigAppService {
     }
 
     /**
-     * 边缘调用点档位写（PUT）：值面仅模型档位（窄命令形——边缘点无 prompt/开关/
+     * 边缘调用点配置写（PUT）：值面仅模型配置（窄命令形——边缘点无 prompt/开关/
      * 路由语义），写语义与全量写同构（null/纯空白＝清空覆盖回落代码缺省；值面有
      * 动才落痕，幂等回执零写入）。装配腿 {@code AgentConfigAppService
-     * #effectiveEdgeModelId} 动态查库——改档下一轮命令构建即生效。
+     * #effectiveEdgeModelConfigKey} 动态查库——改配置下一轮命令构建即生效。
      *
      * @throws ApplicationException PRJ_064 边缘调用点不存在；PRJ_034 操作者缺
      */
@@ -247,14 +247,14 @@ public class BackofficeAgentConfigAppService {
         requireOperator(operator);
         EdgeModelUpdateCommand safe = command == null ? EMPTY_EDGE_COMMAND : command;
         AgentOperationalConfig current = currentOf(point.key());
-        // 值面仅档位：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态、
+        // 值面仅配置：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态、
         // 结构性信号两开关关〔#454 缺省〕）
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
-                null, blankToNull(safe.modelId()),
+                null, blankToNull(safe.modelConfigKey()),
                 true, true, true, null, null, null, false, false, null, null, null, true, true, true,
                 true, false, true, null, null, null, true, false, true,
                 operator.id(), operator.name(), null);
-        requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
+        requireBindableConfig(next.modelConfigKey()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
                 persistIfChanged(point.key(), current, next, operator);
         return BackofficeEdgeModelConfigResponse.of(point,
@@ -263,7 +263,7 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 边缘调用点留痕读面（GET traces）：该点全部留痕按时间倒序（快照列与三座同形
-     * ——边缘行档位列之外的快照件恒缺省态）。
+     * ——边缘行配置列之外的快照件恒缺省态）。
      *
      * @throws ApplicationException PRJ_064 边缘调用点不存在
      */
@@ -292,7 +292,7 @@ public class BackofficeAgentConfigAppService {
     }
 
     /**
-     * 值面变更落库＋留痕（全量写、工具开关写与边缘档位写的共用写路径，同事务原子）：
+     * 值面变更落库＋留痕（全量写、工具开关写与边缘配置写的共用写路径，同事务原子）：
      * 值面无动返回 null（幂等回执零写入）；有动即整行 upsert＋留痕（变更前后全量值
      * 快照＋操作者）并回读新现行。
      */
@@ -303,13 +303,13 @@ public class BackofficeAgentConfigAppService {
         }
         configStore.save(next);
         configStore.insertTrace(new AgentConfigTrace(TsidGenerator.newInstance().generate(),
-                agentKey, current.systemPrompt(), current.modelId(),
+                agentKey, current.systemPrompt(), current.modelConfigKey(),
                 current.webSearchEnabled(), current.fetchUrlEnabled(),
-                current.routingEnabled(), current.routingStrongModelId(),
+                current.routingEnabled(), current.routingStrongModelConfigKey(),
                 current.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(current.routingEscalatingSizeLabels()),
                 current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
-                current.verifyModelId(), current.verifyRoundBudget(),
+                current.verifyModelConfigKey(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
                 current.finalVerificationGateEnabled(),
@@ -318,12 +318,12 @@ public class BackofficeAgentConfigAppService {
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
                 current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
                 current.generateImageEnabled(),
-                next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
-                next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
+                next.systemPrompt(), next.modelConfigKey(), next.webSearchEnabled(),
+                next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelConfigKey(),
                 next.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
                 next.routingFileCountSignalEnabled(), next.routingSizeLabelSignalEnabled(),
-                next.verifyModelId(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
+                next.verifyModelConfigKey(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
                 next.verificationPresenceGateEnabled(), next.proofOfOutputGateEnabled(),
                 next.finalVerificationGateEnabled(),
                 next.singleSessionGenerationEnabled(), next.parallelSliceMachineEnabled(),
@@ -345,16 +345,16 @@ public class BackofficeAgentConfigAppService {
     private static boolean valueFacetsChanged(AgentOperationalConfig current,
             AgentOperationalConfig next) {
         return !Objects.equals(current.systemPrompt(), next.systemPrompt())
-                || !Objects.equals(current.modelId(), next.modelId())
+                || !Objects.equals(current.modelConfigKey(), next.modelConfigKey())
                 || current.webSearchEnabled() != next.webSearchEnabled()
                 || current.fetchUrlEnabled() != next.fetchUrlEnabled()
                 || current.routingEnabled() != next.routingEnabled()
-                || !Objects.equals(current.routingStrongModelId(), next.routingStrongModelId())
+                || !Objects.equals(current.routingStrongModelConfigKey(), next.routingStrongModelConfigKey())
                 || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
                 || !Objects.equals(current.routingEscalatingSizeLabels(), next.routingEscalatingSizeLabels())
                 || current.routingFileCountSignalEnabled() != next.routingFileCountSignalEnabled()
                 || current.routingSizeLabelSignalEnabled() != next.routingSizeLabelSignalEnabled()
-                || !Objects.equals(current.verifyModelId(), next.verifyModelId())
+                || !Objects.equals(current.verifyModelConfigKey(), next.verifyModelConfigKey())
                 || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget())
                 || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget())
                 || current.verificationPresenceGateEnabled() != next.verificationPresenceGateEnabled()
@@ -373,7 +373,7 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 失败止损阈值校验（#437）：null＝清空回落代码缺省不校验；非空须 2-10
-     * 整数（越界 PRJ_081——错值写不进去，同档位键即时校验口径）。
+     * 整数（越界 PRJ_081——错值写不进去，同配置键即时校验口径）。
      */
     private static Integer requireValidHintErrorStreak(Integer streak) {
         if (streak != null && (streak < 2 || streak > 10)) {
@@ -415,7 +415,7 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 单场验证轮次预算校验（#424）：null＝清空回落代码缺省不校验；非空须 1-20
-     * 整数（越界 PRJ_078——错值写不进去，同档位键即时校验口径）。
+     * 整数（越界 PRJ_078——错值写不进去，同配置键即时校验口径）。
      */
     private static Integer requireValidRoundBudget(Integer budget) {
         if (budget != null && (budget < 1 || budget > 20)) {
@@ -426,7 +426,7 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 整轨终验修复预算校验（#427）：null＝清空回落代码缺省不校验；非空须 0-10
-     * 整数（越界 PRJ_080——错值写不进去，同档位键即时校验口径；0＝不起修复 run
+     * 整数（越界 PRJ_080——错值写不进去，同配置键即时校验口径；0＝不起修复 run
      * 的合法运营选择）。
      */
     private static Integer requireValidFinalVerifyFixBudget(Integer budget) {
@@ -438,7 +438,7 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 升档规模标签映射校验（#426）：null＝清空回落代码缺省（「大」）不校验；非空
-     * token 须在小/中/大封闭集内——非法 token PRJ_079（错值写不进去，同档位键
+     * token 须在小/中/大封闭集内——非法 token PRJ_079（错值写不进去，同配置键
      * 即时校验口径）。空列表合法（空映射＝规模标签信号整体关停的运营选择）。
      * 归一：去空白、剔重复、EnumSet 定形（序列化序由 {@link SliceSizeLabel#tokensOf}
      * 定序单点管）。
@@ -465,20 +465,20 @@ public class BackofficeAgentConfigAppService {
     }
 
     /**
-     * 绑定即时校验（#367，ADR-0031——「错值靠留痕回滚兜底」的退役面）：非空档位键
-     * 必须在档位表有行且启用——白名单从档位表来（替代硬编码集合）。缺行 PRJ_074、
+     * 绑定即时校验（#367，ADR-0031——「错值靠留痕回滚兜底」的退役面）：非空配置键
+     * 必须在配置表有行且启用——白名单从配置表来（替代硬编码集合）。缺行 PRJ_074、
      * 停用 PRJ_075；null（清空回落缺省）放行。
      */
-    private void requireBindableTier(String tierKey) {
-        if (tierKey == null) {
+    private void requireBindableConfig(String configKey) {
+        if (configKey == null) {
             return;
         }
-        ModelTier tier = channelStore.findTier(tierKey);
-        if (tier == null) {
-            throw new ApplicationException(ProjectMessage.MODEL_TIER_BINDING_NOT_FOUND, tierKey);
+        ModelConfig config = channelStore.findConfig(configKey);
+        if (config == null) {
+            throw new ApplicationException(ProjectMessage.MODEL_CONFIG_BINDING_NOT_FOUND, configKey);
         }
-        if (!tier.enabled()) {
-            throw new ApplicationException(ProjectMessage.MODEL_TIER_BINDING_DISABLED, tierKey);
+        if (!config.enabled()) {
+            throw new ApplicationException(ProjectMessage.MODEL_CONFIG_BINDING_DISABLED, configKey);
         }
     }
 

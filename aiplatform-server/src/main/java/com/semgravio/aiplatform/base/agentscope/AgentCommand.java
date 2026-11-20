@@ -10,13 +10,13 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  *
  * <p>{@code runId} 为本轮调用的平台标识（计量幂等键与事件锚定都基于它）；
  * {@code systemPrompt} 可空——为空时取配置默认；{@code modelString}
- * <b>必填</b>（ADR-0031/#366 起全部调用面经档位解析携「前缀:实际模型名」串
+ * <b>必填</b>（ADR-0031/#366 起全部调用面经配置解析携「前缀:实际模型名」串
  * ——三座与边缘四点统一装配链，配置缺省串回落已随边缘点收编退役）；
- * {@code modelChannel} 可空——模型通道注入件（业务侧档位解析的
+ * {@code modelChannel} 可空——模型通道注入件（业务侧配置解析的
  * baseUrl/apiKey/enableThinking，经创建上下文注入 SDK、进实例缓存键指纹）；
  * 主链调用与 {@code modelString} 恒结伴非空；为空＝无通道语境（测试形），
  * SDK 侧回落内置 provider 的环境变量/默认地址；
- * {@code modelQueue} 可空——<b>候选队列</b>（#557，ADR-0053 ③：档位解析的
+ * {@code modelQueue} 可空——<b>候选队列</b>（#557，ADR-0053 ③：配置解析的
  * 整队列产物，主链调用面经 {@code resolveQueue} 携入）：非空＝failover 装配面
  * （多候选＝{@code FailoverModel} 链式切换、单候选＝既有单候选装配行为不变），
  * 且其首候选与 {@code modelString}/{@code modelChannel} 同源（双字段由队列首
@@ -73,7 +73,7 @@ public record AgentCommand(
         ModelCandidateQueue modelQueue) {
 
     /** 无逐轮超时的兼容形（取内核配置默认）：一次性本地会话调用面（取名等）
-     * 不变——空工具面、无工具面规格；模型串由调用侧档位解析携入（#366）。 */
+     * 不变——空工具面、无工具面规格；模型串由调用侧配置解析携入（#366）。 */
     public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation) {
@@ -110,7 +110,7 @@ public record AgentCommand(
                 || modelString == null || modelString.isBlank()) {
             throw new IllegalArgumentException(
                     "AgentCommand 字段不完整：runId/prompt/sessionId/modelString 必填"
-                            + "（modelString＝档位解析产物，ADR-0031/#366 无配置缺省回落）");
+                            + "（modelString＝配置解析产物，ADR-0031/#366 无配置缺省回落）");
         }
         streamCorrelation = streamCorrelation == null ? Map.of() : Map.copyOf(streamCorrelation);
         if (streamCorrelation.containsKey(EventEnvelope.TYPE_KEY)) {

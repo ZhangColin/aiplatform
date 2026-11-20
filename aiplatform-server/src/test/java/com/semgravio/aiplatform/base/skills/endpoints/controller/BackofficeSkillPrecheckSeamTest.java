@@ -25,7 +25,7 @@ import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
-import com.semgravio.aiplatform.business.project.application.ModelTierSeed;
+import com.semgravio.aiplatform.business.project.application.ModelConfigSeed;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
@@ -53,7 +53,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>失败/超时降级</b>：桩抛错/返回不可解析输出 → executed=false「未执行」
  * （与「无重叠」可区分）、hints 恒空，且<b>不拦后续指派</b>（PUT 照常落地）；</li>
  * <li><b>命令断言</b>（ArgumentCaptor 逐字段）：专用会话前缀 skillcheck-、模型
- * 走边缘点档位链（#366 收编：precheck 档位库值优先缺省 flash → 解析单点产模型
+ * 走边缘点配置链（#366 收编：precheck 配置库值优先缺省 flash → 解析单点产模型
  * 串＋通道注入）、空 sink（喂事件无事发生）、短超时 15s、专用
  * 计量标记 agentKind=skillcheck＋平台级归属桶、不触工作区、无配置语境；</li>
  * <li><b>对照材料组装</b>：生效 systemPrompt 库值覆盖优先（造一条 prj_agent_configs
@@ -100,9 +100,9 @@ class BackofficeSkillPrecheckSeamTest {
 
     @BeforeEach
     void ensureChannelKeyForRealResolution() {
-        // 真解析链护卫（#366 边缘点收编）：预检模型走 precheck 档位→解析单点真链路
+        // 真解析链护卫（#366 边缘点收编）：预检模型走 precheck 配置→解析单点真链路
         // （测试环境无 key 注入——幂等补测试 key，DispatchAppServiceTest 同款）
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
     }
 
     @AfterEach
@@ -145,8 +145,8 @@ class BackofficeSkillPrecheckSeamTest {
         // 命令断言（ArgumentCaptor 逐字段，classify 先例形制）
         AgentCommand command = capturedCommand();
         assertThat(command.sessionId()).startsWith("skillcheck-");
-        assertThat(command.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
-        assertThat(command.modelChannel()).isNotNull(); // 边缘点档位链（#366 收编）
+        assertThat(command.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
+        assertThat(command.modelChannel()).isNotNull(); // 边缘点配置链（#366 收编）
         assertThat(command.timeout()).isEqualTo(java.time.Duration.ofSeconds(15));
         assertThat(command.usageContext().subject()).isEqualTo("skills");
         assertThat(command.usageContext().dims())
@@ -370,7 +370,7 @@ class BackofficeSkillPrecheckSeamTest {
     /** 造一条 executor 协议覆盖行（生效值库值优先断言用）。 */
     private void overrideExecutorProtocol() {
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id, operator_id, operator_name)
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key, operator_id, operator_name)
                 VALUES ('executor', ?, NULL, ?, ?)
                 ON CONFLICT (agent_key) DO UPDATE SET system_prompt = EXCLUDED.system_prompt
                 """, PROTOCOL_OVERRIDE, OPERATOR_ID, OPERATOR_NAME);

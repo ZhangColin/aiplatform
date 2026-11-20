@@ -7,8 +7,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * AgentScope 内核配置（前缀 app.agentscope）：默认人格 / agent 名 / 工作区根 /
- * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走档位解析：三座与边缘四点的
- * 模型串＋通道注入由业务侧 {@code ModelTierAppService} 解析随命令/装配透传——
+ * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走配置解析：三座与边缘四点的
+ * 模型串＋通道注入由业务侧 {@code ModelConfigAppService} 解析随命令/装配透传——
  * 旧 yml 模型键 default-model/compaction-model 已随边缘点收编退役）。workspace
  * 是本地兜底工作区（命令未带 workspaceId 时用，如取名轻调用），为空时用
  * AgentScope 默认（.agentscope/workspace）；带 workspaceId 的调用解析为项目
@@ -51,7 +51,7 @@ public class AgentscopeProperties {
      * 尤甚。取 400K：按最坏低估比 2.5× 折算 est 400K ≈ 真实 1M，正好在
      * context_length_exceeded 硬上限前触发（streamEvents 路径天然受益，「炸后下轮」
      * 因下一轮先压缩再跑而自愈，#108 / ADR-0012）。null = 回框架动态缺省。
-     * 压缩模型不在此配（#366 起走边缘点档位链：compaction 档位库值优先缺省 flash，
+     * 压缩模型不在此配（#366 起走边缘点配置链：compaction 配置库值优先缺省 flash，
      * 经 {@code EdgeModelSupplier} 解析注入工厂装配）。
      */
     private Integer compactionTriggerTokens = 400_000;

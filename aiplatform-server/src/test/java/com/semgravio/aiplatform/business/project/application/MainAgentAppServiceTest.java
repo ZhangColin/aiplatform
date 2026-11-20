@@ -177,9 +177,9 @@ class MainAgentAppServiceTest {
 
     @BeforeEach
     void defaultAgentReplies() {
-        // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行
+        // 真解析链护卫（ADR-0031）：命令构建经 ModelConfigAppService 解析种子配置行
         // （flash → deepseek 通道，V79 收敛后种子），测试环境无 key 注入——幂等补测试 key
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         // 轮落定点读 converse/resume 返回维护挂起问答会合锚——默认回复形状兜底
         // （个别用例自带脚本后打桩覆盖之，Mockito 后桩胜出）。同测重打桩时 when()
         // 的 matcher 空参调用会触发旧 answer——null 直接过，不当真调用（同
@@ -325,7 +325,7 @@ class MainAgentAppServiceTest {
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).contains("ask_user");
-        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(value.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue();
         assertThat(value.workspaceId()).isEqualTo("9700");
@@ -346,14 +346,14 @@ class MainAgentAppServiceTest {
     @Test
     void given_main_config_override_when_opinion_turn_then_command_carries_library_values() {
         // #251 装配断言（真命令构建缝，ADR-0021 库值优先缺省回落）：设运营配置库行后
-        // 对话命令实取库值（prompt 与模型档位两腿）；清空（行删即全回落）后下一轮
+        // 对话命令实取库值（prompt 与模型配置两腿）；清空（行删即全回落）后下一轮
         // 命令回枚举默认——解析单点 AgentConfigAppService 经 mainCommand 真链路钉死。
         // #252 增强工具开关同批：生效开关编入 toolSpec 随命令透传（进工厂缓存键＋
         // 装配判据——开关变更下一轮命令构建即新装配）
         Long projectId = persistedProject("9740");
         givenSessionExecutorRunsInline();
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id, web_search_enabled)
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key, web_search_enabled)
                 VALUES ('main', ?, 'pro', false)
                 """, "主智能体覆盖协议：每轮先复述目标。");
 
@@ -380,7 +380,7 @@ class MainAgentAppServiceTest {
                         + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
                         + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(fallback.getAllValues().get(3).modelString())
-                .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+                .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(fallback.getAllValues().get(3).toolSpec())
                 .isEqualTo("ws=true,fu=true,gi=true");
     }
@@ -804,7 +804,7 @@ class MainAgentAppServiceTest {
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.workspaceId()).isEqualTo("9703");
-        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(value.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         // #538 续跑同缝随附试用轨协议段（额度内无收口指令）＋#543 风格目录尾注
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
                 + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
@@ -881,7 +881,7 @@ class MainAgentAppServiceTest {
         assertThat(value.prompt()).isEqualTo("我后台的地址是什么？");
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
-        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(value.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue();
         assertThat(value.usageContext().dims()).isEqualTo(
@@ -2290,12 +2290,12 @@ class MainAgentAppServiceTest {
         assertThat(commands.getAllValues().get(1).prompt())
                 .contains("ask_user").contains("重新提出");
         assertThat(commands.getAllValues().get(1).modelString())
-                .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+                .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
     }
 
     @Test
     void given_corrective_round_1_fails_when_round_2_escalates_strong_and_rescues() {
-        // 纠偏链②：①（主档 flash）仍失格 → ②升强档（routingStrongModelId 缺省 pro）
+        // 纠偏链②：①（主档 flash）仍失格 → ②升强档（routingStrongModelConfigKey 缺省 pro）
         // ＋同款微指令——「flash 为主、做不到升 pro」的升档落点（ADR-0036）；救回即不播报
         Long projectId = persistedProject("9761");
         givenSessionExecutorRunsInline();

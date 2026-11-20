@@ -37,48 +37,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/backoffice/model-tiers/{tierKey}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 档位单行读面
-         * @description 该档位行。寻址键即绑定引用腿（flash/pro/doubao-flagship 这类运营短名）。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 404 PRJ_066 — 模型档位不存在
-         */
-        get: operations["tier"];
-        /**
-         * 档位更新（换通道/升模型版本/改显示名/停启用/开关注度思考；留痕）
-         * @description PUT 全量语义：providerKey/modelName/displayName 终态替换（displayName 可空＝清显示名）；enabled/thinkingEnabled 缺省＝保持现值（停用档换模型名/换通道不被意外复启、开思考的档换模型名不被意外关，显式 true/false 才翻转）。thinkingEnabled＝深度思考开关（#370：跟档位/模型走，改完下一轮命令构建即生效——通道指纹含 thinking 腿，新值＝新模型实例，进行中 run 不定格）。停用＝既有绑定装配报错 PRJ_061、新绑定被即时校验拒绝 PRJ_075（临时下线用停用不删行）。改指向下一轮命令构建即生效（装配动态查库）。值面无动＝幂等回执不落痕；回滚＝留痕旧值快照写回（即一次新变更、留新痕）。X-User-Id/X-User-Name 必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 404 PRJ_066 — 模型档位不存在
-         *     - 400 PRJ_070 — 档位配置字段不完整（providerKey/modelName 必填）
-         *     - 400 PRJ_071 — 档位所属的模型供应商通道不存在：{0}（先建通道行）
-         *     - 400 PRJ_034 — 操作者不能为空
-         */
-        put: operations["update"];
-        post?: never;
-        /**
-         * 档位删除（被绑定引用即拒）
-         * @description 删除档位行；仍被智能体运营配置绑定（model_id/routing_strong_model_id 任一＝该语义键）即 409 PRJ_073——先改绑或清空绑定再删（悬空引用不留静默坑；临时下线用停用不删行）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 404 PRJ_066 — 模型档位不存在
-         *     - 409 PRJ_073 — 该档位仍被智能体运营配置绑定，先改绑或清空绑定再删（临时下线用停用不删行）
-         *     - 400 PRJ_034 — 操作者不能为空
-         */
-        delete: operations["delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/backoffice/model-providers/{providerKey}": {
         parameters: {
             query?: never;
@@ -103,18 +61,98 @@ export interface paths {
          *     - 400 PRJ_069 — 通道配置字段不完整（baseUrl 必填）
          *     - 400 PRJ_034 — 操作者不能为空
          */
-        put: operations["update_1"];
+        put: operations["update"];
         post?: never;
         /**
-         * 通道删除（被档位引用即拒）
-         * @description 删除通道行；仍被档位行引用即 409 PRJ_072（先删改挂其下的档位行——悬空引用不留静默坑）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401
+         * 通道删除（被配置引用即拒）
+         * @description 删除通道行；仍被配置行引用即 409 PRJ_072（先删改挂其下的配置行——悬空引用不留静默坑）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_065 — 模型供应商通道不存在
-         *     - 409 PRJ_072 — 该通道仍被模型档位引用，先删改这些档位行再删通道
+         *     - 409 PRJ_072 — 该通道仍被模型配置或候选行引用，先删改这些配置行（候选随档删）再删通道
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        delete: operations["delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/model-configs/{configKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 配置单行读面
+         * @description 该配置行。寻址键即绑定引用腿（flash/pro/doubao-flagship 这类运营短名）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         */
+        get: operations["config"];
+        /**
+         * 配置更新（换通道/升模型版本/改显示名/停启用/开关注度思考；留痕）
+         * @description PUT 全量语义：providerKey/modelName/displayName 终态替换（displayName 可空＝清显示名）；enabled/thinkingEnabled 缺省＝保持现值（停用档换模型名/换通道不被意外复启、开思考的档换模型名不被意外关，显式 true/false 才翻转）。thinkingEnabled＝深度思考开关（#370：跟配置/模型走，改完下一轮命令构建即生效——通道指纹含 thinking 腿，新值＝新模型实例，进行中 run 不定格）。停用＝既有绑定装配报错 PRJ_061、新绑定被即时校验拒绝 PRJ_075（临时下线用停用不删行）。改指向下一轮命令构建即生效（装配动态查库）。值面无动＝幂等回执不落痕；回滚＝留痕旧值快照写回（即一次新变更、留新痕）。X-User-Id/X-User-Name 必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         *     - 400 PRJ_070 — 配置字段不完整（providerKey/modelName 必填）
+         *     - 400 PRJ_071 — 配置所属的模型供应商通道不存在：{0}（先建通道行）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        put: operations["update_1"];
+        post?: never;
+        /**
+         * 配置删除（被绑定引用即拒）
+         * @description 删除配置行；仍被智能体运营配置绑定（model_config_key/routing_strong_model_config_key 任一＝该语义键）即 409 PRJ_073——先改绑或清空绑定再删（悬空引用不留静默坑；临时下线用停用不删行）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         *     - 409 PRJ_073 — 该配置仍被智能体运营配置绑定，先改绑或清空绑定再删（临时下线用停用不删行）
          *     - 400 PRJ_034 — 操作者不能为空
          */
         delete: operations["delete_1"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/model-configs/{configKey}/candidates/{priority}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 候选改（换指向/启停/移动排序；寻址＝队列序；留痕）
+         * @description 寻址＝队列序（无行 404 PRJ_089）：providerKey/modelName 各自缺省＝保持现值（换指向即换候选身份——留痕＝旧身份删除痕＋新身份新增痕，撞既有身份 409 PRJ_091、通道不存在 400 PRJ_071）；enabled 缺省＝保持、显式 true/false 才翻转（行级启停——false＝读面剔除不参队）；priority＝移动目标队列序（缺省＝原地；区间候选顺移补位——排序即此；越界 PRJ_090）。动到队列头（priority 1）＝配置行现列镜像跟随。值面无动＝幂等回执不落痕；回滚＝留痕旧值快照写回（一次新编排留新痕）。X-User-Id/X-User-Name 必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         *     - 404 PRJ_089 — 该配置无此队列序的候选：{0}#{1}
+         *     - 400 PRJ_071 — 配置所属的模型供应商通道不存在：{0}（先建通道行）
+         *     - 400 PRJ_090 — 候选队列序越界：{0}（须为 1..{1} 的整数）
+         *     - 409 PRJ_091 — 候选已在队列：{0}:{1}（同通道×同模型的重复候选无备胎价值——换实际模型名或通道）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        put: operations["update_2"];
+        post?: never;
+        /**
+         * 候选删（队列压实；编排留痕）
+         * @description 删该队列序的候选（无行 404 PRJ_089）：后续候选顺移补位（priority 密集无空洞——补位候选各留同身份移动痕）。最后一个候选不可删（409 PRJ_092——配置供给定义非空，整队下线走配置停用不删空）。删成留痕 new 全 null；回滚＝按痕旧值原位重建（一次新编排留新痕）。X-User-Id/X-User-Name 必留痕（缺头400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         *     - 404 PRJ_089 — 该配置无此队列序的候选：{0}#{1}
+         *     - 409 PRJ_092 — 配置须保留至少一个候选（整队下线走配置停用，不删空供给定义）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        delete: operations["delete_2"];
         options?: never;
         head?: never;
         patch?: never;
@@ -155,22 +193,22 @@ export interface paths {
         };
         /**
          * 智能体配置读面（生效值＋覆盖标记＋默认预览）
-         * @description 该智能体生效配置：systemPrompt／模型档位生效值（库覆盖值或枚举默认——装配实取值）＋覆盖标记（systemPromptOverridden/modelIdOverridden，运营要看到「现在跑的是覆盖还是默认」）＋枚举默认预览（defaultSystemPrompt/defaultModelId——清空覆盖即落此值，恢复默认前可先看落点）＋增强工具开关存储态（webSearchEnabled/fetchUrlEnabled，#252 起生效装配——工具面清单与窄幅开关另见 /agent-tools 两端点）＋最近写者。无覆盖行＝全回落（覆盖标记 false、写者 null）。寻址稳定键三把：main=主智能体 / executor=run 执行体 / designer=设计执行体；边缘调用点（naming 等）走 /edge/{edgeKey} 档位端点，三座端点对边缘键 404 PRJ_033。需要机机签名（五头 HMAC），无签名 401
+         * @description 该智能体生效配置：systemPrompt／模型配置生效值（库覆盖值或枚举默认——装配实取值）＋覆盖标记（systemPromptOverridden/modelConfigKeyOverridden，运营要看到「现在跑的是覆盖还是默认」）＋枚举默认预览（defaultSystemPrompt/defaultModelConfigKey——清空覆盖即落此值，恢复默认前可先看落点）＋增强工具开关存储态（webSearchEnabled/fetchUrlEnabled，#252 起生效装配——工具面清单与窄幅开关另见 /agent-tools 两端点）＋最近写者。无覆盖行＝全回落（覆盖标记 false、写者 null）。寻址稳定键三把：main=主智能体 / executor=run 执行体 / designer=设计执行体；边缘调用点（naming 等）走 /edge/{edgeKey} 配置端点，三座端点对边缘键 404 PRJ_033。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor/designer 三座智能体）
          */
-        get: operations["config"];
+        get: operations["config_1"];
         /**
          * 智能体配置全量写（覆盖态终态＋变更留痕）
-         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelId/routingFileCountThreshold/routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；token 越出小/中/大封闭集 400 PRJ_079）。路由结构性信号两开关（#454，ADR-0037）：routingFileCountSignalEnabled/routingSizeLabelSignalEnabled 缺省 false/null＝关＝对应信号不参与升档判定（观测值照留进判定快照）；true＝恢复对应判据（阈值/映射旋钮照旧生效）；失败重试信号不受两开关影响、常开。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射命中）升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位键即时校验（#367）：modelId 与 routingStrongModelId 非空时必须在模型档位面（/model-tiers）有行且启用——缺行 400 PRJ_074、停用 400 PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
+         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelConfigKey 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelConfigKey/routingFileCountThreshold/routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；token 越出小/中/大封闭集 400 PRJ_079）。路由结构性信号两开关（#454，ADR-0037）：routingFileCountSignalEnabled/routingSizeLabelSignalEnabled 缺省 false/null＝关＝对应信号不参与升档判定（观测值照留进判定快照）；true＝恢复对应判据（阈值/映射旋钮照旧生效）；失败重试信号不受两开关影响、常开。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射命中）升强档，无信号回落人工档（modelConfigKey 覆盖 → 枚举缺省快档，覆盖即基础档、快配置可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。配置键即时校验（#367）：modelConfigKey 与 routingStrongModelConfigKey 非空时必须在模型配置面（/model-configs）有行且启用——缺行 400 PRJ_074、停用 400 PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor/designer 三座智能体）
          *     - 400 PRJ_034 — 操作者不能为空
          *     - 400 PRJ_079 — 升档规模标签须为小/中/大封闭集内的值：{0}（null/缺省＝清空回落代码缺省「大」；空列表＝空映射）
          */
-        put: operations["update_2"];
+        put: operations["update_3"];
         post?: never;
         delete?: never;
         options?: never;
@@ -186,19 +224,19 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 边缘调用点档位读面（生效值＋覆盖标记＋默认预览）
-         * @description 边缘调用点（一次性轻调用）的模型档位生效值：库覆盖值或代码缺省档位键（#366 同表收编——值面仅模型档位，无 prompt/工具开关/路由件）。寻址稳定键四把：naming=项目取名 / compaction=上下文压缩 / classification=入口分类 / precheck=技能预检。改档下一轮命令构建即生效（装配动态查库，进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401
+         * 边缘调用点配置读面（生效值＋覆盖标记＋默认预览）
+         * @description 边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/工具开关/路由件）。寻址稳定键四把：naming=项目取名 / compaction=上下文压缩 / classification=入口分类 / precheck=技能预检。改配置下一轮命令构建即生效（装配动态查库，进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 404 PRJ_064 — 边缘调用点不存在（档位配置面只有 naming/compaction/classification/precheck 四点）
+         *     - 404 PRJ_064 — 边缘调用点不存在（配置面只有 naming/compaction/classification/precheck 四点）
          */
         get: operations["edgeConfig"];
         /**
-         * 边缘调用点档位写（窄值面＋变更留痕）
-         * @description PUT 全量语义、值面仅模型档位：请求体 {modelId} 即该边缘点覆盖态终态——null/缺省/纯空白＝清空覆盖回落代码缺省 flash；换档不发版（装配库值优先，下一轮命令构建即生效）。留痕与三座全量写同机制：值面有动必落痕（前后快照＋操作者），同值幂等重写不落痕，回滚＝旧值快照写回（一次新变更、留新痕）。档位键即时校验与三座同口径（#367）：非空须在模型档位面有行且启用（缺行 400 PRJ_074、停用 400 PRJ_075；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         * 边缘调用点配置写（窄值面＋变更留痕）
+         * @description PUT 全量语义、值面仅模型配置：请求体 {modelConfigKey} 即该边缘点覆盖态终态——null/缺省/纯空白＝清空覆盖回落代码缺省 flash；换档不发版（装配库值优先，下一轮命令构建即生效）。留痕与三座全量写同机制：值面有动必落痕（前后快照＋操作者），同值幂等重写不落痕，回滚＝旧值快照写回（一次新变更、留新痕）。配置键即时校验与三座同口径（#367）：非空须在模型配置面有行且启用（缺行 400 PRJ_074、停用 400 PRJ_075；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 404 PRJ_064 — 边缘调用点不存在（档位配置面只有 naming/compaction/classification/precheck 四点）
+         *     - 404 PRJ_064 — 边缘调用点不存在（配置面只有 naming/compaction/classification/precheck 四点）
          *     - 400 PRJ_034 — 操作者不能为空
          */
         put: operations["updateEdgeModel"];
@@ -1152,7 +1190,7 @@ export interface paths {
          *     - 409 SKL_013 — 更新将移除有指派在身的技能，先解绑再更新
          *     - 400 SKL_014 — 来源包标识不能为空（取清单行 sourcePackage 值）
          */
-        post: operations["update_3"];
+        post: operations["update_4"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1385,7 +1423,7 @@ export interface paths {
          *     - 400 PRJ_058 — 生产承接字段超长
          *     - 400 PRJ_059 — 操作者必填（生产承接动作须携带操作者身份）
          */
-        post: operations["update_4"];
+        post: operations["update_5"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1733,39 +1771,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/backoffice/model-tiers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 档位清单读面（绑定下拉数据源）
-         * @description 全部档位行按语义键序：语义键/实际模型名/所属通道/显示名/启用态＋最近写者。绑定改档（agent-configs 面 PUT）的即时校验放行值＝本清单 enabled=true 的语义键集。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 401 UNAUTHORIZED — Authentication required
-         */
-        get: operations["tiers"];
-        put?: never;
-        /**
-         * 档位创建（建行即可被绑定）
-         * @description 新建档位：语义键随体（已存在 409 PRJ_068）；所属通道必须已有行（PRJ_071——先建通道再挂档位）；实际模型名必填（PRJ_070）；显示名可空（＝回落语义键）；enabled 缺省 true。创建即落痕（old 全 null）。模型版本升级（方舟名带日期后缀、季度级更新）＝改档位行指向，全部引用自动跟上。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 409 PRJ_068 — 模型档位已存在（语义键唯一——改既有档走 PUT）
-         *     - 400 PRJ_070 — 档位配置字段不完整（providerKey/modelName 必填）
-         *     - 400 PRJ_071 — 档位所属的模型供应商通道不存在：{0}（先建通道行）
-         *     - 400 PRJ_034 — 操作者不能为空
-         */
-        post: operations["create_2"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/backoffice/model-providers": {
         parameters: {
             query?: never;
@@ -1784,14 +1789,14 @@ export interface paths {
         put?: never;
         /**
          * 通道创建（apiKey 收全量值，创建即留痕）
-         * @description 新建接入通道：键名（＝协议路由前缀，OpenAI 兼容统一接、SDK 内置前缀走原生 provider）随体、已存在 409 PRJ_067；baseUrl 必填（PRJ_069）；apiKey 收全量值（null/空白＝暂不配置——装配按 PRJ_063 明确报错）；enabled 缺省 true。回执apiKey 已掩码。创建即落痕（old 全 null）。新通道接入＝建通道行＋档位行两步（档位面 POST /model-tiers），不动结构。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         * @description 新建接入通道：键名（＝协议路由前缀，OpenAI 兼容统一接、SDK 内置前缀走原生 provider）随体、已存在 409 PRJ_067；baseUrl 必填（PRJ_069）；apiKey 收全量值（null/空白＝暂不配置——装配按 PRJ_063 明确报错）；enabled 缺省 true。回执apiKey 已掩码。创建即落痕（old 全 null）。新通道接入＝建通道行＋配置行两步（配置面 POST /model-configs），不动结构。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 409 PRJ_067 — 模型供应商通道已存在（键名唯一——改既有行走 PUT）
          *     - 400 PRJ_069 — 通道配置字段不完整（baseUrl 必填）
          *     - 400 PRJ_034 — 操作者不能为空
          */
-        post: operations["create_3"];
+        post: operations["create_2"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1808,8 +1813,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 远端模型清单手动拉取（对照库内档位）
-         * @description 按通道行真拉远端模型清单（OpenAI 兼容 GET {baseUrl}/models，方舟端点实测同形状）并与库内档位对照：条目 trackedTierKeys 空＝远端有库里无（建议入库）；staleTiers＝库内指向远端已无（提示过时）。每次全量真拉无缓存（手动同步——自动定时同步备案未来增强，ADR-0031）。勾选入库复用档位创建写口（POST /api/backoffice/model-tiers，modelName 填所选条目 modelId、语义键人工命名）。条目 status 如实转述（方舟：无 status＝活跃、Shutdown/Retiring＝下架/退场中）。上游不可用明确报错不静默（502 PRJ_077 带理由）；通道 key 空 400 PRJ_076；停用通道可拉（巡检语义）。纯读动作零留痕。需要机机签名（五头 HMAC），无签名 401
+         * 远端模型清单手动拉取（对照库内配置）
+         * @description 按通道行真拉远端模型清单（OpenAI 兼容 GET {baseUrl}/models，方舟端点实测同形状）并与库内配置对照：条目 trackedConfigKeys 空＝远端有库里无（建议入库）；staleConfigs＝库内指向远端已无（提示过时）。每次全量真拉无缓存（手动同步——自动定时同步备案未来增强，ADR-0031）。勾选入库复用配置创建写口（POST /api/backoffice/model-configs，modelName 填所选条目 modelId、语义键人工命名）。条目 status 如实转述（方舟：无 status＝活跃、Shutdown/Retiring＝下架/退场中）。上游不可用明确报错不静默（502 PRJ_077 带理由）；通道 key 空 400 PRJ_076；停用通道可拉（巡检语义）。纯读动作零留痕。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_065 — 模型供应商通道不存在
@@ -1818,6 +1823,74 @@ export interface paths {
          *     - 401 UNAUTHORIZED — Authentication required
          */
         post: operations["pullRemoteModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/model-configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 配置清单读面（绑定下拉数据源）
+         * @description 全部配置行按语义键序：语义键/实际模型名/所属通道/显示名/启用态＋最近写者。绑定改配置（agent-configs 面 PUT）的即时校验放行值＝本清单 enabled=true 的语义键集。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 401 UNAUTHORIZED — Authentication required
+         */
+        get: operations["configs"];
+        put?: never;
+        /**
+         * 配置创建（建行即可被绑定）
+         * @description 新建配置：语义键随体（已存在 409 PRJ_068）；所属通道必须已有行（PRJ_071——先建通道再挂配置）；实际模型名必填（PRJ_070）；显示名可空（＝回落语义键）；enabled 缺省 true。创建即落痕（old 全 null）。模型版本升级（方舟名带日期后缀、季度级更新）＝改配置行指向，全部引用自动跟上。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 409 PRJ_068 — 模型配置已存在（语义键唯一——改既有档走 PUT）
+         *     - 400 PRJ_070 — 配置字段不完整（providerKey/modelName 必填）
+         *     - 400 PRJ_071 — 配置所属的模型供应商通道不存在：{0}（先建通道行）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        post: operations["create_3"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/model-configs/{configKey}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 候选队列读面（priority 升序＝队列序）
+         * @description 该配置全部候选行按队列序（含停用行——启停过滤是装配语义）：队列序/通道/实际模型名/行级启停＋最近写者。主备＝队列前两名。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         */
+        get: operations["candidates"];
+        put?: never;
+        /**
+         * 候选增（追加/插位；编排留痕）
+         * @description 新候选入队：priority 缺省＝追加队尾、显式 1..队尾+1＝插位（既有候选顺移，越界 PRJ_090）；候选身份＝通道×实际模型名，队列内唯一（重复 409 PRJ_091——同故障物理单元无备胎价值）；通道须已有行（PRJ_071）。配置无候选行时配置行现列即隐式首选候选（先进队列再插新行，不被顶掉）。回执＝整队列（编排结果一次可见）。变更下一轮命令构建即生效（resolve 动态查库）。X-User-Id/X-User-Name 必留痕（缺头400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_066 — 模型配置不存在
+         *     - 400 PRJ_088 — 候选配置字段不完整（providerKey/modelName 必填）
+         *     - 400 PRJ_071 — 配置所属的模型供应商通道不存在：{0}（先建通道行）
+         *     - 400 PRJ_090 — 候选队列序越界：{0}（须为 1..{1} 的整数）
+         *     - 409 PRJ_091 — 候选已在队列：{0}:{1}（同通道×同模型的重复候选无备胎价值——换实际模型名或通道）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        post: operations["add"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2365,7 +2438,7 @@ export interface paths {
          * 删除项目（真删级联）
          * @description 容器/卷级联清理 + wsp_*\/prj_* 库记录删除；SSE workspace-destroyed
          */
-        delete: operations["delete_2"];
+        delete: operations["delete_3"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2666,7 +2739,7 @@ export interface paths {
         };
         /**
          * 首建派发门读面（访谈②：岔路口卡与 PRD 确认按钮的呈现条件）
-         * @description #542 两入口退役后首个构建 run 的点火归用户——本端点是两个点火面的呈现条件单读点（服务端单源，前端不自算）：forkCardPending＝试用态访谈自然收口待选择（岔路口三选卡「持久可回」，重载/回访重建；「立即生成」经 POST /{id}/generate 点火）；prdConfirmable＝付费态首建待确认（PRD 文档面「确认 PRD，开始生成」按钮，确认即派发）。两呈现互斥（两轨判定归扣费域单读点）；快道（收敛令/零必答短路/「直接开始做」）收口观测直派生成——两读面都缺席（false）；点火后（generation_requested_at 落位）卡与按钮都不复现（失败重试走「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。forkSettleDue＝「继续讨论」引导流到账自动翻转信号（#544：卡在场∧源已选定∧源池余额为正——他处到账〔不限收银台单缝〕后卡回读即显，前端空 source 重判即翻转，POST /{id}/fork/continue-discussion）。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null（非 404——读面缺席语义与拦截卡同族）。
+         * @description #542 两入口退役后首个构建 run 的点火归用户——本端点是两个点火面的呈现条件单读点（服务端单源，前端不自算）：forkCardPending＝试用态访谈自然收口待选择（岔路口三选卡「持久可回」，重载/回访重建；「立即生成」经 POST /{id}/generate 点火）；prdConfirmable＝付费态首建待确认（PRD 文档面「确认 PRD，开始生成」按钮，确认即派发）。两呈现互斥（两轨判定归扣费域单读点）；快道（试用态＝用户明确收敛令；付费态＝零必答短路/「直接开始做」视同确认）收口观测直派生成——两读面都缺席（false）；点火后（generation_requested_at 落位）卡与按钮都不复现（失败重试走「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。forkSettleDue＝「继续讨论」引导流到账自动翻转信号（#544：卡在场∧源已选定∧源池余额为正——他处到账〔不限收银台单缝〕后卡回读即显，前端空 source 重判即翻转，POST /{id}/fork/continue-discussion）。归属守卫同单项目寻址统一口径（先于控制器）。项目不存在 data=null（非 404——读面缺席语义与拦截卡同族）。
          */
         get: operations["buildGate"];
         put?: never;
@@ -3530,29 +3603,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/backoffice/model-tiers/{tierKey}/traces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 档位变更留痕读面（历史可查，回滚依据）
-         * @description 该档位全部变更留痕按时间倒序（最近先）：前后全量值快照＋操作者＋时刻；创建痕 old 全 null、删除痕 new 全 null；append-only 跨行存活——行删除后留痕仍可读（空清单＝从未有行，行读面负责 404 判别）。回滚＝把某痕旧值快照写回（行在＝PUT、行已删＝按旧值重建行，皆一次新变更留新痕，不做版本树）。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 401 UNAUTHORIZED — Authentication required
-         */
-        get: operations["traces"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/backoffice/model-providers/{providerKey}/traces": {
         parameters: {
             query?: never;
@@ -3567,7 +3617,53 @@ export interface paths {
          *     错误码：
          *     - 401 UNAUTHORIZED — Authentication required
          */
+        get: operations["traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/model-configs/{configKey}/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 配置变更留痕读面（历史可查，回滚依据）
+         * @description 该配置全部变更留痕按时间倒序（最近先）：前后全量值快照＋操作者＋时刻；创建痕 old 全 null、删除痕 new 全 null；append-only 跨行存活——行删除后留痕仍可读（空清单＝从未有行，行读面负责 404 判别）。回滚＝把某痕旧值快照写回（行在＝PUT、行已删＝按旧值重建行，皆一次新变更留新痕，不做版本树）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 401 UNAUTHORIZED — Authentication required
+         */
         get: operations["traces_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/model-configs/{configKey}/candidates/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 候选编排留痕读面（历史可查，回滚依据）
+         * @description 该配置候选全部编排留痕按时间倒序（最近先）：身份轴前后快照（新增痕 old 全 null、删除痕 new 全 null、移动/启停/换指向＝同身份 priority/enabled 前后可见）＋操作者＋时刻；append-only 跨行存活。回滚＝按痕旧值写回（重排/重建候选＝一次新编排留新痕）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 401 UNAUTHORIZED — Authentication required
+         */
+        get: operations["traces_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3624,7 +3720,7 @@ export interface paths {
          *     错误码：
          *     - 404 KNW_005 — 知识素材不存在
          */
-        delete: operations["delete_3"];
+        delete: operations["delete_4"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3639,7 +3735,7 @@ export interface paths {
         };
         /**
          * unpriced 全局警示（用量驱动）
-         * @description 窗口内有 token 用量且事件时点无生效单价的 (provider, model, 档位) 按档位汇总 token（只计无价分量——同档位部分有价部分无价时只计无价部分）。用量驱动：已配价档位与无用量档位不出现，静态配价缺口清单不做（无用量＝无实际损失）；据此发现漏配价并及时补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝该侧不限）；空窗/无未配价用量返回空 items，不是错误。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
+         * @description 窗口内有 token 用量且事件时点无生效单价的 (供应商, model, 档位) 按档位汇总 token（只计无价分量——同档位部分有价部分无价时只计无价部分）。provider 字段承载供应商（vendor，ADR-0053 ②——补价动作的匹配对象是供应商级单价行，同 vendor 多账号共用）。用量驱动：已配价档位与无用量档位不出现，静态配价缺口清单不做（无用量＝无实际损失）；据此发现漏配价并及时补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝该侧不限）；空窗/无未配价用量返回空 items，不是错误。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 NOT_FOUND — Resource not found
@@ -3686,7 +3782,7 @@ export interface paths {
         };
         /**
          * 单项目成本下钻（byModel/byAgentKind 分解）
-         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体（dims.agentKind 原值 + agentKindName 中文名随行——#186，口径同全局总览；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
+         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的供应商/model/档位——provider 字段承载 vendor，与 cost 互补不重叠）+ 分模型（vendor+model 跨账号合并）+ 分智能体（dims.agentKind 原值 + agentKindName 中文名随行——#186，口径同全局总览；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 NOT_FOUND — Resource not found
@@ -3807,7 +3903,7 @@ export interface paths {
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor/designer 三座智能体）
          */
-        get: operations["traces_2"];
+        get: operations["traces_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3824,11 +3920,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 边缘调用点档位留痕读面（历史可查，回滚依据）
-         * @description 该边缘点全部配置变更留痕，按时间倒序（最近先）——快照列与三座同形（边缘行档位列之外的快照件恒缺省态：prompt null、开关 true）。回滚＝把某痕旧值快照的 modelId PUT 回写（即一次新变更、留新痕，不做版本树）。需要机机签名（五头 HMAC），无签名 401
+         * 边缘调用点配置留痕读面（历史可查，回滚依据）
+         * @description 该边缘点全部配置变更留痕，按时间倒序（最近先）——快照列与三座同形（边缘行配置列之外的快照件恒缺省态：prompt null、开关 true）。回滚＝把某痕旧值快照的 modelConfigKey PUT 回写（即一次新变更、留新痕，不做版本树）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 404 PRJ_064 — 边缘调用点不存在（档位配置面只有 naming/compaction/classification/precheck 四点）
+         *     - 404 PRJ_064 — 边缘调用点不存在（配置面只有 naming/compaction/classification/precheck 四点）
          */
         get: operations["edgeTraces"];
         put?: never;
@@ -3944,7 +4040,7 @@ export interface paths {
          *     - 409 ORD_006 — 订单处理中——如需继续修改，请取消订单
          *     - 500 WSP_002 — 环境后端操作失败
          */
-        delete: operations["delete_4"];
+        delete: operations["delete_5"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4040,7 +4136,70 @@ export interface components {
             message?: string;
             errorCode?: string;
         };
-        ModelTierUpdateCommand: {
+        ModelProviderUpdateCommand: {
+            /**
+             * @description 归一供应商（受控值校验同创建；缺省＝保持现值。换归一＝计量/单价匹配维度随之切换——留痕前后快照可回滚）
+             * @example deepseek
+             */
+            vendor?: string;
+            /**
+             * @description 通道 baseUrl（终态全量替换，必填）
+             * @example https://ark.cn-beijing.volces.com/api/v3
+             */
+            baseUrl?: string;
+            /** @description apiKey：写全量新值＝换 key（写面唯一明文入口）；null/空白/等于现值掩码形＝保持现值（读面掩码回显的 round-trip 安全语义）。清除 key 无写面——下线通道走 enabled=false */
+            apiKey?: string;
+            /** @description 启用态（缺省＝保持现值，显式 true/false 才翻转——停用通道换 key/换地址不被意外复启；停用＝引用该通道的装配明确报错，不静默换道） */
+            enabled?: boolean;
+        };
+        ApiResponseBackofficeModelProviderResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeModelProviderResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeModelProviderResponse: {
+            /**
+             * @description 通道键名＝协议路由前缀
+             * @example volcengine
+             */
+            providerKey?: string;
+            /**
+             * @description 归一供应商（计量按模型统计与单价/峰谷匹配的维度腿；同供应商多账号行同填，如 deepseek/deepseek-2 同填 deepseek）
+             * @example deepseek
+             */
+            vendor?: string;
+            /**
+             * @description 通道 baseUrl（创建上下文注入 SDK）
+             * @example https://ark.cn-beijing.volces.com/api/v3
+             */
+            baseUrl?: string;
+            /**
+             * @description apiKey 掩码形（尾 4 位；null＝未配置——接口回显零明文 key）
+             * @example ****ab12
+             */
+            apiKeyMasked?: string;
+            /** @description 启用态（停用＝引用该通道的装配明确报错，不静默换道） */
+            enabled?: boolean;
+            /**
+             * @description 最近写者 id（admin 侧 TSID；null＝种子/迁移写入）
+             * @example 700210
+             */
+            operatorId?: string;
+            /**
+             * @description 最近写者名（直读展示）
+             * @example 运营·智能体管理员
+             */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 最近写入时刻
+             */
+            updatedAt?: string;
+        };
+        ModelConfigUpdateCommand: {
             /**
              * @description 所属通道键（终态全量替换，必填且须已存在）
              * @example volcengine
@@ -4061,20 +4220,20 @@ export interface components {
             /** @description 深度思考开关（缺省＝保持现值，显式 true/false 才翻转；改完下一轮命令构建即生效——通道指纹含 thinking 腿，新值＝新模型实例，进行中 run 不定格） */
             thinkingEnabled?: boolean;
         };
-        ApiResponseBackofficeModelTierResponse: {
+        ApiResponseBackofficeModelConfigResponse: {
             /** Format: int32 */
             code?: number;
             message?: string;
-            data?: components["schemas"]["BackofficeModelTierResponse"];
+            data?: components["schemas"]["BackofficeModelConfigResponse"];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
-        BackofficeModelTierResponse: {
+        BackofficeModelConfigResponse: {
             /**
-             * @description 档位语义键（绑定面引用值）
+             * @description 配置语义键（绑定面引用值）
              * @example flash
              */
-            tierKey?: string;
+            configKey?: string;
             /**
              * @description 所属通道键（模型串「前缀:实际模型名」的前缀腿）
              * @example volcengine
@@ -4110,51 +4269,61 @@ export interface components {
              */
             updatedAt?: string;
         };
-        ModelProviderUpdateCommand: {
+        ModelConfigCandidateUpdateCommand: {
             /**
-             * @description 通道 baseUrl（终态全量替换，必填）
-             * @example https://ark.cn-beijing.volces.com/api/v3
-             */
-            baseUrl?: string;
-            /** @description apiKey：写全量新值＝换 key（写面唯一明文入口）；null/空白/等于现值掩码形＝保持现值（读面掩码回显的 round-trip 安全语义）。清除 key 无写面——下线通道走 enabled=false */
-            apiKey?: string;
-            /** @description 启用态（缺省＝保持现值，显式 true/false 才翻转——停用通道换 key/换地址不被意外复启；停用＝引用该通道的装配明确报错，不静默换道） */
-            enabled?: boolean;
-        };
-        ApiResponseBackofficeModelProviderResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["BackofficeModelProviderResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        BackofficeModelProviderResponse: {
-            /**
-             * @description 通道键名＝协议路由前缀
-             * @example volcengine
+             * @description 换指向通道键（缺省＝保持现值）
+             * @example deepseek-2
              */
             providerKey?: string;
             /**
-             * @description 通道 baseUrl（创建上下文注入 SDK）
-             * @example https://ark.cn-beijing.volces.com/api/v3
+             * @description 换指向实际模型名（缺省＝保持现值）
+             * @example deepseek-flash
              */
-            baseUrl?: string;
-            /**
-             * @description apiKey 掩码形（尾 4 位；null＝未配置——接口回显零明文 key）
-             * @example ****ab12
-             */
-            apiKeyMasked?: string;
-            /** @description 启用态（停用＝引用该通道的装配明确报错，不静默换道） */
+            modelName?: string;
+            /** @description 行级启停（缺省＝保持现值；显式 true/false 才翻转——false＝读面剔除不参队） */
             enabled?: boolean;
             /**
-             * @description 最近写者 id（admin 侧 TSID；null＝种子/迁移写入）
-             * @example 700210
+             * Format: int32
+             * @description 移动目标队列序（缺省＝原地不动；显式值＝移动，区间候选顺移补位——排序即此）
+             * @example 1
+             */
+            priority?: number;
+        };
+        ApiResponseListBackofficeModelConfigCandidateResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeModelConfigCandidateResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeModelConfigCandidateResponse: {
+            /**
+             * Format: int32
+             * @description 队列序（小者先；主备＝队列前两名）
+             * @example 2
+             */
+            priority?: number;
+            /**
+             * @description 通道键（切换单元＝故障物理单元：endpoint×账号 key）
+             * @example deepseek-2
+             */
+            providerKey?: string;
+            /**
+             * @description 实际模型名（计量/单价行匹配腿）
+             * @example deepseek-flash
+             */
+            modelName?: string;
+            /** @description 行级启停（false＝读面剔除不参队；与配置行启停正交） */
+            enabled?: boolean;
+            /**
+             * @description 最近写者 id（null＝种子/迁移写入）
+             * @example 700214
              */
             operatorId?: string;
             /**
              * @description 最近写者名（直读展示）
-             * @example 运营·智能体管理员
+             * @example 运营·候选队列管理员
              */
             operatorName?: string;
             /**
@@ -4198,10 +4367,10 @@ export interface components {
             /** @description 覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝清空覆盖，装配回落枚举默认——GET 回执的 defaultSystemPrompt 即回落落点） */
             systemPrompt?: string;
             /**
-             * @description 覆盖模型档位键（如 pro；null/缺省/纯空白＝清空覆盖回落枚举默认。即时校验（#367）：须在模型档位面有行且启用（PRJ_074/075））
+             * @description 覆盖模型配置键（如 pro；null/缺省/纯空白＝清空覆盖回落枚举默认。即时校验（#367）：须在模型配置面有行且启用（PRJ_074/075））
              * @example pro
              */
-            modelId?: string;
+            modelConfigKey?: string;
             /** @description 增强工具开关：联网搜索（缺省 true＝开；#252 起生效装配——关即退出槽位装配面、开即回归，窄幅写口 PUT /agent-tools/{toolName}） */
             webSearchEnabled?: boolean;
             /** @description 增强工具开关：网页抓取（缺省 true＝开；生效语义同 webSearchEnabled） */
@@ -4209,10 +4378,10 @@ export interface components {
             /** @description 模型路由开关（#354：缺省 true＝开——路由判定优先；false＝既有人工定档口径。仅 run 执行体消费） */
             routingEnabled?: boolean;
             /**
-             * @description 强模型档语义键（#354 路由升档落点；null/缺省/纯空白＝清空回落代码缺省 pro。即时校验同 modelId（#367）
+             * @description 强模型档语义键（#354 路由升档落点；null/缺省/纯空白＝清空回落代码缺省 pro。即时校验同 modelConfigKey（#367）
              * @example pro
              */
-            routingStrongModelId?: string;
+            routingStrongModelConfigKey?: string;
             /**
              * Format: int32
              * @description 文件面阈值（#354/#426：应用文件面——工作区已跟踪文件数扣基座基数 ≥ 此值升强档；null＝清空回落代码缺省 30）
@@ -4231,10 +4400,10 @@ export interface components {
             /** @description 规模标签信号开关（#454，ADR-0037：缺省 false/null＝关＝规模标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。仅 run 执行体行消费） */
             routingSizeLabelSignalEnabled?: boolean;
             /**
-             * @description verify 验证子智能体档位键（#424 片轻验：null/缺省/纯空白＝清空随执行体生效档〔含路由升档，缺省同档不降〕。即时校验同 modelId（#367：须在模型档位面有行且启用）
+             * @description verify 验证子智能体配置键（#424 片轻验：null/缺省/纯空白＝清空随执行体生效档〔含路由升档，缺省同档不降〕。即时校验同 modelConfigKey（#367：须在模型配置面有行且启用）
              * @example pro
              */
-            verifyModelId?: string;
+            verifyModelConfigKey?: string;
             /**
              * Format: int32
              * @description 单场验证轮次预算（#424 防无限复验：登记达预算仍有未过项即停修复—复验、未过项如实带入收口；null＝清空回落代码缺省 3；1-20 整数，越界 PRJ_078）
@@ -4305,21 +4474,21 @@ export interface components {
             /** @description 生效 systemPrompt（库覆盖值或枚举默认——装配实取值，对照 systemPromptOverridden 知来源） */
             systemPrompt?: string;
             /**
-             * @description 生效模型档位键（ADR-0031 语义键，如 flash/pro）
+             * @description 生效模型配置键（ADR-0031 语义键，如 flash/pro）
              * @example flash
              */
-            modelId?: string;
+            modelConfigKey?: string;
             /** @description systemPrompt 是否库覆盖值（true＝覆盖；false＝枚举默认） */
             systemPromptOverridden?: boolean;
-            /** @description 模型档位是否库覆盖值（true＝覆盖；false＝枚举默认；路由开时为兜底基础档——信号升档可越过；路由关时＝钉死人工档） */
-            modelIdOverridden?: boolean;
+            /** @description 模型配置是否库覆盖值（true＝覆盖；false＝枚举默认；路由开时为兜底基础档——信号升档可越过；路由关时＝钉死人工档） */
+            modelConfigKeyOverridden?: boolean;
             /** @description 枚举默认 systemPrompt（预览：清空覆盖即落此值——身份与配置分治的缺省正本） */
             defaultSystemPrompt?: string;
             /**
-             * @description 枚举默认模型档位（清空覆盖即落此值）
+             * @description 枚举默认模型配置（清空覆盖即落此值）
              * @example flash
              */
-            defaultModelId?: string;
+            defaultModelConfigKey?: string;
             /** @description 联网搜索开关生效态（#252 起生效装配：关即退出槽位装配面；无覆盖行语境＝true 开） */
             webSearchEnabled?: boolean;
             /** @description 网页抓取开关生效态（生效语义同 webSearchEnabled；无覆盖行语境＝true 开） */
@@ -4327,17 +4496,17 @@ export interface components {
             /** @description 模型路由开关生效态（#354：开＝路由判定优先；关＝既有人工定档口径。仅 run 执行体消费，无覆盖行语境＝true 开） */
             routingEnabled?: boolean;
             /**
-             * @description 强模型档生效值（#354 路由升档落点；库覆盖值或代码缺省——对照 routingStrongModelIdOverridden 知来源）
+             * @description 强模型档生效值（#354 路由升档落点；库覆盖值或代码缺省——对照 routingStrongModelConfigKeyOverridden 知来源）
              * @example pro
              */
-            routingStrongModelId?: string;
+            routingStrongModelConfigKey?: string;
             /** @description 强模型档是否库覆盖值（true＝覆盖；false＝代码缺省） */
-            routingStrongModelIdOverridden?: boolean;
+            routingStrongModelConfigKeyOverridden?: boolean;
             /**
              * @description 代码缺省强模型档（预览：清空覆盖即落此值）
              * @example pro
              */
-            defaultRoutingStrongModelId?: string;
+            defaultRoutingStrongModelConfigKey?: string;
             /**
              * Format: int32
              * @description 文件面阈值生效值（#354/#426：应用文件面——已跟踪文件数扣基座基数 ≥ 此值升强档；库覆盖值或代码缺省）
@@ -4373,12 +4542,12 @@ export interface components {
             /** @description 规模标签信号开关生效态（#454，ADR-0037：缺省 false＝关＝规模标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。仅 run 执行体消费） */
             routingSizeLabelSignalEnabled?: boolean;
             /**
-             * @description verify 验证子智能体档位覆盖值（#424 片轻验：null＝随执行体生效档——含路由升档，缺省同档不降）
+             * @description verify 验证子智能体配置覆盖值（#424 片轻验：null＝随执行体生效档——含路由升档，缺省同档不降）
              * @example pro
              */
-            verifyModelId?: string;
-            /** @description verify 档位是否库覆盖值（true＝覆盖钉死；false＝随执行体档） */
-            verifyModelIdOverridden?: boolean;
+            verifyModelConfigKey?: string;
+            /** @description verify 配置是否库覆盖值（true＝覆盖钉死；false＝随执行体档） */
+            verifyModelConfigKeyOverridden?: boolean;
             /**
              * Format: int32
              * @description 单场验证轮次预算生效值（#424 防无限复验：登记达预算仍有未过项即停修复—复验；库覆盖值或代码缺省）
@@ -4478,10 +4647,10 @@ export interface components {
         };
         EdgeModelUpdateCommand: {
             /**
-             * @description 覆盖模型档位键（如 pro；null/缺省/纯空白＝清空覆盖，装配回落代码缺省 flash。即时校验：须在模型档位面有行且启用（PRJ_074/075））
+             * @description 覆盖模型配置键（如 pro；null/缺省/纯空白＝清空覆盖，装配回落代码缺省 flash。即时校验：须在模型配置面有行且启用（PRJ_074/075））
              * @example pro
              */
-            modelId?: string;
+            modelConfigKey?: string;
         };
         ApiResponseBackofficeEdgeModelConfigResponse: {
             /** Format: int32 */
@@ -4503,17 +4672,17 @@ export interface components {
              */
             agentName?: string;
             /**
-             * @description 生效模型档位键（ADR-0031 语义键，如 flash/pro）
+             * @description 生效模型配置键（ADR-0031 语义键，如 flash/pro）
              * @example flash
              */
-            modelId?: string;
-            /** @description 模型档位是否库覆盖值（true＝覆盖；false＝代码缺省 flash） */
-            modelIdOverridden?: boolean;
+            modelConfigKey?: string;
+            /** @description 模型配置是否库覆盖值（true＝覆盖；false＝代码缺省 flash） */
+            modelConfigKeyOverridden?: boolean;
             /**
-             * @description 代码缺省模型档位（清空覆盖即落此值）
+             * @description 代码缺省模型配置（清空覆盖即落此值）
              * @example flash
              */
-            defaultModelId?: string;
+            defaultModelConfigKey?: string;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700210
@@ -5673,38 +5842,17 @@ export interface components {
         CancelOrderCommand: {
             reason?: string;
         };
-        ModelTierCreateCommand: {
-            /**
-             * @description 档位语义键（引用腿——三座/边缘点/路由强档绑定的值）
-             * @example doubao-flagship
-             */
-            tierKey?: string;
-            /**
-             * @description 所属通道键（必须已存在——先建通道行再挂档位）
-             * @example volcengine
-             */
-            providerKey?: string;
-            /**
-             * @description 实际模型名（通道侧 Model ID，方舟名带日期后缀——版本升级改此处指向、全部引用自动跟上）
-             * @example doubao-seed-2-1-pro-260915
-             */
-            modelName?: string;
-            /**
-             * @description 运营显示名（后台绑定下拉的人话标签；可空＝回落语义键）
-             * @example 豆包旗舰
-             */
-            displayName?: string;
-            /** @description 启用态（缺省 true；停用＝既有绑定装配报错、新绑定被即时校验拒绝） */
-            enabled?: boolean;
-            /** @description 深度思考开关（#370：跟档位/模型走；缺省 false＝显式关——不配置不默认拖慢首 token，开态影响首轮延迟/质量/token，细测对比后按档开启） */
-            thinkingEnabled?: boolean;
-        };
         ModelProviderCreateCommand: {
             /**
              * @description 通道键名＝协议路由前缀（模型串「前缀:实际模型名」的前缀腿；OpenAI 兼容通道统一接，SDK 内置前缀走原生 provider）
              * @example volcengine
              */
             providerKey?: string;
+            /**
+             * @description 归一供应商（受控值：小写字母/数字/连字符 1-50 位；缺省＝providerKey 同值。按模型统计与单价/峰谷匹配的维度腿——同供应商多账号行显式同填，如 deepseek/deepseek-2 同填 deepseek）
+             * @example deepseek
+             */
+            vendor?: string;
             /**
              * @description 通道 baseUrl（创建上下文注入 SDK，覆盖依赖库默认地址）
              * @example https://ark.cn-beijing.volces.com/api/v3
@@ -5728,19 +5876,65 @@ export interface components {
             /** Format: date-time */
             pulledAt?: string;
             remoteModels?: components["schemas"]["RemoteModelEntry"][];
-            staleTiers?: components["schemas"]["StaleTier"][];
+            staleConfigs?: components["schemas"]["StaleConfig"][];
         };
         RemoteModelEntry: {
             modelId?: string;
             name?: string;
             status?: string;
             domain?: string;
-            trackedTierKeys?: string[];
+            trackedConfigKeys?: string[];
         };
-        StaleTier: {
-            tierKey?: string;
+        StaleConfig: {
+            configKey?: string;
             modelName?: string;
             displayName?: string;
+            enabled?: boolean;
+        };
+        ModelConfigCreateCommand: {
+            /**
+             * @description 配置语义键（引用腿——三座/边缘点/路由强档绑定的值）
+             * @example doubao-flagship
+             */
+            configKey?: string;
+            /**
+             * @description 所属通道键（必须已存在——先建通道行再挂配置）
+             * @example volcengine
+             */
+            providerKey?: string;
+            /**
+             * @description 实际模型名（通道侧 Model ID，方舟名带日期后缀——版本升级改此处指向、全部引用自动跟上）
+             * @example doubao-seed-2-1-pro-260915
+             */
+            modelName?: string;
+            /**
+             * @description 运营显示名（后台绑定下拉的人话标签；可空＝回落语义键）
+             * @example 豆包旗舰
+             */
+            displayName?: string;
+            /** @description 启用态（缺省 true；停用＝既有绑定装配报错、新绑定被即时校验拒绝） */
+            enabled?: boolean;
+            /** @description 深度思考开关（#370：跟配置/模型走；缺省 false＝显式关——不配置不默认拖慢首 token，开态影响首轮延迟/质量/token，细测对比后按档开启） */
+            thinkingEnabled?: boolean;
+        };
+        ModelConfigCandidateCreateCommand: {
+            /**
+             * @description 通道键（一行＝endpoint×账号 key；须已在通道面建行）
+             * @example deepseek-2
+             */
+            providerKey?: string;
+            /**
+             * @description 实际模型名（计量/单价行匹配腿）
+             * @example deepseek-flash
+             */
+            modelName?: string;
+            /**
+             * Format: int32
+             * @description 队列序（缺省＝追加队尾；显式值＝插位——既有候选顺移；主备＝队列前两名）
+             * @example 2
+             */
+            priority?: number;
+            /** @description 行级启停（缺省 true；false＝读面剔除不参队，装配跳过该候选） */
             enabled?: boolean;
         };
         ApiResponseBackofficeMaterialSummaryResponse: {
@@ -6137,7 +6331,7 @@ export interface components {
             runId?: string;
             text?: string;
             /**
-             * @description 问答卡载荷（kind=3 question 携带，其余 kind 为 null）：question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的待确认工具最小面）、data.questions=[{header,question,multiple,custom,options[{label}],recommended?}]（问答卡投影，custom 恒 true 可自由输入；recommended 可缺省＝推荐答案 #459，命中 options 才携带）。answered=false 即挂起待答，据此可重建可作答
+             * @description 问答卡载荷（kind=3 question 携带，其余 kind 为 null）：question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的待确认工具最小面）、data.questions=[{header,question,multiple,custom,options[{label}],recommended?}]（问答卡投影，custom 恒 true 可自由输入；recommended 可缺省＝推荐答案 #459，命中 options 才携带）；data.questionOrdinal＝「第 N 问」序号（平台注入，见顶层 questionOrdinal）。answered=false 即挂起待答，据此可重建可作答
              * @example {
              *       "runId": "r-01",
              *       "sessionId": "s-01",
@@ -6165,7 +6359,8 @@ export interface components {
              *               {
              *                 "label": "个人开发者"
              *               }
-             *             ]
+             *             ],
+             *             "questionOrdinal": 1
              *           }
              *         ]
              *       }
@@ -6174,6 +6369,11 @@ export interface components {
             question?: {
                 [key: string]: Record<string, never>;
             };
+            /**
+             * Format: int32
+             * @description 「第 N 问」序号（#538/#549 五问额度呈现面，ADR-0048 服务端单源）：kind=3 question 携带——缺口首次出现序 1..k（同缺口重派复用旧号不跳号，挂起卡也占号），读口按对话史重算（存量行自动有号）；其余 kind 为 null。前端仅试用访谈期（额度读面在场）渲染问答卡序号徽标
+             */
+            questionOrdinal?: number;
             /**
              * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, verification?{total,failed,faces,rounds,failedItems}, version?, durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,overhead{configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）
              * @example {
@@ -6947,23 +7147,80 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
-        ApiResponseListBackofficeModelTierResponse: {
+        ApiResponseListBackofficeModelProviderResponse: {
             /** Format: int32 */
             code?: number;
             message?: string;
-            data?: components["schemas"]["BackofficeModelTierResponse"][];
+            data?: components["schemas"]["BackofficeModelProviderResponse"][];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
-        ApiResponseListBackofficeModelTierTraceResponse: {
+        ApiResponseListBackofficeModelProviderTraceResponse: {
             /** Format: int32 */
             code?: number;
             message?: string;
-            data?: components["schemas"]["BackofficeModelTierTraceResponse"][];
+            data?: components["schemas"]["BackofficeModelProviderTraceResponse"][];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
-        BackofficeModelTierTraceResponse: {
+        BackofficeModelProviderTraceResponse: {
+            /** @description 留痕标识（TSID 十进制串） */
+            id?: string;
+            /**
+             * @description 变更前归一供应商（null＝创建痕或 V80 前历史痕）
+             * @example deepseek
+             */
+            oldVendor?: string;
+            /** @description 变更前 baseUrl（null＝创建痕——行此前不存在） */
+            oldBaseUrl?: string;
+            /** @description 变更前 apiKey 掩码（尾 4 位；null＝此前未配置或创建痕） */
+            oldApiKeyMasked?: string;
+            /** @description 变更前启用态（null＝创建痕） */
+            oldEnabled?: boolean;
+            /**
+             * @description 变更后归一供应商（null＝删除痕）
+             * @example deepseek
+             */
+            newVendor?: string;
+            /** @description 变更后 baseUrl（null＝删除痕——行已不存在） */
+            newBaseUrl?: string;
+            /** @description 变更后 apiKey 掩码（尾 4 位；null＝删除痕或未配置） */
+            newApiKeyMasked?: string;
+            /** @description 变更后启用态（null＝删除痕） */
+            newEnabled?: boolean;
+            /**
+             * @description 变更操作者 id
+             * @example 700210
+             */
+            operatorId?: string;
+            /**
+             * @description 变更操作者名（直读展示）
+             * @example 运营·智能体管理员
+             */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 变更动作时刻（留痕生成时刻）
+             */
+            operatedAt?: string;
+        };
+        ApiResponseListBackofficeModelConfigResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeModelConfigResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        ApiResponseListBackofficeModelConfigTraceResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeModelConfigTraceResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeModelConfigTraceResponse: {
             /** @description 留痕标识（TSID 十进制串） */
             id?: string;
             /**
@@ -7011,45 +7268,47 @@ export interface components {
              */
             operatedAt?: string;
         };
-        ApiResponseListBackofficeModelProviderResponse: {
+        ApiResponseListBackofficeModelConfigCandidateTraceResponse: {
             /** Format: int32 */
             code?: number;
             message?: string;
-            data?: components["schemas"]["BackofficeModelProviderResponse"][];
+            data?: components["schemas"]["BackofficeModelConfigCandidateTraceResponse"][];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
-        ApiResponseListBackofficeModelProviderTraceResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["BackofficeModelProviderTraceResponse"][];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        BackofficeModelProviderTraceResponse: {
+        BackofficeModelConfigCandidateTraceResponse: {
             /** @description 留痕标识（TSID 十进制串） */
             id?: string;
-            /** @description 变更前 baseUrl（null＝创建痕——行此前不存在） */
-            oldBaseUrl?: string;
-            /** @description 变更前 apiKey 掩码（尾 4 位；null＝此前未配置或创建痕） */
-            oldApiKeyMasked?: string;
-            /** @description 变更前启用态（null＝创建痕） */
+            /**
+             * Format: int32
+             * @description 变更前队列序（null＝新增痕——候选此前不在队列）
+             */
+            oldPriority?: number;
+            /** @description 变更前通道键（null＝新增痕） */
+            oldProviderKey?: string;
+            /** @description 变更前实际模型名（null＝新增痕） */
+            oldModelName?: string;
+            /** @description 变更前行级启停（null＝新增痕） */
             oldEnabled?: boolean;
-            /** @description 变更后 baseUrl（null＝删除痕——行已不存在） */
-            newBaseUrl?: string;
-            /** @description 变更后 apiKey 掩码（尾 4 位；null＝删除痕或未配置） */
-            newApiKeyMasked?: string;
-            /** @description 变更后启用态（null＝删除痕） */
+            /**
+             * Format: int32
+             * @description 变更后队列序（null＝删除痕——候选已出队列）
+             */
+            newPriority?: number;
+            /** @description 变更后通道键（null＝删除痕） */
+            newProviderKey?: string;
+            /** @description 变更后实际模型名（null＝删除痕） */
+            newModelName?: string;
+            /** @description 变更后行级启停（null＝删除痕） */
             newEnabled?: boolean;
             /**
              * @description 变更操作者 id
-             * @example 700210
+             * @example 700214
              */
             operatorId?: string;
             /**
              * @description 变更操作者名（直读展示）
-             * @example 运营·智能体管理员
+             * @example 运营·候选队列管理员
              */
             operatorName?: string;
             /**
@@ -7330,8 +7589,8 @@ export interface components {
             id?: string;
             /** @description 变更前 systemPrompt（null＝此前即缺省回落——回滚即把此值写回） */
             oldSystemPrompt?: string;
-            /** @description 变更前模型档位（null＝此前即缺省回落） */
-            oldModelId?: string;
+            /** @description 变更前模型配置（null＝此前即缺省回落） */
+            oldModelConfigKey?: string;
             /** @description 变更前联网搜索开关 */
             oldWebSearchEnabled?: boolean;
             /** @description 变更前网页抓取开关 */
@@ -7339,7 +7598,7 @@ export interface components {
             /** @description 变更前模型路由开关（#354） */
             oldRoutingEnabled?: boolean;
             /** @description 变更前强模型档（null＝此前即回落代码缺省） */
-            oldRoutingStrongModelId?: string;
+            oldRoutingStrongModelConfigKey?: string;
             /**
              * Format: int32
              * @description 变更前文件面阈值（null 同上）
@@ -7351,8 +7610,8 @@ export interface components {
             oldRoutingFileCountSignalEnabled?: boolean;
             /** @description 变更前规模标签信号开关（#454；恒有值——缺省态恒 false） */
             oldRoutingSizeLabelSignalEnabled?: boolean;
-            /** @description 变更前 verify 档位（#424；null＝此前即随执行体生效档） */
-            oldVerifyModelId?: string;
+            /** @description 变更前 verify 配置（#424；null＝此前即随执行体生效档） */
+            oldVerifyModelConfigKey?: string;
             /**
              * Format: int32
              * @description 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
@@ -7391,10 +7650,12 @@ export interface components {
             oldVerifySelfDecisionEnabled?: boolean;
             /** @description 变更前基座 lint 强制档阻断开关（#541；恒有值——缺省态恒 false＝让路） */
             oldRobustLintBlockingEnabled?: boolean;
+            /** @description 变更前构建轨出图工具开关（#545；恒有值——缺省态恒 true＝下放） */
+            oldGenerateImageEnabled?: boolean;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
-            /** @description 变更后模型档位（null＝本次清空回落） */
-            newModelId?: string;
+            /** @description 变更后模型配置（null＝本次清空回落） */
+            newModelConfigKey?: string;
             /** @description 变更后联网搜索开关 */
             newWebSearchEnabled?: boolean;
             /** @description 变更后网页抓取开关 */
@@ -7402,7 +7663,7 @@ export interface components {
             /** @description 变更后模型路由开关（#354） */
             newRoutingEnabled?: boolean;
             /** @description 变更后强模型档（null＝本次清空回落代码缺省） */
-            newRoutingStrongModelId?: string;
+            newRoutingStrongModelConfigKey?: string;
             /**
              * Format: int32
              * @description 变更后文件面阈值（null 同上）
@@ -7414,8 +7675,8 @@ export interface components {
             newRoutingFileCountSignalEnabled?: boolean;
             /** @description 变更后规模标签信号开关（#454；恒有值） */
             newRoutingSizeLabelSignalEnabled?: boolean;
-            /** @description 变更后 verify 档位（#424；null＝本次清空随执行体生效档） */
-            newVerifyModelId?: string;
+            /** @description 变更后 verify 配置（#424；null＝本次清空随执行体生效档） */
+            newVerifyModelConfigKey?: string;
             /**
              * Format: int32
              * @description 变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）
@@ -7454,6 +7715,8 @@ export interface components {
             newVerifySelfDecisionEnabled?: boolean;
             /** @description 变更后基座 lint 强制档阻断开关（#541；恒有值） */
             newRobustLintBlockingEnabled?: boolean;
+            /** @description 变更后构建轨出图工具开关（#545；恒有值——经工具面窄幅写口变更） */
+            newGenerateImageEnabled?: boolean;
             /**
              * @description 变更操作者 id
              * @example 700200
@@ -7565,76 +7828,6 @@ export interface operations {
             };
         };
     };
-    tier: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tierKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeModelTierResponse"];
-                };
-            };
-        };
-    };
-    update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tierKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModelTierUpdateCommand"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeModelTierResponse"];
-                };
-            };
-        };
-    };
-    delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tierKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-        };
-    };
     provider: {
         parameters: {
             query?: never;
@@ -7657,7 +7850,7 @@ export interface operations {
             };
         };
     };
-    update_1: {
+    update: {
         parameters: {
             query?: never;
             header?: never;
@@ -7683,7 +7876,7 @@ export interface operations {
             };
         };
     };
-    delete_1: {
+    delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -7701,6 +7894,126 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeModelConfigResponse"];
+                };
+            };
+        };
+    };
+    update_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelConfigUpdateCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeModelConfigResponse"];
+                };
+            };
+        };
+    };
+    delete_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    update_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+                priority: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelConfigCandidateUpdateCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigCandidateResponse"];
+                };
+            };
+        };
+    };
+    delete_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+                priority: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigCandidateResponse"];
                 };
             };
         };
@@ -7731,7 +8044,7 @@ export interface operations {
             };
         };
     };
-    config: {
+    config_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -7753,7 +8066,7 @@ export interface operations {
             };
         };
     };
-    update_2: {
+    update_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -8830,7 +9143,7 @@ export interface operations {
             };
         };
     };
-    update_3: {
+    update_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -9046,7 +9359,7 @@ export interface operations {
             };
         };
     };
-    update_4: {
+    update_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -9424,50 +9737,6 @@ export interface operations {
             };
         };
     };
-    tiers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListBackofficeModelTierResponse"];
-                };
-            };
-        };
-    };
-    create_2: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModelTierCreateCommand"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeModelTierResponse"];
-                };
-            };
-        };
-    };
     providers: {
         parameters: {
             query?: never;
@@ -9488,7 +9757,7 @@ export interface operations {
             };
         };
     };
-    create_3: {
+    create_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -9530,6 +9799,98 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeRemoteModelCatalogResponse"];
+                };
+            };
+        };
+    };
+    configs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigResponse"];
+                };
+            };
+        };
+    };
+    create_3: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelConfigCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeModelConfigResponse"];
+                };
+            };
+        };
+    };
+    candidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigCandidateResponse"];
+                };
+            };
+        };
+    };
+    add: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelConfigCandidateCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigCandidateResponse"];
                 };
             };
         };
@@ -10084,7 +10445,7 @@ export interface operations {
             };
         };
     };
-    delete_2: {
+    delete_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -11262,28 +11623,6 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                tierKey: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListBackofficeModelTierTraceResponse"];
-                };
-            };
-        };
-    };
-    traces_1: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
                 providerKey: string;
             };
             cookie?: never;
@@ -11297,6 +11636,50 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListBackofficeModelProviderTraceResponse"];
+                };
+            };
+        };
+    };
+    traces_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigTraceResponse"];
+                };
+            };
+        };
+    };
+    traces_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                configKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigCandidateTraceResponse"];
                 };
             };
         };
@@ -11351,7 +11734,7 @@ export interface operations {
             };
         };
     };
-    delete_3: {
+    delete_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -11541,7 +11924,7 @@ export interface operations {
             };
         };
     };
-    traces_2: {
+    traces_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -11673,7 +12056,7 @@ export interface operations {
             };
         };
     };
-    delete_4: {
+    delete_5: {
         parameters: {
             query: {
                 path: string;

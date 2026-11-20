@@ -128,7 +128,7 @@ final class AgentscopeEventMapper {
      * recommended 可缺省（#459 推荐答案），前端问答卡
      * 契约——multiple 恒 false / custom 恒 true：ask_user 一次一题开放可自由输入；
      * custom 必须显式 true，否则无选项题整题被前端收窄丢弃）。摘要口径 = 问题文本
-     * （截断保短）。恢复入参（模型档位/会话寻址/计量）由业务编排从项目侧事实重建，
+     * （截断保短）。恢复入参（模型配置/会话寻址/计量）由业务编排从项目侧事实重建，
      * 不随事件携带。</p>
      */
     AgentEvent suspension(RequireUserConfirmEvent event) {

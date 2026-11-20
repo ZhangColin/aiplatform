@@ -22,7 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
-import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
+import com.semgravio.aiplatform.business.project.application.ModelConfigAppService;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,10 +44,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>验收面钉死（票 #368 AC）：</p>
  * <ul>
- * <li><b>对照正确</b>：远端有库里无（trackedTierKeys 空＝建议入库）；库内指向
- *     远端已无（staleTiers）；条目 status 如实转述（活跃无 status、Shutdown 有）；</li>
- * <li><b>勾选入库复用 T3 写口</b>：拉取结果里的 modelId 经 POST /model-tiers 入库
- *     新档位 → 绑定智能体 → 装配解析（resolve 半边）跟上——拉取面零新写路径；</li>
+ * <li><b>对照正确</b>：远端有库里无（trackedConfigKeys 空＝建议入库）；库内指向
+ *     远端已无（staleConfigs）；条目 status 如实转述（活跃无 status、Shutdown 有）；</li>
+ * <li><b>勾选入库复用 T3 写口</b>：拉取结果里的 modelId 经 POST /model-configs 入库
+ *     新配置 → 绑定智能体 → 装配解析（resolve 半边）跟上——拉取面零新写路径；</li>
  * <li><b>上游不可用明确报错不静默</b>：非 200 / 连接拒绝 → 502 PRJ_077 带理由；</li>
  * <li><b>前置与鉴权</b>：通道 key 空 400 PRJ_076、未知通道 404 PRJ_065、
  *     停用通道可拉（巡检语义）、非签名 401。</li>
@@ -65,7 +65,7 @@ class BackofficeModelCatalogSeamTest {
     private static final String OPERATOR_NAME = "运营·清单管理员";
 
     private static final String PROVIDERS_PATH = "/api/backoffice/model-providers";
-    private static final String TIERS_PATH = "/api/backoffice/model-tiers";
+    private static final String CONFIGS_PATH = "/api/backoffice/model-configs";
 
     /** 假上游回执（方舟实测形状的缩影：活跃无 status、下架有 Shutdown）。 */
     private static final String UPSTREAM_BODY = """
@@ -85,9 +85,9 @@ class BackofficeModelCatalogSeamTest {
     @Autowired
     private AgentConfigAppService agentConfigs;
 
-    /** 档位解析单点（勾选入库后的装配半边——真 LLM 调用属 #369 活体冒烟）。 */
+    /** 配置解析单点（勾选入库后的装配半边——真 LLM 调用属 #369 活体冒烟）。 */
     @Autowired
-    private ModelTierAppService modelTiers;
+    private ModelConfigAppService modelConfigs;
 
     private HttpServer upstream;
 
@@ -118,11 +118,11 @@ class BackofficeModelCatalogSeamTest {
         // 「无行＝全回落」的缺省态）
         jdbcTemplate.update("DELETE FROM prj_agent_config_traces WHERE agent_key = 'executor'");
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'executor'");
-        jdbcTemplate.update("DELETE FROM prj_model_tier_traces WHERE tier_key LIKE 't-cat%'");
+        jdbcTemplate.update("DELETE FROM prj_model_config_traces WHERE config_key LIKE 't-cat%'");
         jdbcTemplate.update("DELETE FROM prj_model_provider_traces WHERE provider_key LIKE 't-cat%'");
-        // 先子后父：候选行 FK 指档位/通道（V79 起）——反序撞外键
-        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-cat%'");
-        jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-cat%'");
+        // 先子后父：候选行 FK 指配置/通道（V79 起）——反序撞外键
+        jdbcTemplate.update("DELETE FROM prj_model_config_candidates WHERE config_key LIKE 't-cat%'");
+        jdbcTemplate.update("DELETE FROM prj_model_configs WHERE config_key LIKE 't-cat%'");
         jdbcTemplate.update("DELETE FROM prj_model_providers WHERE provider_key LIKE 't-cat%'");
     }
 
@@ -132,8 +132,8 @@ class BackofficeModelCatalogSeamTest {
     void given_pulled_catalog_when_compared_then_tracked_untracked_and_stale_reflected()
             throws Exception {
         String providerKey = createProviderAt(upstreamBaseUrl(), "sk-cat-pull-0001");
-        createTier("t-cat-current", providerKey, "m-current-2601");
-        createTier("t-cat-stale", providerKey, "m-gone-2512", "过时档");
+        createConfig("t-cat-current", providerKey, "m-current-2601");
+        createConfig("t-cat-stale", providerKey, "m-gone-2512", "过时档");
 
         signedPost(providersRemoteModelsPath(providerKey), null)
                 .andExpect(status().isOk())
@@ -141,18 +141,18 @@ class BackofficeModelCatalogSeamTest {
                 // 远端全量三条（modelId 序稳定）：对照标记如实——已入库/建议入库/下架
                 .andExpect(jsonPath("$.data.remoteModels", hasSize(3)))
                 .andExpect(jsonPath("$.data.remoteModels[0].modelId").value("m-current-2601"))
-                .andExpect(jsonPath("$.data.remoteModels[0].trackedTierKeys[0]").value("t-cat-current"))
+                .andExpect(jsonPath("$.data.remoteModels[0].trackedConfigKeys[0]").value("t-cat-current"))
                 .andExpect(jsonPath("$.data.remoteModels[0].status").value(nullValue()))
                 .andExpect(jsonPath("$.data.remoteModels[1].modelId").value("m-fresh-2602"))
-                .andExpect(jsonPath("$.data.remoteModels[1].trackedTierKeys").value(empty()))
+                .andExpect(jsonPath("$.data.remoteModels[1].trackedConfigKeys").value(empty()))
                 .andExpect(jsonPath("$.data.remoteModels[2].modelId").value("m-old-2401"))
                 .andExpect(jsonPath("$.data.remoteModels[2].status").value("Shutdown"))
                 // 库内指向远端已无：t-cat-stale（m-gone 不在远端清单）——提示过时
-                .andExpect(jsonPath("$.data.staleTiers", hasSize(1)))
-                .andExpect(jsonPath("$.data.staleTiers[0].tierKey").value("t-cat-stale"))
-                .andExpect(jsonPath("$.data.staleTiers[0].modelName").value("m-gone-2512"))
-                .andExpect(jsonPath("$.data.staleTiers[0].displayName").value("过时档"))
-                .andExpect(jsonPath("$.data.staleTiers[0].enabled").value(true));
+                .andExpect(jsonPath("$.data.staleConfigs", hasSize(1)))
+                .andExpect(jsonPath("$.data.staleConfigs[0].configKey").value("t-cat-stale"))
+                .andExpect(jsonPath("$.data.staleConfigs[0].modelName").value("m-gone-2512"))
+                .andExpect(jsonPath("$.data.staleConfigs[0].displayName").value("过时档"))
+                .andExpect(jsonPath("$.data.staleConfigs[0].enabled").value(true));
 
         // 拉取是纯读动作：不落留痕、不写配置行
         assertThat(configTraceCount("executor")).isZero();
@@ -165,7 +165,7 @@ class BackofficeModelCatalogSeamTest {
             throws Exception {
         String providerKey = createProviderAt(upstreamBaseUrl(), "sk-cat-pull-0002");
 
-        // 拉取：建议入库条目（trackedTierKeys 空）
+        // 拉取：建议入库条目（trackedConfigKeys 空）
         String pullBody = signedPost(providersRemoteModelsPath(providerKey), null)
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
@@ -174,9 +174,9 @@ class BackofficeModelCatalogSeamTest {
                 .path("modelId").asText();
         assertThat(freshModelId).isEqualTo("m-fresh-2602");
 
-        // 勾选入库＝复用档位创建写口（语义键人工命名、modelName 填远端条目 modelId）
-        signedPost(TIERS_PATH, """
-                {"tierKey": "t-cat-imported", "providerKey": "%s",
+        // 勾选入库＝复用配置创建写口（语义键人工命名、modelName 填远端条目 modelId）
+        signedPost(CONFIGS_PATH, """
+                {"configKey": "t-cat-imported", "providerKey": "%s",
                  "modelName": "%s", "displayName": "清单入库档"}"""
                 .formatted(providerKey, freshModelId), OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isOk())
@@ -185,20 +185,20 @@ class BackofficeModelCatalogSeamTest {
         // 绑定一座智能体（运营配置面既有写口）＋装配读面跟上（resolve 半边——
         // 真调用属 #369 活体冒烟，此处钉装配链取到正确模型串与通道注入）
         signedPut("/api/backoffice/agent-configs/executor",
-                "{\"modelId\": \"t-cat-imported\"}", OPERATOR_ID, OPERATOR_NAME)
+                "{\"modelConfigKey\": \"t-cat-imported\"}", OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isOk());
-        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).modelId())
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).modelConfigKey())
                 .isEqualTo("t-cat-imported");
-        ModelTierAppService.ResolvedModel resolved = modelTiers.resolve("t-cat-imported");
+        ModelConfigAppService.ResolvedModel resolved = modelConfigs.resolve("t-cat-imported");
         assertThat(resolved.modelString()).isEqualTo(providerKey + ":m-fresh-2602");
         assertThat(resolved.baseUrl()).isEqualTo(upstreamBaseUrl());
 
         // 再拉一次：对照翻转——刚入库的条目不再是「建议入库」
         signedPost(providersRemoteModelsPath(providerKey), null)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.remoteModels[1].trackedTierKeys[0]")
+                .andExpect(jsonPath("$.data.remoteModels[1].trackedConfigKeys[0]")
                         .value("t-cat-imported"))
-                .andExpect(jsonPath("$.data.staleTiers").value(empty()));
+                .andExpect(jsonPath("$.data.staleConfigs").value(empty()));
     }
 
     // ---------- 上游不可用明确报错不静默（AC）：非 200 / 连接拒绝 ----------
@@ -298,18 +298,18 @@ class BackofficeModelCatalogSeamTest {
         return providerKey;
     }
 
-    /** 建档位夹具（挂假上游通道——对照例的库内侧）。 */
-    private void createTier(String tierKey, String providerKey, String modelName)
+    /** 建配置夹具（挂假上游通道——对照例的库内侧）。 */
+    private void createConfig(String configKey, String providerKey, String modelName)
             throws Exception {
-        createTier(tierKey, providerKey, modelName, null);
+        createConfig(configKey, providerKey, modelName, null);
     }
 
-    private void createTier(String tierKey, String providerKey, String modelName,
+    private void createConfig(String configKey, String providerKey, String modelName,
             String displayName) throws Exception {
-        String body = "{\"tierKey\": \"%s\", \"providerKey\": \"%s\", \"modelName\": \"%s\""
-                .formatted(tierKey, providerKey, modelName)
+        String body = "{\"configKey\": \"%s\", \"providerKey\": \"%s\", \"modelName\": \"%s\""
+                .formatted(configKey, providerKey, modelName)
                 + (displayName == null ? "}" : ", \"displayName\": \"" + displayName + "\"}");
-        signedPost(TIERS_PATH, body, OPERATOR_ID, OPERATOR_NAME)
+        signedPost(CONFIGS_PATH, body, OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isOk());
     }
 

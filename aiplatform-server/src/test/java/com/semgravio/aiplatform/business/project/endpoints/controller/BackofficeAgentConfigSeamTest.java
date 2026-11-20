@@ -12,8 +12,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
-import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
-import com.semgravio.aiplatform.business.project.application.ModelTierSeed;
+import com.semgravio.aiplatform.business.project.application.ModelConfigAppService;
+import com.semgravio.aiplatform.business.project.application.ModelConfigSeed;
 import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
@@ -40,7 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * false、默认预览同值、开关 true、写者 null；</li>
  * <li><b>覆盖写＋装配断言（缝 2）</b>：PUT 后 GET 生效值＝库值＋覆盖标记 true；
  * 装配读面（{@link AgentConfigAppService}——MainAgentAppService/CoderRunAttempts
- * 命令构建的取值单点）返回库值（systemPrompt 与档位键）；两座智能体各自独立（动 main 不动 executor）；</li>
+ * 命令构建的取值单点）返回库值（systemPrompt 与配置键）；两座智能体各自独立（动 main 不动 executor）；</li>
  * <li><b>清空回落</b>：null/缺省/纯空白＝清空覆盖，GET 与装配读面回枚举默认；</li>
  * <li><b>留痕＋回滚</b>：每次实际变更一痕（前后全量值快照＋操作者＋倒序最近先）、
  * 同值幂等重写不落痕；回滚＝旧值写回（一次新变更、留新痕——不做版本树）；</li>
@@ -80,18 +80,18 @@ class BackofficeAgentConfigSeamTest {
     @Autowired
     private AgentConfigAppService agentConfigs;
 
-    /** 档位解析（ADR-0031 解析单点：边缘点档位键 → 模型串＋通道，#366 缝 2 真链路）。 */
+    /** 配置解析（ADR-0031 解析单点：边缘点配置键 → 模型串＋通道，#366 缝 2 真链路）。 */
     @Autowired
-    private ModelTierAppService modelTiers;
+    private ModelConfigAppService modelConfigs;
 
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_agent_config_traces");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
-        // 绑定校验例的档位夹具（t- 前缀归零——种子档位行不动；先子后父：候选行
-        // FK 指档位——V79 起候选表在库）
-        jdbcTemplate.update("DELETE FROM prj_model_tier_candidates WHERE tier_key LIKE 't-%'");
-        jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
+        // 绑定校验例的配置夹具（t- 前缀归零——种子配置行不动；先子后父：候选行
+        // FK 指配置——V79 起候选表在库）
+        jdbcTemplate.update("DELETE FROM prj_model_config_candidates WHERE config_key LIKE 't-%'");
+        jdbcTemplate.update("DELETE FROM prj_model_configs WHERE config_key LIKE 't-%'");
     }
 
     // ---------- 读面缺省：无覆盖行＝全回落枚举默认 ----------
@@ -108,11 +108,11 @@ class BackofficeAgentConfigSeamTest {
                     .andExpect(jsonPath("$.data.agentName").value(profile.getName()))
                     // 生效值＝枚举默认（逐字）；覆盖标记 false；默认预览同值
                     .andExpect(jsonPath("$.data.systemPrompt").value(profile.systemPrompt()))
-                    .andExpect(jsonPath("$.data.modelId").value(profile.modelId()))
+                    .andExpect(jsonPath("$.data.modelConfigKey").value(profile.modelConfigKey()))
                     .andExpect(jsonPath("$.data.systemPromptOverridden").value(false))
-                    .andExpect(jsonPath("$.data.modelIdOverridden").value(false))
+                    .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(false))
                     .andExpect(jsonPath("$.data.defaultSystemPrompt").value(profile.systemPrompt()))
-                    .andExpect(jsonPath("$.data.defaultModelId").value(profile.modelId()))
+                    .andExpect(jsonPath("$.data.defaultModelConfigKey").value(profile.modelConfigKey()))
                     // 开关存储态缺省 true（与现行工具装配一致）
                     .andExpect(jsonPath("$.data.webSearchEnabled").value(true))
                     .andExpect(jsonPath("$.data.fetchUrlEnabled").value(true))
@@ -133,32 +133,32 @@ class BackofficeAgentConfigSeamTest {
     void given_override_persisted_when_get_and_assembly_then_library_value_wins()
             throws Exception {
         signedPut("main", OPERATOR_ID, OPERATOR_NAME, """
-                {"systemPrompt": "%s", "modelId": "pro"}""".formatted(MAIN_PROMPT_V1))
+                {"systemPrompt": "%s", "modelConfigKey": "pro"}""".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.agentKey").value("main"))
                 .andExpect(jsonPath("$.data.systemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data.modelId").value("pro"))
+                .andExpect(jsonPath("$.data.modelConfigKey").value("pro"))
                 .andExpect(jsonPath("$.data.systemPromptOverridden").value(true))
-                .andExpect(jsonPath("$.data.modelIdOverridden").value(true))
+                .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(true))
                 // 默认预览仍指枚举缺省（清空回落即落此值）
                 .andExpect(jsonPath("$.data.defaultSystemPrompt").value(AgentProfile.MAIN.systemPrompt()))
-                .andExpect(jsonPath("$.data.defaultModelId").value(AgentProfile.MAIN.modelId()))
+                .andExpect(jsonPath("$.data.defaultModelConfigKey").value(AgentProfile.MAIN.modelConfigKey()))
                 .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID))
                 .andExpect(jsonPath("$.data.operatorName").value(OPERATOR_NAME));
 
         // GET 重读一致（写回执非独占视图）
         signedGet("main")
                 .andExpect(jsonPath("$.data.systemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data.modelIdOverridden").value(true));
+                .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(true));
 
         // 装配断言（缝 2）：库值优先——systemPrompt 取库值、模型串 provider 前缀单源拼装
         var main = agentConfigs.effectiveOf(AgentProfile.MAIN);
         assertThat(main.systemPrompt()).isEqualTo(MAIN_PROMPT_V1);
-        assertThat(main.modelId()).isEqualTo("pro");
+        assertThat(main.modelConfigKey()).isEqualTo("pro");
         // 两座独立：main 的覆盖不漂进 executor（仍枚举默认）
         var executorDefaults = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executorDefaults.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(executorDefaults.modelId()).isEqualTo(AgentProfile.EXECUTOR.modelId());
+        assertThat(executorDefaults.modelConfigKey()).isEqualTo(AgentProfile.EXECUTOR.modelConfigKey());
     }
 
     // ---------- 清空回落：null/缺省/纯空白＝回落枚举默认 ----------
@@ -168,37 +168,37 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // #341 起 Demo 阶段（executor）缺省＝快模型档，覆盖档取强模型档以示覆盖值≠缺省值
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"pro\"}"
+                "{\"systemPrompt\": \"%s\", \"modelConfigKey\": \"pro\"}"
                         .formatted(EXECUTOR_PROMPT_V1))
                 .andExpect(status().isOk());
         assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).systemPrompt())
                 .isEqualTo(EXECUTOR_PROMPT_V1);
 
-        // 缺省字段即清空（PUT 全量语义：systemPrompt/modelId 不带＝null）
+        // 缺省字段即清空（PUT 全量语义：systemPrompt/modelConfigKey 不带＝null）
         signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, "{}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.systemPrompt").value(AgentProfile.EXECUTOR.systemPrompt()))
-                .andExpect(jsonPath("$.data.modelId").value(AgentProfile.EXECUTOR.modelId()))
+                .andExpect(jsonPath("$.data.modelConfigKey").value(AgentProfile.EXECUTOR.modelConfigKey()))
                 .andExpect(jsonPath("$.data.systemPromptOverridden").value(false))
-                .andExpect(jsonPath("$.data.modelIdOverridden").value(false));
+                .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(false));
         var executorBack = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executorBack.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(executorBack.modelId()).isEqualTo(AgentProfile.EXECUTOR.modelId());
+        assertThat(executorBack.modelConfigKey()).isEqualTo(AgentProfile.EXECUTOR.modelConfigKey());
 
         // 纯空白同 null（归一）；显式 null 同语义；行保留（写者留最近动作者）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
                 "{\"systemPrompt\": \"%s\"}".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk());
         signedPut("main", OPERATOR_ID_2, OPERATOR_NAME_2,
-                "{\"systemPrompt\": \"  \", \"modelId\": null}")
+                "{\"systemPrompt\": \"  \", \"modelConfigKey\": null}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.systemPrompt").value(AgentProfile.MAIN.systemPrompt()))
-                .andExpect(jsonPath("$.data.modelId").value(AgentProfile.MAIN.modelId()));
+                .andExpect(jsonPath("$.data.modelConfigKey").value(AgentProfile.MAIN.modelConfigKey()));
         var row = jdbcTemplate.queryForMap(
-                "SELECT system_prompt, model_id, operator_id FROM prj_agent_configs WHERE agent_key = 'main'");
+                "SELECT system_prompt, model_config_key, operator_id FROM prj_agent_configs WHERE agent_key = 'main'");
         assertThat(row)
                 .containsEntry("system_prompt", null)
-                .containsEntry("model_id", null)
+                .containsEntry("model_config_key", null)
                 .containsEntry("operator_id", OPERATOR_ID_2);
     }
 
@@ -209,7 +209,7 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // 变更一（V1 覆盖）→ 变更二（V2 翻新）→ 幂等（同值重写）→ 变更三（回滚＝V1 写回）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"pro\"}".formatted(MAIN_PROMPT_V1))
+                "{\"systemPrompt\": \"%s\", \"modelConfigKey\": \"pro\"}".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk());
         signedPut("main", OPERATOR_ID_2, OPERATOR_NAME_2,
                 "{\"systemPrompt\": \"%s\"}".formatted(MAIN_PROMPT_V2))
@@ -221,7 +221,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID_2));
         // 回滚＝把留痕旧值写回（一次新变更、留新痕——不做版本树）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"pro\"}".formatted(MAIN_PROMPT_V1))
+                "{\"systemPrompt\": \"%s\", \"modelConfigKey\": \"pro\"}".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk());
 
         signedGet("main/traces")
@@ -230,24 +230,24 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data", hasSize(3)))
                 // 痕三（最近）：回滚——old=V2/模型清空态，new=V1/pro
                 .andExpect(jsonPath("$.data[0].oldSystemPrompt").value(MAIN_PROMPT_V2))
-                .andExpect(jsonPath("$.data[0].oldModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldModelConfigKey").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newSystemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data[0].newModelId").value("pro"))
+                .andExpect(jsonPath("$.data[0].newModelConfigKey").value("pro"))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID))
                 .andExpect(jsonPath("$.data[0].oldWebSearchEnabled").value(true))
                 .andExpect(jsonPath("$.data[0].newWebSearchEnabled").value(true))
                 // 痕二：翻新——old=V1/pro，new=V2/模型清空（PUT 全量：未带即 null）
                 .andExpect(jsonPath("$.data[1].oldSystemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data[1].oldModelId").value("pro"))
+                .andExpect(jsonPath("$.data[1].oldModelConfigKey").value("pro"))
                 .andExpect(jsonPath("$.data[1].newSystemPrompt").value(MAIN_PROMPT_V2))
-                .andExpect(jsonPath("$.data[1].newModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[1].newModelConfigKey").value(nullValue()))
                 .andExpect(jsonPath("$.data[1].operatorId").value(OPERATOR_ID_2))
                 .andExpect(jsonPath("$.data[1].operatorName").value(OPERATOR_NAME_2))
                 // 痕一（最早）：首次覆盖——old 全缺省态（prompt/model null、开关 true）
                 .andExpect(jsonPath("$.data[2].oldSystemPrompt").value(nullValue()))
-                .andExpect(jsonPath("$.data[2].oldModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[2].oldModelConfigKey").value(nullValue()))
                 .andExpect(jsonPath("$.data[2].newSystemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data[2].newModelId").value("pro"))
+                .andExpect(jsonPath("$.data[2].newModelConfigKey").value("pro"))
                 .andExpect(jsonPath("$.data[2].operatorId").value(OPERATOR_ID));
 
         // 留痕跨智能体隔离：executor 无痕
@@ -295,7 +295,7 @@ class BackofficeAgentConfigSeamTest {
 
     @Test
     void given_unknown_agent_key_when_any_endpoint_then_404() throws Exception {
-        // 三座端点只认三座智能体：边缘调用点（naming 等）走 /edge/{edgeKey} 面档位
+        // 三座端点只认三座智能体：边缘调用点（naming 等）走 /edge/{edgeKey} 面配置
         // 端点（#366），三座端点照 404；任意未知键同语义（含 verify 子智能体——
         // 配置面只有三座智能体，#289 designer 座齐）
         for (String badKey : new String[]{"classify", "naming", "reviewer", "verify"}) {
@@ -318,7 +318,7 @@ class BackofficeAgentConfigSeamTest {
 
     @Test
     void given_missing_operator_headers_when_signed_put_then_400() throws Exception {
-        signedPut("main", null, null, "{\"modelId\": \"pro\"}")
+        signedPut("main", null, null, "{\"modelConfigKey\": \"pro\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(AGENT_CONFIG_OPERATOR_REQUIRED_CODE))
                 .andExpect(jsonPath("$.message").value("操作者不能为空"));
@@ -331,7 +331,7 @@ class BackofficeAgentConfigSeamTest {
     void given_no_signature_headers_when_any_endpoint_then_401_signature_required() throws Exception {
         mockMvc.perform(put("/api/backoffice/agent-configs/main")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"modelId\": \"pro\"}"))
+                        .content("{\"modelConfigKey\": \"pro\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("Signature required"));
@@ -354,9 +354,9 @@ class BackofficeAgentConfigSeamTest {
         signedGet("executor")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("pro"))
-                .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingStrongModelId").value("pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelConfigKey").value("pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelConfigKeyOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultRoutingStrongModelConfigKey").value("pro"))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
                 .andExpect(jsonPath("$.data.routingFileCountThresholdOverridden").value(false))
                 .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(30))
@@ -368,7 +368,7 @@ class BackofficeAgentConfigSeamTest {
         // 装配读面同步：路由开、三可空件 null（回落缺省归路由判定单点）
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isTrue();
-        assertThat(executor.routingStrongModelId()).isNull();
+        assertThat(executor.routingStrongModelConfigKey()).isNull();
         assertThat(executor.routingFileCountThreshold()).isNull();
         assertThat(executor.routingEscalatingSizeLabels()).isNull();
     }
@@ -378,20 +378,20 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // 策略覆盖写（开关关＋强档换＋阈值换＋映射换）→ GET 生效值＝库值、覆盖标记
         // true；留痕前后快照含路由四件（映射留存储形逗号接 token）；清空（null）
-        // 回落代码缺省。强档键取夹具档位 t-strong（doubao-flagship 已随 V79 退场；
-        // #367 起改档即时校验档位键——裸名已写不进去）
+        // 回落代码缺省。强档键取夹具配置 t-strong（doubao-flagship 已随 V79 退场；
+        // #367 起改配置即时校验配置键——裸名已写不进去）
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled) "
                         + "VALUES ('t-strong', 'deepseek', 'some-strong-model', TRUE)");
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"routingEnabled": false, "routingStrongModelId": "t-strong",
+                {"routingEnabled": false, "routingStrongModelConfigKey": "t-strong",
                  "routingFileCountThreshold": 50,
                  "routingEscalatingSizeLabels": ["中", "大"]}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("t-strong"))
-                .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(true))
+                .andExpect(jsonPath("$.data.routingStrongModelConfigKey").value("t-strong"))
+                .andExpect(jsonPath("$.data.routingStrongModelConfigKeyOverridden").value(true))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(50))
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabels").isArray())
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabels.length()").value(2))
@@ -400,7 +400,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isFalse();
-        assertThat(executor.routingStrongModelId()).isEqualTo("t-strong");
+        assertThat(executor.routingStrongModelConfigKey()).isEqualTo("t-strong");
         assertThat(executor.routingEscalatingSizeLabels())
                 .containsExactlyInAnyOrder(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE);
 
@@ -409,11 +409,11 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 // 旧态＝缺省（开关开、三可空件 null），新态＝本次覆盖——回滚依据
                 .andExpect(jsonPath("$.data[0].oldRoutingEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].oldRoutingStrongModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldRoutingStrongModelConfigKey").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldRoutingEscalatingSizeLabels").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("t-strong"))
+                .andExpect(jsonPath("$.data[0].newRoutingStrongModelConfigKey").value("t-strong"))
                 .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(50))
                 .andExpect(jsonPath("$.data[0].newRoutingEscalatingSizeLabels").value("中,大"))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
@@ -422,8 +422,8 @@ class BackofficeAgentConfigSeamTest {
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("pro"))
-                .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.routingStrongModelConfigKey").value("pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelConfigKeyOverridden").value(false))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("大"))
                 .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(false));
@@ -433,7 +433,7 @@ class BackofficeAgentConfigSeamTest {
     void given_routing_size_label_mapping_invalid_token_when_put_then_400_no_write()
             throws Exception {
         // 封闭集校验（#426）：升档标签映射的 token 须在小/中/大封闭集内——非法
-        // token 错值写不进去（对偶档位键即时校验口径），行与留痕零写入
+        // token 错值写不进去（对偶配置键即时校验口径），行与留痕零写入
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
                 "{\"routingEscalatingSizeLabels\": [\"大\", \"巨\"]}")
                 .andExpect(status().isBadRequest())
@@ -534,22 +534,22 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[0].newRoutingSizeLabelSignalEnabled").value(false));
     }
 
-    // ---------- 验证面两件（#424 片轻验：verify 档位＋单场轮次预算） ----------
+    // ---------- 验证面两件（#424 片轻验：verify 配置＋单场轮次预算） ----------
 
     @Test
     void given_no_verify_override_when_get_then_code_defaults_with_unoverridden_marks()
             throws Exception {
-        // 验证面读面缺省：verifyModelId null＝随执行体生效档（覆盖标记 false）、
+        // 验证面读面缺省：verifyModelConfigKey null＝随执行体生效档（覆盖标记 false）、
         // 轮次预算回落代码缺省 3（覆盖标记 false、默认预览同值）；装配读面同步
         signedGet("executor")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifyModelId").value(nullValue()))
-                .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.verifyModelConfigKey").value(nullValue()))
+                .andExpect(jsonPath("$.data.verifyModelConfigKeyOverridden").value(false))
                 .andExpect(jsonPath("$.data.verifyRoundBudget").value(3))
                 .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(false))
                 .andExpect(jsonPath("$.data.defaultVerifyRoundBudget").value(3));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.verifyModelId()).isNull();
+        assertThat(executor.verifyModelConfigKey()).isNull();
         assertThat(executor.verifyRoundBudget()).isEqualTo(3);
     }
 
@@ -560,34 +560,34 @@ class BackofficeAgentConfigSeamTest {
         // 退场）→ GET 生效值＝库值、覆盖标记 true；留痕前后快照含验证面两件；
         // 清空（null）回落缺省（档随执行体、预算 3）
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled) "
                         + "VALUES ('t-verify', 'deepseek', 'some-verify-model', TRUE)");
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"verifyModelId": "t-verify", "verifyRoundBudget": 5}
+                {"verifyModelConfigKey": "t-verify", "verifyRoundBudget": 5}
                 """)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifyModelId").value("t-verify"))
-                .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(true))
+                .andExpect(jsonPath("$.data.verifyModelConfigKey").value("t-verify"))
+                .andExpect(jsonPath("$.data.verifyModelConfigKeyOverridden").value(true))
                 .andExpect(jsonPath("$.data.verifyRoundBudget").value(5))
                 .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.verifyModelId()).isEqualTo("t-verify");
+        assertThat(executor.verifyModelConfigKey()).isEqualTo("t-verify");
         assertThat(executor.verifyRoundBudget()).isEqualTo(5);
 
         signedGet("executor/traces")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].oldVerifyModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldVerifyModelConfigKey").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldVerifyRoundBudget").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].newVerifyModelId").value("t-verify"))
+                .andExpect(jsonPath("$.data[0].newVerifyModelConfigKey").value("t-verify"))
                 .andExpect(jsonPath("$.data[0].newVerifyRoundBudget").value(5))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
 
         // 清空回落：验证面两件 null＝随执行体档＋预算 3
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifyModelId").value(nullValue()))
-                .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.verifyModelConfigKey").value(nullValue()))
+                .andExpect(jsonPath("$.data.verifyModelConfigKeyOverridden").value(false))
                 .andExpect(jsonPath("$.data.verifyRoundBudget").value(3))
                 .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(false));
     }
@@ -595,9 +595,9 @@ class BackofficeAgentConfigSeamTest {
     @Test
     void given_invalid_verify_face_when_put_then_rejected_with_zero_writes()
             throws Exception {
-        // verifyModelId 即时校验同 modelId（#367）：缺行键 400 PRJ_074；
+        // verifyModelConfigKey 即时校验同 modelConfigKey（#367）：缺行键 400 PRJ_074；
         // verifyRoundBudget 区间校验（1-20）：越界 400 PRJ_078——fail-fast 零写入
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"verifyModelId\": \"t-nope\"}")
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"verifyModelConfigKey\": \"t-nope\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4074));
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"verifyRoundBudget\": 0}")
@@ -1083,24 +1083,24 @@ class BackofficeAgentConfigSeamTest {
     @Test
     void given_unknown_or_disabled_tier_when_put_then_rejected_with_zero_writes()
             throws Exception {
-        // 停用档夹具（t- 前缀，teardown 归零——种子档位是他测真链路依赖）
+        // 停用档夹具（t- 前缀，teardown 归零——种子配置是他测真链路依赖）
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled) "
                         + "VALUES ('t-off', 'deepseek', 'some-off-model', FALSE)");
 
-        // 三座 modelId/路由强档与边缘点档位：缺行键 400 PRJ_074、停用键 400 PRJ_075
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-nope\"}")
+        // 三座 modelConfigKey/路由强档与边缘点配置：缺行键 400 PRJ_074、停用键 400 PRJ_075
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"t-nope\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4074))
                 .andExpect(jsonPath("$.message").value(containsString("t-nope")));
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"routingStrongModelId\": \"t-nope\"}")
+                "{\"routingStrongModelConfigKey\": \"t-nope\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4074));
-        signedPutEdge("naming", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-nope\"}")
+        signedPutEdge("naming", OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"t-nope\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4074));
-        signedPut("main", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-off\"}")
+        signedPut("main", OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"t-off\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4075))
                 .andExpect(jsonPath("$.message").value(containsString("t-off")));
@@ -1110,86 +1110,86 @@ class BackofficeAgentConfigSeamTest {
         assertThat(traceRowCount()).isZero();
     }
 
-    // ---------- 边缘四点（#366：仅模型档位入配置面，同表同机制） ----------
+    // ---------- 边缘四点（#366：仅模型配置入配置面，同表同机制） ----------
 
     @Test
     void given_no_edge_override_when_signed_get_edge_then_effective_falls_back_to_default_tier()
             throws Exception {
-        // 四点读面缺省：生效档＝代码缺省档位键（flash）、覆盖标记 false、默认预览
-        // 同值、写者 null；装配读面同值且经档位解析真链路产通道模型串（V44 种子）
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        // 四点读面缺省：生效档＝代码缺省配置键（flash）、覆盖标记 false、默认预览
+        // 同值、写者 null；装配读面同值且经配置解析真链路产通道模型串（V44 种子）
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         for (AgentEdgePoint point : AgentEdgePoint.values()) {
             signedGet("edge/" + point.key())
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.agentKey").value(point.key()))
                     .andExpect(jsonPath("$.data.agentName").value(point.getName()))
-                    .andExpect(jsonPath("$.data.modelId").value("flash"))
-                    .andExpect(jsonPath("$.data.modelIdOverridden").value(false))
-                    .andExpect(jsonPath("$.data.defaultModelId").value("flash"))
+                    .andExpect(jsonPath("$.data.modelConfigKey").value("flash"))
+                    .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(false))
+                    .andExpect(jsonPath("$.data.defaultModelConfigKey").value("flash"))
                     .andExpect(jsonPath("$.data.operatorId").value(nullValue()))
                     .andExpect(jsonPath("$.data.operatorName").value(nullValue()));
             // 缝 2（装配读面＋解析单点）：缺省 flash → deepseek 通道模型串（V79 收敛后种子）
-            assertThat(agentConfigs.effectiveEdgeModelId(point)).isEqualTo("flash");
-            assertThat(modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point)).modelString())
-                    .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+            assertThat(agentConfigs.effectiveEdgeModelConfigKey(point)).isEqualTo("flash");
+            assertThat(modelConfigs.resolve(agentConfigs.effectiveEdgeModelConfigKey(point)).modelString())
+                    .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         }
     }
 
     @Test
     void given_edge_tier_overridden_when_put_then_library_value_wins_next_resolve()
             throws Exception {
-        // AC：后台 PUT 边缘键改档即时生效——四键逐一 PUT pro：GET 生效值＝库值＋
+        // AC：后台 PUT 边缘键改配置即时生效——四键逐一 PUT pro：GET 生效值＝库值＋
         // 覆盖标记 true，装配读面取库值、经解析单点产 pro 档模型串（下一轮命令
         // 构建即生效的取值半边）；四点各自独立（动 naming 不动 precheck）
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         for (AgentEdgePoint point : AgentEdgePoint.values()) {
-            signedPutEdge(point.key(), OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"pro\"}")
+            signedPutEdge(point.key(), OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"pro\"}")
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.modelId").value("pro"))
-                    .andExpect(jsonPath("$.data.modelIdOverridden").value(true))
-                    .andExpect(jsonPath("$.data.defaultModelId").value("flash"))
+                    .andExpect(jsonPath("$.data.modelConfigKey").value("pro"))
+                    .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(true))
+                    .andExpect(jsonPath("$.data.defaultModelConfigKey").value("flash"))
                     .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
-            assertThat(agentConfigs.effectiveEdgeModelId(point)).isEqualTo("pro");
-            assertThat(modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point)).modelString())
+            assertThat(agentConfigs.effectiveEdgeModelConfigKey(point)).isEqualTo("pro");
+            assertThat(modelConfigs.resolve(agentConfigs.effectiveEdgeModelConfigKey(point)).modelString())
                     .isEqualTo("deepseek:deepseek-v4-pro");
         }
 
         // 清空覆盖（PUT 全量语义同款：null/缺省/纯空白＝清空）→ 回落代码缺省 flash
         signedPutEdge("naming", OPERATOR_ID_2, OPERATOR_NAME_2, "{}")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.modelId").value("flash"))
-                .andExpect(jsonPath("$.data.modelIdOverridden").value(false));
-        assertThat(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING)).isEqualTo("flash");
+                .andExpect(jsonPath("$.data.modelConfigKey").value("flash"))
+                .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(false));
+        assertThat(agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.NAMING)).isEqualTo("flash");
         // 其余三点不受清空牵连（各自独立行）
-        assertThat(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.COMPACTION))
+        assertThat(agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.COMPACTION))
                 .isEqualTo("pro");
     }
 
     @Test
     void given_edge_changes_when_traces_then_snapshots_and_unknown_key_404() throws Exception {
-        // 留痕同机制：改档一痕（old=null 缺省态 → new=pro＋操作者）；同值幂等重写
+        // 留痕同机制：改配置一痕（old=null 缺省态 → new=pro＋操作者）；同值幂等重写
         // 不落痕；未知边缘键 404 PRJ_064、缺操作者 400 PRJ_034（同面守卫）
-        signedPutEdge("compaction", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"pro\"}")
+        signedPutEdge("compaction", OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"pro\"}")
                 .andExpect(status().isOk());
-        signedPutEdge("compaction", OPERATOR_ID_2, OPERATOR_NAME_2, "{\"modelId\": \"pro\"}")
+        signedPutEdge("compaction", OPERATOR_ID_2, OPERATOR_NAME_2, "{\"modelConfigKey\": \"pro\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID)); // 幂等：写者不漂移
         signedGet("edge/compaction/traces")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].oldModelId").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].newModelId").value("pro"))
+                .andExpect(jsonPath("$.data[0].oldModelConfigKey").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newModelConfigKey").value("pro"))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID))
                 .andExpect(jsonPath("$.data[0].operatorName").value(OPERATOR_NAME));
 
         // 回滚＝旧值写回（一次新变更、留新痕）
-        signedPutEdge("compaction", OPERATOR_ID_2, OPERATOR_NAME_2, "{\"modelId\": null}")
+        signedPutEdge("compaction", OPERATOR_ID_2, OPERATOR_NAME_2, "{\"modelConfigKey\": null}")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.modelId").value("flash"));
+                .andExpect(jsonPath("$.data.modelConfigKey").value("flash"));
         signedGet("edge/compaction/traces")
                 .andExpect(jsonPath("$.data", hasSize(2)))
-                .andExpect(jsonPath("$.data[0].newModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newModelConfigKey").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
 
         // 负例：未知边缘键三端点同 404 PRJ_064；边缘键不进三座端点（404 PRJ_033）
@@ -1200,7 +1200,7 @@ class BackofficeAgentConfigSeamTest {
             signedGet("edge/" + badKey + "/traces")
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value(EDGE_POINT_NOT_FOUND_CODE));
-            signedPutEdge(badKey, OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"pro\"}")
+            signedPutEdge(badKey, OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"pro\"}")
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value(EDGE_POINT_NOT_FOUND_CODE));
         }
@@ -1208,7 +1208,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(AGENT_CONFIG_NOT_FOUND_CODE));
         // 缺操作者同面守卫（PRJ_034）
-        signedPutEdge("naming", null, null, "{\"modelId\": \"pro\"}")
+        signedPutEdge("naming", null, null, "{\"modelConfigKey\": \"pro\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(AGENT_CONFIG_OPERATOR_REQUIRED_CODE));
     }
@@ -1221,7 +1221,7 @@ class BackofficeAgentConfigSeamTest {
         return mockMvc.perform(BackofficeSignatures.signed(get(path), path, null));
     }
 
-    /** 签名 PUT 边缘点档位（JSON 体＋操作者透传头；operatorId 传 null 即缺头负例形制）。 */
+    /** 签名 PUT 边缘点配置（JSON 体＋操作者透传头；operatorId 传 null 即缺头负例形制）。 */
     private ResultActions signedPutEdge(String edgeKey, String operatorId, String operatorName,
             String body) throws Exception {
         String path = "/api/backoffice/agent-configs/edge/" + edgeKey;

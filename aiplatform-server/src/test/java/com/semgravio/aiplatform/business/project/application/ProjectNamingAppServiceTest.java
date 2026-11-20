@@ -94,7 +94,7 @@ class ProjectNamingAppServiceTest {
 
     @Test
     void given_effective_tier_when_name_async_then_command_carries_resolved_model_and_channel() {
-        // #366 边缘点收编：取名模型选用走档位解析链（配置读面→解析单点）——命令携
+        // #366 边缘点收编：取名模型选用走配置解析链（配置读面→解析单点）——命令携
         // 「前缀:实际模型名」串与通道注入件（key/baseUrl 注入 SDK，不吃环境变量）；
         // 库值覆盖 pro 与缺省 flash 同链（下一轮命令构建即生效）
         when(projectRepository.findById(44L)).thenReturn(Optional.of(placeholderProject()));
@@ -262,22 +262,22 @@ class ProjectNamingAppServiceTest {
     }
 
     /**
-     * 指定生效档位键的构造（装配链断言用：缺省 flash 与库值覆盖 pro 两形共用——
-     * 覆盖态经 {@code AgentConfigAppService#effectiveEdgeModelId} 解析、模型串与
-     * 通道经 {@code ModelTierAppService#resolve} 解析，#366 边缘点收编链路）。
+     * 指定生效配置键的构造（装配链断言用：缺省 flash 与库值覆盖 pro 两形共用——
+     * 覆盖态经 {@code AgentConfigAppService#effectiveEdgeModelConfigKey} 解析、模型串与
+     * 通道经 {@code ModelConfigAppService#resolve} 解析，#366 边缘点收编链路）。
      */
-    private ProjectNamingAppService serviceWithTier(String tierKey) {
-        String modelName = "pro".equals(tierKey)
+    private ProjectNamingAppService serviceWithTier(String configKey) {
+        String modelName = "pro".equals(configKey)
                 ? "deepseek-v4-pro-ga-260813" : "deepseek-v4-flash-ga-260731";
         // lenient：blank-requirement 形不触发解析链（零调用合法——不因桩未用报错）
         AgentConfigAppService agentConfigs = mock(AgentConfigAppService.class);
-        lenient().when(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING))
-                .thenReturn(tierKey);
-        ModelTierAppService modelTiers = mock(ModelTierAppService.class);
-        lenient().when(modelTiers.resolveQueue(tierKey)).thenReturn(new ModelCandidateQueue(
-                tierKey, List.of(new ModelCandidate("volcengine", modelName,
+        lenient().when(agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.NAMING))
+                .thenReturn(configKey);
+        ModelConfigAppService modelConfigs = mock(ModelConfigAppService.class);
+        lenient().when(modelConfigs.resolveQueue(configKey)).thenReturn(new ModelCandidateQueue(
+                configKey, List.of(new ModelCandidate("volcengine", modelName,
                         new ModelChannel("https://ark.example/api/v3", "sk-test-ark", false)))));
-        return new ProjectNamingAppService(agentClient, agentConfigs, modelTiers,
+        return new ProjectNamingAppService(agentClient, agentConfigs, modelConfigs,
                 projectRepository, eventsAppService, Runnable::run);
     }
 

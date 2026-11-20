@@ -118,10 +118,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
             ModelChannel modelChannel, ModelCandidateQueue modelQueue, AgentWorkspace workspace,
             String agentKey, String toolSpec) {
-        // 压缩档位随装配解析（#366 边缘点收编：compaction 档位库值优先缺省 → 解析
+        // 压缩配置随装配解析（#366 边缘点收编：compaction 配置库值优先缺省 → 解析
         // 单点，每次 obtain 动态查——后台改档下一轮命令构建即生效）
         EdgeModelSupplier.EdgeModel compaction = edgeModels.compactionModel();
-        // 委派子智能体档位随装配解析（#424 片轻验）：null＝随父级（执行体生效档
+        // 委派子智能体配置随装配解析（#424 片轻验）：null＝随父级（执行体生效档
         // ——含路由升档），非空即独立档；同入实例缓存键指纹（改档即新实例）
         EdgeModelSupplier.EdgeModel subagent = edgeModels.subagentModel();
         // sysPrompt/workspace/agentKey/toolSpec 明文入键（不用 hashCode：碰撞会把不同
@@ -132,13 +132,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 「改配置即生效、进行中 run 不定格」。#557 起队列形优先：modelQueue 非
         // 空时整队列指纹（任一候选变＝新实例——failover 面对全队列成立），双字段
         // 形（modelChannel.fingerprint()）为无队列测试形保留；
-        // 压缩档位同入指纹（#366）：改压缩档即新实例；子智能体档位同律（#424）
+        // 压缩配置同入指纹（#366）：改压缩档即新实例；子智能体配置同律（#424）
         String channelFingerprint = modelQueue != null ? modelQueue.fingerprint()
                 : (modelChannel == null ? "" : modelChannel.fingerprint());
         String key = name + "|" + modelString + "|" + channelFingerprint + "|"
                 + sysPrompt + "|" + workspace.identity()
                 + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec)
-                // 边缘档位（压缩/子智能体）整队列指纹：#557 队列化后任一候选变＝新实例
+                // 边缘配置（压缩/子智能体）整队列指纹：#557 队列化后任一候选变＝新实例
                 + "|cx=" + compaction.queue().fingerprint()
                 + "|sg=" + (subagent == null ? "" : subagent.queue().fingerprint());
         return agents.computeIfAbsent(key,
@@ -177,14 +177,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // （ADR-0031）随解析进创建上下文：baseUrl/apiKey/enableThinking 注入
         // SDK（覆盖依赖库默认地址与环境变量），前缀路由到平台注册工厂
         // （volcengine）或内置 provider（deepseek 等）。#557 起队列形：命令携
-        // modelQueue（档位解析的整队列产物）时主模型经 failoverLayer 装配
+        // modelQueue（配置解析的整队列产物）时主模型经 failoverLayer 装配
         // （多候选＝FailoverModel 链式切换、单候选＝streamLayer 直装行为不变）
         Model model = modelQueue != null
                 ? failoverLayer(modelQueue, properties, switchTraceSink)
                 : streamLayer(
                         ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
                         modelString, vendorOf(modelChannel), properties);
-        // 委派子智能体档位（#424 片轻验）：覆盖档独立解析同款流层包装（计量外圈＋
+        // 委派子智能体配置（#424 片轻验）：覆盖档独立解析同款流层包装（计量外圈＋
         // 断流重试同构；#557 起整队列 failover 同构）；null＝随父级实例（缺省同
         // 执行体档——含路由升档，计量边界连续的既有口径不变）
         Model subagentModel = subagent == null ? model
@@ -223,7 +223,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .disableTranscript()
                 // 内层重试关闭·内核旋钮（#555 / ADR-0053 ①）：平台 INNER_RETRY_DISABLED
                 // 压的 maxAttempts=1 只到模型 configuredOptions——内核 ReActAgent 无条件
-                // 烧 modelConfig(maxRetries 缺省 3) 进每次调用的 callOptions，
+                // 烧 modelConfig(maxRetries 缺省 3) 进每次调用的 callOptions
+                // （框架生成调用选项——与平台「模型配置」域概念〔ModelConfig/
+                // config_key，#554 改名〕无涉，仅字面撞车），
                 // ModelUtils.applyTimeoutAndRetry 的 mergeOptions(callOptions,
                 // configuredOptions) 第一参字段级优先压过之（且 retryOn=null 时内核挂
                 // 恒真 filter：401 也重试、耗尽 RetryExhaustedException 裹走真错误——
@@ -250,8 +252,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
         }
-        // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩档位解析产物（#366 边缘
-        // 点收编——档位键经 EdgeModelSupplier 反转读配置面），让压缩在
+        // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩配置解析产物（#366 边缘
+        // 点收编——配置键经 EdgeModelSupplier 反转读配置面），让压缩在
         // context_length_exceeded 前触发；阈值取值依据见 AgentscopeProperties。
         builder.compaction(compactionConfig(properties, compaction, switchTraceSink));
         switch (workspace) {
@@ -697,7 +699,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     .build();
 
     /**
-     * 生效解析上下文（ADR-0031 通道注入腿）：通道件非空＝档位解析产物——
+     * 生效解析上下文（ADR-0031 通道注入腿）：通道件非空＝配置解析产物——
      * baseUrl/apiKey/enableThinking 注入创建上下文（平台 volcengine 工厂与内置
      * provider 都从标准字段读，key 不落环境变量）；空＝无通道语境（一次性调用
      * 面的配置缺省串），维持仅内层重试关闭的既有上下文。
@@ -714,11 +716,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     /**
-     * 压缩配置装配：把配置的触发阈值 + 压缩档位解析产物落到 {@link CompactionConfig}
-     * ——压缩模型来自 {@link EdgeModelSupplier}（#366 边缘点收编：compaction 档位
+     * 压缩配置装配：把配置的触发阈值 + 压缩配置解析产物落到 {@link CompactionConfig}
+     * ——压缩模型来自 {@link EdgeModelSupplier}（#366 边缘点收编：compaction 配置
      * 库值优先缺省 flash，通道注入同主模型链——换压缩档/换通道不发版），保留量/裁剪
      * 走框架缺省。压缩（摘要）模型同经候选队列装配（#109 计量 + #321 断流重试 +
-     * #557 failover——边缘档位同获链式切换）：压缩链的摘要与 flushBeforeCompact
+     * #557 failover——边缘配置同获链式切换）：压缩链的摘要与 flushBeforeCompact
      * 记忆抽取共用该模型实例直调 stream()，包装后用量归入当前轮计量（flash 档与
      * 主模型 pro 档各自归位）、断流同获流层重试。
      *

@@ -22,20 +22,20 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param agentKey                智能体稳定键（寻址腿）
  * @param agentName               展示名
  * @param systemPrompt            生效 systemPrompt（库覆盖值或枚举默认——装配实取值）
- * @param modelId                 生效模型档位键（ADR-0031 语义键）
+ * @param modelConfigKey                 生效模型配置键（ADR-0031 语义键）
  * @param systemPromptOverridden  true＝systemPrompt 为库覆盖值（false＝枚举默认）
- * @param modelIdOverridden       true＝模型档位为库覆盖值（false＝枚举默认；路由开
+ * @param modelConfigKeyOverridden       true＝模型配置为库覆盖值（false＝枚举默认；路由开
  *                                时为兜底基础档——信号升档可越过；路由关时＝钉死
  *                                人工档）
  * @param defaultSystemPrompt     枚举默认 systemPrompt（预览：清空覆盖即落此值）
- * @param defaultModelId          枚举默认模型档位（同上）
+ * @param defaultModelConfigKey          枚举默认模型配置（同上）
  * @param webSearchEnabled        联网搜索开关生效态（无行语境＝true；#252 起生效装配）
  * @param fetchUrlEnabled         网页抓取开关存储态（同上）
  * @param routingEnabled          模型路由开关生效态（#354：开＝路由判定优先；关＝
  *                                既有人工定档口径。仅 run 执行体消费）
- * @param routingStrongModelId    强模型档生效值（路由升档落点；库覆盖值或代码缺省）
- * @param routingStrongModelIdOverridden true＝强模型档为库覆盖值（false＝代码缺省）
- * @param defaultRoutingStrongModelId 代码缺省强模型档（预览：清空覆盖即落此值）
+ * @param routingStrongModelConfigKey    强模型档生效值（路由升档落点；库覆盖值或代码缺省）
+ * @param routingStrongModelConfigKeyOverridden true＝强模型档为库覆盖值（false＝代码缺省）
+ * @param defaultRoutingStrongModelConfigKey 代码缺省强模型档（预览：清空覆盖即落此值）
  * @param routingFileCountThreshold 文件面阈值生效值（库覆盖值或代码缺省）
  * @param routingFileCountThresholdOverridden true＝文件面阈值为库覆盖值
  * @param defaultRoutingFileCountThreshold 代码缺省文件面阈值（同上预览）
@@ -49,9 +49,9 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param routingSizeLabelSignalEnabled 规模标签信号开关生效态（#454，ADR-0037；缺省
  *                                false＝关＝规模标签不参与升档判定；true＝恢复标签
  *                                映射判据。仅 run 执行体行消费）
- * @param verifyModelId           verify 子智能体档位覆盖值（#424；null＝随执行体生效档
+ * @param verifyModelConfigKey           verify 子智能体配置覆盖值（#424；null＝随执行体生效档
  *                                ——含路由升档，缺省同档不降）
- * @param verifyModelIdOverridden true＝verify 档位为库覆盖值（false＝随执行体档）
+ * @param verifyModelConfigKeyOverridden true＝verify 配置为库覆盖值（false＝随执行体档）
  * @param verifyRoundBudget       单场验证轮次预算生效值（#424；库覆盖值或代码缺省）
  * @param verifyRoundBudgetOverridden true＝轮次预算为库覆盖值（false＝代码缺省）
  * @param defaultVerifyRoundBudget 代码缺省轮次预算（预览：清空覆盖即落此值）
@@ -92,18 +92,18 @@ public record BackofficeAgentConfigResponse(
         @Schema(description = "生效 systemPrompt（库覆盖值或枚举默认——装配实取值，"
                 + "对照 systemPromptOverridden 知来源）")
         String systemPrompt,
-        @Schema(description = "生效模型档位键（ADR-0031 语义键，如 flash/pro）", example = "flash")
-        String modelId,
+        @Schema(description = "生效模型配置键（ADR-0031 语义键，如 flash/pro）", example = "flash")
+        String modelConfigKey,
         @Schema(description = "systemPrompt 是否库覆盖值（true＝覆盖；false＝枚举默认）")
         boolean systemPromptOverridden,
-        @Schema(description = "模型档位是否库覆盖值（true＝覆盖；false＝枚举默认；"
+        @Schema(description = "模型配置是否库覆盖值（true＝覆盖；false＝枚举默认；"
                 + "路由开时为兜底基础档——信号升档可越过；路由关时＝钉死人工档）")
-        boolean modelIdOverridden,
+        boolean modelConfigKeyOverridden,
         @Schema(description = "枚举默认 systemPrompt（预览：清空覆盖即落此值——身份与"
                 + "配置分治的缺省正本）")
         String defaultSystemPrompt,
-        @Schema(description = "枚举默认模型档位（清空覆盖即落此值）", example = "flash")
-        String defaultModelId,
+        @Schema(description = "枚举默认模型配置（清空覆盖即落此值）", example = "flash")
+        String defaultModelConfigKey,
         @Schema(description = "联网搜索开关生效态（#252 起生效装配：关即退出槽位装配面；无覆盖行语境＝true 开）")
         boolean webSearchEnabled,
         @Schema(description = "网页抓取开关生效态（生效语义同 webSearchEnabled；无覆盖行语境＝true 开）")
@@ -112,12 +112,12 @@ public record BackofficeAgentConfigResponse(
                 + "定档口径。仅 run 执行体消费，无覆盖行语境＝true 开）")
         boolean routingEnabled,
         @Schema(description = "强模型档生效值（#354 路由升档落点；库覆盖值或代码缺省——"
-                + "对照 routingStrongModelIdOverridden 知来源）", example = "pro")
-        String routingStrongModelId,
+                + "对照 routingStrongModelConfigKeyOverridden 知来源）", example = "pro")
+        String routingStrongModelConfigKey,
         @Schema(description = "强模型档是否库覆盖值（true＝覆盖；false＝代码缺省）")
-        boolean routingStrongModelIdOverridden,
+        boolean routingStrongModelConfigKeyOverridden,
         @Schema(description = "代码缺省强模型档（预览：清空覆盖即落此值）", example = "pro")
-        String defaultRoutingStrongModelId,
+        String defaultRoutingStrongModelConfigKey,
         @Schema(description = "文件面阈值生效值（#354/#426：应用文件面——已跟踪文件数扣"
                 + "基座基数 ≥ 此值升强档；库覆盖值或代码缺省）", example = "30")
         Integer routingFileCountThreshold,
@@ -140,11 +140,11 @@ public record BackofficeAgentConfigResponse(
                 + "标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。"
                 + "仅 run 执行体消费）")
         boolean routingSizeLabelSignalEnabled,
-        @Schema(description = "verify 验证子智能体档位覆盖值（#424 片轻验：null＝随执行体"
+        @Schema(description = "verify 验证子智能体配置覆盖值（#424 片轻验：null＝随执行体"
                 + "生效档——含路由升档，缺省同档不降）", example = "pro")
-        String verifyModelId,
-        @Schema(description = "verify 档位是否库覆盖值（true＝覆盖钉死；false＝随执行体档）")
-        boolean verifyModelIdOverridden,
+        String verifyModelConfigKey,
+        @Schema(description = "verify 配置是否库覆盖值（true＝覆盖钉死；false＝随执行体档）")
+        boolean verifyModelConfigKeyOverridden,
         @Schema(description = "单场验证轮次预算生效值（#424 防无限复验：登记达预算仍有"
                 + "未过项即停修复—复验；库覆盖值或代码缺省）", example = "3")
         Integer verifyRoundBudget,
@@ -223,18 +223,18 @@ public record BackofficeAgentConfigResponse(
                 profile.key(),
                 profile.getName(),
                 config.effectiveSystemPrompt(profile.systemPrompt()),
-                config.effectiveModelId(profile.modelId()),
+                config.effectiveModelConfigKey(profile.modelConfigKey()),
                 config.systemPrompt() != null,
-                config.modelId() != null,
+                config.modelConfigKey() != null,
                 profile.systemPrompt(),
-                profile.modelId(),
+                profile.modelConfigKey(),
                 config.webSearchEnabled(),
                 config.fetchUrlEnabled(),
                 config.routingEnabled(),
-                config.routingStrongModelId() != null
-                        ? config.routingStrongModelId() : ModelRoutingAppService.DEFAULT_STRONG_MODEL_ID,
-                config.routingStrongModelId() != null,
-                ModelRoutingAppService.DEFAULT_STRONG_MODEL_ID,
+                config.routingStrongModelConfigKey() != null
+                        ? config.routingStrongModelConfigKey() : ModelRoutingAppService.DEFAULT_STRONG_MODEL_CONFIG_KEY,
+                config.routingStrongModelConfigKey() != null,
+                ModelRoutingAppService.DEFAULT_STRONG_MODEL_CONFIG_KEY,
                 config.routingFileCountThreshold() != null
                         ? config.routingFileCountThreshold() : ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD,
                 config.routingFileCountThreshold() != null,
@@ -245,8 +245,8 @@ public record BackofficeAgentConfigResponse(
                 config.routingEscalatingSizeLabels() != null,
                 SliceSizeLabel.namesOf(ModelRoutingAppService.DEFAULT_ESCALATING_SIZE_LABELS),
                 config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled(),
-                config.verifyModelId(),
-                config.verifyModelId() != null,
+                config.verifyModelConfigKey(),
+                config.verifyModelConfigKey() != null,
                 config.verifyRoundBudget() != null
                         ? config.verifyRoundBudget() : AgentConfigAppService.DEFAULT_VERIFY_ROUND_BUDGET,
                 config.verifyRoundBudget() != null,

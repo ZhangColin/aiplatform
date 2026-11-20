@@ -34,7 +34,7 @@
 - 存量经 migration 一步刷成档位键（三座 model_id、路由强档、四个配置缺省串、AgentProfile 枚举缺省）——不留新旧两制；dev 库真数据走 repair 流程。
 - 单价表需为火山模型开新行（provider+model 维度变化），平台成本观测跨切换不断线。
 - 模型实例缓存键含生效配置指纹——改配置即生效的边界由缓存纪律守住（装配层守点，Seam B 测试锚）。
-- admin 侧新增通道/档位两维护面＋绑定改档位下拉（跨仓交接，admin 仓库 issue）；demo-stage-model-tier.md 改档 SOP 更新。
+- admin 侧新增通道/档位两维护面＋绑定改档位下拉（跨仓交接，admin 仓库 issue）；demo-stage-model-config.md 改档 SOP 更新。
 - CONTEXT.md 新词条「模型供应商」「模型档位」，「智能体运营配置」词条修订（边缘四点入面）；本 ADR 与 ADR-0021/0030 构成模型选用三件套正本（谁调用〔运营配置〕、何时升档〔路由〕、打到哪家用哪家〔供应商〕）。
 
 ## 修订（2026-11，#370 enableThinking 开关档位化）

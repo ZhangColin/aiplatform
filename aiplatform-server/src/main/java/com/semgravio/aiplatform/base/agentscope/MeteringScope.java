@@ -85,7 +85,7 @@ final class MeteringScope {
     /**
      * 一次模型 {@code stream()} 收口报恰一条 UsageEvent（幂等键 = 前缀 + 本轮自增
      * 序号；零用量/无 usage 跳过——不发明零事件）。provider/model/vendor 取模型
-     * 边界的自身档位（压缩 flash 与主循环 pro 各自归位，不并桶；vendor 随候选
+     * 边界的自身配置（压缩 flash 与主循环 pro 各自归位，不并桶；vendor 随候选
      * 的通道行走——同供应商多账号共用供应商级定价与模型视角合并，ADR-0053 ②）。
      * 判死后（#374）收口照报＋WARN（僵尸调用只烧 token 产出全弃，事实必须可见）。
      */

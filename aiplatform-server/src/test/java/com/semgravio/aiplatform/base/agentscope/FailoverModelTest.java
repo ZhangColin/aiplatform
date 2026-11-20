@@ -120,7 +120,7 @@ class FailoverModelTest {
         // 切换留痕：何时/从哪到哪/触发错误/run 上下文
         assertThat(traces).hasSize(1);
         ModelSwitchTraceSink.Trace trace = traces.get(0);
-        assertThat(trace.tierKey()).isEqualTo("pro");
+        assertThat(trace.configKey()).isEqualTo("pro");
         assertThat(trace.fromProviderKey()).isEqualTo("ch0");
         assertThat(trace.fromModelName()).isEqualTo("model-0");
         assertThat(trace.toProviderKey()).isEqualTo("ch1");

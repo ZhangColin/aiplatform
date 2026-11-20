@@ -30,7 +30,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * run-finish，runId 锚定、增量拼接 = 汇聚文本），该轮产生恰一条 UsageEvent 落库
  * （subject/dims 归属）。
  *
- * <p>通道件从测试库供应商行现读（deepseek 种子行——与业务侧档位解析同源，
+ * <p>通道件从测试库供应商行现读（deepseek 种子行——与业务侧配置解析同源，
  * key 经部署环境注入种子）：key 空即整类跳过（Assumption，不失败）。流式/计量/
  * 幂等键行为在 {@code AgentscopeAgentClientTest}（mock 事件流）已覆盖，本类只验
  * 真内核接线。workspace 经临时目录隔离；AgentState 落 PG（#48），冒烟槽位
@@ -81,7 +81,7 @@ class AgentscopeConverseSmokeTest {
             throws InterruptedException {
         String runId = "smoke-chat-" + UUID.randomUUID();
         List<AgentEvent> frames = new ArrayList<>();
-        // 通道件从测试库供应商行现读（主链路装配的忠实复刻：档位解析查库构造同款）
+        // 通道件从测试库供应商行现读（主链路装配的忠实复刻：配置解析查库构造同款）
         var channelRow = jdbcTemplate.queryForMap(
                 "SELECT base_url, api_key FROM prj_model_providers WHERE provider_key = 'deepseek'");
         ModelChannel channel = new ModelChannel(

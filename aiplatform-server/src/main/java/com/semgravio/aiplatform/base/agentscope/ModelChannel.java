@@ -6,14 +6,14 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
 /**
- * 模型通道注入件（ADR-0031 装配链的底座半边）：业务侧从模型档位/供应商通道
- * 解析（{@code ModelTierAppService}，库为唯一正本）后随命令透传——baseUrl/apiKey
+ * 模型通道注入件（ADR-0031 装配链的底座半边）：业务侧从模型配置/供应商通道
+ * 解析（{@code ModelConfigAppService}，库为唯一正本）后随命令透传——baseUrl/apiKey
  * 经创建上下文注入 SDK（覆盖依赖库默认地址与环境变量），enableThinking 显式
- * 表态（值随档位行走——#370 运营配置，缺省关＝#369 活体结论；装配不留给
+ * 表态（值随配置行走——#370 运营配置，缺省关＝#369 活体结论；装配不留给
  * 模型默认）。
  *
  * <p>可为 null＝无通道语境（测试形——主链全部调用面〔三座与边缘四点，#366 收编〕
- * 一律经档位解析携通道注入；null 时 SDK 侧回落内置 provider 的环境变量/默认地址）。
+ * 一律经配置解析携通道注入；null 时 SDK 侧回落内置 provider 的环境变量/默认地址）。
  * {@code vendor}（ADR-0053 ②）＝通道行的归一供应商维度（deepseek/deepseek-2 同填
  * deepseek）：计量事件按模型统计与单价表/峰谷规则匹配键的腿，随候选行走（failover
  * 切候选后 vendor 随实际命中通道行归因）；可空＝无通道语境，模型边界回落 provider

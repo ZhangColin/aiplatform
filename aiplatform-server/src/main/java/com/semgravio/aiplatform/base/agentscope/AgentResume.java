@@ -15,7 +15,7 @@ import io.agentscope.core.event.ConfirmResult;
  * @param sessionId         会话标识（状态槽位寻址）
  * @param userId            会话用户（状态槽位寻址）
  * @param workspaceId       工作区标识（可空 → 本地兜底工作区）
- * @param modelString       模型串（必填——档位解析产物「前缀:实际模型名」，语义同
+ * @param modelString       模型串（必填——配置解析产物「前缀:实际模型名」，语义同
  *                         {@link AgentCommand#modelString()}；业务侧从运营配置重新
  *                         解析重建，不信挂起载荷）
  * @param modelChannel      模型通道注入件（主链非空——续跑与首轮同通道，业务侧
@@ -71,7 +71,7 @@ public record AgentResume(
                 || modelString == null || modelString.isBlank()) {
             throw new IllegalArgumentException(
                     "AgentResume 字段不完整：runId/sessionId/modelString 必填"
-                            + "（modelString＝档位解析产物，与 AgentCommand 同契约）");
+                            + "（modelString＝配置解析产物，与 AgentCommand 同契约）");
         }
     }
 }

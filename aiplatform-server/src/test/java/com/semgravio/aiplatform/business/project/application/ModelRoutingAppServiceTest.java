@@ -26,8 +26,8 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * 封闭集，主智能体计划自报——#423）替换枚举密度信号（度量描述写法非实现面积，
  * 退役）；文件面排除基座基数后阈值重校。结构性信号开关 #454（用户裁决）：文件面/
  * 规模标签两信号缺省关＝不参与升档判定（观测值照留、参与标记进判定快照），失败
- * 重试信号常开不受两开关影响。档位值为语义键（ADR-0031：flash/pro——模型串与
- * 通道注入由 ModelTierAppService 解析，判定层只见键）。
+ * 重试信号常开不受两开关影响。配置值为语义键（ADR-0031：flash/pro——模型串与
+ * 通道注入由 ModelConfigAppService 解析，判定层只见键）。
  */
 class ModelRoutingAppServiceTest {
 
@@ -62,9 +62,9 @@ class ModelRoutingAppServiceTest {
 
     /** 路由开＋信号开＋自定义映射（升档规模标签集＝中＋大）、文件面阈值与强档覆盖。 */
     private static AgentConfigAppService.EffectiveConfig routedWithMapping(
-            Set<SliceSizeLabel> escalating, Integer fileThreshold, String strongModelId) {
+            Set<SliceSizeLabel> escalating, Integer fileThreshold, String strongModelConfigKey) {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, false, true, strongModelId, fileThreshold, escalating, true, true,
+                true, true, false, true, strongModelConfigKey, fileThreshold, escalating, true, true,
                 null, 3, 2, true, true, true, true, false, false, true);
     }
 
@@ -72,20 +72,20 @@ class ModelRoutingAppServiceTest {
 
     @Test
     void given_routing_on_no_signals_when_decide_then_fast_default() {
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, 10, null);
-        assertThat(selection.modelId()).isEqualTo("flash");
+        assertThat(selection.modelConfigKey()).isEqualTo("flash");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_ROUTED);
         assertThat(selection.reasons()).isEmpty();
     }
 
     @Test
     void given_override_without_signals_when_decide_then_manual_fallback_base_tier() {
-        // 人工覆盖兜底：无信号时回落人工档（覆盖即基础档——快档位可经 modelId
+        // 人工覆盖兜底：无信号时回落人工档（覆盖即基础档——快配置可经 modelConfigKey
         // 配置、不关路由）
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedWithOverride(), 1, 1, 10, null);
-        assertThat(selection.modelId()).isEqualTo("flash");
+        assertThat(selection.modelConfigKey()).isEqualTo("flash");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_ROUTED);
         assertThat(selection.reasons()).isEmpty();
     }
@@ -93,9 +93,9 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_override_with_signals_when_decide_then_routing_escalation_wins() {
         // 路由判定优先：信号升强档优先于人工档（覆盖是兜底不是钉死）
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedWithOverride(), 2, 1, null, null);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("重试升档（第 2 次尝试）");
     }
 
@@ -103,18 +103,18 @@ class ModelRoutingAppServiceTest {
 
     @Test
     void given_retry_attempt_when_decide_then_escalates_to_strong() {
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 2, 1, null, null);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("重试升档（第 2 次尝试）");
     }
 
     @Test
     void given_rerun_round_when_decide_then_escalates_to_strong() {
         // #353 外环：首轮重试耗尽回滚重跑——首试（attempt 1）也升强档
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 2, null, null);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("回滚重跑升档（首轮重试耗尽）");
     }
 
@@ -123,15 +123,15 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_file_count_at_threshold_when_decide_then_escalates_with_boundary() {
         int threshold = ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD;
-        ModelRoutingAppService.TierSelection atThreshold =
+        ModelRoutingAppService.ConfigSelection atThreshold =
                 ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1, threshold, null);
-        assertThat(atThreshold.modelId()).isEqualTo("pro");
+        assertThat(atThreshold.modelConfigKey()).isEqualTo("pro");
         assertThat(atThreshold.reasons()).containsExactly(
                 "文件面超出阈值（" + threshold + " ≥ " + threshold + "）");
         // 阈值下界不升档（越阈判定的边界语义）
-        ModelRoutingAppService.TierSelection below =
+        ModelRoutingAppService.ConfigSelection below =
                 ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1, threshold - 1, null);
-        assertThat(below.modelId()).isEqualTo("flash");
+        assertThat(below.modelConfigKey()).isEqualTo("flash");
     }
 
     // ---------- 信号三（#426 替换）：规模标签映射——缺省「大」升强档、小/中回落 ----------
@@ -140,9 +140,9 @@ class ModelRoutingAppServiceTest {
     void given_large_slice_when_decide_then_escalates_by_default_mapping() {
         // 缺省映射＝「大」升强档（多页面多接口的重功能片——描述短功能重的锚案
         // 大片不再被误留快档）；理由携标签快照
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1, null, SliceSizeLabel.LARGE);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("规模标签升档（大）");
     }
 
@@ -150,17 +150,17 @@ class ModelRoutingAppServiceTest {
     void given_small_or_medium_slice_when_decide_then_stay_fast_by_default() {
         // 小/中回落人工档兜底（快档）——缺省映射只升「大」
         assertThat(ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1, null,
-                SliceSizeLabel.SMALL).modelId()).isEqualTo("flash");
+                SliceSizeLabel.SMALL).modelConfigKey()).isEqualTo("flash");
         assertThat(ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1, null,
-                SliceSizeLabel.MEDIUM).modelId()).isEqualTo("flash");
+                SliceSizeLabel.MEDIUM).modelConfigKey()).isEqualTo("flash");
     }
 
     @Test
     void given_unlabeled_slice_when_decide_then_no_size_signal() {
         // 未设标签（存量计划/阶段 0）＝无此信号——存量不回补、降级不升档
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, null, null);
-        assertThat(selection.modelId()).isEqualTo("flash");
+        assertThat(selection.modelConfigKey()).isEqualTo("flash");
         assertThat(selection.reasons()).isEmpty();
         assertThat(selection.signals()).containsEntry("sizeLabel", null);
     }
@@ -171,17 +171,17 @@ class ModelRoutingAppServiceTest {
         AgentConfigAppService.EffectiveConfig mediumAndLarge =
                 routedWithMapping(Set.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE), null, null);
         assertThat(ModelRoutingAppService.decide(mediumAndLarge, 1, 1, null,
-                SliceSizeLabel.MEDIUM).modelId()).isEqualTo("pro");
+                SliceSizeLabel.MEDIUM).modelConfigKey()).isEqualTo("pro");
         assertThat(ModelRoutingAppService.decide(mediumAndLarge, 1, 1, null,
                 SliceSizeLabel.MEDIUM).reasons()).containsExactly("规模标签升档（中）");
         // 小片不在映射内仍回落
         assertThat(ModelRoutingAppService.decide(mediumAndLarge, 1, 1, null,
-                SliceSizeLabel.SMALL).modelId()).isEqualTo("flash");
+                SliceSizeLabel.SMALL).modelConfigKey()).isEqualTo("flash");
         // 映射收窄为仅「大」→ 中片回落（缺省映射可经配置收回）
         AgentConfigAppService.EffectiveConfig largeOnly =
                 routedWithMapping(Set.of(SliceSizeLabel.LARGE), null, null);
         assertThat(ModelRoutingAppService.decide(largeOnly, 1, 1, null,
-                SliceSizeLabel.MEDIUM).modelId()).isEqualTo("flash");
+                SliceSizeLabel.MEDIUM).modelConfigKey()).isEqualTo("flash");
     }
 
     @Test
@@ -191,7 +191,7 @@ class ModelRoutingAppServiceTest {
         AgentConfigAppService.EffectiveConfig emptyMapping =
                 routedWithMapping(Set.of(), null, null);
         assertThat(ModelRoutingAppService.decide(emptyMapping, 1, 1, null,
-                SliceSizeLabel.LARGE).modelId()).isEqualTo("flash");
+                SliceSizeLabel.LARGE).modelConfigKey()).isEqualTo("flash");
         // 文件面信号独立在场仍升档（OR 组合——信号互不掩护）
         assertThat(ModelRoutingAppService.decide(emptyMapping, 1, 1,
                 ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD,
@@ -204,10 +204,10 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_multiple_signals_when_decide_then_reasons_list_all() {
         int threshold = ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD;
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedWithSignalsOn(), 3, 1, threshold,
                         SliceSizeLabel.LARGE);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.reasons()).hasSize(3);
     }
 
@@ -216,9 +216,9 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_routing_off_with_override_when_decide_then_pinned_manual_tier() {
         // 钉死位＝路由关：人工档恒生效——重试/文件面/规模标签全在场也不升档
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(pinned(), 3, 2, 999, SliceSizeLabel.LARGE);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_PINNED);
         assertThat(selection.reasons()).isEmpty();
     }
@@ -229,9 +229,9 @@ class ModelRoutingAppServiceTest {
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, false, null, null, null, false, false, null, 3, 2,
                         true, true, true, true, false, false, true);
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(disabledDefault, 3, 2, 999, null);
-        assertThat(selection.modelId()).isEqualTo("flash");
+        assertThat(selection.modelConfigKey()).isEqualTo("flash");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_DEFAULT);
     }
 
@@ -240,9 +240,9 @@ class ModelRoutingAppServiceTest {
         AgentConfigAppService.EffectiveConfig custom =
                 routedWithMapping(Set.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE), 5,
                         "doubao-flagship");
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(custom, 1, 1, 5, SliceSizeLabel.MEDIUM);
-        assertThat(selection.modelId()).isEqualTo("doubao-flagship");
+        assertThat(selection.modelConfigKey()).isEqualTo("doubao-flagship");
         assertThat(selection.reasons()).hasSize(2);
         assertThat(selection.signals())
                 .containsEntry("fileCountThreshold", 5)
@@ -252,7 +252,7 @@ class ModelRoutingAppServiceTest {
 
     @Test
     void given_selection_when_payload_then_carry_tier_source_reasons_and_signals() {
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1, null, SliceSizeLabel.LARGE);
         Map<String, Object> payload = selection.payload();
         assertThat(payload).containsEntry("modelId", "pro")
@@ -272,9 +272,9 @@ class ModelRoutingAppServiceTest {
     void given_signals_off_by_default_when_file_count_over_threshold_then_no_escalation() {
         // 缺省态（两开关 false）：文件面越阈不升档——观测值照留、标未参与判定
         int threshold = ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD;
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, threshold + 20, null);
-        assertThat(selection.modelId()).isEqualTo("flash");
+        assertThat(selection.modelConfigKey()).isEqualTo("flash");
         assertThat(selection.reasons()).isEmpty();
         assertThat(selection.signals())
                 .containsEntry("fileCount", threshold + 20)
@@ -284,9 +284,9 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_signals_off_by_default_when_large_slice_then_no_escalation() {
         // 规模标签映射命中也不升档（开关关＝信号不参与判定）；观测值照留
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, null, SliceSizeLabel.LARGE);
-        assertThat(selection.modelId()).isEqualTo("flash");
+        assertThat(selection.modelConfigKey()).isEqualTo("flash");
         assertThat(selection.reasons()).isEmpty();
         assertThat(selection.signals())
                 .containsEntry("sizeLabel", "大")
@@ -297,13 +297,13 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_signals_off_when_retry_then_failure_signal_still_escalates() {
         // 失败重试信号不受两开关影响、常开（#454 裁决：全程 flash、只有失败重试才升档）
-        ModelRoutingAppService.TierSelection retry =
+        ModelRoutingAppService.ConfigSelection retry =
                 ModelRoutingAppService.decide(routedDefault(), 2, 1, 999, SliceSizeLabel.LARGE);
-        assertThat(retry.modelId()).isEqualTo("pro");
+        assertThat(retry.modelConfigKey()).isEqualTo("pro");
         assertThat(retry.reasons()).containsExactly("重试升档（第 2 次尝试）");
-        ModelRoutingAppService.TierSelection rerun =
+        ModelRoutingAppService.ConfigSelection rerun =
                 ModelRoutingAppService.decide(routedDefault(), 1, 2, 999, SliceSizeLabel.LARGE);
-        assertThat(rerun.modelId()).isEqualTo("pro");
+        assertThat(rerun.modelConfigKey()).isEqualTo("pro");
         assertThat(rerun.reasons()).containsExactly("回滚重跑升档（首轮重试耗尽）");
     }
 
@@ -319,16 +319,16 @@ class ModelRoutingAppServiceTest {
                         + ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD + " ≥ "
                         + ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD + "）");
         assertThat(ModelRoutingAppService.decide(fileOnly, 1, 1, null, SliceSizeLabel.LARGE)
-                .modelId()).isEqualTo("flash");
+                .modelConfigKey()).isEqualTo("flash");
     }
 
     @Test
     void given_signals_on_when_signals_present_then_participation_flags_true() {
         // 开关开＝恢复判据：判定依据快照带参与标记 true（观测面可区分「在场」与「参与」）
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(routedWithSignalsOn(), 1, 1,
                         ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD, null);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelConfigKey()).isEqualTo("pro");
         assertThat(selection.signals())
                 .containsEntry("fileCountSignalEnabled", true)
                 .containsEntry("sizeLabelSignalEnabled", true);
@@ -381,7 +381,7 @@ class ModelRoutingAppServiceTest {
         // 覆盖的兜底路径仍需采集——升档可能越过覆盖）
         WorkspaceLifecycleAppService workspaces = mock(WorkspaceLifecycleAppService.class);
         ModelRoutingAppService service = new ModelRoutingAppService(workspaces);
-        ModelRoutingAppService.TierSelection selection =
+        ModelRoutingAppService.ConfigSelection selection =
                 service.select(pinned(), "1", 1, 1, ModelRoutingAppService.SegmentSignals.none());
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_PINNED);
         verifyNoInteractions(workspaces);

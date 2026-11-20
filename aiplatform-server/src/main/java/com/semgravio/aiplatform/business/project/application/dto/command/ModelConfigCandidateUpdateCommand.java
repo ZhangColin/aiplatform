@@ -13,7 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param priority    移动目标队列序（缺省＝原地不动；显式 1..队列长＝移动——
  *                    区间候选顺移补位；越界 PRJ_090）
  */
-public record ModelTierCandidateUpdateCommand(
+public record ModelConfigCandidateUpdateCommand(
         @Schema(description = "换指向通道键（缺省＝保持现值）", example = "deepseek-2")
         String providerKey,
         @Schema(description = "换指向实际模型名（缺省＝保持现值）", example = "deepseek-flash")

@@ -146,8 +146,8 @@ class AgentscopeInnerRetryKnobTest {
     }
 
     /**
-     * 主装配参数化（401 用例缺省形／#561 补验形共用）：主模型通道与压缩档位参数化，
-     * 压缩/预检档位恒指 401 端点（两个用例的压缩模型都「不可用」——401 用例钉主模型
+     * 主装配参数化（401 用例缺省形／#561 补验形共用）：主模型通道与压缩配置参数化，
+     * 压缩/预检配置恒指 401 端点（两个用例的压缩模型都「不可用」——401 用例钉主模型
      * 错误直通、补验用例钉压缩失败续跑）。
      */
     private HarnessAgent assemblyAgent(AgentscopeProperties properties, ModelChannel mainChannel,

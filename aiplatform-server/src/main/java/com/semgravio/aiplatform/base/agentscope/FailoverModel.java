@@ -107,8 +107,8 @@ final class FailoverModel implements Model {
                     }
                     ModelCandidate from = queue.candidate(index);
                     ModelCandidate to = queue.candidate(index + 1);
-                    logger.warn("[model-failover] 档位 {} 候选 {} → {} 切换（触发: {}）",
-                            queue.tierKey(), from.modelString(), to.modelString(),
+                    logger.warn("[model-failover] 配置 {} 候选 {} → {} 切换（触发: {}）",
+                            queue.configKey(), from.modelString(), to.modelString(),
                             error.toString());
                     recordSwitch(from, to, error, runId, sessionId);
                     return attempt(index + 1, messages, tools, options, emitted, runId,
@@ -129,8 +129,8 @@ final class FailoverModel implements Model {
                 assemblies[index] = assembler.apply(candidate);
             }
             catch (RuntimeException e) {
-                logger.warn("[model-failover] 档位 {} 候选 {} 装配失败（配置态错误，"
-                        + "如实上抛不切下一候选）: {}", queue.tierKey(), candidate.modelString(),
+                logger.warn("[model-failover] 配置 {} 候选 {} 装配失败（配置态错误，"
+                        + "如实上抛不切下一候选）: {}", queue.configKey(), candidate.modelString(),
                         e.toString());
                 throw e;
             }
@@ -159,12 +159,12 @@ final class FailoverModel implements Model {
      */
     private void recordSwitch(ModelCandidate from, ModelCandidate to, Throwable error,
             String runId, String sessionId) {
-        if (traceSink == null || queue.tierKey() == null) {
-            // 无端口（测试形）/无档位语境——切换照走，留痕腿缺席
+        if (traceSink == null || queue.configKey() == null) {
+            // 无端口（测试形）/无配置语境——切换照走，留痕腿缺席
             return;
         }
         try {
-            traceSink.record(new ModelSwitchTraceSink.Trace(queue.tierKey(),
+            traceSink.record(new ModelSwitchTraceSink.Trace(queue.configKey(),
                     from.providerKey(), from.modelName(), to.providerKey(), to.modelName(),
                     triggerErrorSummary(error), runId, sessionId, Instant.now()));
         }

@@ -616,7 +616,7 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_command_when_converse_then_model_string_passed_through_and_prompt_defaulted() {
-        // 模型串必填直透（#366 起无配置缺省回落——全部调用面经档位解析携串），
+        // 模型串必填直透（#366 起无配置缺省回落——全部调用面经配置解析携串），
         // systemPrompt 缺省仍取内核配置默认
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "默认"));
 

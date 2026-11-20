@@ -35,10 +35,10 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  * 通道行（同 deepseek 官方端点×<b>假 key</b>——生产事故 2026-11-19 同形：key 供应商
  * 侧被删、真服务器回真 401），备候选＝deepseek 官方行×真 key（env DEEPSEEK_API_KEY
  * 注入落库——apiKey 库为唯一正本的生产口径）。经<b>真实解析链</b>
- * （{@code ModelTierAppService#resolveQueue}：档位行 → 候选表 → 通道行）＋
+ * （{@code ModelConfigAppService#resolveQueue}：配置行 → 候选表 → 通道行）＋
  * <b>平台命令面</b>（{@link AgentscopeAgentClient#converse}）跑一轮对话，验收：
  * 单通道故障下命令面持续可用（自动切备、生成成功、无人工干预）＋failover 事实
- * 与命中通道双视角可见（切换留痕 {@code prj_model_tier_switch_traces}、计量
+ * 与命中通道双视角可见（切换留痕 {@code prj_model_config_switch_traces}、计量
  * {@code met_usage_events} 按账号 provider/按供应商 vendor、[model-failover] 日志）。
  *
  * <p><b>为什么主候选走 {@code openai:} 前缀</b>：候选模型串前缀即协议路由
@@ -65,8 +65,8 @@ class ModelFailoverDrillLiveTest {
 
     /** 演练注入的 OpenAI 兼容通道行键（＝模型串前缀，见类 javadoc）。 */
     private static final String DRILL_PROVIDER_KEY = "openai";
-    /** 演练档位＝平台现役快档（三座缺省/执行体档，demo-stage SOP 正本）。 */
-    private static final String DRILL_TIER_KEY = "flash";
+    /** 演练配置＝平台现役快档（三座缺省/执行体档，demo-stage SOP 正本）。 */
+    private static final String DRILL_CONFIG_KEY = "flash";
     /** 假 key：形状刻意非真值（真 key＝sk-+32hex），供应商侧必回真 401。 */
     private static final String FAKE_KEY = "sk-drill-fake-key-401-fault-injection";
 
@@ -80,7 +80,7 @@ class ModelFailoverDrillLiveTest {
     private AgentscopeProperties chatAgentProperties;
 
     @Autowired
-    private ModelTierAppService modelTiers;
+    private ModelConfigAppService modelConfigs;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -114,7 +114,7 @@ class ModelFailoverDrillLiveTest {
         }
         restoreQueueFault();
         // 演练产物清理（留痕表/计量事件/会话状态——按本演练自有前缀寻址）
-        jdbcTemplate.update("DELETE FROM prj_model_tier_switch_traces WHERE run_id LIKE 'smoke-fo-%'");
+        jdbcTemplate.update("DELETE FROM prj_model_config_switch_traces WHERE run_id LIKE 'smoke-fo-%'");
         jdbcTemplate.update("DELETE FROM met_usage_events WHERE run_id LIKE 'smoke-fo-%'");
         jdbcTemplate.update("DELETE FROM cat_agent_state WHERE user_id = 'smoke-fo-user'");
     }
@@ -125,7 +125,7 @@ class ModelFailoverDrillLiveTest {
             throws InterruptedException {
         String runId = "smoke-fo-" + UUID.randomUUID();
         // 真实解析链读注入后的队列（运营面改候选后的生效路径同款——动态查库）
-        ModelCandidateQueue queue = modelTiers.resolveQueue(DRILL_TIER_KEY);
+        ModelCandidateQueue queue = modelConfigs.resolveQueue(DRILL_CONFIG_KEY);
         assertThat(queue.size()).isEqualTo(2);
         assertThat(queue.first().providerKey()).isEqualTo(DRILL_PROVIDER_KEY);
 
@@ -155,12 +155,12 @@ class ModelFailoverDrillLiveTest {
         // （恰一条：主候选 401 轮一次切换；compaction 边缘档同队列走同一 FailoverModel，
         // 短轮不触发压缩——多痕即异常形态，显式计数防 queryForMap 静默取首行）
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_model_tier_switch_traces WHERE run_id = ?",
+                "SELECT COUNT(*) FROM prj_model_config_switch_traces WHERE run_id = ?",
                 Integer.class, runId)).isEqualTo(1);
         Map<String, Object> trace = jdbcTemplate.queryForMap(
-                "SELECT tier_key, from_provider_key, to_provider_key, trigger_error, run_id "
-                        + "FROM prj_model_tier_switch_traces WHERE run_id = ?", runId);
-        assertThat(trace.get("tier_key")).isEqualTo(DRILL_TIER_KEY);
+                "SELECT config_key, from_provider_key, to_provider_key, trigger_error, run_id "
+                        + "FROM prj_model_config_switch_traces WHERE run_id = ?", runId);
+        assertThat(trace.get("config_key")).isEqualTo(DRILL_CONFIG_KEY);
         assertThat(trace.get("from_provider_key")).isEqualTo(DRILL_PROVIDER_KEY);
         assertThat(trace.get("to_provider_key")).isEqualTo("deepseek");
         assertThat((String) trace.get("trigger_error")).contains("401");
@@ -186,28 +186,28 @@ class ModelFailoverDrillLiveTest {
     private void injectQueueFault() {
         String realKey = System.getenv("DEEPSEEK_API_KEY");
         // 前置断言（fail-fast 留指引，不在未知形态上盲动）：openai 行无残留（上次
-        // 演练硬中断的残迹——手动清 prj_model_tier_candidates p 行 + 本行后重跑）；
+        // 演练硬中断的残迹——手动清 prj_model_config_candidates p 行 + 本行后重跑）；
         // flash 现役形态＝单候选 deepseek（V79 种子态）
         Integer openaiRows = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM prj_model_providers WHERE provider_key = ?",
                 Integer.class, DRILL_PROVIDER_KEY);
         assertThat(openaiRows).as("openai 通道行已存在（疑似上次演练残留）——先手动清理再跑").isZero();
         Integer flashCandidateRows = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_model_tier_candidates WHERE tier_key = ?",
-                Integer.class, DRILL_TIER_KEY);
+                "SELECT COUNT(*) FROM prj_model_config_candidates WHERE config_key = ?",
+                Integer.class, DRILL_CONFIG_KEY);
         assertThat(flashCandidateRows).as("flash 候选形态非单候选（非 V79 种子态）——确认库态再跑").isEqualTo(1);
 
         originalDeepseekKey = jdbcTemplate.queryForObject(
                 "SELECT api_key FROM prj_model_providers WHERE provider_key = 'deepseek'", String.class);
         deepseekKeyCaptured = true;
         originalFlashPrimaryProvider = jdbcTemplate.queryForObject(
-                "SELECT provider_key FROM prj_model_tier_candidates WHERE tier_key = ? AND priority = 1",
-                String.class, DRILL_TIER_KEY);
+                "SELECT provider_key FROM prj_model_config_candidates WHERE config_key = ? AND priority = 1",
+                String.class, DRILL_CONFIG_KEY);
         // 种子事实单源现读（不复制 V79 字面值）：主候选模型名沿 flash p1 行、假通道行
         // 端点沿 deepseek 行——种子漂移时前置断言先红，此处不另背一份常量
-        String tierModelName = jdbcTemplate.queryForObject(
-                "SELECT model_name FROM prj_model_tier_candidates WHERE tier_key = ? AND priority = 1",
-                String.class, DRILL_TIER_KEY);
+        String configModelName = jdbcTemplate.queryForObject(
+                "SELECT model_name FROM prj_model_config_candidates WHERE config_key = ? AND priority = 1",
+                String.class, DRILL_CONFIG_KEY);
         String deepseekBaseUrl = jdbcTemplate.queryForObject(
                 "SELECT base_url FROM prj_model_providers WHERE provider_key = 'deepseek'", String.class);
 
@@ -216,27 +216,27 @@ class ModelFailoverDrillLiveTest {
                         + "VALUES (?, ?, ?, TRUE, 'deepseek')",
                 DRILL_PROVIDER_KEY, deepseekBaseUrl, FAKE_KEY);
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tier_candidates (tier_key, priority, provider_key, model_name, enabled) "
+                "INSERT INTO prj_model_config_candidates (config_key, priority, provider_key, model_name, enabled) "
                         + "VALUES (?, 2, 'deepseek', ?, TRUE)",
-                DRILL_TIER_KEY, tierModelName);
+                DRILL_CONFIG_KEY, configModelName);
         jdbcTemplate.update(
                 "UPDATE prj_model_providers SET api_key = ? WHERE provider_key = 'deepseek'", realKey);
         jdbcTemplate.update(
-                "UPDATE prj_model_tier_candidates SET provider_key = ? WHERE tier_key = ? AND priority = 1",
-                DRILL_PROVIDER_KEY, DRILL_TIER_KEY);
+                "UPDATE prj_model_config_candidates SET provider_key = ? WHERE config_key = ? AND priority = 1",
+                DRILL_PROVIDER_KEY, DRILL_CONFIG_KEY);
     }
 
     /** 注入还原（反序：先还 p1 指向〔FK 引用腿〕再删 openai 行；key 原值回写）。 */
     private void restoreQueueFault() {
         if (originalFlashPrimaryProvider != null) {
             jdbcTemplate.update(
-                    "UPDATE prj_model_tier_candidates SET provider_key = ? "
-                            + "WHERE tier_key = ? AND priority = 1",
-                    originalFlashPrimaryProvider, DRILL_TIER_KEY);
+                    "UPDATE prj_model_config_candidates SET provider_key = ? "
+                            + "WHERE config_key = ? AND priority = 1",
+                    originalFlashPrimaryProvider, DRILL_CONFIG_KEY);
         }
         jdbcTemplate.update(
-                "DELETE FROM prj_model_tier_candidates WHERE tier_key = ? AND priority = 2",
-                DRILL_TIER_KEY);
+                "DELETE FROM prj_model_config_candidates WHERE config_key = ? AND priority = 2",
+                DRILL_CONFIG_KEY);
         jdbcTemplate.update(
                 "DELETE FROM prj_model_providers WHERE provider_key = ?", DRILL_PROVIDER_KEY);
         if (deepseekKeyCaptured) {

@@ -14,16 +14,16 @@ import com.cartisan.core.domain.BaseEnum;
  * 与 run 执行体并列的两套产出逻辑——按设计物产出多稿候选、无 shell）——的身份
  * 与缺省配置。
  * 旧职能体角色卡（BA / 助理 / 编码智能体三座）已随 #86 并轨退役：差异只在
- * systemPrompt（工作协议）与模型档位，内核同一。模型档位＝Demo 阶段（首 Demo ＋
+ * systemPrompt（工作协议）与模型配置，内核同一。模型配置＝Demo 阶段（首 Demo ＋
  * 迭代，由 run 执行体承载）缺省快模型档、正式生产档未来独立槽位（#341，见
  * {@link #EXECUTOR}）。
  *
  * <p><b>身份与配置分治（#251，ADR-0021 修订 ADR-0006「不落库」边界）</b>：本枚举
  * 仍是智能体身份（有哪些智能体、职能、寻址键）与<b>缺省</b>正本；systemPrompt/
- * 模型档位的运营覆盖态落库（{@code prj_agent_configs}）后台可维护——装配「库值
+ * 模型配置的运营覆盖态落库（{@code prj_agent_configs}）后台可维护——装配「库值
  * 优先、缺省回落枚举默认」（解析单点 {@code AgentConfigAppService}），变更留痕
- * 可回滚。边缘调用点（取名/压缩/分类/预检）非智能体身份面，档位经
- * {@link AgentEdgePoint} 同表收编（#366，值面仅档位）；其提示词仍不属配置面。</p>
+ * 可回滚。边缘调用点（取名/压缩/分类/预检）非智能体身份面，配置经
+ * {@link AgentEdgePoint} 同表收编（#366，值面仅配置）；其提示词仍不属配置面。</p>
  *
  * <p>{@link #key()} 是两处寻址腿的稳定键：工具集装配（ProfileToolkitSupplier 按
  * 配置发放）与 SSE run-start 载荷的 {@code agent} 字段（前端对话面/工作消息的
@@ -202,8 +202,8 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     // 基座 tag 换版），协议不再重复枚举预置件路径（双正本必漂移）。
     // #341 Demo 阶段快模型档：本座承载 Demo 阶段全部任务——首 Demo（PRD 确认触发
     // 的首个生成 run）与迭代（更新 run）——缺省档＝快模型档（spec⑤「Demo 阶段激进
-    // 用快模型，质量靠验证兜底」；Demo 与正式生产同轨同协议，档位在既有智能体运营
-    // 配置机制上人工定档）。正式生产档为未来独立槽位、与本缺省互不牵连；改档经运营
+    // 用快模型，质量靠验证兜底」；Demo 与正式生产同轨同协议，配置在既有智能体运营
+    // 配置机制上人工定档）。正式生产档为未来独立槽位、与本缺省互不牵连；改配置经运营
     // 配置面（ADR-0021）即时生效、不发版。路由判定机制归 #354。
     EXECUTOR("executor", 2, "run 执行体", "flash",
             "你是平台的 run 执行体，负责把 PRD 变成可操作的系统、把用户意见变为系统更新："
@@ -310,7 +310,7 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "全程使用中文。"),
 
     // systemPrompt 即设计工作协议（#289 设计执行体槽位，ADR-0025）：按设计物产出
-    // 多稿候选——界面类写可交互轻量实现、平面类出图（档位表落提示词层，ADR-0026
+    // 多稿候选——界面类写可交互轻量实现、平面类出图（配置表落提示词层，ADR-0026
     // 不做代码级硬路由）；产物只落 design/（不动系统代码）；无 shell（工具面结构性
     // 收窄，ProjectDesign 工作区面）；解说与术语口径对偶执行体协议
     DESIGNER("designer", 3, "设计执行体", "pro",
@@ -371,14 +371,14 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     private final String key;
     private final Integer code;
     private final String name;
-    private final String modelId;
+    private final String modelConfigKey;
     private final String systemPrompt;
 
-    AgentProfile(String key, Integer code, String name, String modelId, String systemPrompt) {
+    AgentProfile(String key, Integer code, String name, String modelConfigKey, String systemPrompt) {
         this.key = key;
         this.code = code;
         this.name = name;
-        this.modelId = modelId;
+        this.modelConfigKey = modelConfigKey;
         this.systemPrompt = systemPrompt;
     }
 
@@ -399,12 +399,12 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     }
 
     /**
-     * 该配置的模型档位键（ADR-0031：引用 {@code prj_model_tiers} 的语义键，如
-     * flash/pro——运营覆盖时装配取库值，本值即回落缺省；档位键 → 模型串与通道
-     * 注入的解析单点在 {@code ModelTierAppService}）。
+     * 该配置的模型配置键（ADR-0031：引用 {@code prj_model_configs} 的语义键，如
+     * flash/pro——运营覆盖时装配取库值，本值即回落缺省；配置键 → 模型串与通道
+     * 注入的解析单点在 {@code ModelConfigAppService}）。
      */
-    public String modelId() {
-        return modelId;
+    public String modelConfigKey() {
+        return modelConfigKey;
     }
 
     public String systemPrompt() {

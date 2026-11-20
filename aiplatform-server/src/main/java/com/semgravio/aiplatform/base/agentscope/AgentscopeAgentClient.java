@@ -341,7 +341,7 @@ public class AgentscopeAgentClient {
      * 地基）。
      */
     private PreparedTurn prepareFor(TurnSpec spec, Consumer<AgentEvent> sink) {
-        // 模型串必填（ADR-0031/#366：全部调用面经档位解析携串——配置缺省回落已随
+        // 模型串必填（ADR-0031/#366：全部调用面经配置解析携串——配置缺省回落已随
         // 边缘点收编退役，null 即编程错误、形状校验单点报错）
         ModelRef modelRef = ModelRef.parse(spec.modelString());
         String sysPrompt = spec.systemPrompt() != null

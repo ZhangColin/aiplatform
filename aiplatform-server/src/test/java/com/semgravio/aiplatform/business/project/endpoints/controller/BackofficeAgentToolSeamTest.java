@@ -264,7 +264,7 @@ class BackofficeAgentToolSeamTest {
     void given_tool_toggle_when_traces_then_config_trace_mechanism_shared() throws Exception {
         // 先落一条 prompt 覆盖（开关写口必须不碰其余值面——同表共留痕的对照基础）
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key)
                 VALUES ('main', '主智能体覆盖协议 V1：每轮先复述目标。', null)
                 """);
         signedPut("fetch_url", "{\"enabled\": false}").andExpect(status().isOk());

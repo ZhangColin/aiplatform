@@ -107,7 +107,7 @@ class DispatchAppServiceTest {
     @BeforeEach
     void ensureChannelKeyForRealResolution() {
         // 真解析链护卫（ADR-0031）：测试环境无 key 注入——幂等补测试 key
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
     }
 
     @AfterEach
@@ -176,12 +176,12 @@ class DispatchAppServiceTest {
         AgentCommand classify = command.getAllValues().get(0);
         AgentCommand inquiry = command.getAllValues().get(1);
 
-        // 分类命令：智能体边界轻量调用——一次性会话、模型档走边缘点档位链（#366：
-        // classification 档位库值优先缺省 flash → 解析单点产模型串＋通道注入——
-        // 后台改档下一轮派发即生效）、不触项目工作区、计量 agentKind=classify、
+        // 分类命令：智能体边界轻量调用——一次性会话、模型档走边缘点配置链（#366：
+        // classification 配置库值优先缺省 flash → 解析单点产模型串＋通道注入——
+        // 后台改配置下一轮派发即生效）、不触项目工作区、计量 agentKind=classify、
         // 短超时、无流关联（空 sink 无事件）
         assertThat(classify.sessionId()).startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX);
-        assertThat(classify.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(classify.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(classify.modelChannel()).isNotNull(); // 通道注入（key/baseUrl 入 SDK）
         assertThat(classify.workspaceId()).isNull();
         assertThat(classify.agentKey()).isNull();
@@ -196,7 +196,7 @@ class DispatchAppServiceTest {
         assertThat(inquiry.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
                 + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
                 + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
-        assertThat(inquiry.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(inquiry.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(inquiry.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(inquiry.workspaceReadOnly()).isTrue();
         assertThat(inquiry.workspaceId()).isEqualTo("9800");

@@ -32,5 +32,5 @@
 - 计量双维度：`met_usage_events` 加 vendor 列（事件落库冗余）；按账号（provider）/按模型（vendor+model）统计双原生；单价表/时段规则匹配键迁移 provider→vendor（数据同值映射，历史成本不漂移）。
 - 「模型档位」概念正名「模型配置」：词条/ADR/UI 即换；代码与库层（ModelTier/tier_key、API 路径、既有引用）随改名票投产前统一——期间文档他处「模型档位」字样＝旧称指同物；英文名定稿 ModelConfig／config_key、引用腿列族（model_id 等）随改名名实对齐（#554）。
 - V79 后 dev/test 库与生产收敛同态（volcengine 零残留）；`ModelTierSeed` 假 key 改挂 deepseek 行、`FLASH_MODEL_STRING` 去 volcengine 前缀。
-- 后台接口变更→semgravio-admin 对接票互链、admin-web 伴侣票随后（admin 仓惯例）；demo-stage-model-tier.md 改档 SOP 随 ② 更新。
+- 后台接口变更→semgravio-admin 对接票互链、admin-web 伴侣票随后（admin 仓惯例）；demo-stage-model-config.md 改档 SOP 随 ② 更新。
 - 验收面：WireMock 假 OpenAI 端点（默认车道单测断言请求次数/切换序列/真错误裸露——CI 可跑）＋live 一门真通道假 key 注入（按 live 车道约定票内留痕）。

@@ -66,6 +66,8 @@ class BackofficeModelChannelSeamTest {
     private static final int TIER_BINDING_NOT_FOUND_CODE = 4074;
     private static final int TIER_BINDING_DISABLED_CODE = 4075;
     private static final int OPERATOR_REQUIRED_CODE = 4034;
+    /** #559/T5 写面新码：vendor 受控值（PRJ_087）。 */
+    private static final int VENDOR_INVALID_CODE = 4087;
 
     private static final String OPERATOR_ID = "700212";
     private static final String OPERATOR_NAME = "运营·通道管理员";
@@ -253,6 +255,83 @@ class BackofficeModelChannelSeamTest {
                 "{\"baseUrl\": \"https://x\"}", OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(PROVIDER_NOT_FOUND_CODE));
+    }
+
+    // ---------- 通道 vendor（#559/T5）：受控值写面＋缺省同值＋留痕快照 ----------
+
+    @Test
+    void given_provider_vendor_when_write_then_controlled_validated_echoed_and_traced()
+            throws Exception {
+        // 显式 vendor：落库＋回显（归一供应商维度腿——计量/单价匹配键）
+        signedRequest(post(PROVIDERS_PATH), PROVIDERS_PATH, """
+                {"providerKey": "t-vend", "baseUrl": "https://v.example",
+                 "vendor": "deepseek", "apiKey": "sk-vend-0011"}""",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.providerKey").value("t-vend"))
+                .andExpect(jsonPath("$.data.vendor").value("deepseek"));
+        assertThat(vendorOf("t-vend")).isEqualTo("deepseek");
+
+        // 缺省 vendor＝provider_key 同值（V79 历史回填语义——解析层归一的写面落定）
+        signedRequest(post(PROVIDERS_PATH), PROVIDERS_PATH,
+                "{\"providerKey\": \"t-vend2\", \"baseUrl\": \"https://v2.example\"}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendor").value("t-vend2"));
+        assertThat(vendorOf("t-vend2")).isEqualTo("t-vend2");
+
+        // 受控值校验（防脏——错字即单价 miss/统计分裂）：大写/空格/空串皆 400
+        signedRequest(post(PROVIDERS_PATH), PROVIDERS_PATH,
+                "{\"providerKey\": \"t-vend3\", \"baseUrl\": \"https://v3.example\","
+                        + " \"vendor\": \"DeepSeek\"}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(VENDOR_INVALID_CODE));
+        signedRequest(post(PROVIDERS_PATH), PROVIDERS_PATH,
+                "{\"providerKey\": \"t-vend3\", \"baseUrl\": \"https://v3.example\","
+                        + " \"vendor\": \"deep seek\"}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(VENDOR_INVALID_CODE));
+        assertThat(providerRowCount("t-vend3")).isZero(); // 零写入
+
+        // 更新保形：PUT 不携 vendor＝保持现值（终态字段不因缺省翻转，同 enabled）
+        putProvider("t-vend", "{\"baseUrl\": \"https://v.example\"}", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendor").value("deepseek"));
+
+        // 换 vendor（归一纠正）：落库＋回显＋留痕前后快照（回滚腿完整）
+        putProvider("t-vend", "{\"baseUrl\": \"https://v.example\", \"vendor\": \"vendor-x\"}",
+                OPERATOR_ID_2, OPERATOR_NAME_2)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendor").value("vendor-x"))
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID_2));
+        assertThat(vendorOf("t-vend")).isEqualTo("vendor-x");
+
+        signedRequest(get(PROVIDERS_PATH + "/t-vend/traces"),
+                        PROVIDERS_PATH + "/t-vend/traces", null, null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                // 痕二（最近）：换 vendor——old/new vendor 快照齐（换归一可证、可回滚）
+                .andExpect(jsonPath("$.data[0].oldVendor").value("deepseek"))
+                .andExpect(jsonPath("$.data[0].newVendor").value("vendor-x"))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2))
+                // 痕一（创建）：old vendor null、new＝显式值
+                .andExpect(jsonPath("$.data[1].oldVendor").value(nullValue()))
+                .andExpect(jsonPath("$.data[1].newVendor").value("deepseek"));
+
+        // 幂等：同 vendor 重写零痕（值面含 vendor）
+        putProvider("t-vend", "{\"baseUrl\": \"https://v.example\", \"vendor\": \"vendor-x\"}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        assertThat(traceCountOf("t-vend")).isEqualTo(2);
+
+        // 更新受控值负例：同码 400（现值不动）
+        putProvider("t-vend", "{\"baseUrl\": \"https://v.example\", \"vendor\": \"NO\"}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(VENDOR_INVALID_CODE));
+        assertThat(vendorOf("t-vend")).isEqualTo("vendor-x");
     }
 
     // ---------- 通道留痕：前后快照＋操作者＋倒序；回滚＝旧值写回即新痕 ----------
@@ -730,6 +809,13 @@ class BackofficeModelChannelSeamTest {
     private String plaintextKeyOf(String providerKey) {
         return jdbcTemplate.queryForObject(
                 "SELECT api_key FROM prj_model_providers WHERE provider_key = ?",
+                String.class, providerKey);
+    }
+
+    /** 通道行 vendor 读（库内正本——写面落库断言面）。 */
+    private String vendorOf(String providerKey) {
+        return jdbcTemplate.queryForObject(
+                "SELECT vendor FROM prj_model_providers WHERE provider_key = ?",
                 String.class, providerKey);
     }
 

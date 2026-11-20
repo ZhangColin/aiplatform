@@ -15,9 +15,11 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace
  * 掩码尾 4 足以比对「哪次换的哪把 key」；回滚换 key＝操作者重输全量新值）。
  *
  * @param id            留痕标识（TSID 十进制串）
+ * @param oldVendor     变更前归一供应商（创建痕/null＝V80 前历史痕）
  * @param oldBaseUrl    变更前 baseUrl（创建痕＝null）
  * @param oldApiKeyMasked 变更前 apiKey 掩码（创建痕/null 键＝null）
  * @param oldEnabled    变更前启用态（创建痕＝null）
+ * @param newVendor     变更后归一供应商（删除痕＝null）
  * @param newBaseUrl    变更后 baseUrl（删除痕＝null）
  * @param newApiKeyMasked 变更后 apiKey 掩码（删除痕/null 键＝null）
  * @param newEnabled    变更后启用态（删除痕＝null）
@@ -28,12 +30,16 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace
 public record BackofficeModelProviderTraceResponse(
         @Schema(description = "留痕标识（TSID 十进制串）")
         String id,
+        @Schema(description = "变更前归一供应商（null＝创建痕或 V80 前历史痕）", example = "deepseek")
+        String oldVendor,
         @Schema(description = "变更前 baseUrl（null＝创建痕——行此前不存在）")
         String oldBaseUrl,
         @Schema(description = "变更前 apiKey 掩码（尾 4 位；null＝此前未配置或创建痕）")
         String oldApiKeyMasked,
         @Schema(description = "变更前启用态（null＝创建痕）")
         Boolean oldEnabled,
+        @Schema(description = "变更后归一供应商（null＝删除痕）", example = "deepseek")
+        String newVendor,
         @Schema(description = "变更后 baseUrl（null＝删除痕——行已不存在）")
         String newBaseUrl,
         @Schema(description = "变更后 apiKey 掩码（尾 4 位；null＝删除痕或未配置）")
@@ -50,8 +56,10 @@ public record BackofficeModelProviderTraceResponse(
     /** 留痕行 → 读面行（apiKey 快照经掩码单点——读面零明文）。 */
     public static BackofficeModelProviderTraceResponse of(ModelProviderTrace trace) {
         return new BackofficeModelProviderTraceResponse(Long.toString(trace.id()),
+                trace.oldVendor(),
                 trace.oldBaseUrl(), ModelProvider.maskApiKey(trace.oldApiKey()),
                 trace.oldEnabled(),
+                trace.newVendor(),
                 trace.newBaseUrl(), ModelProvider.maskApiKey(trace.newApiKey()),
                 trace.newEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());

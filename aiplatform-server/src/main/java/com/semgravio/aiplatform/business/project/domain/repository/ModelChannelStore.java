@@ -6,6 +6,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidateTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierSwitchTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
 
@@ -54,6 +55,14 @@ public interface ModelChannelStore {
     void saveTierPrimaryCandidate(String tierKey, String providerKey, String modelName,
             String operatorId, String operatorName);
 
+    /**
+     * 档内候选队列整队原子重写（#559/T5 候选编排写口）：delete＋insert 保序落
+     * 地（priority 是 PK 肢——单行 UPDATE 换位撞唯一键，整队重写是排序语义的
+     * 最简形；调用方携完整新队列、事务由应用层界定）。created_at 随重写取当下
+     * （行身份＝位次而非连续性，历史在留痕表）。
+     */
+    void replaceTierCandidates(String tierKey, List<ModelTierCandidate> candidates);
+
     /** 通道行删除（引用守卫在应用层先查，此处纯删）。 */
     void deleteProvider(String providerKey);
 
@@ -84,4 +93,10 @@ public interface ModelChannelStore {
      * （观察面：库故障不烧穿生成流，适配层吞错记日志）。
      */
     void insertTierSwitchTrace(ModelTierSwitchTrace trace);
+
+    /** 候选编排留痕追加（#559/T5，append-only，仅实际变更落痕——一次编排可多痕）。 */
+    void insertTierCandidateTrace(ModelTierCandidateTrace trace);
+
+    /** 候选编排留痕读面：该档位全部留痕按时间倒序（最近先）。 */
+    List<ModelTierCandidateTrace> findTierCandidateTraces(String tierKey);
 }

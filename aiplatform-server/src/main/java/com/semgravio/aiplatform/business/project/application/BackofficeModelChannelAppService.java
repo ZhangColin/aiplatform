@@ -1,8 +1,12 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,16 +16,22 @@ import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.semgravio.aiplatform.business.project.application.dto.command.ModelProviderCreateCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.ModelProviderUpdateCommand;
+import com.semgravio.aiplatform.business.project.application.dto.command.ModelTierCandidateCreateCommand;
+import com.semgravio.aiplatform.business.project.application.dto.command.ModelTierCandidateUpdateCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.ModelTierCreateCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.ModelTierUpdateCommand;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeModelProviderResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeModelProviderTraceResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeModelTierCandidateResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeModelTierCandidateTraceResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeModelTierResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeModelTierTraceResponse;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProviderTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidate;
+import com.semgravio.aiplatform.business.project.domain.model.ModelTierCandidateTrace;
 import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
 import com.semgravio.aiplatform.business.project.domain.model.Operator;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
@@ -61,10 +71,10 @@ public class BackofficeModelChannelAppService {
 
     /** 空命令归一（体缺/体 null 的安全形——先例 EMPTY_COMMAND 同款意图）。 */
     private static final ModelProviderCreateCommand EMPTY_PROVIDER_CREATE =
-            new ModelProviderCreateCommand(null, null, null, null);
+            new ModelProviderCreateCommand(null, null, null, null, null);
 
     private static final ModelProviderUpdateCommand EMPTY_PROVIDER_UPDATE =
-            new ModelProviderUpdateCommand(null, null, null);
+            new ModelProviderUpdateCommand(null, null, null, null);
 
     private static final ModelTierCreateCommand EMPTY_TIER_CREATE =
             new ModelTierCreateCommand(null, null, null, null, null, null);
@@ -72,7 +82,20 @@ public class BackofficeModelChannelAppService {
     private static final ModelTierUpdateCommand EMPTY_TIER_UPDATE =
             new ModelTierUpdateCommand(null, null, null, null, null);
 
+    private static final ModelTierCandidateCreateCommand EMPTY_CANDIDATE_CREATE =
+            new ModelTierCandidateCreateCommand(null, null, null, null);
+
+    private static final ModelTierCandidateUpdateCommand EMPTY_CANDIDATE_UPDATE =
+            new ModelTierCandidateUpdateCommand(null, null, null, null);
+
     private final ModelChannelStore channelStore;
+
+    /**
+     * vendor 受控值形（#559/T5）：小写字母/数字/连字符、1-50 位、字母数字起止
+     * （列宽 VARCHAR(50) 对齐）。
+     */
+    private static final Pattern VENDOR_PATTERN =
+            Pattern.compile("[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?");
 
     public BackofficeModelChannelAppService(ModelChannelStore channelStore) {
         this.channelStore = channelStore;
@@ -120,9 +143,12 @@ public class BackofficeModelChannelAppService {
         String baseUrl = requireBaseUrl(safe.baseUrl());
         String apiKey = blankToNull(safe.apiKey());
         boolean enabled = safe.enabled() == null || safe.enabled();
-        // vendor 落空（现写面无 vendor 语义——受控值写面随 #559；解析层归一
-        // provider_key 同值，不阻断装配）
-        ModelProvider created = new ModelProvider(providerKey, null, baseUrl, apiKey, enabled,
+        // vendor 受控值（#559/T5）：显式值校验小写 slug 形（防错字分裂统计与单价
+        // 匹配）；缺省＝provider_key 同值落定（V79 历史回填语义的写面延续——缺省
+        // 值不校验：provider_key 本身非 slug 时不强拦既有建行惯例）
+        String vendor = blankToNull(safe.vendor());
+        vendor = vendor == null ? providerKey : requireVendorFormat(vendor);
+        ModelProvider created = new ModelProvider(providerKey, vendor, baseUrl, apiKey, enabled,
                 operator.id(), operator.name(), null);
         persistProvider(null, created, operator);
         return BackofficeModelProviderResponse.of(requireProvider(providerKey));
@@ -149,8 +175,11 @@ public class BackofficeModelChannelAppService {
         // 不被意外复启；显式 true/false 才翻转。与 agent-configs 开关「缺省归一
         // true」不同属有意：那边 null 有回落枚举缺省语义，这边行恒存在无回落概念）
         boolean enabled = safe.enabled() == null ? current.enabled() : safe.enabled();
-        // vendor 保持现值（值面不含 vendor——更新不触碰，受控值写面随 #559）
-        ModelProvider next = new ModelProvider(current.providerKey(), current.vendor(), baseUrl,
+        // vendor 缺省＝保持现值（同终态字段不因缺省翻转——换 key/换地址不动归一；
+        // 归一纠正＝显式写新值，受控值校验同创建）
+        String vendor = blankToNull(safe.vendor());
+        vendor = vendor == null ? current.vendor() : requireVendorFormat(vendor);
+        ModelProvider next = new ModelProvider(current.providerKey(), vendor, baseUrl,
                 apiKey, enabled, operator.id(), operator.name(), null);
         persistProvider(current, next, operator);
         return BackofficeModelProviderResponse.of(
@@ -240,10 +269,13 @@ public class BackofficeModelChannelAppService {
 
     /**
      * 档位更新（PUT 全量语义）：换通道/升模型版本/改显示名/停启用皆此一处改
-     * 指向（全部引用自动跟上）；值面无动＝幂等回执零写入。
+     * 指向（全部引用自动跟上）；值面无动＝幂等回执零写入。V79 起改指向同步镜像
+     * priority 1 首选候选；指向撞队列他候选身份即拒（PRJ_091——双写径不变式：
+     * 队列身份唯一不被档位直改绕过，换首选备选位走候选面的 move）。
      *
      * @throws ApplicationException PRJ_066 档位不存在；PRJ_070 字段缺；
-     *                              PRJ_071 所属通道不存在；PRJ_034 操作者缺
+     *                              PRJ_071 所属通道不存在；PRJ_091 撞候选身份；
+     *                              PRJ_034 操作者缺
      */
     @Transactional
     public BackofficeModelTierResponse updateTier(String tierKey, ModelTierUpdateCommand command,
@@ -258,6 +290,17 @@ public class BackofficeModelChannelAppService {
             throw new ApplicationException(ProjectMessage.MODEL_TIER_FIELDS_REQUIRED);
         }
         requireProviderExists(providerKey);
+        // 双写径不变式（#559）：档位行现列＝priority 1 候选（镜像），直改指向若
+        // 撞队列他候选（p2+）身份＝队列出现重复故障单元——拒之，换位走候选面
+        // move（那是排序语义不是改指向）
+        for (ModelTierCandidate candidate : channelStore.findTierCandidates(tierKey)) {
+            if (candidate.priority() != 1
+                    && candidate.providerKey().equals(providerKey)
+                    && candidate.modelName().equals(modelName)) {
+                throw new ApplicationException(ProjectMessage.MODEL_TIER_CANDIDATE_DUPLICATE,
+                        providerKey, modelName);
+            }
+        }
         // enabled/thinking 缺省＝保持现值（同通道面：停用档换模型名/换通道不被
         // 意外复启；开思考的档换模型名不被意外关——终态字段不因缺省翻转）
         ModelTier next = new ModelTier(current.tierKey(), providerKey, modelName,
@@ -298,6 +341,142 @@ public class BackofficeModelChannelAppService {
     public List<BackofficeModelTierTraceResponse> tierTraces(String tierKey) {
         return channelStore.findTierTraces(tierKey).stream()
                 .map(BackofficeModelTierTraceResponse::of).toList();
+    }
+
+    // ---------- 候选队列（档位子资源 CRUD＋留痕，#559/T5） ----------
+
+    /**
+     * 候选队列读面（priority 升序＝队列序，含停用行——启停过滤是解析语义）。
+     * 编排基准同源（{@link #effectiveQueue}）：无候选行的存量档位读面亦出物化
+     * 首选（档位行现列＝隐式 priority 1，寻址/判重与编排一致）。
+     *
+     * @throws ApplicationException PRJ_066 档位不存在
+     */
+    @Transactional(readOnly = true)
+    public List<BackofficeModelTierCandidateResponse> tierCandidates(String tierKey) {
+        return effectiveQueue(requireTier(tierKey)).stream()
+                .map(BackofficeModelTierCandidateResponse::of).toList();
+    }
+
+    /**
+     * 候选增（POST）：追加缺省队尾、显式 priority＝插位（既有候选顺移）。候选
+     * 身份（通道×实际模型名）队列内唯一（PRJ_091——同身份重复无备胎价值）。
+     * 软着陆物化：档位无候选行时档位行现列即隐式首选候选，先进队列再插新行
+     * （ incumbent 不被新行顶掉，回退腿与显式队列同形）。变更下一轮命令构建
+     * 即生效（resolve 动态查库——进行中 run 不定格）。
+     *
+     * @throws ApplicationException PRJ_066 档位不存在；PRJ_088 字段缺；
+     *                              PRJ_071 通道不存在；PRJ_090 队列序越界；
+     *                              PRJ_091 身份重复；PRJ_034 操作者缺
+     */
+    @Transactional
+    public List<BackofficeModelTierCandidateResponse> addTierCandidate(String tierKey,
+            ModelTierCandidateCreateCommand command, Operator operator) {
+        requireOperator(operator);
+        ModelTier tier = requireTier(tierKey);
+        ModelTierCandidateCreateCommand safe =
+                command == null ? EMPTY_CANDIDATE_CREATE : command;
+        String providerKey = blankToNull(safe.providerKey());
+        String modelName = blankToNull(safe.modelName());
+        if (providerKey == null || modelName == null) {
+            throw new ApplicationException(ProjectMessage.MODEL_TIER_CANDIDATE_FIELDS_REQUIRED);
+        }
+        requireProviderExists(providerKey);
+        List<ModelTierCandidate> oldQueue = effectiveQueue(tier);
+        requireCandidateAbsent(oldQueue, providerKey, modelName);
+        int position = safe.priority() == null ? oldQueue.size() + 1
+                : requirePriorityWithin(safe.priority(), oldQueue.size() + 1);
+        ModelTierCandidate added = new ModelTierCandidate(tierKey, position, providerKey,
+                modelName, safe.enabled() == null || safe.enabled(),
+                operator.id(), operator.name(), null);
+        List<ModelTierCandidate> newQueue = new ArrayList<>(oldQueue);
+        newQueue.add(position - 1, added);
+        applyQueueChange(tier, oldQueue, renumber(newQueue), operator);
+        log.info("[model-channel] 候选增 {}#{}（{}:{}）", tierKey, position,
+                providerKey, modelName);
+        return tierCandidates(tierKey);
+    }
+
+    /**
+     * 候选编排留痕读面（倒序最近先）。不要求档位行存在——留痕跨一切存活。
+     */
+    @Transactional(readOnly = true)
+    public List<BackofficeModelTierCandidateTraceResponse> tierCandidateTraces(String tierKey) {
+        return channelStore.findTierCandidateTraces(tierKey).stream()
+                .map(BackofficeModelTierCandidateTraceResponse::of).toList();
+    }
+
+    /**
+     * 候选改（PUT，寻址＝队列序）：换指向（通道/实际模型名各自缺省保持）、行级
+     * 启停（缺省保持）、移动（priority＝目标队列序，区间顺移补位——排序即此）。
+     * 换指向即换身份（旧身份删除痕＋新身份新增痕）；值面无动＝幂等回执零写入。
+     * 动到队列头＝档位行镜像跟随（现列恒＝priority 1 候选）。变更下一轮命令构建
+     * 即生效。
+     *
+     * @throws ApplicationException PRJ_066 档位不存在；PRJ_089 候选无行；
+     *                              PRJ_071 通道不存在；PRJ_090 移动目标越界；
+     *                              PRJ_091 换指向撞身份；PRJ_034 操作者缺
+     */
+    @Transactional
+    public List<BackofficeModelTierCandidateResponse> updateTierCandidate(String tierKey,
+            int priority, ModelTierCandidateUpdateCommand command, Operator operator) {
+        requireOperator(operator);
+        ModelTier tier = requireTier(tierKey);
+        ModelTierCandidateUpdateCommand safe =
+                command == null ? EMPTY_CANDIDATE_UPDATE : command;
+        List<ModelTierCandidate> oldQueue = effectiveQueue(tier);
+        int index = requireCandidateIndex(oldQueue, tierKey, priority);
+        ModelTierCandidate current = oldQueue.get(index);
+        String providerKey = blankToNull(safe.providerKey());
+        String modelName = blankToNull(safe.modelName());
+        providerKey = providerKey == null ? current.providerKey() : providerKey;
+        modelName = modelName == null ? current.modelName() : modelName;
+        if (!providerKey.equals(current.providerKey()) || !modelName.equals(current.modelName())) {
+            requireProviderExists(providerKey);
+            List<ModelTierCandidate> others = new ArrayList<>(oldQueue);
+            others.remove(index);
+            requireCandidateAbsent(others, providerKey, modelName);
+        }
+        boolean enabled = safe.enabled() == null ? current.enabled() : safe.enabled();
+        // 移动缺省＝原地（与增的「缺省＝队尾」不同属：改是寻址动词，缺省不动位）
+        int target = safe.priority() == null ? index + 1
+                : requirePriorityWithin(safe.priority(), oldQueue.size());
+        ModelTierCandidate updated = new ModelTierCandidate(tierKey, target, providerKey,
+                modelName, enabled, operator.id(), operator.name(), null);
+        List<ModelTierCandidate> newQueue = new ArrayList<>(oldQueue);
+        newQueue.remove(index);
+        newQueue.add(target - 1, updated);
+        applyQueueChange(tier, oldQueue, renumber(newQueue), operator);
+        log.info("[model-channel] 候选改 {}#{}（{}:{}，enabled {}，序 {}→{}）", tierKey,
+                priority, providerKey, modelName, enabled, index + 1, target);
+        return tierCandidates(tierKey);
+    }
+
+    /**
+     * 候选删（DELETE，寻址＝队列序）：删成＝队列压实（后续候选顺移补位、priority
+     * 密集无空洞）；最后一个候选不可删（PRJ_092——档位供给定义非空，整队下线走
+     * 档位停用）。删成落痕（new 全 null）＋补位痕；回滚＝按痕旧值原位重建。
+     *
+     * @throws ApplicationException PRJ_066 档位不存在；PRJ_089 候选无行；
+     *                              PRJ_092 最后候选；PRJ_034 操作者缺
+     */
+    @Transactional
+    public List<BackofficeModelTierCandidateResponse> deleteTierCandidate(String tierKey,
+            int priority, Operator operator) {
+        requireOperator(operator);
+        ModelTier tier = requireTier(tierKey);
+        List<ModelTierCandidate> oldQueue = effectiveQueue(tier);
+        int index = requireCandidateIndex(oldQueue, tierKey, priority);
+        if (oldQueue.size() == 1) {
+            throw new ApplicationException(ProjectMessage.MODEL_TIER_CANDIDATE_LAST_DELETE_FORBIDDEN);
+        }
+        ModelTierCandidate removed = oldQueue.get(index);
+        List<ModelTierCandidate> newQueue = new ArrayList<>(oldQueue);
+        newQueue.remove(index);
+        applyQueueChange(tier, oldQueue, renumber(newQueue), operator);
+        log.info("[model-channel] 候选删 {}#{}（{}:{}）", tierKey, priority,
+                removed.providerKey(), removed.modelName());
+        return tierCandidates(tierKey);
     }
 
     // ---------- 共用写路径（值面比对＋落库＋留痕，同事务原子） ----------
@@ -341,9 +520,11 @@ public class BackofficeModelChannelAppService {
     private static ModelProviderTrace providerTrace(String providerKey, ModelProvider oldProvider,
             ModelProvider newProvider, Operator operator) {
         return new ModelProviderTrace(TsidGenerator.newInstance().generate(), providerKey,
+                oldProvider == null ? null : oldProvider.vendor(),
                 oldProvider == null ? null : oldProvider.baseUrl(),
                 oldProvider == null ? null : oldProvider.apiKey(),
                 oldProvider == null ? null : oldProvider.enabled(),
+                newProvider == null ? null : newProvider.vendor(),
                 newProvider == null ? null : newProvider.baseUrl(),
                 newProvider == null ? null : newProvider.apiKey(),
                 newProvider == null ? null : newProvider.enabled(),
@@ -369,7 +550,8 @@ public class BackofficeModelChannelAppService {
 
     /** 通道值面比对（写者/时刻不入比——幂等不落痕不写行）。 */
     private static boolean providerFacetsMatch(ModelProvider current, ModelProvider next) {
-        return Objects.equals(current.baseUrl(), next.baseUrl())
+        return Objects.equals(current.vendor(), next.vendor())
+                && Objects.equals(current.baseUrl(), next.baseUrl())
                 && Objects.equals(current.apiKey(), next.apiKey())
                 && current.enabled() == next.enabled();
     }
@@ -395,6 +577,198 @@ public class BackofficeModelChannelAppService {
         return candidate.equals(current.maskedApiKey()) ? current.apiKey() : candidate;
     }
 
+    // ---------- 候选队列共用机制（#559/T5） ----------
+
+    /**
+     * 编排基准队列：候选表非空＝本体；空＝档位行现列物化单元素（软着陆对偶腿
+     * ——#556 起档位行现列是隐式首选候选，首次编排把它落成显式 priority 1，
+     * incumbent 不被新行顶掉、回退腿与显式队列同形）。
+     */
+    private List<ModelTierCandidate> effectiveQueue(ModelTier tier) {
+        List<ModelTierCandidate> stored = channelStore.findTierCandidates(tier.tierKey());
+        if (!stored.isEmpty()) {
+            return stored;
+        }
+        return List.of(new ModelTierCandidate(tier.tierKey(), 1, tier.providerKey(),
+                tier.modelName(), true, null, null, null));
+    }
+
+    /** 候选身份重复守卫（PRJ_091）：通道×实际模型名＝故障物理单元，队列内唯一。 */
+    private static void requireCandidateAbsent(List<ModelTierCandidate> queue,
+            String providerKey, String modelName) {
+        boolean present = queue.stream()
+                .anyMatch(candidate -> candidate.providerKey().equals(providerKey)
+                        && candidate.modelName().equals(modelName));
+        if (present) {
+            throw new ApplicationException(ProjectMessage.MODEL_TIER_CANDIDATE_DUPLICATE,
+                    providerKey, modelName);
+        }
+    }
+
+    /**
+     * 队列序校验（PRJ_090）：显式值须在 1..maxAllowed（增＝队尾+1 可取、移动＝
+     * 队列长；缺省位由调用方定——增缺省＝追加队尾、改缺省＝原地）。
+     */
+    private static int requirePriorityWithin(int priority, int maxAllowed) {
+        if (priority < 1 || priority > maxAllowed) {
+            throw new ApplicationException(ProjectMessage.MODEL_TIER_CANDIDATE_PRIORITY_INVALID,
+                    String.valueOf(priority), String.valueOf(maxAllowed));
+        }
+        return priority;
+    }
+
+    /** 候选行寻址（PRJ_089）：按队列序取下标；无行＝404。 */
+    private static int requireCandidateIndex(List<ModelTierCandidate> queue, String tierKey,
+            int priority) {
+        for (int i = 0; i < queue.size(); i++) {
+            if (queue.get(i).priority() == priority) {
+                return i;
+            }
+        }
+        throw new ApplicationException(ProjectMessage.MODEL_TIER_CANDIDATE_NOT_FOUND,
+                tierKey, String.valueOf(priority));
+    }
+
+    /** 重排编号：列表序即队列序（priority 密集 1..n——换位/补位不留空洞）。 */
+    private static List<ModelTierCandidate> renumber(List<ModelTierCandidate> queue) {
+        List<ModelTierCandidate> renumbered = new ArrayList<>(queue.size());
+        for (int i = 0; i < queue.size(); i++) {
+            ModelTierCandidate candidate = queue.get(i);
+            renumbered.add(new ModelTierCandidate(candidate.tierKey(), i + 1,
+                    candidate.providerKey(), candidate.modelName(), candidate.enabled(),
+                    candidate.operatorId(), candidate.operatorName(), null));
+        }
+        return renumbered;
+    }
+
+    /**
+     * 队列换装单点：值面无动＝幂等零写入；有动＝整队原子重写＋身份轴留痕（一次
+     * 编排可多痕）＋镜像跟随。同事务原子（覆盖与留痕不留中间态）。值面有动的行
+     * （直接编排对象＋被顺移补位的行）统一盖本次操作者——「最近写者」与留痕
+     * 同口径；未动行保留原写者。并发口径：读-改-写无锁、last-writer-wins——
+     * 维护面单操作者节奏（demo 阶段），队列个位数行无热点。
+     */
+    private void applyQueueChange(ModelTier tier, List<ModelTierCandidate> oldQueue,
+            List<ModelTierCandidate> newQueue, Operator operator) {
+        if (queuesMatch(oldQueue, newQueue)) {
+            return;
+        }
+        List<ModelTierCandidate> stamped = stampChangedRows(oldQueue, newQueue, operator);
+        channelStore.replaceTierCandidates(tier.tierKey(), stamped);
+        candidateTraces(tier.tierKey(), oldQueue, stamped, operator)
+                .forEach(channelStore::insertTierCandidateTrace);
+        mirrorTierHead(tier, stamped, operator);
+    }
+
+    /** 值面有动的行盖本次操作者（未动行原写者保留——含 materialized incumbent）。 */
+    private static List<ModelTierCandidate> stampChangedRows(List<ModelTierCandidate> oldQueue,
+            List<ModelTierCandidate> newQueue, Operator operator) {
+        Map<String, ModelTierCandidate> oldByIdentity = new LinkedHashMap<>();
+        oldQueue.forEach(candidate -> oldByIdentity.put(identityOf(candidate), candidate));
+        return newQueue.stream().map(next -> {
+            ModelTierCandidate prev = oldByIdentity.get(identityOf(next));
+            if (prev != null && candidateFacetsMatch(prev, next)) {
+                return next;
+            }
+            return new ModelTierCandidate(next.tierKey(), next.priority(), next.providerKey(),
+                    next.modelName(), next.enabled(), operator.id(), operator.name(), null);
+        }).toList();
+    }
+
+    /** 队列值面比对（写者/时刻不入比——幂等不落痕不写行）。 */
+    private static boolean queuesMatch(List<ModelTierCandidate> oldQueue,
+            List<ModelTierCandidate> newQueue) {
+        if (oldQueue.size() != newQueue.size()) {
+            return false;
+        }
+        for (int i = 0; i < oldQueue.size(); i++) {
+            if (!candidateFacetsMatch(oldQueue.get(i), newQueue.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 身份轴留痕 diff：候选身份（通道×实际模型名，队列内唯一）为轴比对前后队列
+     * ——新增痕 old 全 null、删除痕 new 全 null、移动/启停/换指向＝同身份前后
+     * 快照（priority 变化即排序事实）。时刻腿＝同一基准逐痕单调加 1µs（显式落
+     * created_at——多痕若共享事务时间戳，次序腿只剩 TSID 而其跨调用非单调，
+     * 读面次序会随机；纳秒步进会被 Postgres 微秒精度截平，µs 步进保证「同编排
+     * 内＝生成序的逆」确定可读）。回滚＝按痕旧值写回（重排/重建＝一次新编排
+     * 留新痕）。
+     */
+    private static List<ModelTierCandidateTrace> candidateTraces(String tierKey,
+            List<ModelTierCandidate> oldQueue, List<ModelTierCandidate> newQueue,
+            Operator operator) {
+        Map<String, ModelTierCandidate> oldByIdentity = new LinkedHashMap<>();
+        oldQueue.forEach(candidate -> oldByIdentity.put(identityOf(candidate), candidate));
+        TsidGenerator tsid = TsidGenerator.newInstance();
+        LocalDateTime base = LocalDateTime.now();
+        List<ModelTierCandidateTrace> traces = new ArrayList<>();
+        for (ModelTierCandidate next : newQueue) {
+            ModelTierCandidate prev = oldByIdentity.remove(identityOf(next));
+            if (prev == null || !candidateFacetsMatch(prev, next)) {
+                traces.add(candidateTrace(tsid.generate(),
+                        base.plusNanos(traces.size() * 1_000L), tierKey, prev, next, operator));
+            }
+        }
+        for (ModelTierCandidate prev : oldQueue) {
+            if (oldByIdentity.remove(identityOf(prev)) != null) {
+                traces.add(candidateTrace(tsid.generate(),
+                        base.plusNanos(traces.size() * 1_000L), tierKey, prev, null, operator));
+            }
+        }
+        return traces;
+    }
+
+    /** 候选留痕构造单点（old/new 任一 null＝新增/删除痕：该侧快照腿全 null）。 */
+    private static ModelTierCandidateTrace candidateTrace(long id, LocalDateTime createdAt,
+            String tierKey, ModelTierCandidate oldCandidate, ModelTierCandidate newCandidate,
+            Operator operator) {
+        return new ModelTierCandidateTrace(id, tierKey,
+                oldCandidate == null ? null : oldCandidate.priority(),
+                oldCandidate == null ? null : oldCandidate.providerKey(),
+                oldCandidate == null ? null : oldCandidate.modelName(),
+                oldCandidate == null ? null : oldCandidate.enabled(),
+                newCandidate == null ? null : newCandidate.priority(),
+                newCandidate == null ? null : newCandidate.providerKey(),
+                newCandidate == null ? null : newCandidate.modelName(),
+                newCandidate == null ? null : newCandidate.enabled(),
+                operator.id(), operator.name(), createdAt);
+    }
+
+    /** 候选身份键（通道×实际模型名；队列内唯一由写面守卫保证）。 */
+    private static String identityOf(ModelTierCandidate candidate) {
+        return candidate.providerKey() + '\u0000' + candidate.modelName();
+    }
+
+    /** 候选值面比对（队列序/启停/指向全比——写者/时刻不入比）。 */
+    private static boolean candidateFacetsMatch(ModelTierCandidate current,
+            ModelTierCandidate next) {
+        return current.priority() == next.priority()
+                && current.enabled() == next.enabled()
+                && current.providerKey().equals(next.providerKey())
+                && current.modelName().equals(next.modelName());
+    }
+
+    /**
+     * 镜像跟随（#556 不变式的对偶腿）：档位行现列恒＝队列头（priority 1）——
+     * 候选编排动了头即跟写档位行指向。不落档位痕：候选痕即本次编排的审计，
+     * 档位行现列是队列头的派生面（软着陆回退腿），双痕反而口径分裂。
+     */
+    private void mirrorTierHead(ModelTier tier, List<ModelTierCandidate> newQueue,
+            Operator operator) {
+        ModelTierCandidate head = newQueue.get(0);
+        if (head.providerKey().equals(tier.providerKey())
+                && head.modelName().equals(tier.modelName())) {
+            return;
+        }
+        channelStore.saveTier(new ModelTier(tier.tierKey(), head.providerKey(),
+                head.modelName(), tier.displayName(), tier.enabled(),
+                tier.thinkingEnabled(), operator.id(), operator.name(), null));
+    }
+
     /** baseUrl 必填守卫（创建与更新同拦——维护面无部分更新语义）。 */
     private static String requireBaseUrl(String baseUrl) {
         String value = blankToNull(baseUrl);
@@ -402,6 +776,19 @@ public class BackofficeModelChannelAppService {
             throw new ApplicationException(ProjectMessage.MODEL_PROVIDER_FIELDS_REQUIRED);
         }
         return value;
+    }
+
+    /**
+     * vendor 受控值校验（#559/T5，ADR-0053「受控下拉＋可新建」）：小写字母/数字/
+     * 连字符、1-50 位、字母数字起止——供应商定价与按模型统计挂 vendor（错字即
+     * 单价 miss/统计分裂，防脏即全部校验面；新建值即下拉新选项，无独立供应商
+     * 档案页）。不归一大小写（DeepSeek 直接拒——静默归一会把错值落成「看起来对」）。
+     */
+    private static String requireVendorFormat(String vendor) {
+        if (!VENDOR_PATTERN.matcher(vendor).matches()) {
+            throw new ApplicationException(ProjectMessage.MODEL_PROVIDER_VENDOR_INVALID, vendor);
+        }
+        return vendor;
     }
 
     /** 通道行寻址：无行 404 PRJ_065（维护面语义——装配面缺行是 PRJ_060）。 */

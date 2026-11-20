@@ -266,7 +266,25 @@ public enum ProjectMessage implements CodeMessage {
     // ========== 模型通道高可用（#552，ADR-0053） ==========
 
     /** 候选队列读面（#556）：配置了候选行但全停用＝运营显式下线——无静默回落档位现列（与通道停用同 Doctrine）。 */
-    MODEL_TIER_NO_ENABLED_CANDIDATES(503, "PRJ_086", "模型档位无启用候选：{0}（候选全停用＝显式下线——启用候选或停用档位行，不静默回落现列）");
+    MODEL_TIER_NO_ENABLED_CANDIDATES(503, "PRJ_086", "模型档位无启用候选：{0}（候选全停用＝显式下线——启用候选或停用档位行，不静默回落现列）"),
+
+    /** 通道 vendor 受控值（#559/T5 写面）：小写 slug 形——防错字分裂统计与单价匹配（受控下拉＋可新建）。 */
+    MODEL_PROVIDER_VENDOR_INVALID(400, "PRJ_087", "通道 vendor 受控值不合法：{0}（小写字母/数字/连字符，1-50 位、字母数字起止）"),
+
+    /** 候选行字段缺（#559/T5 写面）：通道键/实际模型名必填。 */
+    MODEL_TIER_CANDIDATE_FIELDS_REQUIRED(400, "PRJ_088", "候选配置字段不完整（providerKey/modelName 必填）"),
+
+    /** 候选行寻址（#559/T5 写面）：档内无此 priority 的候选行。 */
+    MODEL_TIER_CANDIDATE_NOT_FOUND(404, "PRJ_089", "该档位无此队列序的候选：{0}#{1}"),
+
+    /** 候选 priority 越界（#559/T5 写面）：队列序须在现存位次范围内（增＝可取队尾+1）。 */
+    MODEL_TIER_CANDIDATE_PRIORITY_INVALID(400, "PRJ_090", "候选队列序越界：{0}（须为 1..{1} 的整数）"),
+
+    /** 候选身份重复（#559/T5 写面）：通道×实际模型名＝故障物理单元，同单元重复无备胎价值。 */
+    MODEL_TIER_CANDIDATE_DUPLICATE(409, "PRJ_091", "候选已在队列：{0}:{1}（同通道×同模型的重复候选无备胎价值——换实际模型名或通道）"),
+
+    /** 最后候选删除守卫（#559/T5 写面）：档位供给定义非空——整队下线走档位停用。 */
+    MODEL_TIER_CANDIDATE_LAST_DELETE_FORBIDDEN(409, "PRJ_092", "档位须保留至少一个候选（整队下线走档位停用，不删空供给定义）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销（后继 PRJ_053 两级门亦已随
     // 确认门整段退役——见上方 PRJ_053 注）

@@ -121,6 +121,13 @@ class ModelChannelHaMigrationReplayTest {
                 .containsExactly("deepseek→deepseek", "volcengine→volcengine");
         // 切换留痕表落地（append-only 空表——写腿随 T3）
         assertThat(countRows("prj_model_tier_switch_traces")).isZero();
+        // V80 后台写面 schema（#559/T5，migrate() 随跑到位）：候选编排留痕表落地
+        // （append-only 空表）＋通道留痕 vendor 快照腿
+        assertThat(countRows("prj_model_tier_candidate_traces")).isZero();
+        assertThat(queryStrings("SELECT column_name FROM information_schema.columns"
+                + " WHERE table_schema = '" + REPLAY_SCHEMA + "' AND table_name"
+                + " = 'prj_model_provider_traces' AND column_name LIKE '%vendor'"))
+                .containsExactly("old_vendor", "new_vendor");
     }
 
     @Test

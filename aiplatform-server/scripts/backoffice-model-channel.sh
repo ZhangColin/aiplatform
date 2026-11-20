@@ -6,7 +6,12 @@
 #      绑定即时校验负例 → 清场），全部走 t-demo* 可弃键，跑完即删，对 dev 配置
 #      零副作用——验收票 #367 AC「机机签名 curl 全流程可 demo」的执行面；
 #   2. 单动词 —— 真实运维操作（list/get/create-channel/rotate-key/set-channel/
-#      create-tier/set-tier/traces-*/delete-*），动的是真配置行。
+#      create-tier/set-tier/候选队列 add|set|enable|move|delete|list|traces/
+#      traces-*/delete-*），动的是真配置行。
+#
+# 候选队列（#559/ADR-0053 ③ 后台写面）：档位＝有序候选队列（主备＝前两名），
+# 增删/排序/启停经 /candidates 子资源，留痕快照完整可回滚（旧值写回＝一次新
+# 变更）；改完下一轮命令构建即生效、不发版不重启、进行中 run 不定格。
 #
 # apiKey 安全口径：请求体可携全量 key（写面唯一明文入口），回执与留痕只出掩码
 # （尾 4 位）；本脚本打印的响应体经 show_response 原样展示——掩码形即全部可见
@@ -91,6 +96,31 @@ demo() {
     '{"baseUrl":"https://demo.example/api/v3","apiKey":"sk-demo-full-value-0002"}')"
   mask_note
 
+  step "5b. 建第二账号通道 t-demo-channel-2（vendor 同填归一供应商——按模型统计/单价匹配的维度腿）"
+  show "$(call_json POST "$PROVIDERS_PATH" \
+    '{"providerKey":"t-demo-channel-2","vendor":"t-demo","baseUrl":"https://demo2.example/api/v3","apiKey":"sk-demo2-full-0003","enabled":true}')"
+  mask_note
+
+  step "5c. 增备选候选（追加队尾 priority 2——主备配在档位、备选匹配能力档）"
+  show "$(call_json POST "$TIERS_PATH/t-demo-tier/candidates" \
+    '{"providerKey":"t-demo-channel-2","modelName":"demo-model-2602"}')"
+
+  step "5d. 启停（行级——false＝读面剔除不参队；缺省保持语义只携 enabled 即可）"
+  show "$(call_json PUT "$TIERS_PATH/t-demo-tier/candidates/2" '{"enabled":false}')"
+  show "$(call_json PUT "$TIERS_PATH/t-demo-tier/candidates/2" '{"enabled":true}')"
+
+  step "5e. 排序（备选上提 priority 1——区间顺移＋档位行现列镜像跟随）"
+  show "$(call_json PUT "$TIERS_PATH/t-demo-tier/candidates/2" '{"priority":1}')"
+  show "$(call_get "$TIERS_PATH/t-demo-tier")"
+
+  step "5f. 候选编排留痕（身份轴前后快照＋操作者——备账号被烧运营可查）"
+  show "$(call_get "$TIERS_PATH/t-demo-tier/candidates/traces")"
+
+  step "5g. 回滚（旧值写回＝一次新变更留新痕——不做版本树）"
+  show "$(call_json PUT "$TIERS_PATH/t-demo-tier/candidates/1" '{"priority":2}')"
+  show "$(call_json DELETE "$TIERS_PATH/t-demo-tier/candidates/2" '{}')"
+  show "$(call_json DELETE "$PROVIDERS_PATH/t-demo-channel-2" '{}')"
+
   step "6. 留痕读面（前后快照＋操作者；key 快照亦掩码）"
   show "$(call_get "$PROVIDERS_PATH/t-demo-channel/traces")"
   show "$(call_get "$TIERS_PATH/t-demo-tier/traces")"
@@ -126,9 +156,10 @@ list() { show "$(call_get "$PROVIDERS_PATH")"; show "$(call_get "$TIERS_PATH")";
 get_channel() { show "$(call_get "$PROVIDERS_PATH/$1")"; }
 get_tier() { show "$(call_get "$TIERS_PATH/$1")"; }
 
-create_channel() { # <key> <baseUrl> [apiKey]
+create_channel() { # <key> <baseUrl> [apiKey] [vendor]
   local body="{\"providerKey\":\"$1\",\"baseUrl\":\"$2\""
   [[ -n "${3:-}" ]] && body="$body,\"apiKey\":\"$3\""
+  [[ -n "${4:-}" ]] && body="$body,\"vendor\":\"$4\""
   show "$(call_json POST "$PROVIDERS_PATH" "$body}")"
 }
 
@@ -142,9 +173,10 @@ rotate_key() { # <key> <newApiKey>（现 baseUrl 从 GET 取，apiKey null 语�
   mask_note
 }
 
-set_channel() { # <key> <baseUrl> [enabled=true|false]（不携 apiKey＝保持现值）
+set_channel() { # <key> <baseUrl> [enabled=true|false] [vendor]（不携 apiKey＝保持现值）
   local body="{\"baseUrl\":\"$2\""
   [[ -n "${3:-}" ]] && body="$body,\"enabled\":$3"
+  [[ -n "${4:-}" ]] && body="$body,\"vendor\":\"$4\""
   show "$(call_json PUT "$PROVIDERS_PATH/$1" "$body}")"
 }
 
@@ -163,6 +195,38 @@ set_tier() { # <tierKey> <providerKey> <modelName> [displayName] [enabled]
 
 traces_channel() { show "$(call_get "$PROVIDERS_PATH/$1/traces")"; }
 traces_tier() { show "$(call_get "$TIERS_PATH/$1/traces")"; }
+
+# 候选队列（#559：档位子资源——增删/排序/启停＋留痕，回滚＝旧值写回即新痕）
+list_candidates() { # <tierKey> 候选队列读面（priority 升序＝队列序）
+  show "$(call_get "$TIERS_PATH/$1/candidates")"
+}
+
+add_candidate() { # <tierKey> <providerKey> <modelName> [priority]（缺省追加队尾）
+  local body="{\"providerKey\":\"$2\",\"modelName\":\"$3\""
+  [[ -n "${4:-}" ]] && body="$body,\"priority\":$4"
+  show "$(call_json POST "$TIERS_PATH/$1/candidates" "$body}")"
+}
+
+set_candidate() { # <tierKey> <priority> <providerKey> <modelName>（换指向；缺省保持其余）
+  show "$(call_json PUT "$TIERS_PATH/$1/candidates/$2" \
+    "{\"providerKey\":\"$3\",\"modelName\":\"$4\"}")"
+}
+
+enable_candidate() { # <tierKey> <priority> <true|false>（行级启停）
+  show "$(call_json PUT "$TIERS_PATH/$1/candidates/$2" "{\"enabled\":$3}")"
+}
+
+move_candidate() { # <tierKey> <priority> <newPriority>（排序——区间顺移＋镜像跟随）
+  show "$(call_json PUT "$TIERS_PATH/$1/candidates/$2" "{\"priority\":$3}")"
+}
+
+delete_candidate() { # <tierKey> <priority>（队列压实；最后候选不可删）
+  show "$(call_json DELETE "$TIERS_PATH/$1/candidates/$2" '{}')"
+}
+
+traces_candidates() { # <tierKey> 候选编排留痕读面（回滚依据）
+  show "$(call_get "$TIERS_PATH/$1/candidates/traces")"
+}
 
 pull_models() { # <providerKey> 手动拉取远端模型清单（对照库内档位；每次全量真拉）
   show "$(call_json POST "$PROVIDERS_PATH/$1/remote-models" '{}')"
@@ -188,11 +252,25 @@ usage() {
   demo                                    全流程演示（t-demo* 可弃键，自动清场）
   list                                    通道＋档位清单（掩码形）
   get-channel <key> / get-tier <key>      单行读面
-  create-channel <key> <baseUrl> [key]    建通道（apiKey 全量值；缺＝暂不配置）
+  create-channel <key> <baseUrl> [key] [vendor]
+                                          建通道（apiKey 全量值；vendor 受控值缺省＝
+                                          providerKey 同值——同供应商多账号行显式同填）
   rotate-key <key> <newApiKey>            换 key（现 baseUrl 自动携带）
-  set-channel <key> <baseUrl> [enabled]   改 baseUrl/停启用（apiKey 保持）
+  set-channel <key> <baseUrl> [enabled] [vendor]
+                                          改 baseUrl/停启用/换归一（apiKey/vendor 保持）
   create-tier <tierKey> <providerKey> <modelName> [displayName]
   set-tier <tierKey> <providerKey> <modelName> [displayName] [enabled]
+  list-candidates <tierKey>               候选队列读面（priority 升序＝队列序）
+  add-candidate <tierKey> <providerKey> <modelName> [priority]
+                                          增候选（缺省追加队尾；显式序＝插位顺移）
+  set-candidate <tierKey> <priority> <providerKey> <modelName>
+                                          换候选指向（通道/实际模型名；备选模型升级）
+  enable-candidate <tierKey> <priority> <true|false>
+                                          行级启停（false＝读面剔除不参队）
+  move-candidate <tierKey> <priority> <newPriority>
+                                          排序（区间顺移＋档位行镜像跟随）
+  delete-candidate <tierKey> <priority>   删候选（队列压实；最后候选不可删）
+  traces-candidates <tierKey>             候选编排留痕读面（回滚＝旧值写回即新痕）
   traces-channel <key> / traces-tier <key> 留痕读面（回滚依据）
   pull-models <key>                          手动拉取远端模型清单（对照库内档位；
                                             trackedTierKeys 空＝建议入库，勾选后走
@@ -204,6 +282,8 @@ usage() {
                                             traces 前后快照含两开关，回滚腿完整）
   get-agent-config <agentKey>               智能体配置读面（executor 行含两信号开关生效态）
 环境：BACKOFFICE_API_KEY/SECRET（同 backoffice-quote.sh）、OP_ID/OP_NAME（写留痕）
+候选面主备配法（运维口诀）：add-candidate flash <备通道> <同档模型> → 队列即主备；
+改完下一轮命令构建即生效、进行中 run 不定格。
 USAGE
 }
 
@@ -218,6 +298,13 @@ case "${1:-}" in
   set-channel) shift; set_channel "$@" ;;
   create-tier) shift; create_tier "$@" ;;
   set-tier) shift; set_tier "$@" ;;
+  list-candidates) list_candidates "$2" ;;
+  add-candidate) shift; add_candidate "$@" ;;
+  set-candidate) shift; set_candidate "$@" ;;
+  enable-candidate) shift; enable_candidate "$@" ;;
+  move-candidate) shift; move_candidate "$@" ;;
+  delete-candidate) delete_candidate "$2" ;;
+  traces-candidates) traces_candidates "$2" ;;
   traces-channel) traces_channel "$2" ;;
   traces-tier) traces_tier "$2" ;;
   pull-models) pull_models "$2" ;;

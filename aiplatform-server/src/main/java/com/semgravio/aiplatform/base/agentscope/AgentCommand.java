@@ -49,7 +49,14 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * 头部呈现源）；{@code toolSpec} 可空——工具面规格串（#252 增强工具开关的
  * 装配腿：业务侧从运营配置解析编码，底座不解释），进工厂实例缓存键并透传
  * {@link AgentToolkitSupplier}（规格变＝实例变，开关变更下一轮命令构建即新装配；
- * 一次性判定等无配置语境不填）。</p>
+ * 一次性判定等无配置语境不填）；
+ * {@code kernelForm}——<b>生成内核形态</b>（#601 接线，ADR-0054/0055）：命令
+ * 按内核装配形态下发——工作区解析为 {@link AgentWorkspace.ProjectKernel}
+ * （系统提示＝{@link KernelSystemPrompt} 权威版本、工具面＝恰四件〔{@link
+ * KernelTools}〕经装配结构性兑现）、装配键不得携带 executor 旧中间件的挂键
+ * （决策提示／verify 自决按配置键挂、不看工作区形态——装配键沿用 executor
+ * 会结构性挂回旧中间件，#598 警示第一条）。供给链三产物（模型串／通道行／
+ * 候选队列）照命令既有字段传入，failover／计量包装层原样在场。</p>
  */
 public record AgentCommand(
         String runId,
@@ -70,7 +77,8 @@ public record AgentCommand(
         boolean workspaceNoShell,
         RunHeading heading,
         String toolSpec,
-        ModelCandidateQueue modelQueue) {
+        ModelCandidateQueue modelQueue,
+        boolean kernelForm) {
 
     /** 无逐轮超时的兼容形（取内核配置默认）：一次性本地会话调用面（取名等）
      * 不变——空工具面、无工具面规格；模型串由调用侧配置解析携入（#366）。 */
@@ -79,7 +87,7 @@ public record AgentCommand(
             String workspaceId, Map<String, Object> streamCorrelation) {
         this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, null, null, null, null,
-                false, false, null, null, null);
+                false, false, null, null, null, false);
     }
 
     /** 无逐轮超时、带配置键的对话形（主智能体对话轮调用面：配置键穿透工具装配）。 */
@@ -88,7 +96,7 @@ public record AgentCommand(
             String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
         this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, null, null, null, agentKey,
-                false, false, null, null, null);
+                false, false, null, null, null, false);
     }
 
     /** 既有规范形（#557 前无队列形态）：兼容不携队列的调用面/测试形。 */
@@ -101,7 +109,20 @@ public record AgentCommand(
         this(runId, prompt, systemPrompt, modelString, modelChannel, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, timeout, silenceTimeout,
                 toolSilenceTimeout, agentKey, workspaceReadOnly, workspaceNoShell, heading,
-                toolSpec, null);
+                toolSpec, null, false);
+    }
+
+    /** #557 队列形（无内核标记的调用面）：kernelForm 缺省 false。 */
+    public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
+            ModelChannel modelChannel, String sessionId, String userId,
+            UsageContext usageContext, String workspaceId, Map<String, Object> streamCorrelation,
+            Duration timeout, Duration silenceTimeout, Duration toolSilenceTimeout,
+            String agentKey, boolean workspaceReadOnly, boolean workspaceNoShell,
+            RunHeading heading, String toolSpec, ModelCandidateQueue modelQueue) {
+        this(runId, prompt, systemPrompt, modelString, modelChannel, sessionId, userId,
+                usageContext, workspaceId, streamCorrelation, timeout, silenceTimeout,
+                toolSilenceTimeout, agentKey, workspaceReadOnly, workspaceNoShell, heading,
+                toolSpec, modelQueue, false);
     }
 
     public AgentCommand {

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
@@ -13,6 +15,7 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -24,6 +27,8 @@ import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeHarnessAgentFactory;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -271,6 +276,31 @@ class BuildGateAppServiceTest {
         assertThat(jdbcTemplate.queryForList(
                 "SELECT version_no FROM prj_prd_versions WHERE project_id = ?", projectId))
                 .hasSize(1); // 拒绝路径不落第二行
+    }
+
+    @Test
+    void given_paid_confirm_when_dispatch_then_kernel_command_reaches_client() {
+        // #601 接线验收缝（付费入口）：确认即派发首建——到达客户端的命令为内核形态
+        //（权威系统提示＋内核装配键 generation-kernel＋kernelForm＋无工具规格/
+        // 无 executor 旧中间件挂点），与岔路口「立即生成」共用同一派发编排
+        Long projectId = persistedPaidPrdProject("9912");
+        seedPlan(projectId);
+
+        GenerationAppService.GenerationRun run = gateService.confirmFirstBuild(projectId);
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(command.capture(), any());
+        AgentCommand value = command.getAllValues().get(0);
+        assertThat(value.runId()).isEqualTo(run.runId());
+        assertThat(value.prompt()).isEqualTo(GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
+        assertThat(value.sessionId())
+                .isEqualTo(GenerationAppService.kernelSession(projectId, run.runId()));
+        assertThat(value.systemPrompt()).isEqualTo(KernelSystemPrompt.text())
+                .contains("0.0.0.0:8081").contains("docs/PRD.md");
+        assertThat(value.agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
+        assertThat(value.kernelForm()).isTrue();
+        assertThat(value.toolSpec()).isNull();
     }
 
     @Test

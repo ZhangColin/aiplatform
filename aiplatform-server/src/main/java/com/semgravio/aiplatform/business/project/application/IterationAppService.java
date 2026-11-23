@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.semgravio.aiplatform.base.agentscope.FileChange;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -71,6 +72,13 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归主智能体协议（配置），
  * 平台不设门。</p>
+ *
+ * <p><b>内核接线（#601，ADR-0054/0055）</b>：迭代重建 run 按<b>生成内核装配形态</b>
+ * 派发（{@link CoderRunAttempts.RunSeat#kernel()}——系统提示权威版本、工具恰四件、
+ * 循环语义中间件、装配键不带 executor 旧中间件）；收尾＝平台侧机器判据双件
+ * （{@link KernelClosingCriteria}：{@code pnpm build} 过＋8081 探活），不再经
+ * finish_edit 事实／验证在场／产出证明／终验复走旧验收链（段四技术债）。下列
+ * finish_edit 相关叙旧段归旧形态留档，入口不可达（清场票处置）。</p>
  */
 @Service
 @Slf4j
@@ -102,6 +110,48 @@ public class IterationAppService {
                 + "判定无需改动也必须调用，传 changed=false 并说明原因）。";
     }
 
+    /**
+     * 内核修正收口叙事（收尾卡 systemNote；#601 接线：build 过＋8081 探活双件判据
+     * 全过——与首建内核收口同口径）。
+     */
+    static final String KERNEL_FIX_CLOSING_SUMMARY = "完成系统更新：构建通过、预览可访问";
+
+    /**
+     * 内核修正任务 prompt（#601 接线）：交接物三要素结构化拼装同 {@link
+     * #fixRunPrompt}（意见原文＋逐轮需求侧判定＋PRD 正本引用），收口判据句换内核
+     * 口径——pnpm build 过＋8081 探活有响应双件全过才算完成（无 finish_edit 尾句：
+     * 内核工具面恰四件、收口以平台侧机器判据为准）。
+     */
+    static String kernelFixRunPrompt(FixHandoff handoff) {
+        StringBuilder prompt = new StringBuilder(
+                "系统修正：系统已生成并可操作，用户提出了如下修正意见（每条意见后紧跟"
+                        + "该轮的需求侧判定），请在现有工作区内完成修正（系统的其余部分"
+                        + "保持可用）：");
+        for (int index = 0; index < handoff.rounds().size(); index++) {
+            FixHandoff.Round round = handoff.rounds().get(index);
+            prompt.append("\n").append(index + 1).append(". 意见原文：").append(round.opinion())
+                    .append("\n   需求侧判定（主智能体已收口）：")
+                    .append(round.prdRevisionSummary() != null
+                            ? "PRD 已修订——" + round.prdRevisionSummary()
+                            : "本轮无修订（未触发 PRD 变更）");
+        }
+        prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
+                .append("，以正本与上述意见为准。");
+        prompt.append("\n完成后用 pnpm build 验证可构建、用 curl http://localhost:8081 "
+                + "确认有响应——双件全过本轮修正才算完成。");
+        return prompt.toString();
+    }
+
+    /**
+     * 内核修正重试续作 prompt（#601 接线）：同 {@link GenerationAppService#kernelRetryPrompt}
+     * 口径——任务界以收尾判据双件为准（pnpm build 通过、8081 探活可达）。
+     */
+    static String kernelFixRetryPrompt(String retryScene) {
+        return "上一次修正尝试失败。\n" + retryScene + "\n工作区内已完成的成果仍然有效——不要重做已对的工作。"
+                + "请先检查现状（代码、依赖、8081 端口服务是否在跑），针对该错误在现有成果上继续修复，"
+                + "直至 pnpm build 通过且 curl http://localhost:8081 有响应。";
+    }
+
     /** 修正轨会话寻址（#114 更新 run 每次新会话）：runId 逐场换新 → 会话逐场换新，重试续本 run 会话。 */
     static String fixSession(Long projectId, String runId) {
         return CoderRunAttempts.SESSION_PREFIX + projectId + "-fix-" + runId;
@@ -130,6 +180,8 @@ public class IterationAppService {
     private final RobustKitLintAppService robustKitLint;
     private final TrackFinalVerificationAppService finalVerification;
     private final BalanceGateAppService balanceGate;
+    /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
+    private final KernelClosingCriteria kernelClosingCriteria;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -161,7 +213,8 @@ public class IterationAppService {
             VerificationPresenceGate verificationPresence,
             RobustKitLintAppService robustKitLint,
             TrackFinalVerificationAppService finalVerification,
-            BalanceGateAppService balanceGate) {
+            BalanceGateAppService balanceGate,
+            KernelClosingCriteria kernelClosingCriteria) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -178,6 +231,7 @@ public class IterationAppService {
         this.robustKitLint = robustKitLint;
         this.finalVerification = finalVerification;
         this.balanceGate = balanceGate;
+        this.kernelClosingCriteria = kernelClosingCriteria;
     }
 
     /**
@@ -401,26 +455,18 @@ public class IterationAppService {
                 Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
                 CoderRunAttempts.RunResult result;
                 try {
-                    // 产出证明闸（#420 更新轨同盖）：本场判定件——起跑捕获段起点
-                    //（工作区 HEAD），拒绝史跨尝试累计
-                    ProofOfOutputGate.Checking proof =
-                            proofGate.forRun(project.getWorkspaceId());
+                    // 内核装配形态（#601 接线，ADR-0054/0055）：系统提示权威版本＋工具
+                    // 恰四件＋循环语义中间件＋装配键不带 executor（决策提示／verify 自决
+                    // 旧中间件结构性挂不上）；收尾＝平台侧机器判据双件（build＋探活），
+                    // 无 finish_edit／验证在场／产出证明／终验复走旧验收链（段四技术债）
                     result = coderRunAttempts.run(project, runId,
                             fixSession(projectId, runId),
-                            new CoderRunAttempts.Prompts(fixRunPrompt(handoff),
-                                    IterationAppService::fixRetryPrompt,
-                                    IterationAppService::lintFixRetryPrompt),
-                            (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
-                                    currentHandoff, prdVersionNo, proof),
-                            "fix", true, CoderRunAttempts.RunSeat.executor(),
+                            new CoderRunAttempts.Prompts(kernelFixRunPrompt(handoff),
+                                    IterationAppService::kernelFixRetryPrompt),
+                            (attemptRunId, attemptChanges) -> closeKernelFix(project, attemptRunId,
+                                    currentHandoff, prdVersionNo, attemptChanges),
+                            "fix", true, CoderRunAttempts.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN);
-                    if (result.succeeded()) {
-                        // #427 更新轨收口后复走整轨终验（防修 A 坏 B）：以现行计划的
-                        // 核心旅程清单为轴复验——fail 自动起终验修复 run 修→复走，
-                        // 预算耗尽已知缺陷随末轮终验收尾卡如实呈现；无旅程轴（存量
-                        // 计划/锚漂）跳过。仍在 try 内：复走途中用户停止走下方停止账
-                        finalVerification.verifyAfterUpdateRun(project);
-                    }
                 }
                 catch (RunStoppedException e) {
                     // 停止收口（#359 生成取消）：失败账口径——本场（＋排队残队的意见
@@ -564,6 +610,54 @@ public class IterationAppService {
                 fact.text())
                 // 产出证明判别标注（#420：空转拒绝史／豁免依据——正常干活收口 null 不携带）
                 .withProofOfOutput(proofAnnotation)
+                // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
+                // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
+                .withDesignLint(designSpecs.lintClosingPayload(project))
+                // 基座 lint 两档扫描事实（#425——更新轨同盖：强制档违规修不完＝收口
+                // 被拒（尝试环判定），预置档如实标注不拦收口；存量工作区 null 不携带）
+                .withRobustKitLint(robustKitLint.lintClosingPayload(project.getWorkspaceId()));
+    }
+
+    /**
+     * 内核修正收口判据回调（#601 接线，ADR-0054）：run 正常返回后的平台侧机器核验
+     * ——{@code pnpm build} 过＋8081 探活双件全过才判完成（{@link KernelClosingCriteria}）；
+     * 未过即抛——本环转既有重试/终态通道（现场如实进重试 prompt）。系统改没改以
+     * 尝试环的平台可观测文件改动事实为准（{@code attemptChanges} 非空——不依赖
+     * 模型自报）；实动即 Demo 迭代轮成版（#333 同口径）＋演示种子补位（#340）。
+     * PRD 改没改＝本场交接物各轮修订说明（同 {@link #closeFixRun} 口径）。
+     */
+    private CoderRunAttempts.ClosingJudgment closeKernelFix(Project project, String attemptRunId,
+            FixHandoff handoff, Integer prdVersionNo, List<FileChange> attemptChanges) {
+        KernelClosingCriteria.KernelClosingResult closing =
+                kernelClosingCriteria.assess(project.getWorkspaceId());
+        if (!closing.complete()) {
+            throw new IllegalStateException("收尾判据未过：pnpm build "
+                    + (closing.buildPassed() ? "通过" : "未通过") + "、8081 探活"
+                    + (closing.probePassed() ? "有响应" : "无响应")
+                    + "——按完成判据继续修复后再收口");
+        }
+        boolean systemChanged = attemptChanges != null && !attemptChanges.isEmpty();
+        if (systemChanged) {
+            try {
+                demoVersionAppService.closeOnIteration(project.getId(), attemptRunId, prdVersionNo);
+            }
+            catch (RuntimeException e) {
+                log.warn("[fix] 项目 {} Demo 版本成版失败（不反噬收口，下轮补位）：{}",
+                        project.getId(), e.toString());
+            }
+        }
+        // 演示种子预置（#340）：迭代收口补位——系统实动后可能有新空表（幂等引擎
+        // 只补空表）；失败不阻断收工。
+        demoSeed.seedSandbox(project);
+        List<String> prdNotes = handoff.rounds().stream()
+                .map(FixHandoff.Round::prdRevisionSummary)
+                .filter(summary -> summary != null && !summary.isBlank())
+                .toList();
+        return CoderRunAttempts.ClosingJudgment.update(
+                !prdNotes.isEmpty(),
+                prdNotes.isEmpty() ? null : String.join("；", prdNotes),
+                systemChanged,
+                KERNEL_FIX_CLOSING_SUMMARY)
                 // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
                 // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
                 .withDesignLint(designSpecs.lintClosingPayload(project))

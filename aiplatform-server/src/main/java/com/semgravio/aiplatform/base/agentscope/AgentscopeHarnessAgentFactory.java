@@ -93,8 +93,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     private static final String TIMEOUT_SECONDS_PARAM = "timeout_seconds";
     private static final String REQUIRED_SCHEMA_KEY = "required";
 
-    /** 生成内核形态的智能体名（#595）：状态槽位与实例缓存键的名字腿，钉死免漂。 */
-    private static final String KERNEL_AGENT_NAME = "generation-kernel";
+    /**
+     * 生成内核形态的智能体名/装配键（#595 名字腿；#601 起兼作内核命令的装配键——
+     * 平台中间件按配置键挂、不看工作区形态：内核命令携本键（非 executor）结构性
+     * 挡掉决策提示／verify 自决旧中间件，#598 警示第一条），钉死免漂。
+     */
+    public static final String KERNEL_AGENT_NAME = "generation-kernel";
 
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,

@@ -44,6 +44,8 @@ import com.semgravio.aiplatform.base.agentscope.AgentResume;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentSuspension;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeHarnessAgentFactory;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -199,6 +201,11 @@ class MainAgentAppServiceTest {
                 argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
                         || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // #601 内核收尾判据双件（pnpm build＋8081 探活）默认成功——失败态用例后注册覆盖
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     private void givenSessionExecutorRunsInline() {
@@ -210,24 +217,6 @@ class MainAgentAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submitGeneration(any(), any());
-    }
-
-    /**
-     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——锚 slice-0 会话寻址的
-     * 旧行为用例显式切回）：直写 executor 行 single_session_generation_enabled=FALSE
-     * ＋parallel_slice_machine_enabled=TRUE（tearDown 已清 prj_agent_configs）。
-     */
-    private void givenPerSliceSessions() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     single_session_generation_enabled, parallel_slice_machine_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    single_session_generation_enabled
-                        = EXCLUDED.single_session_generation_enabled,
-                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
-                """);
     }
 
     /** 同生产语义吞掉轨道异常（异步轨道失败经 error 事件表达，执行器只记日志）——
@@ -987,10 +976,15 @@ class MainAgentAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand fix = command.getAllValues().get(1);
         assertThat(fix.sessionId()).isEqualTo(IterationAppService.fixSession(projectId, fix.runId()));
-        assertThat(fix.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
+        // #601 内核形态：系统提示＝权威版本、装配键＝generation-kernel（非 executor——
+        // 决策提示/verify 自决旧中间件结构性挂不上）
+        assertThat(fix.systemPrompt()).isEqualTo(KernelSystemPrompt.text());
+        assertThat(fix.prompt()).isEqualTo(IterationAppService.kernelFixRunPrompt(
                 handoff("把系统的主色调改成绿色", null)));
-        assertThat(fix.agentKey()).isEqualTo("executor"); // run-start 携配置键（引擎信息归一）
+        assertThat(fix.agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
+        assertThat(fix.kernelForm()).isTrue();
+        assertThat(fix.toolSpec()).isNull();
     }
 
     // ---------- 沉淀兜底盘问（#460：该提未提的轻兜底——次轮 system prompt 尾附提醒） ----------
@@ -1096,10 +1090,11 @@ class MainAgentAppServiceTest {
                 argThat(payload -> projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
                         && run.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         order.verify(agentClient, times(2)).converse(any(), any());
-        // 衔接：受理轮收口自动派更新 run（executor 配置键 = 工作消息的呈现锚）
+        // 衔接：受理轮收口自动派更新 run（#601 内核装配键 = 工作消息的呈现锚）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).agentKey()).isEqualTo("executor");
+        assertThat(command.getAllValues().get(1).agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
     }
 
     @Test
@@ -1144,7 +1139,8 @@ class MainAgentAppServiceTest {
                         && run.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).agentKey()).isEqualTo("executor");
+        assertThat(command.getAllValues().get(1).agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
     }
 
     @Test
@@ -1391,10 +1387,11 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_prd_produced_with_version_rows_when_opinion_turn_closes_then_first_generation_dispatched() {
-        // 首场编码 run 的会话寻址与配置形状（#104 生成轨道首 run = 阶段 0 先起服）：
+        // 首场编码 run 的会话寻址与配置形状（#104 生成轨道首 run）：
         // PRD 已产出（判据＝prdProducedAt，去门化 #462 后与版本行无关——版本行在场
         // 只是 legacy 记行形态，不构成任何门）；切片计划随派发交接（planOf 可取到）。
-        givenPerSliceSessions(); // #436 单会话缺省开——本用例锚 slice-0 会话寻址（旧行为）
+        // #601 内核接线：首建直派新内核（权威提示＋generation-kernel 装配键＋
+        // kernelForm＋无工具规格）
         Long projectId = persistedPrdProject("9731");
         seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
@@ -1415,16 +1412,18 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "别问了直接做");
 
-        // 快道收口直派生成：首条编码 run 落在阶段 0 会话、携执行体配置与起服 prompt
+        // 快道收口直派生成：首条编码 run＝内核形态（#601——会话锚 run、收口判据双件）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(2)).converse(command.capture(), any());
         AgentCommand generation = command.getAllValues().stream()
-                .filter(c -> c.sessionId().equals(GenerationAppService.sliceSession(projectId, 0)))
+                .filter(c -> c.sessionId().contains("-kernel-"))
                 .findFirst().orElseThrow();
-        assertThat(generation.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(generation.agentKey()).isEqualTo("executor");
-        assertThat(generation.prompt()).isEqualTo(GenerationAppService.stage0Prompt(
-                new BuildPlan(List.of("用户能使用 PRD 描述的全部功能"))));
+        assertThat(generation.systemPrompt()).isEqualTo(KernelSystemPrompt.text());
+        assertThat(generation.agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
+        assertThat(generation.kernelForm()).isTrue();
+        assertThat(generation.toolSpec()).isNull();
+        assertThat(generation.prompt()).isEqualTo(GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
     }
 
     @Test
@@ -1679,7 +1678,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(handoff(
+                .isEqualTo(IterationAppService.kernelFixRunPrompt(handoff(
                         "把系统的主色调改成绿色；用户对追问的答复：要薄荷绿"
                                 + "；用户对追问的答复：偏冷一点的", null)));
     }
@@ -1710,9 +1709,9 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(4)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(2).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(handoff("意见一：加导出", null)));
+                .isEqualTo(IterationAppService.kernelFixRunPrompt(handoff("意见一：加导出", null)));
         assertThat(command.getAllValues().get(3).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(handoff("意见二：改蓝色", null)));
+                .isEqualTo(IterationAppService.kernelFixRunPrompt(handoff("意见二：改蓝色", null)));
     }
 
     // ---------- 意见轮在途意见排队成轮（#54：锚随任务落 + 失败清锚） ----------
@@ -1747,9 +1746,9 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(4)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(2).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(handoff("意见一：加导出", null)));
+                .isEqualTo(IterationAppService.kernelFixRunPrompt(handoff("意见一：加导出", null)));
         assertThat(command.getAllValues().get(3).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(handoff("意见二：改蓝色", null)));
+                .isEqualTo(IterationAppService.kernelFixRunPrompt(handoff("意见二：改蓝色", null)));
     }
 
     @Test

@@ -39,6 +39,7 @@ import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeHarnessAgentFactory;
 import com.semgravio.aiplatform.base.agentscope.FileChange;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
@@ -1243,7 +1244,9 @@ class DesignProcessAppServiceTest {
         AgentCommand fixRun = commands.getValue();
         assertThat(fixRun.sessionId()).isEqualTo(
                 IterationAppService.fixSession(projectId, fixRun.runId()));
-        assertThat(fixRun.agentKey()).isEqualTo(AgentProfile.EXECUTOR.key());
+        // #601 内核装配键：定稿触发的更新 run 同走新内核（执行体旧中间件结构性挂不上）
+        assertThat(fixRun.agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
         assertThat(fixRun.prompt())
                 .contains("/design/home-1.html")
                 .contains("按稿对齐");
@@ -1252,11 +1255,9 @@ class DesignProcessAppServiceTest {
     @Test
     void given_system_design_not_generated_when_all_finalized_then_first_build_with_drafts() {
         // 灵魂用例（#291 验收④第二岔＋验收⑤）：系统＋设计未生成、全部定稿——定稿
-        // 自动起首个构建（经计划补产链自然恢复：主智能体补产计划收口→生成派发对
-        // 全部定稿放行），起跑上下文携定稿稿引用块（稿入起跑上下文——执行体先读
-        // 稿再动手）；转系统开发同链（PRD 重写系统形后同序，归 MainAgentAppService
-        // 终点切换既有链）
-        givenPerSliceSessions(); // #436 单会话缺省开——本用例锚 slice-0 会话寻址（旧行为）
+        // 自动起首个构建（#601 内核接线：直派新内核——起手资产就位＋起跑上下文
+        // 携定稿稿引用块〔稿入起跑上下文——内核先读稿再动手〕）；转系统开发同链
+        //（PRD 重写系统形后同序，归 MainAgentAppService 终点切换既有链）
         Long projectId = persistedDesignProject(ProjectEndpointType.SYSTEM_DESIGN, null);
         givenSessionExecutorRunsInline();
         givenWorkspaceCommands("""
@@ -1287,19 +1288,21 @@ class DesignProcessAppServiceTest {
                 .findFirst().orElseThrow()
                 .get(AgentEventTypes.CLOSING_FIELD).toString())
                 .contains(DesignProcessAppService.TRIGGER_BUILD_STARTED);
-        // 计划补产链（主智能体轮）→ 生成轨道首 run（阶段 0）——prompt 前置定稿稿
-        // 引用块（设计先行：构建从定稿设计稿长出）
+        // 定稿触发直派内核首建 run——prompt 前置定稿稿引用块（设计先行：构建从
+        // 定稿设计稿长出）；#601 内核形态四件（装配键/kernelForm/无工具规格）
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(2)).converse(commands.capture(), any());
-        AgentCommand stage0 = commands.getAllValues().stream()
-                .filter(command -> command.sessionId()
-                        .equals(GenerationAppService.sliceSession(projectId, 0)))
-                .findFirst().orElseThrow();
-        assertThat(stage0.agentKey()).isEqualTo(AgentProfile.EXECUTOR.key());
-        assertThat(stage0.prompt())
+        verify(agentClient, times(1)).converse(commands.capture(), any());
+        AgentCommand kernelRun = commands.getValue();
+        assertThat(kernelRun.sessionId())
+                .isEqualTo(GenerationAppService.kernelSession(projectId, kernelRun.runId()));
+        assertThat(kernelRun.agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
+        assertThat(kernelRun.kernelForm()).isTrue();
+        assertThat(kernelRun.toolSpec()).isNull();
+        assertThat(kernelRun.prompt())
                 .contains("已定稿的设计稿")
                 .contains("/design/home-1.html")
-                .contains(GenerationAppService.STAGE0_RUN_PROMPT);
+                .endsWith(GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
         assertThat(projectRepository.findById(projectId).orElseThrow().getGeneratedAt())
                 .isNotNull();
     }
@@ -1462,24 +1465,6 @@ class DesignProcessAppServiceTest {
     }
 
     // ---------- designer 座运营配置（三座齐） ----------
-
-    /**
-     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——锚 slice-0 会话寻址的
-     * 旧行为用例显式切回）：直写 executor 行 single_session_generation_enabled=FALSE
-     * ＋parallel_slice_machine_enabled=TRUE。与既有 designer 行配置用例各写各的键。
-     */
-    private void givenPerSliceSessions() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     single_session_generation_enabled, parallel_slice_machine_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    single_session_generation_enabled
-                        = EXCLUDED.single_session_generation_enabled,
-                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
-                """);
-    }
 
     @Test
     void given_designer_config_override_when_dispatch_then_command_uses_override() {

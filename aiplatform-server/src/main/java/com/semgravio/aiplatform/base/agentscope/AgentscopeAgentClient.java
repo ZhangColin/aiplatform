@@ -302,14 +302,15 @@ public class AgentscopeAgentClient {
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
             ModelChannel modelChannel, ModelCandidateQueue modelQueue, String systemPrompt,
             String workspaceId, String agentKey,
-            boolean workspaceReadOnly, boolean workspaceNoShell, String toolSpec) {
+            boolean workspaceReadOnly, boolean workspaceNoShell, String toolSpec,
+            boolean kernelForm) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
                     command.modelString(), command.modelChannel(), command.modelQueue(),
                     command.systemPrompt(),
                     command.workspaceId(), command.agentKey(), command.workspaceReadOnly(),
-                    command.workspaceNoShell(), command.toolSpec());
+                    command.workspaceNoShell(), command.toolSpec(), command.kernelForm());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
@@ -317,7 +318,7 @@ public class AgentscopeAgentClient {
                     resume.modelString(), resume.modelChannel(), resume.modelQueue(),
                     resume.systemPrompt(),
                     resume.workspaceId(), resume.agentKey(), resume.workspaceReadOnly(),
-                    /* noShell= */ false, resume.toolSpec());
+                    /* noShell= */ false, resume.toolSpec(), /* kernelForm= */ false);
         }
     }
 
@@ -339,6 +340,14 @@ public class AgentscopeAgentClient {
      * 通道注入件同透传——创建上下文注入 SDK＋进实例缓存键指纹，ADR-0031）
      * → 会话上下文与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现
      * 地基）。
+     *
+     * <p><b>内核形态（#601 接线）</b>：{@code kernelForm} 命令经内核装配唯一合法
+     * 入口 {@link AgentscopeHarnessAgentFactory#obtainKernel}——工作区解析为
+     * {@link AgentWorkspace.ProjectKernel}、系统提示＝{@link KernelSystemPrompt}
+     * 权威版本、工具面＝恰四件、循环语义中间件结构性挂载（装配内兑现，底座不重
+     * 复判）；装配键（agentKey）由调用方按内核键携带（不携带 executor 键——平台
+     * 中间件按配置键挂、不看工作区形态，#598 警示第一条）。其余形态照旧经
+     * {@link AgentscopeHarnessAgentFactory#obtain} 通用装配。</p>
      */
     private PreparedTurn prepareFor(TurnSpec spec, Consumer<AgentEvent> sink) {
         // 模型串必填（ADR-0031/#366：全部调用面经配置解析携串——配置缺省回落已随
@@ -347,10 +356,14 @@ public class AgentscopeAgentClient {
         String sysPrompt = spec.systemPrompt() != null
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly(),
-                spec.workspaceNoShell());
-        HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
-                modelRef.toModelString(), spec.modelChannel(), spec.modelQueue(), workspace,
-                spec.agentKey(), spec.toolSpec());
+                spec.workspaceNoShell(), spec.kernelForm());
+        HarnessAgent agent = spec.kernelForm()
+                ? factory.obtainKernel(modelRef.toModelString(), spec.modelChannel(),
+                        spec.modelQueue(), (AgentWorkspace.ProjectKernel) workspace,
+                        spec.agentKey())
+                : factory.obtain(properties.getAgentName(), sysPrompt,
+                        modelRef.toModelString(), spec.modelChannel(), spec.modelQueue(), workspace,
+                        spec.agentKey(), spec.toolSpec());
         // 每迭代平台开销观察面（#453）下发属性袋——执行体中间件每迭代取来掐表回写
         IterationOverheadFacts overhead = new IterationOverheadFacts();
         RuntimeContext ctx = runtimeContext(spec.sessionId(), spec.userId(), spec.runId(), sink);
@@ -600,15 +613,21 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * 工作区解析：带 workspaceId → 项目工作区（只读标记则解析为只读面——#86 起
-     * 主智能体的对话姿态：写面结构性关闭；noShell 标记则解析为设计面——#289 设计
-     * 执行体姿态：文件工具保留、shell/委派关闭，只读标记优先）；缺省 → 本地工作区。
+     * 工作区解析：带 workspaceId → 项目工作区（kernelForm 命令解析为生成内核形态
+     * #601——装配面差异（提示词权威版本/工具四件/循环语义）由工厂内核分支结构性
+     * 兑现；只读标记则解析为只读面——#86 起主智能体的对话姿态：写面结构性关闭；
+     * noShell 标记则解析为设计面——#289 设计执行体姿态：文件工具保留、shell/委派
+     * 关闭，内核形态与只读标记优先）；缺省 → 本地工作区。
      */
-    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly, boolean noShell) {
+    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly, boolean noShell,
+            boolean kernelForm) {
         if (workspaceId == null || workspaceId.isBlank()) {
             return new AgentWorkspace.Local(properties.getWorkspace());
         }
         var handle = workspaceLifecycleAppService.handleOf(workspaceId);
+        if (kernelForm) {
+            return new AgentWorkspace.ProjectKernel(workspaceId, handle.containerName());
+        }
         if (readOnly) {
             return new AgentWorkspace.ProjectReadOnly(workspaceId, handle.containerName());
         }

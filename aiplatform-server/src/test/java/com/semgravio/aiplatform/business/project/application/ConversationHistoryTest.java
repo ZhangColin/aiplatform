@@ -135,6 +135,11 @@ class ConversationHistoryTest {
                 argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
                         || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // #601 内核收尾判据双件（pnpm build＋8081 探活）默认成功——失败态用例后注册覆盖
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     private void givenSessionExecutorRunsInline() {

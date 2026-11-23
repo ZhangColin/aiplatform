@@ -23,7 +23,9 @@ import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
 import com.semgravio.aiplatform.base.agentscope.AgentTurnFailure;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeHarnessAgentFactory;
 import com.semgravio.aiplatform.base.agentscope.FileChange;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.agentscope.StageDurations;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
@@ -130,18 +132,35 @@ class CoderRunAttempts {
      * ADR-0025 候选与版本两套语义不打通）、收尾卡稿清单开关（designer 会话扩载
      * 「本轮稿清单与去向」——条目随判定事实由轨道层拼装，#292；null = 非设计
      * 会话不扩载）。
+     *
+     * <p>{@code kernelForm}（#601 接线，ADR-0054/0055）：<b>生成内核形态座席</b>——
+     * 命令按内核装配形态构建（系统提示＝{@link KernelSystemPrompt} 权威版本、
+     * 装配键＝{@link AgentscopeHarnessAgentFactory#KERNEL_AGENT_NAME}——不带
+     * executor 键，决策提示／verify 自决旧中间件结构性挂不上；工具面＝恰四件经
+     * 装配兑现，本层不发放工具规格）。模型配置寻址／模型路由／计量 dims 仍随
+     * {@link AgentProfile#EXECUTOR} 座（供给链照现路径——模型配置→候选队列→
+     * 通道行，#601 供给链不绕开）。</p>
      */
     record RunSeat(AgentProfile profile, boolean workspaceNoShell,
-            boolean commitVersionAtClosing, String draftsItem) {
+            boolean commitVersionAtClosing, String draftsItem, boolean kernelForm) {
 
         /** run 执行体座（生成/更新轨道）。 */
         static RunSeat executor() {
-            return new RunSeat(AgentProfile.EXECUTOR, false, true, null);
+            return new RunSeat(AgentProfile.EXECUTOR, false, true, null, false);
+        }
+
+        /**
+         * 生成内核座席（#601 接线）：首建与迭代重建派发走新内核装配——profile 仍
+         * EXECUTOR（模型配置／路由／计量 dims 连续性），装配面四件内核形态由
+         * kernelForm 分叉（提示词权威版本／内核装配键／无工具面规格）。
+         */
+        static RunSeat kernel() {
+            return new RunSeat(AgentProfile.EXECUTOR, false, true, null, true);
         }
 
         /** 设计执行体座（#289 设计过程轨道）：无 shell、候选不成版、收尾卡带稿清单。 */
         static RunSeat designer(String draftsItem) {
-            return new RunSeat(AgentProfile.DESIGNER, true, false, draftsItem);
+            return new RunSeat(AgentProfile.DESIGNER, true, false, draftsItem, false);
         }
     }
 
@@ -532,6 +551,12 @@ class CoderRunAttempts {
                 String attemptModelConfigKey = config != null ? config.modelConfigKey() : agent.modelConfigKey();
                 // #557 整候选队列（多候选＝failover 装配面，五个 resolve 面之一）
                 ModelCandidateQueue model = modelConfigs.resolveQueue(attemptModelConfigKey);
+                // #601 内核形态分叉：内核座席的命令按生成内核装配形态构建——系统提示
+                // ＝KernelSystemPrompt 权威版本（住代码、调用方不可覆盖）、装配键＝内核
+                // 键（不带 executor——平台中间件按配置键挂、不看工作区形态，带 executor
+                // 会结构性挂回决策提示／verify 自决旧中间件，#598 警示第一条）、工具面
+                // 规格串空（内核工具面＝恰四件经装配结构性兑现，不消费业务工具规格）。
+                // 供给链三产物（模型串／通道行／候选队列）与计量 dims 照现路径不变。
                 AgentCommand command = new AgentCommand(
                         attemptRunId,
                         attempt == 1 ? (round == 1 ? knowledgePrefix : "") + prompts.first()
@@ -540,7 +565,7 @@ class CoderRunAttempts {
                                                 maxAttempts,
                                                 Duration.between(runStartedAt, Instant.now()).toMillis(),
                                                 runChanges, planSteps.get(), lintFixPending)),
-                        agent.systemPrompt(),
+                        seat.kernelForm() ? KernelSystemPrompt.text() : agent.systemPrompt(),
                         model.modelString(),
                         model.channel(),
                         roundSessionId,
@@ -553,13 +578,16 @@ class CoderRunAttempts {
                         /* timeout= */ null, // #322 活超时替换一次性总墙钟
                         properties.getSilenceTimeout(),
                         properties.getToolSilenceTimeout(), // #355 工具执行窗延长预算
-                        seat.profile().key(),
+                        seat.kernelForm()
+                                ? AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME
+                                : seat.profile().key(),
                         /* workspaceReadOnly= */ false,
                         seat.workspaceNoShell(),
                         heading,
-                        agent.toolSpec(),
+                        seat.kernelForm() ? null : agent.toolSpec(),
                         // #557 候选队列（生成尝试同获链式切换——多候选＝failover）
-                        model);
+                        model,
+                        seat.kernelForm());
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
                         eventBridge.sink(project));

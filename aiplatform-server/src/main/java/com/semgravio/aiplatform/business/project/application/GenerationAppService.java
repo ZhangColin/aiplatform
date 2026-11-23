@@ -26,6 +26,7 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.workspace.application.ConvergenceFace;
@@ -207,6 +208,34 @@ public class GenerationAppService {
     /** 切片收口叙事（收尾卡 summary 的拼装单点——落口与存量对照同键）。 */
     static String sliceClosingSummary(String slice) {
         return SLICE_CLOSING_PREFIX + slice;
+    }
+
+    /**
+     * 内核首跑 prompt（#601 接线，ADR-0054/0055）：「开始」——权威系统提示
+     * （{@link KernelSystemPrompt}）自带完整指令（PRD 正本阅读＋任务＋完成判据），
+     * 首句只点火不复述任务；与 #598 一次性真模型验收驱动形态一致。
+     */
+    static final String KERNEL_FIRST_RUN_PROMPT = "开始";
+
+    /** 内核收口叙事（收尾卡 summary；#601 接线：build 过＋8081 探活双件判据全过）。 */
+    static final String KERNEL_CLOSING_SUMMARY = "完成首次生成：构建通过、预览可访问";
+
+    /**
+     * 内核会话寻址（#601 接线）：首轮与重试续作共用同一会话锚——内核不设切片段，
+     * 单会话连续驱动至收尾判据过；run 维度新 run 换会话（同 #114 口径的会话有界）。
+     */
+    static String kernelSession(Long projectId, String runId) {
+        return CoderRunAttempts.SESSION_PREFIX + projectId + "-kernel-" + runId;
+    }
+
+    /**
+     * 内核重试续作 prompt（#601 接线）：不重设切片段——任务界以 PRD 正本＋收尾
+     * 判据（pnpm build 通过、8081 探活可达）为准，与权威提示词完成判据句同口径。
+     */
+    static String kernelRetryPrompt(String retryScene) {
+        return "上一次尝试失败。\n" + retryScene + "\n工作区内已完成的成果仍然有效——不要重做已对的工作。"
+                + "请先检查现状（代码、依赖、8081 端口服务是否在跑），针对该错误在现有成果上继续修复，"
+                + "直至 pnpm build 通过且 curl http://localhost:8081 有响应。";
     }
 
     /**
@@ -580,6 +609,12 @@ public class GenerationAppService {
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
 
+    /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
+    private final KernelClosingCriteria kernelClosingCriteria;
+
+    /** 内核起服守卫（#601 接线消费 #597 落位件）：开发服务器平台起、常驻。 */
+    private final KernelServingGuard kernelServingGuard;
+
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
      * 同一 PRD 版本只补产一次——补产轮收口仍无计划即止（用户重提意见即兜底；PRD
@@ -667,7 +702,9 @@ public class GenerationAppService {
             ClosingProbes closingProbes,
             AgentConfigAppService agentConfigs,
             IterationAppService iterationAppService,
-            BalanceGateAppService balanceGate) {
+            BalanceGateAppService balanceGate,
+            KernelClosingCriteria kernelClosingCriteria,
+            KernelServingGuard kernelServingGuard) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -698,6 +735,8 @@ public class GenerationAppService {
         this.agentConfigs = agentConfigs;
         this.iterationAppService = iterationAppService;
         this.balanceGate = balanceGate;
+        this.kernelClosingCriteria = kernelClosingCriteria;
+        this.kernelServingGuard = kernelServingGuard;
     }
 
     /**
@@ -837,11 +876,12 @@ public class GenerationAppService {
     }
 
     /**
-     * 首次生成派发（显式与收口自动两入口共用）：切片计划解析（#220 计划跟 PRD 版本
-     * 走）→ AGENTS.md 资产就位 → 计划落轨道表 → 异步提交编码 run。在途口径按调用方
-     * 分岔——按钮路径拒绝 PRJ_017、收口自动路径静默跳过（返回 null 即「未派」，调用
-     * 方不关心）。资产就位/计划落库失败如实上抛并释放在途标记（环境故障口径，生成
-     * 不起跑）。计划缺失不派 run（不造假计划）——重派主智能体补产。
+     * 首次生成派发（显式与收口自动两入口共用，#601 接线）：起手资产就位 → 计划旁路
+     * 落表（内核不消费计划，缺失不阻断）→ 异步提交编码 run（<b>内核装配形态</b>，
+     * {@link #runKernelTrack}——旧切片轨 {@link #runGenerationTrack} 退居不可达）。
+     * 在途口径按调用方分岔——按钮路径拒绝 PRJ_017、收口自动路径静默跳过（返回
+     * null 即「未派」，调用方不关心）。资产就位/计划落库失败如实上抛并释放在途
+     * 标记（环境故障口径，生成不起跑）。
      */
     private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight,
             BuildPlan plan, TurnOpinion turnOpinion) {
@@ -920,23 +960,17 @@ public class GenerationAppService {
                     projectId);
             return null;
         }
-        // 切片计划解析（#220 计划跟 PRD 版本走）：显式交接物优先（即计划重产——PRD
-        // 演进随修订轮重交）；无交接物沿用表内现行计划（仅当 PRD 版本锚一致——PRD
-        // 未演进）。计划缺失：释放在途占位后走补产兜底（占位不跨补产轮——补产轮
-        // 收口再派时可重新占位，不自锁）
-        BuildPlan resolved = resolvePlan(project, plan);
-        if (resolved == null) {
-            codingRunTrack.end(projectId);
-            return dispatchPlanProduction(project);
-        }
+        // 切片计划旁路落表（#601 内核接线）：内核形态不消费计划——执行结构由内核
+        // 提示词权威版本＋PRD 正本承载，计划缺失不再阻断派发（旧「计划缺失→补产
+        // 兜底」链随旧轨道退出入口面）；主智能体产出的计划仍旁路落表——表结构与
+        // 呈现面读面维持事实连续（清场票处置）。PRD 演进换锚重产等生命周期口径
+        // 归 recordPlan 不变。
         try {
             // 起手资产就位（#296）：设计规范物化＋AGENTS.md 平台约定（物化先于
             // AGENTS.md——设计规范节内容随物化结果）
             writeConventionAssets(workspaceLifecycleAppService, designSpecs, project);
-            // 交接物在位 = 计划（重）产——整组替换落表；沿用表内计划的再派（REST 兜底、
-            // PRD 未演进）不重落——片状态是续跑事实，重落即清零
             if (plan != null) {
-                recordPlan(project, resolved);
+                recordPlan(project, plan);
             }
         } catch (RuntimeException e) {
             codingRunTrack.end(projectId);
@@ -976,7 +1010,7 @@ public class GenerationAppService {
                 () -> {
                     boolean trackReturned = false;
                     try {
-                        runGenerationTrack(project, firstRunId, resolved, prdVersionNo);
+                        runKernelTrack(project, firstRunId, prdVersionNo);
                         trackReturned = true;
                     }
                     catch (RunStoppedException e) {
@@ -1318,6 +1352,74 @@ public class GenerationAppService {
                     current.markFirstBuildRequested();
                     projectRepository.save(current);
                 }));
+    }
+
+    /**
+     * 生成内核轨道（#601 接线，ADR-0054/0055）：首建点火后整轨<b>一场 run</b>——内核
+     * 装配形态（{@link CoderRunAttempts.RunSeat#kernel()}：系统提示＝{@link
+     * KernelSystemPrompt} 权威版本、工具恰四件、循环语义中间件、装配键不带 executor
+     * 〔决策提示／verify 自决旧中间件结构性挂不上〕）单会话连续驱动，直至收尾判据
+     * 双件全过（{@link KernelClosingCriteria}：{@code pnpm build} 过＋8081 探活有
+     * 响应——与内核完成判据句同口径）。起服先行由 {@link KernelServingGuard} 尽力
+     * 确保（收敛不成不杀 run——探活仍是收口硬门）。成功：{@code generated_at}/Demo
+     * 首版成版＋preview-ready＋清失败账；失败：终态现场入续跑盘点＋run-failed
+     * （「继续生成」重发即续跑——守卫口径同 {@link #startGeneration}）。
+     */
+    private void runKernelTrack(Project project, String firstRunId, Integer prdVersionNo) {
+        Long projectId = project.getId();
+        // 起手起服（#597 起服守卫，尽力而为）：开发服务器平台起、常驻——内核工具面
+        // 恰四件、无杀/起服务路径，探活收口前起服须在
+        try {
+            kernelServingGuard.ensureServing(project.getWorkspaceId());
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 内核轨道起手起服未成（探活仍为收口硬门）：{}",
+                    projectId, e.toString());
+        }
+        // 定稿设计稿引用块（#291 稿入起跑上下文——内核形态沿用）：设计类终点门开后
+        // 的构建，首试与重试 prompt 前置定稿稿清单；纯系统项目零注入
+        String designContext = finalizedDesignsContext(
+                designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
+                        .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
+                        .toList());
+        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, firstRunId,
+                kernelSession(projectId, firstRunId),
+                new CoderRunAttempts.Prompts(designContext + KERNEL_FIRST_RUN_PROMPT,
+                        retryScene -> designContext
+                                + GenerationAppService.kernelRetryPrompt(retryScene)),
+                (attemptRunId, attemptChanges) -> closeKernelGeneration(project),
+                CoderRunAttempts.GENERATE_LABEL, true, CoderRunAttempts.RunSeat.kernel(),
+                RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN);
+        if (!result.succeeded()) {
+            if (result.lastError() != null) {
+                terminalFailureScenes.put(projectId, result.lastError());
+            }
+            eventBridge.emitRunFailed(project, firstRunId, result.failure());
+            return;
+        }
+        markGenerated(projectId, firstRunId, prdVersionNo);
+        // 演示种子预置（#340 口径延续：Demo 将可见前一刻——幂等，失败不阻断收工）
+        demoSeed.seedSandbox(project);
+        emitPreviewReady(project);
+        terminalFailureScenes.remove(projectId);
+    }
+
+    /**
+     * 内核收口判据回调（#601 接线，ADR-0054）：run 正常返回（一轮无工具调用）后的
+     * 平台侧机器核验——{@code pnpm build} 过＋8081 探活双件全过才判完成
+     * （{@link KernelClosingCriteria}，#597 落位件）；未过即抛——本环转既有重试/
+     * 终态通道（现场如实进重试 prompt），耗尽终态由轨道层记失败账。
+     */
+    private CoderRunAttempts.ClosingJudgment closeKernelGeneration(Project project) {
+        KernelClosingCriteria.KernelClosingResult closing =
+                kernelClosingCriteria.assess(project.getWorkspaceId());
+        if (!closing.complete()) {
+            throw new IllegalStateException("收尾判据未过：pnpm build "
+                    + (closing.buildPassed() ? "通过" : "未通过") + "、8081 探活"
+                    + (closing.probePassed() ? "有响应" : "无响应")
+                    + "——按完成判据继续修复后再收口");
+        }
+        return CoderRunAttempts.ClosingJudgment.generation(KERNEL_CLOSING_SUMMARY);
     }
 
     // ---------- 内部 ----------

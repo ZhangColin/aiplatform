@@ -37,6 +37,9 @@ import reactor.core.publisher.Flux;
  * 参数重复调用第 3／5／8 次只提醒、绝不拦截；⑤到护栏上限→工具被关、如实汇报提示
  * 出现（MAX_STEPS_PROMPT）。
  *
+ * <p>另钉内核的压缩触发规则两例（#598 真跑实证后照 DeepSeek Harness 口径修正，见
+ * 文末）：不按消息条数压缩；按上下文压力压缩，阈值取自主模型窗口与内核输出上限
+ * （{@code AgentscopeHarnessAgentFactory#kernelCompactionTriggerTokens}）。</p>
  * <p>工具执行不触 docker：重复/自然结束用例的工具参数取非法路径（{@code /../..}），
  * {@link KernelTools} 在校验期即返回「路径非法」错误（DockerExecFilesystem 同口径），
  * fast lane 无环境依赖；fast lane 纪律见 docs/agents/live-test-lane.md。</p>
@@ -55,14 +58,16 @@ class KernelAgentLoopTest {
      * 消息序列与工具 schema 序列（提醒时机/到顶关工具的外部观察面）。
      *
      * <p>压缩档（{@code :compaction-stub}）与主模型共享注册前缀，装配时各解析一
-     * 实例——长用例（护栏 300 轮，会话 600+ 消息）触发既有装配的 50 消息压缩
-     * （CompactionConfig triggerMessages 缺省 50，底座行为非本件改动）：压缩档给
-     * 永不耗尽的摘要脚本（主模型脚本不被压缩调用偷吃），本例断言只认主模型实例。</p>
+     * 实例——压缩档给独立空队列（脚本耗尽走兜底摘要，不偷吃主模型脚本）；本例断言
+     * 只认主模型实例。内核不按消息条数压缩（#598 修正，见文末两例），压缩只在上下
+     * 越过 token 阈值时发生。</p>
      */
     private static final class ScriptedKernelModel implements Model {
 
         private static final List<ScriptedKernelModel> PROBES = new CopyOnWriteArrayList<>();
         private static volatile Queue<ChatResponse> nextScript;
+        /** 本例主模型上报的上下文窗口（缺省 0＝未登记；压缩阈值按窗口算的用例逐例注入）。 */
+        private static volatile int nextContextWindow;
 
         private final String modelId;
         private final boolean infinite;
@@ -109,6 +114,11 @@ class KernelAgentLoopTest {
         public String getModelName() {
             return "scripted-kernel";
         }
+
+        @Override
+        public int getContextWindowSize() {
+            return nextContextWindow;
+        }
     }
 
     /** 不触网不依赖环境 key 的模型工厂注册（probe557／装配测试先例）：脚本逐例注入。 */
@@ -144,11 +154,15 @@ class KernelAgentLoopTest {
     }
 
     private static AgentscopeHarnessAgentFactory realFactory() {
+        return realFactory(new AgentscopeProperties());
+    }
+
+    private static AgentscopeHarnessAgentFactory realFactory(AgentscopeProperties properties) {
         return new AgentscopeHarnessAgentFactory(new InMemoryAgentStateStore(),
                 (agentKey, workspace, toolSpec) -> new Toolkit(),
                 (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(), edgeModels(),
-                new AgentscopeProperties(), null);
+                properties, null);
     }
 
     private static EdgeModelSupplier edgeModels() {
@@ -452,5 +466,96 @@ class KernelAgentLoopTest {
         } finally {
             ScriptedKernelModel.nextScript = null;
         }
+    }
+
+    // ---------- 不按消息条数压缩（#598 真跑实证后照 DeepSeek Harness 口径修正） ----------
+
+    /**
+     * 内核不按消息条数压缩。框架缺省「对话满 50 条即压缩」——#598 真跑实证：内核
+     * 一轮 2–3 条消息，约 15–20 轮压缩一次，14 分钟 17 次、301 轮撞轮次护栏；实验
+     * 基线无压缩、89 轮自然结束；DeepSeek Harness 只按上下文压力压缩。30 轮工具
+     * 调用＝首条用户消息＋60 条往返，远在任何 token 阈值之下：对话须原样送达模型、
+     * 压缩模型零调用。参数逐轮不同——不触发同参重复提醒（提醒注入的用户消息会让
+     * 条数偏离 61）。
+     */
+    @Test
+    void given_long_tool_run_under_token_threshold_when_run_then_not_compacted_by_message_count() {
+        List<ChatResponse> responses = new ArrayList<>();
+        for (int round = 1; round <= 30; round++) {
+            responses.add(toolReply("m" + round,
+                    Map.of("path", "/../loop-" + round + ".txt", "content", "x")));
+        }
+        responses.add(textReply("做完了。"));
+        beginScript(new ConcurrentLinkedQueue<>(responses));
+        try (HarnessAgent agent = realFactory().obtainKernel("scripted-kernel:loop", null, null,
+                kernelWorkspace(), null)) {
+            runGeneration(agent);
+            ScriptedKernelModel stub = ScriptedKernelModel.called();
+
+            assertThat(stub.seenMessages).hasSize(31);
+            // 模型可见列表＝1 条系统提示＋对话（压缩器的条数只数对话、不数系统提示）
+            assertThat(stub.seenMessages.get(30))
+                    .as("末次调用可见 62 条消息（系统提示 1 条＋用户消息 1 条＋30 轮往返）——未被压缩")
+                    .hasSize(62);
+            assertThat(ScriptedKernelModel.PROBES.stream()
+                    .filter(candidate -> candidate.modelId.endsWith(":compaction-stub"))
+                    .flatMap(candidate -> candidate.seenMessages.stream())
+                    .toList())
+                    .as("token 阈值未到，压缩模型不得被调用")
+                    .isEmpty();
+        } finally {
+            ScriptedKernelModel.nextScript = null;
+        }
+    }
+
+    /**
+     * 按上下文压力压缩对内核仍在（只是不再按消息条数）：阈值取 DeepSeek Harness
+     * compaction-basic 原式 min(窗口×0.8, 窗口−输出上限−65,536)，窗口来自主模型、输出
+     * 上限来自 kernel-max-output-tokens——本例窗口 200,000、上限 60,000 → 阈值
+     * 200,000−60,000−65,536=74,464 估算 token（小于窗口比例项 160,000）。每轮回复带
+     * 8,000 字符长文本（估算约 3,200 token，贴近真实运行里内容逐轮累积的形态），
+     * 第 23 轮前后越过阈值；压缩器尾部保留窗按框架动态口径（上限 8,000），只留最近
+     * 两三轮。阈值来源若取错——漏减输出上限（→134,464）或误读成未登记窗口（→16 万
+     * 兜底）——全程估算不到 10 万 token，不越阈，本例红。
+     */
+    @Test
+    void given_context_pressure_over_harness_threshold_when_kernel_runs_then_compacted_by_tokens() {
+        List<ChatResponse> responses = new ArrayList<>();
+        for (int round = 1; round <= 30; round++) {
+            responses.add(new ChatResponse("resp-p" + round, List.of(
+                    TextBlock.builder().text("长".repeat(8_000)).build(),
+                    new ToolUseBlock("p" + round, "write_file",
+                            Map.of("path", "/../p-" + round + ".txt", "content", "x"))),
+                    null, Map.of(), "stop"));
+        }
+        responses.add(textReply("做完了。"));
+        AgentscopeProperties properties = new AgentscopeProperties();
+        properties.setKernelMaxOutputTokens(60_000);
+        beginScript(new ConcurrentLinkedQueue<>(responses));
+        ScriptedKernelModel.nextContextWindow = 200_000;
+        try (HarnessAgent agent = realFactory(properties).obtainKernel("scripted-kernel:loop", null, null,
+                kernelWorkspace(), null)) {
+            runGeneration(agent);
+            ScriptedKernelModel stub = ScriptedKernelModel.called();
+
+            assertThat(stub.seenMessages).hasSize(31);
+            assertThat(compactionCalls())
+                    .as("上下文越过 Harness 口径的阈值（74,464）——压缩模型被调用")
+                    .isPositive();
+            assertThat(stub.seenMessages.get(30).size())
+                    .as("压缩后对话＝摘要＋尾部保留，条数少于未压缩的 62")
+                    .isLessThan(62);
+        } finally {
+            ScriptedKernelModel.nextScript = null;
+            ScriptedKernelModel.nextContextWindow = 0;
+        }
+    }
+
+    /** 压缩档替身被调用的次数（token 压力压缩发生的外部观察面）。 */
+    private static int compactionCalls() {
+        return ScriptedKernelModel.PROBES.stream()
+                .filter(candidate -> candidate.modelId.endsWith(":compaction-stub"))
+                .mapToInt(candidate -> candidate.seenMessages.size())
+                .sum();
     }
 }

@@ -17,6 +17,7 @@ import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,8 +35,9 @@ import reactor.core.publisher.Flux;
  * （obtainKernel 钉权威版本，调用方不可覆盖）、工具面恰四件（{@link KernelTools}，
  * 与旧工具面/框架内置件隔离）、无技能／无子智能体委派挂载；会话状态存储、上下文
  * 压缩、pending tool 恢复、内核重试关停沿用现有装配（本票一行不改，此处只钉
- * 「照旧接线」事实）；替身模型 converse 冒烟（装配层 seam，#593 Testing Decisions
- * 唯一新 seam）。
+ * 「照旧接线」事实；压缩的<b>触发规则</b>自 #598 起照 DeepSeek Harness 口径——不按
+ * 消息条数、token 阈值按主模型窗口现算，见「压缩触发规则」一节）；替身模型
+ * converse 冒烟（装配层 seam，#593 Testing Decisions 唯一新 seam）。
  */
 class KernelAgentAssemblyTest {
 
@@ -284,6 +286,47 @@ class KernelAgentAssemblyTest {
         } finally {
             agent.close();
         }
+    }
+
+    // ---------- 压缩触发规则（#598 真跑实证后照 DeepSeek Harness 口径修正） ----------
+
+    /**
+     * 内核形态不按消息条数压缩（框架缺省 50 条，对内核关停）；token 阈值照 DeepSeek
+     * Harness compaction-basic 原式 min(窗口×0.8, 窗口−输出上限−65,536)——deepseek-flash
+     * 窗口 1,048,576、输出上限 32,768：min(838,861, 950,272)=838,861（框架估算 token）。
+     * 压缩前 offload 关停、压缩模型在位——与旧形态同一份公共段。行为面（不按条数／
+     * 越 token 阈值才压）见 KernelAgentLoopTest 文末两例。
+     */
+    @Test
+    void given_kernel_form_when_compaction_config_then_no_message_count_trigger_and_harness_threshold() {
+        CompactionConfig config = AgentscopeHarnessAgentFactory.kernelCompactionConfig(
+                new AgentscopeProperties(), probeEdgeModels().compactionModel(), null,
+                /* contextWindow= */ 1_048_576, /* reservedOutputTokens= */ 32_768);
+
+        assertThat(config.getTriggerMessages()).isZero();
+        assertThat(config.getTriggerTokens()).isEqualTo(838_861);
+        assertThat(config.isOffloadBeforeCompact()).isFalse();
+        assertThat(config.getModel()).isNotNull();
+    }
+
+    /** 阈值原式逐项：预算项胜出／窗口未登记回框架动态口径／余量算尽回动态口径。 */
+    @Test
+    void given_kernel_compaction_threshold_when_inputs_vary_then_harness_formula() {
+        // 预算项胜出：min(200,000×0.8=160,000, 200,000−32,768−65,536=101,696)
+        assertThat(AgentscopeHarnessAgentFactory.kernelCompactionTriggerTokens(200_000, 32_768))
+                .isEqualTo(101_696);
+        assertThat(AgentscopeHarnessAgentFactory.kernelCompactionTriggerTokens(0, 32_768)).isZero();
+        assertThat(AgentscopeHarnessAgentFactory.kernelCompactionTriggerTokens(100_000, 40_000)).isZero();
+    }
+
+    /** 旧形态一行不动（既有行为钉守，非认可其口径）：固定 token 阈值照配置、消息条数规则仍是框架缺省。 */
+    @Test
+    void given_legacy_form_when_compaction_config_then_fixed_threshold_and_framework_default_untouched() {
+        CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
+                new AgentscopeProperties(), probeEdgeModels().compactionModel(), null);
+
+        assertThat(config.getTriggerTokens()).isEqualTo(400_000);
+        assertThat(config.getTriggerMessages()).isEqualTo(50);
     }
 
     // ---------- 替身模型 converse 冒烟 ----------

@@ -35,3 +35,11 @@ live 车道（`-P live`）只在本机手跑、CI 永不执行——缝被改而
 ## ②族：Windows 管道排水（#400 家族的测试侧漏网）
 
 测试代码里 spawn docker/tar 等 CLI 子进程时，**不读输出的 `waitFor()` 在 Windows 上必死锁**：匿名管道仅 ~4KB（Linux 64KB），子进程 stdout 超容量即写阻塞、永不退出（`docker inspect` JSON ~7.4KB 实证挂死 `WorkspaceSealLiveTest.awaitDeepWoken`，#401 活体排查撞上；同机曾留一条挂死多日的 `docker build` 僵尸同因）。纪律：要输出就**读完再 waitFor**，不要输出就 `redirectOutput/error(DISCARD)` 直落 NUL——无管道即无死锁。生产 `runCapture` 已在 #400 修；测试 helper 新写时照此。
+
+## ③族：dev 栈在跑时的孤儿清扫（#598 实证）
+
+同一台机器上，dev 栈（8888 后端）与 live 测试进程是**两个平台实例、共用一个 Docker**。dev 栈缺省开着休眠扫描（`app.workspace.hibernation-enabled: true`），扫描里的运行期孤儿清扫（`WorkspaceHibernationAppService.sweepOrphanContainers`，宽限 10 分钟）会把**不在 dev 库里**的 `ws-编号` 容器当「库无记录」删掉——live 测试建的工作区正是这种。2026-11-23 #598 实证：内核首建跑到第 10 分 20 秒沙箱失联（Docker 回 `No such container`）；模型此前已自跑 build 通过、探活 200，但平台收尾判据无从核验。
+
+- **判据**：live 用例的工作区要存活超过 10 分钟（生成排练、内核首建验收这类长跑），且 dev 栈在跑——即适用。几分钟内销毁的短用例不受影响。
+- **处置**（二选一）：先停 dev 栈再跑；或改用非平台命名的独立容器（实验脚本的做法——清扫只认 `ws-编号`，别的名字不碰）。`KernelFirstRunLiveTest` 两种形态都有，设 `KERNEL_FIRST_RUN_CONTAINER` 即走独立容器。
+- **别去动清扫**：它的行为是对的（库无记录的在跑容器即孤儿，#179）。测试 profile 的 `hibernation-enabled: false` 只关掉测试进程自己的扫描，管不到 dev 栈。排查时注意 dev 栈日志（`%TEMP%\aiplatform-backend.log`）是 UTF-16 编码，grep 前先 `tr -d '\000'` 转一道。

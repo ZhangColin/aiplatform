@@ -84,6 +84,20 @@ class KernelToolsTest {
     }
 
     @Test
+    void given_write_file_with_container_root_absolute_path_when_invoked_then_written_in_place() {
+        exec.responder = c -> ok("");
+
+        ToolResultBlock block = call("write_file",
+                Map.of("path", "/workspace/docs/PRD.md", "content", "# PRD"));
+
+        assertThat(block.getState()).isNotEqualTo(ToolResultState.ERROR);
+        // 已带容器根的绝对路径原样用，不再二次锚定（#598 真跑实证：提示词以 /workspace/…
+        // 叙述环境与任务，模型恒用该形态——再锚定即落 /workspace/workspace/…）
+        assertThat(exec.commands.get(0)).isEqualTo(
+                "mkdir -p '/workspace/docs' && cat > '/workspace/docs/PRD.md'");
+    }
+
+    @Test
     void given_write_file_failure_when_invoked_then_error_block() {
         exec.responder = c -> new ExecOutput(1, new byte[0], "no space left");
 
@@ -115,6 +129,17 @@ class KernelToolsTest {
 
                 (End of file - total 5 lines)
                 </content>""");
+    }
+
+    @Test
+    void given_read_file_with_container_root_absolute_path_when_invoked_then_read_in_place() {
+        exec.responder = c -> ok("alpha\n");
+
+        ToolResultBlock block = call("read_file", Map.of("path", "/workspace/docs/PRD.md"));
+
+        assertThat(block.getState()).isNotEqualTo(ToolResultState.ERROR);
+        // 同 write_file：已带容器根的绝对路径原样用（真跑里 read_file 5 次全报「不存在」）
+        assertThat(exec.commands.get(0)).isEqualTo("cat -- '/workspace/docs/PRD.md'");
     }
 
     @Test
@@ -221,6 +246,21 @@ class KernelToolsTest {
                 "mkdir -p '/workspace/dir' && cat > '/workspace/dir/x.txt'");
         assertThat(exec.stdins.get(1)).isEqualTo("hello\n世界\n".getBytes(StandardCharsets.UTF_8));
         assertThat(textOf(block)).isEqualTo("The file /dir/x.txt has been updated successfully.");
+    }
+
+    @Test
+    void given_edit_file_with_container_root_absolute_path_when_invoked_then_edited_in_place() {
+        exec.responder = c -> c.startsWith("cat --")
+                ? ok("hello\nworld\n")
+                : ok("");
+
+        ToolResultBlock block = call("edit_file",
+                Map.of("path", "/workspace/dir/x.txt", "old_string", "world", "new_string", "世界"));
+
+        assertThat(block.getState()).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(exec.commands.get(0)).isEqualTo("cat -- '/workspace/dir/x.txt'");
+        assertThat(exec.commands.get(1)).isEqualTo(
+                "mkdir -p '/workspace/dir' && cat > '/workspace/dir/x.txt'");
     }
 
     @Test

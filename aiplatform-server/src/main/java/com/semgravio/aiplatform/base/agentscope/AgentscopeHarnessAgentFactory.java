@@ -165,7 +165,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 上限关工具＋MAX_STEPS_PROMPT 如实汇报；一轮不调工具即结束由框架原生兑现）；
      * 工作区＝项目 dev 沙箱（容器文件面同 {@link AgentWorkspace.ProjectDev}），
      * 会话状态存储、(userId,sessionId) 串行、内核重试关停、上下文压缩沿用现有
-     * 装配（{@link #buildAgent} 内核分支，一行不改）。模型串/通道/候选队列照旧
+     * 装配（{@link #buildAgent} 内核分支，一行不改；压缩的触发规则自 #598 起照
+     * DeepSeek Harness 口径，见 {@link #kernelCompactionConfig}）。模型串/通道/候选队列照旧
      * 由调用方经供给链出口携入（#593 用户故事 6/7——供给链不绕开）。护栏三数值
      * （{@code app.agentscope.kernel-guard-*}：300 轮／45 分钟／60M prompt，到顶
      * 关工具如实汇报）与输出上限开关（{@code kernel-max-output-tokens}，每次请求
@@ -349,7 +350,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩配置解析产物（#366 边缘
         // 点收编——配置键经 EdgeModelSupplier 反转读配置面），让压缩在
         // context_length_exceeded 前触发；阈值取值依据见 AgentscopeProperties。
-        builder.compaction(compactionConfig(properties, compaction, switchTraceSink));
+        builder.compaction(kernelForm
+                ? kernelCompactionConfig(properties, compaction, switchTraceSink,
+                        model.getContextWindowSize(), kernelReservedOutputTokens(properties))
+                : compactionConfig(properties, compaction, switchTraceSink));
         switch (workspace) {
             case AgentWorkspace.Local local -> {
                 if (local.root() != null) {
@@ -870,13 +874,75 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      */
     static CompactionConfig compactionConfig(AgentscopeProperties properties,
             EdgeModelSupplier.EdgeModel compaction, ModelSwitchTraceSink switchTraceSink) {
-        CompactionConfig.Builder config = CompactionConfig.builder();
+        CompactionConfig.Builder config = compactionConfigBuilder(properties, compaction, switchTraceSink);
         if (properties.getCompactionTriggerTokens() != null) {
             config.triggerTokens(properties.getCompactionTriggerTokens());
         }
-        // #379 宿主泄漏正源（见方法 javadoc）——框架缺省开，必须显式关
+        return config.build();
+    }
+
+    /**
+     * DeepSeek Harness compaction-basic 缺省口径的两个常量（源
+     * {@code packages/compaction/compaction-basic/src/config.ts}：thresholdRatio 0.8、
+     * headroomTokens 65,536）。
+     */
+    static final double KERNEL_COMPACTION_THRESHOLD_RATIO = 0.8;
+    static final int KERNEL_COMPACTION_HEADROOM_TOKENS = 65_536;
+
+    /**
+     * 内核形态压缩配置（#598 真跑实证后修正）：照 DeepSeek Harness 的口径——只按上下文
+     * 压力压缩，不按消息条数。框架缺省 {@code triggerMessages=50}（对话满 50 条即压缩）
+     * 对内核关停：实证内核一轮 2–3 条消息，约 15–20 轮压缩一次，14 分钟 17 次、301 轮
+     * 撞轮次护栏；实验基线无压缩、89 轮自然结束；Harness 的自动压缩只按上下文压力
+     * 触发、没有按消息条数的规则（用户裁决 2026-11-24：照 Harness 口径）。token 阈值
+     * {@link #kernelCompactionTriggerTokens} 取主模型窗口（{@code contextWindow}）与内核
+     * 每次请求的输出上限（{@code reservedOutputTokens}）。其余（offload 关停、压缩模型）
+     * 与 {@link #compactionConfig} 同一份公共段；旧形态一行不动。
+     */
+    static CompactionConfig kernelCompactionConfig(AgentscopeProperties properties,
+            EdgeModelSupplier.EdgeModel compaction, ModelSwitchTraceSink switchTraceSink,
+            int contextWindow, int reservedOutputTokens) {
+        CompactionConfig.Builder config = compactionConfigBuilder(properties, compaction, switchTraceSink);
+        config.triggerMessages(0);
+        config.triggerTokens(kernelCompactionTriggerTokens(contextWindow, reservedOutputTokens));
+        return config.build();
+    }
+
+    /**
+     * 内核形态压缩触发 token 阈值——DeepSeek Harness compaction-basic
+     * {@code resolveCompactSpec} 原式：min(窗口×0.8, 窗口−输出上限−余量 65,536)。压力
+     * 同时受窗口比例与「扣除输出预留和压缩余量后的容量」两项约束。窗口未登记（≤0）
+     * 或余量算尽时回 0＝框架动态口径（压缩中间件按主模型窗口现算；无窗口回 16 万兜底）。
+     *
+     * <p>单位注记：框架压缩器按<b>估算</b> token 判阈，Harness 按供应商回报的真实 token。
+     * 内核对话以代码为主，实测估算≈真实的 2 倍（#598 首跑末轮：估算 177,831／回报
+     * 88,920）——同一公式落在平台上，真实 token 上的触发点比 Harness 更早。
+     * 不沿用 {@code compaction-trigger-tokens}：那个固定值是按中文对话「估算偏低」
+     * 标定的，对内核（估算偏高）方向相反，会在窗口两成处就触发。</p>
+     */
+    static int kernelCompactionTriggerTokens(int contextWindow, int reservedOutputTokens) {
+        if (contextWindow <= 0) {
+            return 0;
+        }
+        long byRatio = Math.round(contextWindow * KERNEL_COMPACTION_THRESHOLD_RATIO);
+        long byBudget = (long) contextWindow - Math.max(0, reservedOutputTokens)
+                - KERNEL_COMPACTION_HEADROOM_TOKENS;
+        return byBudget <= 0 ? 0 : (int) Math.min(byRatio, byBudget);
+    }
+
+    /** 内核每次请求预留的输出上限（kernel-max-output-tokens；未配置＝不注入＝不预留）。 */
+    private static int kernelReservedOutputTokens(AgentscopeProperties properties) {
+        Integer cap = properties.getKernelMaxOutputTokens();
+        return cap == null || cap < 0 ? 0 : cap;
+    }
+
+    /** 压缩配置公共段（全形态一致）：压缩前 offload 关停＋压缩模型（候选队列 failover 同构、计量外圈）。 */
+    private static CompactionConfig.Builder compactionConfigBuilder(AgentscopeProperties properties,
+            EdgeModelSupplier.EdgeModel compaction, ModelSwitchTraceSink switchTraceSink) {
+        CompactionConfig.Builder config = CompactionConfig.builder();
+        // #379 宿主泄漏正源（见 compactionConfig javadoc）——框架缺省开，必须显式关
         config.offloadBeforeCompact(false);
         config.model(failoverLayer(compaction.queue(), properties, switchTraceSink));
-        return config.build();
+        return config;
     }
 }

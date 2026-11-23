@@ -109,7 +109,11 @@ public final class KernelTools {
         }
     }
 
-    /** 输入路径（工作区锚定形，{@code /docs/a.md}）→ 容器绝对路径；非法（空白／含 ..）返回 null。 */
+    /**
+     * 输入路径 → 容器绝对路径；非法（空白／含 ..）返回 null。两种合法形态：工作区
+     * 锚定形（{@code /docs/a.md}、{@code src/x.ts}——以 /workspace 为根）与已带容器根
+     * 的绝对形（{@code /workspace/src/x.ts}——原样用，不二次锚定）。
+     */
     private static String containerPathOrNull(String path) {
         if (path == null || path.isBlank()) {
             return null;
@@ -120,8 +124,14 @@ public final class KernelTools {
         catch (IllegalArgumentException e) {
             return null;
         }
-        String rel = path.startsWith("/") ? path.substring(1) : path;
         String root = AgentWorkspace.ProjectDev.CONTAINER_ROOT;
+        // 已带容器根的绝对路径原样用（#598 真跑实证：提示词以 /workspace/… 叙述环境与
+        // 任务，模型恒用该形态；再锚定即拼成 /workspace/workspace/…——read/edit 全失败、
+        // write 落错位，模型被迫改走 bash 挪文件。实验脚本绝对路径本就直用）
+        if (path.equals(root) || path.startsWith(root + "/")) {
+            return path;
+        }
+        String rel = path.startsWith("/") ? path.substring(1) : path;
         return rel.isEmpty() || ".".equals(rel) ? root : root + "/" + rel;
     }
 

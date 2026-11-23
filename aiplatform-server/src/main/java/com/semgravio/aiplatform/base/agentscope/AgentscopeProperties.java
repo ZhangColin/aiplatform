@@ -51,6 +51,9 @@ public class AgentscopeProperties {
      * 尤甚。取 400K：按最坏低估比 2.5× 折算 est 400K ≈ 真实 1M，正好在
      * context_length_exceeded 硬上限前触发（streamEvents 路径天然受益，「炸后下轮」
      * 因下一轮先压缩再跑而自愈，#108 / ADR-0012）。null = 回框架动态缺省。
+     * <b>内核形态不用本值</b>（#598）：内核对话以代码为主、框架估算偏高，本值的标定
+     * 前提不成立——内核不按消息条数压缩，token 阈值照 DeepSeek Harness 原式按主模型
+     * 窗口现算（{@code AgentscopeHarnessAgentFactory#kernelCompactionConfig}）。
      * 压缩模型不在此配（#366 起走边缘点配置链：compaction 配置库值优先缺省 flash，
      * 经 {@code EdgeModelSupplier} 解析注入工厂装配）。
      */

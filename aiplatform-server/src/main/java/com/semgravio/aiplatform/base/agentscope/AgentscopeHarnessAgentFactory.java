@@ -52,9 +52,10 @@ import org.springframework.stereotype.Component;
  * {@link AgentWorkspace.ProjectKernel ProjectKernel} 项目工作区生成内核形态
  * （#595 内核装配，ADR-0054）——容器/内脏关/memory 关同 ProjectDev，提示词＝
  * {@link KernelSystemPrompt} 权威版本（经 {@link #obtainKernel} 装配，直携外来
- * 提示词被结构拒绝）、工具面＝恰四件（{@link KernelTools}）、不挂技能、不挂
- * 子智能体委派；会话状态存储、(userId,sessionId) 串行、内核重试关停、上下文
- * 压缩全部沿用现有装配（一行不改）。</p>
+ * 提示词被结构拒绝）、工具面＝恰四件（{@link KernelTools}）、循环五条语义结构性
+ * 挂载（#596 {@link KernelLoopSemantics}）、不挂技能、不挂子智能体委派；会话状态
+ * 存储、(userId,sessionId) 串行、内核重试关停、上下文压缩全部沿用现有装配
+ * （一行不改）。</p>
  *
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
@@ -159,11 +160,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 生成内核装配（#595，ADR-0054／#593 用户故事 9/11）：系统提示＝
      * {@link KernelSystemPrompt} 权威版本（住代码、调用方不可覆盖——改提示词＝
      * 改内核＝开 issue）、工具面＝恰四件（{@link KernelTools}）、不挂技能、不挂
-     * 子智能体委派；工作区＝项目 dev 沙箱（容器文件面同 {@link AgentWorkspace.ProjectDev}），
+     * 子智能体委派；循环五条语义结构性挂载（#596 {@link KernelLoopSemantics}——
+     * 截断/空回复即轮次结束＋收尾如实告知原因、同参重复 3/5/8 只提醒不拦截、到护栏
+     * 上限关工具＋MAX_STEPS_PROMPT 如实汇报；一轮不调工具即结束由框架原生兑现）；
+     * 工作区＝项目 dev 沙箱（容器文件面同 {@link AgentWorkspace.ProjectDev}），
      * 会话状态存储、(userId,sessionId) 串行、内核重试关停、上下文压缩沿用现有
      * 装配（{@link #buildAgent} 内核分支，一行不改）。模型串/通道/候选队列照旧
-     * 由调用方经供给链出口携入（#593 用户故事 6/7——供给链不绕开）。run 接线属
-     * 后续票（#596 循环语义／#597 护栏与完成判据），本入口先把装配形态立住。
+     * 由调用方经供给链出口携入（#593 用户故事 6/7——供给链不绕开）。护栏数值的
+     * 配置化接线与完成判据属 #597。
      *
      * <p>守卫：直用 {@link AgentWorkspace.ProjectKernel} 工作区、绕过本入口携
      * 外来提示词走 {@link #obtain} 被 {@link #buildAgent} 结构拒绝
@@ -303,8 +307,23 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                             workspace, containerFs, model, subagentModel, toolkit, toolkitSupplier,
                             stateStore, skillRepositorySupplier, platformMiddlewares)));
         }
+        // 内核循环五条语义（#596，ADR-0054／#590 最终修订）结构性挂载：一轮不调工具
+        // 即结束（框架原生兑现）、截断/空回复＝轮次结束＋收尾如实告知原因、同参重复
+        // 3/5/8 只提醒不拦截、到护栏上限关工具＋MAX_STEPS_PROMPT 如实汇报——仅内核
+        // 形态挂载，旧形态循环行为一行不动（机制与兑现位见 KernelLoopSemantics）
+        if (kernelForm) {
+            builder.middleware(new KernelLoopSemantics());
+        }
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
+        }
+        if (kernelForm) {
+            // 内核形态 SDK maxIters 抬到循环护栏之上（#596）——压过上方
+            // properties 写入（内核形态不消费该配置项）：到顶语义（关工具＋
+            // MAX_STEPS_PROMPT 如实汇报）由 KernelLoopSemantics 兑现，SDK
+            // summarizing（自带 heuristics 提示句、无工具）不得抢先；护栏数值
+            // 本身的配置化接线（45 分钟／60M prompt 同族）属 #597
+            builder.maxIters(KernelLoopSemantics.GUARD_ROUNDS + 1);
         }
         // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩配置解析产物（#366 边缘
         // 点收编——配置键经 EdgeModelSupplier 反转读配置面），让压缩在

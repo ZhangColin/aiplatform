@@ -18,6 +18,10 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  *   <li>{@link ProjectDesign}：项目工作区设计面（#289 设计执行体姿态，ADR-0025
  *       「无 shell」）——容器与内核文件工具同 {@link ProjectDev}（写文件件在：
  *       界面稿 HTML 落工作区），另关内核 shell 与委派（命令执行结构性不存在）</li>
+ *   <li>{@link ProjectKernel}：项目工作区生成内核形态（#595 内核装配，ADR-0054）
+ *       ——容器与根同 {@link ProjectDev}，差异在装配面：系统提示＝
+ *       {@link KernelSystemPrompt} 权威版本、工具面＝内核四件（{@link KernelTools}）、
+ *       不挂技能、不挂子智能体委派</li>
  * </ul>
  */
 public sealed interface AgentWorkspace {
@@ -93,6 +97,29 @@ public sealed interface AgentWorkspace {
         @Override
         public String identity() {
             return "project-design:" + containerName;
+        }
+    }
+
+    /**
+     * 项目工作区生成内核形态（#595 内核装配，ADR-0054）：容器与根同
+     * {@link ProjectDev}（docker exec 文件面、记忆关、会话状态存储同库），差异在
+     * 装配面——工厂对本形态：系统提示只收 {@link KernelSystemPrompt} 权威版本
+     * （改提示词＝改内核＝开 issue）、工具面＝恰四件（{@link KernelTools}，不发放
+     * 旧工具面）、技能与子智能体委派结构性不挂。形态入实例缓存键
+     * （{@code identity()} 与 {@link ProjectDev} 不同键——同容器两形态不静默复用）。
+     */
+    record ProjectKernel(String workspaceId, String containerName) implements AgentWorkspace {
+
+        public ProjectKernel {
+            if (workspaceId == null || workspaceId.isBlank()
+                    || containerName == null || containerName.isBlank()) {
+                throw new IllegalArgumentException("ProjectKernel 工作区需要 workspaceId 与 containerName");
+            }
+        }
+
+        @Override
+        public String identity() {
+            return "project-kernel:" + containerName;
         }
     }
 }

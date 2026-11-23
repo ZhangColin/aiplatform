@@ -46,6 +46,9 @@ import reactor.core.publisher.Mono;
  */
 public final class KernelTools {
 
+    /** 内核四件注册名（#595 装配收口单点：构建后工具面恰四件的判定正本）。 */
+    static final List<String> NAMES = List.of("write_file", "read_file", "edit_file", "bash");
+
     /** 真实装配：给定项目沙箱容器名构建四件（docker exec 落容器工作区根）。 */
     public static List<AgentTool> forContainer(String containerName) {
         return over(new DockerExecFilesystem.DockerExecCommand(containerName,

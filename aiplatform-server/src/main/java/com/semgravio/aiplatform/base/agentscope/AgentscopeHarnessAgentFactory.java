@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
  * （name + sysPrompt + model + workspace）构建一次、进程内复用；容器关闭时统一释放
  * （HarnessAgent 是 AutoCloseable）。
  *
- * <p>工作区四形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
+ * <p>工作区五形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（memory：源码包
@@ -48,7 +48,13 @@ import org.springframework.stereotype.Component;
  * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）；
  * {@link AgentWorkspace.ProjectDesign ProjectDesign} 项目工作区设计面（#289
  * 设计执行体姿态，ADR-0025 无 shell）——文件工具保留、另关内核 shell 与委派
- * （写文件件在、命令执行结构性不存在）。</p>
+ * （写文件件在、命令执行结构性不存在）；
+ * {@link AgentWorkspace.ProjectKernel ProjectKernel} 项目工作区生成内核形态
+ * （#595 内核装配，ADR-0054）——容器/内脏关/memory 关同 ProjectDev，提示词＝
+ * {@link KernelSystemPrompt} 权威版本（经 {@link #obtainKernel} 装配，直携外来
+ * 提示词被结构拒绝）、工具面＝恰四件（{@link KernelTools}）、不挂技能、不挂
+ * 子智能体委派；会话状态存储、(userId,sessionId) 串行、内核重试关停、上下文
+ * 压缩全部沿用现有装配（一行不改）。</p>
  *
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
@@ -85,6 +91,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     private static final String WAIT_ASYNC_RESULTS_TOOL = "wait_async_results";
     private static final String TIMEOUT_SECONDS_PARAM = "timeout_seconds";
     private static final String REQUIRED_SCHEMA_KEY = "required";
+
+    /** 生成内核形态的智能体名（#595）：状态槽位与实例缓存键的名字腿，钉死免漂。 */
+    private static final String KERNEL_AGENT_NAME = "generation-kernel";
 
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
@@ -146,6 +155,27 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                         compaction, subagent, workspace, agentKey, toolSpec));
     }
 
+    /**
+     * 生成内核装配（#595，ADR-0054／#593 用户故事 9/11）：系统提示＝
+     * {@link KernelSystemPrompt} 权威版本（住代码、调用方不可覆盖——改提示词＝
+     * 改内核＝开 issue）、工具面＝恰四件（{@link KernelTools}）、不挂技能、不挂
+     * 子智能体委派；工作区＝项目 dev 沙箱（容器文件面同 {@link AgentWorkspace.ProjectDev}），
+     * 会话状态存储、(userId,sessionId) 串行、内核重试关停、上下文压缩沿用现有
+     * 装配（{@link #buildAgent} 内核分支，一行不改）。模型串/通道/候选队列照旧
+     * 由调用方经供给链出口携入（#593 用户故事 6/7——供给链不绕开）。run 接线属
+     * 后续票（#596 循环语义／#597 护栏与完成判据），本入口先把装配形态立住。
+     *
+     * <p>守卫：直用 {@link AgentWorkspace.ProjectKernel} 工作区、绕过本入口携
+     * 外来提示词走 {@link #obtain} 被 {@link #buildAgent} 结构拒绝
+     * （IllegalArgumentException）。</p>
+     */
+    public HarnessAgent obtainKernel(String modelString, ModelChannel modelChannel,
+            ModelCandidateQueue modelQueue, AgentWorkspace.ProjectKernel workspace,
+            String agentKey) {
+        return obtain(KERNEL_AGENT_NAME, KernelSystemPrompt.text(), modelString,
+                modelChannel, modelQueue, workspace, agentKey, null);
+    }
+
     @Override
     public void destroy() {
         agents.values().forEach(agent -> {
@@ -168,7 +198,19 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             EdgeModelSupplier.EdgeModel compaction, EdgeModelSupplier.EdgeModel subagent,
             AgentWorkspace workspace, String agentKey,
             String toolSpec, AgentscopeProperties properties) {
-        Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
+        boolean kernelForm = workspace instanceof AgentWorkspace.ProjectKernel;
+        // 提示词权威守卫（#595）：内核形态只收 KernelSystemPrompt 权威版本——改提示词＝
+        // 改内核＝开 issue；直用内核工作区携外来提示词属编程错误，失败要快要响
+        if (kernelForm && !KernelSystemPrompt.text().equals(sysPrompt)) {
+            throw new IllegalArgumentException("生成内核形态的提示词必须取 KernelSystemPrompt "
+                    + "权威版本（改提示词＝改内核＝开 issue，#595）——请经 obtainKernel 装配");
+        }
+        // 内核形态工具面＝恰四件（#594 KernelTools，base 自产）——结构性不发放旧
+        // 工具面（AgentToolkitSupplier 是旧按槽位工具面的业务装配缝，内核不消费）；
+        // 其余形态照旧经业务供应商按配置发放
+        Toolkit toolkit = kernelForm
+                ? kernelToolkit(((AgentWorkspace.ProjectKernel) workspace).containerName())
+                : toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
         // 模型流层平台包装（#109 计量 + #321 断流自动重试）：主模型解析即关内层
         // 缺省重试（见 innerRetryDisabledOptions）、经 streamLayer 包装——重试
         // 内圈（429/5xx 零发射失败流层接续）、计量外圈（主循环每次迭代的
@@ -189,11 +231,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 执行体档——含路由升档，计量边界连续的既有口径不变）
         Model subagentModel = subagent == null ? model
                 : failoverLayer(subagent.queue(), properties, switchTraceSink);
-        // 项目工作区容器文件面（ProjectDev/ProjectReadOnly 共用；子智能体同面，#260）
+        // 项目工作区容器文件面（ProjectDev/ProjectReadOnly/ProjectDesign/ProjectKernel 共用；
+        // 子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
             case AgentWorkspace.ProjectReadOnly ro -> new DockerExecFilesystem(ro.containerName());
             case AgentWorkspace.ProjectDesign design -> new DockerExecFilesystem(design.containerName());
+            case AgentWorkspace.ProjectKernel kernel -> new DockerExecFilesystem(kernel.containerName());
             case AgentWorkspace.Local ignored -> null;
         };
         HarnessAgent.Builder builder = HarnessAgent.builder()
@@ -234,8 +278,15 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 // （外层分类路由见 #552 ② failover；框架压缩中间件另有吞模型错误重放
                 // 一轮的独立缺陷，#561）。子智能体工厂同款（subagentFactory）
                 .maxRetries(1);
-        skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
-                .forEach(builder::skillRepository);
+        // 技能挂载位（#94）：按配置发放技能仓库——无技能挂载返回空集即框架
+        // 不注入 <available_skills>；平台技能来源三途（内置 classpath/安装库/
+        // 自产库）均非框架工作区目录 skills/（预留位已删，ADR-0022），关闭
+        // 框架工作区技能自动合成免无谓文件面往返。
+        // 内核形态（#595）结构性跳过——「不挂技能」不靠业务供应商返回空集兑现
+        if (!kernelForm) {
+            skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
+                    .forEach(builder::skillRepository);
+        }
         // 平台中间件挂载位（#261 首件＝技能加载计数）：全形态挂观测中间件；
         // 委派声明的子智能体同挂（框架对 HarnessRuntimeMiddleware 不随实例拷贝
         // 传播，子级须显式再挂——与技能视图同款两处接线）
@@ -244,11 +295,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         platformMiddlewares.forEach(builder::middleware);
         // 委派位（#95 挂载 / #260 装配一等化）：声明转平台子智能体工厂（框架 2.0.1
         // declared 工厂只继承父级技能仓库，子智能体槽位视图接不进去——见工厂方法
-        // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>
-        subagentSupplier.subagentsFor(agentKey, workspace)
-                .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
-                        workspace, containerFs, model, subagentModel, toolkit, toolkitSupplier,
-                        stateStore, skillRepositorySupplier, platformMiddlewares)));
+        // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>。
+        // 内核形态（#595）结构性跳过——「不挂子智能体委派」不靠业务供应商返回空集兑现
+        if (!kernelForm) {
+            subagentSupplier.subagentsFor(agentKey, workspace)
+                    .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
+                            workspace, containerFs, model, subagentModel, toolkit, toolkitSupplier,
+                            stateStore, skillRepositorySupplier, platformMiddlewares)));
+        }
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
         }
@@ -283,17 +337,56 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     // 关闭——写稿无需命令、设计会话不委派（信任面收窄同主智能体）
                     .disableShellTool()
                     .disableSubagents();
+            case AgentWorkspace.ProjectKernel kernel -> projectSandbox(builder, containerFs)
+                    // 生成内核面（#595，ADR-0054）：框架文件面/shell/WebTools 结构性
+                    // 不注册——防框架 build() 后写胜覆盖内核四件同名件（read/write/
+                    // edit）；委派关（不挂子智能体委派）。内核四件经 toolkit 直装
+                    // （见上 kernelToolkit），记忆关/memory 工具关随 projectSandbox
+                    .disableFilesystemTools()
+                    .disableShellTool()
+                    .disableWebTools()
+                    .disableSubagents();
         }
         HarnessAgent agent = builder.build();
         realignBuiltinWebTools(toolkit, agent);
         // #482：内置等待屏障件 schema 覆写（见 relaxWaitBarrierTimeoutSchema）
         relaxWaitBarrierTimeoutSchema(agent.getToolkit());
+        // 内核工具面收口（#595）：恰四件不变量——构建后摘除一切非四件（框架内置
+        // wait_async_results 等 messageBus 衍生件无 builder 开关，只能后置摘）；
+        // 摘完恒等断言归 KernelAgentAssemblyTest 钉守
+        if (kernelForm) {
+            stripNonKernelTools(agent.getToolkit());
+        }
         // #363：项目容器姿态抑制框架宿主物化面（见 suppressHostSkillStaging——
         // 容器根 /workspace 对纯 NIO 物化是宿主路径，写了必错处）
         if (containerFs != null) {
             suppressHostSkillStaging(agent);
         }
         return agent;
+    }
+
+    /**
+     * 内核工具面装配（#595）：{@link KernelTools} 四件直装新 Toolkit——旧工具面
+     * 供应商（{@link AgentToolkitSupplier}）与技能面、委派位对内核形态结构性
+     * 不消费（见 {@link #buildAgent} 内核分支）。
+     */
+    private static Toolkit kernelToolkit(String containerName) {
+        Toolkit toolkit = new Toolkit();
+        KernelTools.forContainer(containerName).forEach(toolkit::registerAgentTool);
+        return toolkit;
+    }
+
+    /**
+     * 内核工具面收口（#595）：构建后工具面恰四件（{@link KernelTools#NAMES}）——
+     * 一切非四件条目摘除（框架内置 wait_async_results/web 对/MCP 衍生件；框架
+     * 文件面与 shell 已在前置 builder 开关结构性不注册，此处是收口兜底的第二道）。
+     * 镜像 {@link #realignBuiltinWebTools}/#266 stripUndeclared 构建后置校正先例。
+     */
+    private static void stripNonKernelTools(Toolkit toolkit) {
+        toolkit.getToolNames().stream()
+                .filter(name -> !KernelTools.NAMES.contains(name))
+                .toList()
+                .forEach(toolkit::removeTool);
     }
 
     /**

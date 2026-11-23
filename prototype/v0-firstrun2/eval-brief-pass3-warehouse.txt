@@ -1,0 +1,35 @@
+You are verifying, independently and read-only, whether two AI-generated web apps actually implement a requirements document. Do not trust what the generating model claimed; only report what you observe yourself (HTTP responses, API results, database rows, screenshots).
+
+## The apps (question 3: small warehouse in/out inventory system)
+
+- Requirements document: `C:/Users/zhang/AppData/Local/Temp/v0-firstrun/prd-run3-warehouse.md` (read it first; a copy is at `/workspace/docs/PRD.md` inside both containers).
+- **OLD app** — container `v0-run3`, http://localhost:18093. Generated on 2026-11-21 by the earlier approach and kept as-is for the owner's review. It has already been checked twice by other reviewers, so do not go through it item by item this time: check it only where you need it in order to decide whether the NEW app is worse or better on a specific point (read-only; logging in is fine; no business-data writes).
+- **NEW app** — container `v0r2c-q3`, http://localhost:18133 (inside: http://localhost:8081). Generated today.
+
+Environment: Windows host, Git Bash shell, Docker. Work inside a container with `docker exec <container> sh -c '…'`. The database is PostgreSQL inside each container; the connection string is the `DATABASE_URL` line of `/workspace/.env` in that container, and `psql` is installed, e.g. `docker exec v0r2c-q3 sh -c 'psql "$(grep ^DATABASE_URL /workspace/.env | cut -d= -f2-)" -c "\dt"'`. The app source is under `/workspace` in each container.
+
+## What to check (NEW app in full; OLD app only for specific comparisons)
+
+Go through the document item by item: everything in 「六、功能清单」 (items 1–6), 「八、验收与待确认」, and the parts of 「三、核心场景」 that can be checked (stock increases on confirmed inbound, decreases on confirmed outbound, insufficient-stock warning per row, low/out-of-stock rows highlighted, home-page shortage alerts, stocktake started by category with a difference table showing 盘盈/盘亏/一致, the four report cards plus the shortage list). For each item give a verdict for the NEW app — 完成 / 部分 / 未做 — plus concrete evidence: the URL or API called, the HTTP status, what you saw in the HTML/JSON or the source, or the query and row counts. Check the demo-data requirements by querying the database (at least 40 SKUs, at least 100 inbound/outbound orders spread over the last three months, realistic Chinese product names and models) and check the stock-consistency rule with queries (stock quantity equals the sum of movements). If the app has a login, find the demo accounts in the workspace and log in through the app's own login API, reusing the session cookie for page requests.
+
+Rules:
+- Read-only on files: never edit, create or delete anything under `/workspace` in either container; no git commands; never stop, restart or start servers or dev processes; do not run `pnpm build`, `pnpm dev`, tests or install commands.
+- On the OLD app do not create or modify business data (logging in is fine).
+- On the NEW app you may perform a small number of write actions only if that is the only way to verify a write flow (for example one small inbound order and one outbound order, then checking the stock change); report every such action and the records you created.
+- Other verification jobs may be running at the same time against other containers (names starting with `v0-run`, `v0r2-`, `v0r2b-`, `v0r2c-`): do not touch any container other than `v0-run3` and `v0r2c-q3`.
+- Do not open the earlier review reports in the host folder (`eval-q*.md`, `eval2-q*.md`) until your own checks are finished: every verdict must come from what you observed yourself.
+- If something cannot be determined, say "未能确认" and why. Never guess.
+
+## Screenshots (NEW app)
+
+Capture the main pages at 1366×900 with the Chromium that is already in the image. A working example script is `C:/Users/zhang/AppData/Local/Temp/v0-firstrun/shot.js` (requires `/opt/render/node_modules/playwright-core`, uses the env var `RENDER_CHROMIUM`, runs with `node` inside the container; it crawls the links in nav/header/aside). Write your script to `/tmp/shots/` inside each container, run it there, save PNGs under `/tmp/shots/`, and collect browser console errors per page. Then copy the PNGs out with `docker cp <container>:/tmp/shots <destination>`:
+- NEW app → `C:/Users/zhang/AppData/Local/Temp/v0-firstrun2/shots-new3-q3/`
+Screenshots of the OLD app already exist in `C:/Users/zhang/AppData/Local/Temp/v0-firstrun2/shots-old-q3/` and `.../shots-old2-q3/`; open them only when you need one for a specific comparison.
+Cover at least: home (with the shortage alerts), products, inbound, outbound, inventory, stocktakes, reports. Look at the screenshots yourself with the Read tool and note visible problems (blank page, error overlay, broken layout, empty tables, unreadable text).
+
+## What to hand back
+
+1. A Markdown report at `C:/Users/zhang/AppData/Local/Temp/v0-firstrun2/eval3-q3.md`, in Chinese, containing: the item-by-item table (条目｜新应用｜证据; add a 「与旧应用比」 remark only where you checked it), the demo-data checks against the document's numbers, the stock-consistency check, the list of routes/APIs probed, defects observed per app (including HTTP 500s and console errors), write actions you performed on the NEW app, and the list of screenshot files.
+2. A reply to me, under about 400 words: the counts of 完成／部分／未做 for the NEW app; every item where the NEW app is worse than the OLD app and every item where it is better (each such comparison checked by you on the OLD app); the most serious defects in the NEW app; and the file paths of the 4–6 most important screenshots of the NEW app.
+
+Write in plain everyday Chinese, no invented jargon.

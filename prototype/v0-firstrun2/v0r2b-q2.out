@@ -1,0 +1,159 @@
+r1 1s bash:cat /workspace/docs/PRD.md [rc=0]; bash:cd /workspace && ls -a && cat package.json && cat .env && ls src 2>/dev/null || ls app 2>/dev/null [rc=0]
+r2 1s bash:cd /workspace && find src -type f | head -100 && echo "---" && cat src/app/page.tsx 2>/dev/null | he [rc=0]; bash:cd /workspace && ls data materials design exports docs .platform 2>/dev/null && cat next.config.ts & 
+r3 1s bash:cd /workspace && cat src/lib/db.ts src/lib/http.ts src/lib/auth.ts src/lib/robust/http.ts src/lib/ro [rc=0]; bash:cd /workspace && ls .platform/rules && head -60 .platform/rules/* 2>/dev/null | head -150; ls src/co 
+r4 1s bash:cd /workspace && sed -n 60,400p src/lib/robust/data-access.ts [rc=0]; bash:cd /workspace && ls -R .platform/rules | head -40 && cat .platform/rules/*.md 2>/dev/null | head -12 [rc=0]
+r5 6s bash:cd /workspace && ls; cat eslint.config.* 2>/dev/null | head -40; psql "postgres://postgres:v0r2bq2@l [rc=0]; bash:cd /workspace && sed -n 1,80p src/lib/robust/session.ts && grep -n "export" src/lib/robust/session.t 
+r6 41s bash:mkdir -p /workspace/src/data /workspace/scripts /workspace/src/components/kid /workspace/src/app/api [rc=0]
+r7 14s write_file:/workspace/src/data/curriculum.json [ok]
+r8 1s bash:cd /workspace && node -e "
+const d=require('./src/data/curriculum.json');
+console.log('pinyin',d.pin [rc=0]
+r9 8s write_file:/workspace/scripts/schema.sql [ok]
+r10 11s write_file:/workspace/scripts/seed.mjs [ok]
+r11 3s bash:cd /workspace && node scripts/seed.mjs [rc=0]
+r12 8s write_file:/workspace/src/lib/curriculum.ts [ok]
+r13 4s write_file:/workspace/src/lib/types.ts [ok]
+r14 26s write_file:/workspace/src/lib/repo.ts [ok]
+r15 3s bash:cd /workspace && python3 - <<'EOF'
+import re
+p='src/lib/repo.ts'
+s=open(p).read()
+
+# 1) add helper q [rc=0]
+r16 1s bash:cd /workspace && sed -n 455,540p src/lib/repo.ts [rc=0]
+r17 9s bash:cd /workspace && python3 - <<'PY'
+p='src/lib/repo.ts'
+s=open(p).read()
+
+old_mistakes = '''      quer [rc=0]
+r18 1s bash:cd /workspace && sed -n 190,225p src/lib/repo.ts [rc=0]
+r19 5s bash:cd /workspace && python3 - <<'PY'
+p='src/lib/repo.ts'
+s=open(p).read()
+old = '''  const rows = await [rc=0]
+r20 5s bash:cd /workspace && python3 - <<'PY'
+p='src/lib/curriculum.ts'
+s=open(p).read()
+s = s.replace('''export [rc=0]
+r21 8s write_file:/workspace/src/app/globals.css [ok]
+r22 6s write_file:/workspace/src/components/kid/Nav.tsx [ok]
+r23 3s write_file:/workspace/src/components/kid/TopBar.tsx [ok]
+r24 3s write_file:/workspace/src/app/layout.tsx [ok]
+r25 10s write_file:/workspace/src/app/page.tsx [ok]
+r26 3s bash:cd /workspace && python3 - <<'PY'
+p='src/app/globals.css'
+s=open(p).read()
+s=s.replace("""  --color- [rc=0]
+r27 1s bash:cd /workspace && curl -s http://localhost:8081/ | head -c 1200; echo; tail -20 /tmp/app.log [rc=0]
+r28 2s bash:cd /workspace && curl -s http://localhost:8081/ | grep -o "今日练习\|连续 [0-9]* 天\|已过 [0-9]*/12 关\|今日 [0- [rc=0]
+r29 2s bash:cd /workspace && curl -s http://localhost:8081/ | grep -o "连续.\{0,40\}天" | head -3; curl -s http://l [rc=0]
+r30 2s bash:mkdir -p /workspace/src/app/api/today /workspace/src/app/api/games/\[game\]/result /workspace/src/ap [rc=0]
+r31 2s write_file:/workspace/src/app/api/today/route.ts [ok]
+r32 3s write_file:/workspace/src/app/api/games/[game]/result/route.ts [ok]
+r33 2s write_file:/workspace/src/app/api/games/[game]/mistake/route.ts [ok]
+r34 1s write_file:/workspace/src/app/api/pinyin/[id]/learn/route.ts [ok]
+r35 2s write_file:/workspace/src/app/api/levels/[level]/pass/route.ts [ok]
+r36 2s write_file:/workspace/src/app/api/progress/route.ts [ok]
+r37 7s write_file:/workspace/src/lib/api-client.ts [ok]
+r38 6s write_file:/workspace/src/components/kid/GameResult.tsx [ok]
+r39 3s write_file:/workspace/src/components/kid/GameHeader.tsx [ok]
+r40 2s read_file:/workspace/src/components/kid/GameHeader.tsx [rc=0]
+r41 6s write_file:/workspace/src/app/games/recognize/RecognizeGame.tsx [ok]
+r42 2s write_file:/workspace/src/app/games/recognize/page.tsx [ok]
+r43 10s write_file:/workspace/src/app/games/match/MatchGame.tsx [ok]
+r44 3s bash:cd /workspace && python3 - <<'PY'
+p='src/app/games/match/MatchGame.tsx'
+s=open(p).read()
+s=s.replace [rc=0]
+r45 7s write_file:/workspace/src/app/games/find/FindGame.tsx [ok]
+r46 4s bash:cd /workspace && cat > src/app/games/find/page.tsx <<'EOF'
+import { getFindPlay } from "@/lib/repo"; [rc=0]
+r47 4s bash:cd /workspace && python3 - <<'PY'
+p='src/app/api/levels/[level]/pass/route.ts'
+s=open(p).read()
+s=s. [rc=0]
+r48 4s bash:cd /workspace && curl -s -X POST http://localhost:8081/api/games/find/result -H 'content-type: appli [rc=0]
+r49 6s bash:cd /workspace && python3 - <<'PY'
+import json, io, re
+p='src/data/curriculum.json'
+raw=open(p).read( [rc=0]
+r50 6s bash:cd /workspace && python3 - <<'PY'
+# schema: 增加 example_pinyin
+p='scripts/schema.sql'
+s=open(p).read( [rc=0]
+r51 8s write_file:/workspace/src/app/pinyin/PinyinBoard.tsx [ok]
+r52 5s bash:cd /workspace && cat > src/app/pinyin/page.tsx <<'EOF'
+import { getPinyinCards } from "@/lib/repo";
+ [rc=0]
+r53 1s bash:cd /workspace && tail -20 /tmp/app.log; ls src/app/pinyin [rc=0]
+r54 2s bash:cd /workspace && curl -s http://localhost:8081/pinyin | head -c 400; echo; curl -s -o /dev/null -w " [rc=0]
+r55 10s write_file:/workspace/src/app/map/[level]/LevelPlay.tsx [ok]
+r56 6s bash:cd /workspace && rm -rf "src/app/api/games/[game]/mistake" && mkdir -p src/app/api/mistakes && cat > [rc=0]
+r57 8s write_file:/workspace/src/app/map/page.tsx [ok]
+r58 7s bash:cd /workspace && cat > "src/app/map/[level]/page.tsx" <<'EOF'
+import Link from "next/link";
+import { [rc=0]
+r59 11s write_file:/workspace/src/app/parent/page.tsx [ok]
+r60 5s bash:cd /workspace && npx tsc --noEmit 2>&1 | head; for p in / /pinyin /map /map/1 /map/4 /parent /api/to [rc=0]
+r61 2s bash:which chromium chromium-browser google-chrome 2>/dev/null; ls /workspace/node_modules | grep -i -E " [rc=0]
+r62 7s bash:cd /workspace && H='content-type: application/json'
+echo "--- recognize"; curl -s -X POST localhost: [rc=0]
+r63 6s bash:cd /workspace && node scripts/seed.mjs >/dev/null && echo reseeded && css=$(curl -s http://localhost [rc=0]
+r64 1s bash:cd /workspace && grep -o "\.bg-sun\\\\/25{[^}]*}" /tmp/app.css | head -2; grep -o "\.text-sky-deep{[ [rc=0]
+r65 2s bash:cd /workspace && python3 - <<'PY'
+s=open('/tmp/app.css').read()
+import re
+for name in ['bg-sun\\/25' [rc=0]
+r66 6s write_file:/workspace/src/lib/rules.ts [ok]
+r67 6s bash:cd /workspace && python3 - <<'PY'
+p='src/lib/repo.ts'
+s=open(p).read()
+
+# 移除 repo 内的重复纯函数，改为从 rules  [rc=0]
+r68 1s bash:cd /workspace && cat vitest.config.ts vitest.setup.ts [rc=0]
+r69 3s write_file:/workspace/src/lib/rules.test.ts [ok]
+r70 3s write_file:/workspace/src/lib/curriculum.test.ts [ok]
+r71 3s bash:cd /workspace && pnpm test 2>&1 | tail -25 [rc=0]
+r72 7s bash:cd /workspace && python3 - <<'PY'
+p='src/components/kid/GameHeader.tsx'
+s=open(p).read()
+s=s.replace [rc=0]
+r73 4s bash:cd /workspace && curl -s http://localhost:8081/parent | grep -o "错 <!-- -->[0-9]*<!-- --> 次" | head  [rc=0]
+r74 11s bash:cd /workspace && pnpm build 2>&1 | tail -40 [rc=0]
+r75 4s bash:cd /workspace && curl -s -o /dev/null -w "home %{http_code}\n" http://localhost:8081/ && for p in /p [rc=0]
+r76 4s bash:cd /workspace && python3 - <<'PY'
+import re, subprocess, sys
+routes = ["/", "/pinyin", "/map", "/map [rc=0]
+r77 6s bash:cd /workspace && python3 - <<'PY'
+p='src/app/games/match/MatchGame.tsx'
+s=open(p).read()
+s=s.replace [rc=0]
+r78 6s write_file:/workspace/README.md [ok]
+r79 2s bash:cd /workspace && node scripts/seed.mjs && curl -s localhost:8081/api/today | head -c 400; echo; ls e [rc=0]
+r80 2s bash:cd /workspace && node -e "console.log(Object.keys(require('./node_modules/eslint-config-next/package [rc=0]
+r81 5s bash:cd /workspace && cat > eslint.config.mjs <<'EOF'
+import next from "eslint-config-next";
+
+/** 基础 Lint [rc=0]
+r82 9s bash:cd /workspace && cat > eslint.config.mjs <<'EOF'
+import next from "eslint-config-next";
+
+/** 基础 Lint [rc=0]
+r83 11s bash:cd /workspace && python3 - <<'PY'
+p='src/app/error.tsx'
+s=open(p).read()
+s=s.replace('"use client";' [rc=0]
+r84 6s bash:cd /workspace && echo "== recognize"; curl -s localhost:8081/games/recognize | grep -o "认识啦\|下一个\|认一 [rc=0]
+r85 2s bash:cd /workspace && curl -s localhost:8081/games/match | grep -o 'class="tracking-widest">[^<]*' | head [rc=0]
+r86 4s bash:cd /workspace && grep -rn "games/\(find\|match\|recognize\)/mistake" src || echo "no stale refs"; rm [rc=0]
+r87 12s bash:cd /workspace && pnpm build 2>&1 | tail -25 [rc=0]
+r88 4s bash:cd /workspace && sleep 2 && curl -s -o /dev/null -w "root %{http_code}\n" http://localhost:8081 && f [rc=0]
+r89 3s bash:cd /workspace && H='content-type: application/json'
+for g in recognize match find; do curl -s -X POS [rc=0]
+r90 3s bash:cd /workspace && node scripts/seed.mjs | tail -12 && curl -s localhost:8081/api/today | python3 -c " [rc=0]
+r91 9s bash:cd /workspace && python3 - <<'PY'
+p='src/app/page.tsx'
+s=open(p).read()
+s=s.replace('''        <div  [rc=0]
+r92 3s bash:cd /workspace && git status --porcelain 2>/dev/null | head -40 || find src scripts -type f -newer pa [rc=0]
+END kind=natural r93 496s

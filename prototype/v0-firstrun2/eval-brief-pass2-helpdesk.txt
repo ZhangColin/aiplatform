@@ -1,0 +1,34 @@
+You are verifying, independently and read-only, whether two AI-generated web apps actually implement a requirements document. Do not trust what the generating model claimed; only report what you observe yourself (HTTP responses, API results, database rows, screenshots).
+
+## The two apps (question 1: team helpdesk / ticket board)
+
+- Requirements document: `C:/Users/zhang/AppData/Local/Temp/v0-firstrun/prd-run1-helpdesk.md` (read it first; a copy is at `/workspace/docs/PRD.md` inside both containers).
+- **OLD app** — container `v0-run1`, reachable from this machine at http://localhost:18091 (inside the container: http://localhost:8081). Generated on 2026-11-21 and kept as-is for the owner's review.
+- **NEW app** — container `v0r2b-q1`, http://localhost:18121 (inside: http://localhost:8081). Generated today.
+
+Environment: Windows host, Git Bash shell, Docker. Work inside a container with `docker exec <container> sh -c '…'`. The database is PostgreSQL inside each container; the connection string is the `DATABASE_URL` line of `/workspace/.env` in that container, and `psql` is installed, e.g. `docker exec v0r2b-q1 sh -c 'psql "$(grep ^DATABASE_URL /workspace/.env | cut -d= -f2-)" -c "\dt"'`. The app source is under `/workspace` in each container.
+
+## What to check, for BOTH apps
+
+Go through the document item by item: everything in 「六、功能清单」 (items 1–6), 「八、验收与待确认」, and the parts of 「三、核心场景」 that can be checked (for example "任意节点可挂起", "超 48 小时处理中的工单标红", statistics numbers, the five board columns and horizontal scrolling of the "待派单" column when it is taller than the board). For each item and each app give a verdict — 完成 / 部分 / 未做 — plus concrete evidence: the URL or API called, the HTTP status, what you saw in the HTML/JSON, or the query and row counts. Check the demo-data requirements by querying the database (for example ticket count per status — the document asks for at least 20 tickets covering every status — and members, realistic Chinese data). The app has a login: find the demo accounts in the workspace (README, implementation notes, seed script, or the login page) and log in through the app's own login API, reusing the session cookie for page requests.
+
+Rules:
+- Read-only on files: never edit, create or delete anything under `/workspace` in either container; no git commands; never stop, restart or start servers or dev processes; do not run `pnpm build`, `pnpm dev`, tests or install commands.
+- On the OLD app do not create or modify business data (logging in is fine).
+- On the NEW app you may perform a small number of write actions only if that is the only way to verify a write flow (for example creating one ticket and moving it through its statuses to check "任意节点可挂起"); report every such action and the records you created.
+- Other verification jobs are running at the same time against other containers (names starting with `v0-run2`, `v0-run3`, `v0r2-q`): do not touch any container other than `v0-run1` and `v0r2b-q1`.
+- If something cannot be determined, say "未能确认" and why. Never guess.
+
+## Screenshots (both apps)
+
+Capture the main pages at 1366×900 with the Chromium that is already in the image. A working example script is `C:/Users/zhang/AppData/Local/Temp/v0-firstrun/shot.js` (requires `/opt/render/node_modules/playwright-core`, uses the env var `RENDER_CHROMIUM`, runs with `node` inside the container); `shot-run1.js` in the same folder shows how the login was handled for the OLD app (click a demo account or the "进入工作台" button). Write your script to `/tmp/shots/` inside each container, run it there, save PNGs under `/tmp/shots/`, and collect browser console errors per page. Then copy the PNGs out with `docker cp <container>:/tmp/shots <destination>`:
+- NEW app → `C:/Users/zhang/AppData/Local/Temp/v0-firstrun2/shots-new2-q1/`
+- OLD app → `C:/Users/zhang/AppData/Local/Temp/v0-firstrun2/shots-old2-q1/`
+Cover at least: login page, board, list, stats, members, and a ticket detail (if reachable). Look at the screenshots yourself with the Read tool and note visible problems (blank page, error overlay, broken layout, empty tables, unreadable text).
+
+## What to hand back
+
+1. A Markdown report at `C:/Users/zhang/AppData/Local/Temp/v0-firstrun2/eval2-q1.md`, in Chinese, containing: the item-by-item table (条目｜旧应用｜新应用｜证据), the demo-data checks against the document's numbers, the list of routes/APIs probed, defects observed per app (including HTTP 500s and console errors), write actions you performed on the NEW app, and the list of screenshot files.
+2. A reply to me, under about 400 words: the counts of 完成／部分／未做 for each app; every item where the NEW app is worse than the OLD app, and every item where it is better; the most serious defects in each app; and the file paths of the 4–6 most important screenshots per app.
+
+Write in plain everyday Chinese, no invented jargon.

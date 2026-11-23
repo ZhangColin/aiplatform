@@ -175,6 +175,10 @@ class AgentscopeMeteringReconcileTest {
                         .triggerMessages(3)
                         .keepTokens(1)
                         .flushBeforeCompact(false)
+                        // 压缩前 offload 关停——与平台工厂 compactionConfig 同形（#379）。框架缺省
+                        // 开：把被逐消息经 SessionTree 落盘到工作区根，Windows 上与本例 @TempDir
+                        // 清理竞态（#553 起已知的全量偶发红，#599 修）
+                        .offloadBeforeCompact(false)
                         .model(MeteredModel.wrap(compactionModel, "deepseek:deepseek-v4-flash"))
                         .build())
                 .build());

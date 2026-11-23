@@ -538,8 +538,10 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
      * <b>内嵌双引号</b>（argv 编码链必剥 → sh 引号不配对无界挂死，#399 同族）或
      * <b>{@code $(} 命令替换</b>（与引号嵌套是引号不配对的头号来源，①族纪律
      * 禁用）即返回违规名；合规（单引号形态）返回 null。
+     * 包级可见（#594）：{@link KernelTools} 的 bash 件复用本单源定义——守卫逻辑
+     * 只此一份，两处共用（放宽可见性零行为变化，既有测试不受影响）。
      */
-    private static String windowsArgvViolation(String command) {
+    static String windowsArgvViolation(String command) {
         if (command.contains("\"")) {
             return "内嵌双引号";
         }
@@ -549,8 +551,8 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         return null;
     }
 
-    /** 拒命文案：违规点名 + 改写指引（模型按此改写重试即可自愈）。 */
-    private static String guardRejectMessage(String violation) {
+    /** 拒命文案：违规点名 + 改写指引（模型按此改写重试即可自愈）。包级可见（#594）：KernelTools bash 件复用。 */
+    static String guardRejectMessage(String violation) {
         String rewrite = "内嵌双引号".equals(violation)
                 ? "字符串一律用单引号包裹（路径/正则同理），多行内容用 write_file 写文件、不要用 "
                         + "heredoc 拼命令"
@@ -685,7 +687,8 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         return count;
     }
 
-    private static String replaceFirst(String content, String target, String replacement) {
+    /** 首处替换（edit 回写用）。包级可见（#594）：{@link KernelTools} 的 edit_file 件复用，逻辑单源。 */
+    static String replaceFirst(String content, String target, String replacement) {
         int idx = content.indexOf(target);
         return idx < 0 ? content
                 : content.substring(0, idx) + replacement + content.substring(idx + target.length());

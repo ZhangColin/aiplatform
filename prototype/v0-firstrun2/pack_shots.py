@@ -27,6 +27,10 @@ SELECTED = {
     "shots-new3-q1": ["n3-02-board-manager.png", "n3-02f-board-col-inprogress.png", "n3-03-list-manager.png", "n3-05-stats-manager.png", "n3-07-detail-inprogress-overdue.png", "n3-13-board-engineer-mine.png"],
     "shots-new3-q2": ["00-home-full.png", "06-game-renyiren.png", "07d-lianyilian-correct.png", "08-game-zhaoyizhao.png", "02-levels-full.png", "05-parent-full.png", "12-play-zhaoyizhao-result.png"],
     "shots-new3-q3": ["01-home-full.png", "03-inventory-full.png", "18-outbound-new-shortage.png", "13-stocktake-1-completed-full.png", "15-reports-full.png"],
+    # 修正轮（照 DSH 改齐）：只核新应用；q2 的文件在 shots/ 子目录里
+    "shots-new4-q1": ["01-board.png", "08-tickets-inprogress-red.png", "03-stats.png", "05-ticket-detail.png", "06-ticket-detail-review.png", "07-board-scrolled.png"],
+    "shots-new4-q2/shots": ["01-home.png", "09-play-zhao.png", "11-levels-full.png", "10-parent-full.png", "15-zhao-result.png", "16-home-after.png"],
+    "shots-new4-q3": ["home.png", "inventory.png", "reports.png", "stocktake-1.png", "stocktake-2.png", "inbound-new.png"],
 }
 
 staging = os.path.join(HERE, "_staging", "in")

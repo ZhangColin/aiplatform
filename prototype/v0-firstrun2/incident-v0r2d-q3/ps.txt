@@ -1,0 +1,14 @@
+    178       1       55:43 [node] <defunct>
+   3269       1       46:00 [node] <defunct>
+   3919       1       45:06 node /usr/local/bin/pnpm dev
+   3932    3919       45:05 node /root/.local/share/pnpm/.tools/pnpm/10.28.2/bin/pnpm dev
+   3944    3932       45:05 sh -c next dev -H 0.0.0.0 -p 8081
+   3945    3944       45:05 node /workspace/node_modules/.bin/../next/dist/bin/next dev -H 0.0.0.0 -p 8081
+   3962    3945       45:05 next-server (v16.3.1)
+   3999    3962       45:01 node /workspace/.next/dev/build/chunks/pool_entry-[turbopack-node]_transforms_postcss_ts_0tp-k2v._.js 36329
+   4765       1       43:43 [node] <defunct>
+   5437       1       43:35 [node] <defunct>
+   6736       1       42:40 [node] <defunct>
+   7602       1       41:53 [node] <defunct>
+   9254       1       40:05 [node] <defunct>
+  11595       0       00:00 sh -c ps -eo pid,ppid,etime,args | grep -E "[n]ext|[p]npm|[n]ode" > /tmp/ps.txt; ls -la /workspace/.next > /tmp/next-ls.txt; grep -nE "\"(dev|build|start)\"" /workspace/package.json > /tmp/scripts.txt

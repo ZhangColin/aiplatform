@@ -16,17 +16,17 @@ os.makedirs(DST, exist_ok=True)
 
 files = [
     "README.md",
-    "v0-harness3.py", "v0-iter3.py", "setup.sh", "run_batch.sh",
+    "v0-harness3.py", "v0-harness4.py", "v0-iter3.py", "setup.sh", "run_batch.sh", "run_batch4.sh",
     "summarize3.py", "compare.py", "cost.py", "finaltext.py", "seq.py", "check_texts.py",
     "verify-followup-q1.py", "verify-followup-q3.py", "line-check.js", "button-check.js",
-    "pack_shots.py", "convert-shots.js", "make_brief_pass3.py", "pack_branch.py",
+    "pack_shots.py", "convert-shots.js", "make_brief_pass3.py", "make_v0_harness4.py", "pack_branch.py",
     "followup-q1.txt", "followup-q2.txt", "followup-q3.txt",
     "eval-q1.md", "eval-q2.md", "eval-q3.md", "eval2-q1.md", "eval2-q2.md", "eval2-q3.md",
-    "eval3-q1.md", "eval3-q2.md", "eval3-q3.md",
+    "eval3-q1.md", "eval3-q2.md", "eval3-q3.md", "eval4-q1.md", "eval4-q2.md", "eval4-q3.md",
 ]
 files += sorted(os.path.basename(p) for p in glob.glob(os.path.join(HERE, "eval-brief-pass*-*.txt")))
 files += sorted(os.path.basename(p) for p in glob.glob(os.path.join(HERE, "selftest-*-log.jsonl")))
-for prefix in ("v0r2-q", "v0r2b-q", "v0r2c-q", "v0r2i-q"):
+for prefix in ("v0r2-q", "v0r2b-q", "v0r2c-q", "v0r2d-q", "v0r2i-q"):
     for n in "123":
         files += ["%s%s-log.jsonl" % (prefix, n), "%s%s.out" % (prefix, n)]
 

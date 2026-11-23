@@ -106,6 +106,38 @@ public class AgentscopeProperties {
     private Duration generationAdmissionInterval = Duration.ofSeconds(10);
 
     /**
+     * 生成内核运营护栏·轮次上限（#597 配置化，ADR-0054／#593 用户故事 8）：300 轮——
+     * 防挂死与成本失控的兜底数值，非工作语义、不重新标定（定稿配置实测最长 146 轮，
+     * 取值远离实测分布）。到顶不掐断：关工具＋如实汇报提示（循环第 2 条，
+     * {@link KernelLoopSemantics}）。缺省正本 {@link KernelLoopSemantics#GUARD_ROUNDS}；
+     * null/非正＝回落缺省（显式置空不产出「无限轮」形态——SDK maxIters 互锁需具体值）。
+     * 改动重启生效（agent 实例启动期装配）。
+     */
+    private Integer kernelGuardRounds = KernelLoopSemantics.GUARD_ROUNDS;
+
+    /**
+     * 生成内核运营护栏·总时长上限（#597 配置化，ADR-0054）：45 分钟——同族兜底
+     * （实测最长 16.5 分钟）。从生成首轮起算 wall-clock，越过即按循环第 2 条关工具
+     * 如实汇报；null/零/负＝该项不限。改动重启生效。
+     */
+    private Duration kernelGuardDuration = Duration.ofMinutes(45);
+
+    /**
+     * 生成内核运营护栏·prompt 总量上限（#597 配置化，ADR-0054）：60M token——同族
+     * 兜底（实测最大 18.9M，按用量事件 inputTokens 逐轮累计）。越过即按循环第 2 条
+     * 关工具如实汇报；null/零/负＝该项不限。改动重启生效。
+     */
+    private Long kernelGuardPromptTokens = 60_000_000L;
+
+    /**
+     * 生成内核输出上限（#597，ADR-0054／#593 用户故事 10）：每次模型请求的
+     * max_tokens 开关，默认 32768（#590 定稿配置——用速度换完成度的取舍已授权
+     * 为运营开关：调低回 7–11 分钟档，代价是截断风险回来）。null＝不注入（回落
+     * 模型/provider 缺省）。改动重启生效（agent 实例启动期装配）。
+     */
+    private Integer kernelMaxOutputTokens = 32768;
+
+    /**
      * 会话任务队列滞留告警阈值（#475 队列可观测）：交互车道任务出队时滞留超此
      * 即 WARN（sessionId＋滞留时长＋车道深度）——「任务排在队列里无痕迹」是
      * 11-12 事故定位全靠 jstack 的根源。生成车道逐任务 INFO 留痕（低频），
@@ -215,5 +247,37 @@ public class AgentscopeProperties {
 
     public void setSessionQueueWarnThreshold(Duration sessionQueueWarnThreshold) {
         this.sessionQueueWarnThreshold = sessionQueueWarnThreshold;
+    }
+
+    public Integer getKernelGuardRounds() {
+        return kernelGuardRounds;
+    }
+
+    public void setKernelGuardRounds(Integer kernelGuardRounds) {
+        this.kernelGuardRounds = kernelGuardRounds;
+    }
+
+    public Duration getKernelGuardDuration() {
+        return kernelGuardDuration;
+    }
+
+    public void setKernelGuardDuration(Duration kernelGuardDuration) {
+        this.kernelGuardDuration = kernelGuardDuration;
+    }
+
+    public Long getKernelGuardPromptTokens() {
+        return kernelGuardPromptTokens;
+    }
+
+    public void setKernelGuardPromptTokens(Long kernelGuardPromptTokens) {
+        this.kernelGuardPromptTokens = kernelGuardPromptTokens;
+    }
+
+    public Integer getKernelMaxOutputTokens() {
+        return kernelMaxOutputTokens;
+    }
+
+    public void setKernelMaxOutputTokens(Integer kernelMaxOutputTokens) {
+        this.kernelMaxOutputTokens = kernelMaxOutputTokens;
     }
 }

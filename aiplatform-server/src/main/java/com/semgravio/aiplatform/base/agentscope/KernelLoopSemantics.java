@@ -26,6 +26,7 @@ import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.state.AgentState;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import reactor.core.publisher.Flux;
 
 /**
@@ -67,13 +69,16 @@ import reactor.core.publisher.Flux;
  *       「提醒出现在结果之后」），同时持久进会话上下文（会话续跑可见）；
  *       提醒只发一条（取最高次数）。调用本身永不拦截。</li>
  *   <li><b>到护栏上限不掐断：关工具、让模型如实汇报</b>：{@link #onReasoning}
- *       数轮次，越过 {@link #GUARD_ROUNDS} 的当轮改造为到顶轮——
- *       {@link KernelLoopPrompts#maxStepsPrompt()}（OpenCode 原文）作为用户消息
- *       注入上下文与该轮入参，该轮工具面清空（模型物理上无工具可调＝关工具），
- *       模型只能以文本如实汇报；该轮无工具调用→循环自然收。工厂把内核形态
- *       SDK maxIters 抬到护栏之上，保证 SDK summarizing（自带提示句）不抢先。
- *       护栏数值（300 轮／45 分钟／60M prompt）为运营兜底、非工作语义（ADR-0054），
- *       配置化接线属 #597。</li>
+ *       数轮次，越过护栏的当轮改造为到顶轮——
+ *       {@link KernelLoopPrompts#maxStepsPrompt()}（OpenCode 原文，轮次腿）或
+ *       {@link KernelLoopPrompts#guardCapPrompt()}（平台自写句，时长／prompt 量腿）
+ *       作为用户消息注入上下文与该轮入参，该轮工具面清空（模型物理上无工具可调
+ *       ＝关工具），模型只能以文本如实汇报；该轮无工具调用→循环自然收。工厂把内核
+ *       形态 SDK maxIters 抬到轮次护栏之上，保证 SDK summarizing（自带提示句）不抢先。
+ *       护栏三腿（300 轮／45 分钟／60M prompt，ADR-0054 运营兜底、非工作语义）
+ *       配置化接线（{@code app.agentscope.kernel-guard-*}）属 #597——三腿任一到顶
+ *       同一条「关工具＋如实汇报」机制；轮次/prompt 量计数见 {@link SlotState}，
+ *       时长腿自首轮推理起按注入时钟计 wall-clock。</li>
  * </ol>
  *
  * <p>会话态：重复计数/待发提醒按 {@link RuntimeContext} 实例（＝ReActAgent
@@ -82,7 +87,9 @@ import reactor.core.publisher.Flux;
  */
 public final class KernelLoopSemantics implements MiddlewareBase {
 
-    /** 运营护栏轮次（ADR-0054：300 轮／45 分钟／60M prompt 为兜底数值，不重新标定）。 */
+    /** 运营护栏轮次缺省值（ADR-0054：300 轮兜底）——配置缺省正本（
+     * {@link AgentscopeProperties#getKernelGuardRounds()} 引用本常量；显式置空/
+     * 非正配置由工厂回落本值，SDK maxIters 互锁需要具体轮数）。 */
     static final int GUARD_ROUNDS = 300;
 
     /** 截断判据（与框架 ReasoningContext.isTruncated 同口径：OpenAI 系 length、Anthropic/Gemini 系 max_tokens）。 */
@@ -110,6 +117,34 @@ public final class KernelLoopSemantics implements MiddlewareBase {
     private static final Object UNKNOWN_SLOT = new Object();
     private final Map<Object, SlotState> slots = new ConcurrentHashMap<>();
 
+    /**
+     * 运营护栏三腿（#597 配置化接线，ADR-0054）：轮次/prompt 量非正＝该腿不限、
+     * 时长 null/零/负＝该腿不限——工厂保证轮次腿恒为具体正数（配置置空回落
+     * {@link #GUARD_ROUNDS}，SDK maxIters 互锁需要）。
+     */
+    private final int guardRounds;
+    private final Duration guardDuration;
+    private final long guardPromptTokens;
+
+    /** 时长腿的计时源（测试注入假时钟确定性推进；生产＝System::nanoTime）。 */
+    private final LongSupplier nanoClock;
+
+    /**
+     * 装配形态（工厂从 {@code app.agentscope.kernel-guard-*} 配置取值后构造）：
+     * 轮次/prompt 量非正＝该腿不限，时长 null/零/负＝该腿不限。
+     */
+    KernelLoopSemantics(int guardRounds, Duration guardDuration, long guardPromptTokens) {
+        this(guardRounds, guardDuration, guardPromptTokens, System::nanoTime);
+    }
+
+    KernelLoopSemantics(int guardRounds, Duration guardDuration, long guardPromptTokens,
+            LongSupplier nanoClock) {
+        this.guardRounds = guardRounds;
+        this.guardDuration = guardDuration;
+        this.guardPromptTokens = guardPromptTokens;
+        this.nanoClock = nanoClock;
+    }
+
     private static final class SlotState {
 
         /** 连续重复链：上一调用的工具名／规范化参数／连续次数（异参即重置）。 */
@@ -120,8 +155,14 @@ public final class KernelLoopSemantics implements MiddlewareBase {
         /** 本轮达到最高阈值留下的待发提醒（下轮入口消费；null＝无）。 */
         private String pendingReminder;
 
-        /** 已进行的推理轮数（到顶判据）。 */
+        /** 已进行的推理轮数（轮次腿判据）。 */
         private int reasoningRounds;
+
+        /** 首轮推理时刻（时长腿判据起点；槽的首个 onReasoning 定锚）。 */
+        private long startedAtNanos;
+
+        /** 累计 prompt token（prompt 量腿判据；逐响应 usage.inputTokens 相加）。 */
+        private long promptTokens;
     }
 
     private static SlotState fresh() {
@@ -148,7 +189,19 @@ public final class KernelLoopSemantics implements MiddlewareBase {
             Function<ReasoningInput, Flux<AgentEvent>> next) {
         SlotState slot = slotOf(ctx);
         slot.reasoningRounds++;
-        boolean capRound = slot.reasoningRounds > GUARD_ROUNDS;
+        if (slot.reasoningRounds == 1) {
+            // 首轮推理起手计时（时长腿判据起点；时钟原值可为任意值——含 0——
+            // 故不用值哨兵，以「首轮」事件定锚）
+            slot.startedAtNanos = nanoClock.getAsLong();
+        }
+        // 护栏三腿判越界（#597）：任一到顶即改造当轮为到顶轮——关工具＋如实汇报提示
+        boolean roundsExceeded = guardRounds > 0 && slot.reasoningRounds > guardRounds;
+        boolean durationExceeded = guardDuration != null
+                && !guardDuration.isZero() && !guardDuration.isNegative()
+                && nanoClock.getAsLong() - slot.startedAtNanos > guardDuration.toNanos();
+        boolean promptTokensExceeded =
+                guardPromptTokens > 0 && slot.promptTokens > guardPromptTokens;
+        boolean capRound = roundsExceeded || durationExceeded || promptTokensExceeded;
 
         List<Msg> injected = new ArrayList<>();
         if (slot.pendingReminder != null) {
@@ -157,7 +210,11 @@ public final class KernelLoopSemantics implements MiddlewareBase {
             slot.pendingReminder = null;
         }
         if (capRound) {
-            injected.add(new UserMessage(KernelLoopPrompts.maxStepsPrompt()));
+            // 轮次腿照 OpenCode MAX_STEPS_PROMPT 原文；时长/prompt 量腿照平台自写句
+            // guardCapPrompt（原因如实陈述，不挪用轮次文案——#597「如实汇报」）
+            injected.add(new UserMessage(roundsExceeded
+                    ? KernelLoopPrompts.maxStepsPrompt()
+                    : KernelLoopPrompts.guardCapPrompt()));
         }
         if (injected.isEmpty()) {
             return next.apply(input);
@@ -208,10 +265,11 @@ public final class KernelLoopSemantics implements MiddlewareBase {
     @Override
     public Flux<AgentEvent> onModelCall(Agent agent, RuntimeContext ctx, ModelCallInput input,
             Function<ModelCallInput, Flux<AgentEvent>> next) {
+        SlotState slot = slotOf(ctx);
         AtomicReference<String> finishReason = new AtomicReference<>();
         AtomicBoolean visibleText = new AtomicBoolean();
         AtomicBoolean toolCalls = new AtomicBoolean();
-        Model probingModel = probing(input.model(), finishReason, visibleText, toolCalls);
+        Model probingModel = probing(input.model(), slot, finishReason, visibleText, toolCalls);
         ModelCallInput probingInput = new ModelCallInput(
                 input.messages(), input.tools(), input.options(), probingModel);
         return next.apply(probingInput)
@@ -221,16 +279,17 @@ public final class KernelLoopSemantics implements MiddlewareBase {
 
     /**
      * 模型探针：委托原模型（供给链包装件原样——计量/重试/failover 不受影响），
-     * 逐响应记录 finishReason 与「可见文本/工具调用」有无。
+     * 逐响应记录 finishReason 与「可见文本/工具调用」有无，并把回执用量
+     * （usage.inputTokens）累计进会话槽——prompt 量护栏（60M）的计数源（#597）。
      */
-    private static Model probing(Model delegate, AtomicReference<String> finishReason,
+    private static Model probing(Model delegate, SlotState slot, AtomicReference<String> finishReason,
             AtomicBoolean visibleText, AtomicBoolean toolCalls) {
         return new Model() {
             @Override
             public Flux<ChatResponse> stream(List<Msg> messages,
                     List<ToolSchema> tools, GenerateOptions options) {
                 return delegate.stream(messages, tools, options)
-                        .doOnNext(chunk -> probe(chunk, finishReason, visibleText, toolCalls));
+                        .doOnNext(chunk -> probe(chunk, slot, finishReason, visibleText, toolCalls));
             }
 
             @Override
@@ -260,10 +319,14 @@ public final class KernelLoopSemantics implements MiddlewareBase {
         };
     }
 
-    private static void probe(ChatResponse chunk, AtomicReference<String> finishReason,
+    private static void probe(ChatResponse chunk, SlotState slot, AtomicReference<String> finishReason,
             AtomicBoolean visibleText, AtomicBoolean toolCalls) {
         if (chunk.getFinishReason() != null) {
             finishReason.set(chunk.getFinishReason());
+        }
+        if (chunk.getUsage() != null) {
+            // 流末回执（SDK 恒请求 include_usage）——中间块无 usage 自然跳过
+            slot.promptTokens += chunk.getUsage().getInputTokens();
         }
         for (ContentBlock block : chunk.getContent()) {
             if (block instanceof TextBlock text) {

@@ -25,6 +25,7 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
@@ -55,6 +56,7 @@ class KernelAgentAssemblyTest {
 
         private final List<List<Msg>> seenMessages = new CopyOnWriteArrayList<>();
         private final List<List<ToolSchema>> seenToolSchemas = new CopyOnWriteArrayList<>();
+        private final List<GenerateOptions> seenOptions = new CopyOnWriteArrayList<>();
         private final Queue<ChatResponse> script;
 
         ProbeKernelModel(ChatResponse... responses) {
@@ -67,6 +69,7 @@ class KernelAgentAssemblyTest {
                 GenerateOptions options) {
             seenMessages.add(List.copyOf(messages));
             seenToolSchemas.add(tools == null ? List.of() : List.copyOf(tools));
+            seenOptions.add(options);
             ChatResponse next = script.poll();
             return next == null
                     ? Flux.error(new IllegalStateException("probe-kernel 脚本耗尽"))
@@ -113,11 +116,16 @@ class KernelAgentAssemblyTest {
     }
 
     private static AgentscopeHarnessAgentFactory realFactory(AgentStateStoreProbe probe) {
+        return realFactory(probe, new AgentscopeProperties());
+    }
+
+    private static AgentscopeHarnessAgentFactory realFactory(AgentStateStoreProbe probe,
+            AgentscopeProperties properties) {
         return new AgentscopeHarnessAgentFactory(probe.store(), (agentKey, workspace, toolSpec) ->
                 new Toolkit(),
                 (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(), probeEdgeModels(),
-                new AgentscopeProperties(), null);
+                properties, null);
     }
 
     /** 状态存储探针：钉「会话状态存储沿用现有装配」——agent 持有的是注入实例。 */
@@ -133,6 +141,12 @@ class KernelAgentAssemblyTest {
     }
 
     // ---------- 提示词权威：住代码、调用方不可覆盖 ----------
+
+    /** 每例开局清探针列表（防跨例残留——探针按「记录到调用」认领，同 KernelAgentLoopTest 先例）。 */
+    @BeforeEach
+    void clearProbes() {
+        ProbeKernelModel.PROBES.clear();
+    }
 
     @Test
     void given_kernel_workspace_when_obtain_with_foreign_prompt_then_rejected() {
@@ -317,5 +331,60 @@ class KernelAgentAssemblyTest {
         List<TextBlock> blocks = message.getContentBlocks(TextBlock.class);
         assertThat(blocks).isNotEmpty();
         return blocks.get(0).getText();
+    }
+
+    // ---------- 输出上限开关（#597，ADR-0054／#593 用户故事 10）：每次请求携带 ----------
+
+    @Test
+    void given_kernel_agent_when_converse_then_output_cap_default_32768_on_every_request() {
+        AgentStateStoreProbe probe = stateProbe();
+        AgentscopeHarnessAgentFactory factory = realFactory(probe);
+        HarnessAgent agent = factory.obtainKernel("probe-kernel:kernel-stub", null, null,
+                kernelWorkspace(), null);
+        try {
+            converseOnce(agent);
+
+            ProbeKernelModel stub = calledProbe();
+            // 每次模型请求都携 max_tokens＝默认 32768（装配 generateOptions→框架
+            // 每次 stream 的 callOptions——「每次请求的配置开关」的兑现路径）
+            assertThat(stub.seenOptions).isNotEmpty();
+            assertThat(stub.seenOptions).allSatisfy(options ->
+                    assertThat(options.getMaxTokens()).isEqualTo(32768));
+        } finally {
+            agent.close();
+        }
+    }
+
+    @Test
+    void given_operator_overrides_output_cap_when_converse_then_adjusted_value_on_request() {
+        AgentStateStoreProbe probe = stateProbe();
+        AgentscopeProperties properties = new AgentscopeProperties();
+        properties.setKernelMaxOutputTokens(8192);
+        AgentscopeHarnessAgentFactory factory = realFactory(probe, properties);
+        HarnessAgent agent = factory.obtainKernel("probe-kernel:kernel-stub", null, null,
+                kernelWorkspace(), null);
+        try {
+            converseOnce(agent);
+
+            ProbeKernelModel stub = calledProbe();
+            assertThat(stub.seenOptions).isNotEmpty();
+            assertThat(stub.seenOptions).allSatisfy(options ->
+                    assertThat(options.getMaxTokens()).isEqualTo(8192));
+        } finally {
+            agent.close();
+        }
+    }
+
+    private static void converseOnce(HarnessAgent agent) {
+        agent.streamEvents(List.of(new UserMessage("开始")), RuntimeContext.empty())
+                .blockLast(Duration.ofSeconds(10));
+    }
+
+    private static ProbeKernelModel calledProbe() {
+        List<ProbeKernelModel> called = ProbeKernelModel.PROBES.stream()
+                .filter(candidate -> !candidate.seenMessages.isEmpty())
+                .toList();
+        assertThat(called).hasSize(1);
+        return called.get(0);
     }
 }

@@ -110,4 +110,29 @@ class KernelLoopPromptsTest {
         assertThat(closing).contains("收尾");
         assertThat(closing).contains("继续");
     }
+
+    // ---------- 时长／prompt 量到顶提示（#597 平台自写句，同 max-steps 结构） ----------
+
+    @Test
+    void given_guard_cap_prompt_then_platform_written_with_same_structure_and_truthful_reason() {
+        // 无成熟方案出处（同截断／空回复收尾句先例）：镜像 OpenCode MAX_STEPS_PROMPT
+        // 的 STRICT REQUIREMENTS／Response must include 结构，原因如实陈述为
+        // 「平台护栏到达（时长／prompt 量）」——不挪用轮次文案（step）免得谎报
+        String prompt = KernelLoopPrompts.guardCapPrompt();
+
+        assertThat(prompt).startsWith("CRITICAL - PLATFORM GUARD LIMIT REACHED");
+        assertThat(prompt).contains("The platform guard limit for this generation has been"
+                + " reached (time or prompt budget). Tools are disabled until next user input."
+                + " Respond with text only.");
+        assertThat(prompt).contains("STRICT REQUIREMENTS:");
+        assertThat(prompt).contains("1. Do NOT make any tool calls (no reads, writes, edits,"
+                + " searches, or any other tools)");
+        assertThat(prompt).contains("2. MUST provide a text response summarizing work done so far");
+        assertThat(prompt).contains("- Statement that the platform guard limit has been reached");
+        assertThat(prompt).contains("- Summary of what has been accomplished so far");
+        assertThat(prompt).contains("- List of any remaining tasks that were not completed");
+        assertThat(prompt).contains("- Recommendations for what should be done next");
+        assertThat(prompt).endsWith("Any attempt to use tools is a critical violation."
+                + " Respond with text ONLY.");
+    }
 }

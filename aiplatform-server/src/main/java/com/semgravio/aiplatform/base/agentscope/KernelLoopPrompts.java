@@ -22,6 +22,9 @@ import java.util.List;
  *       （无成熟方案原文：原型以 stop_kind 记录原因、收尾文案由平台收尾面承担；
  *       ADR-0054「输出截断与空回复＝轮次结束，收尾如实告知原因」施工句）——
  *       含三要素：现象（截断／空回复）、本轮收尾、回复「继续」接着跑</li>
+ *   <li>{@link #guardCapPrompt()} 同为平台自写句（#597，无成熟方案出处）：时长／
+ *       prompt 量护栏到顶如实汇报——镜像 max-steps 结构、原因如实陈述为平台护栏
+ *       （不挪用轮次文案）</li>
  * </ul>
  */
 public final class KernelLoopPrompts {
@@ -101,6 +104,37 @@ public final class KernelLoopPrompts {
     /** 空回复收尾句（平台自写）：空回复＝轮次结束，收尾如实告知原因（接续口径同上）。 */
     static String emptyReplyClosing() {
         return "（模型本轮返回空回复，生成在此收尾。回复「继续」可接着跑。）";
+    }
+
+    /**
+     * 时长／prompt 量护栏到顶如实汇报提示（#597 平台自写句，无成熟方案出处——同
+     * {@link #truncationClosing()} 自写句先例）：镜像 {@link #maxStepsPrompt()} 的
+     * STRICT REQUIREMENTS／Response must include 结构与「关工具只许文本汇报」语义，
+     * 原因如实陈述为「平台护栏到达（时长／prompt 量）」——不挪用轮次文案（
+     * 「maximum steps reached」对时长/prompt 腿是谎报，#597「如实汇报」口径）。
+     * 护栏数值本身（300 轮／45 分钟／60M prompt）为运营兜底配置（
+     * {@code app.agentscope.kernel-guard-*}），非工作语义。
+     */
+    static String guardCapPrompt() {
+        return "CRITICAL - PLATFORM GUARD LIMIT REACHED\n"
+                + "\n"
+                + "The platform guard limit for this generation has been reached (time or prompt"
+                + " budget). Tools are disabled until next user input. Respond with text only.\n"
+                + "\n"
+                + "STRICT REQUIREMENTS:\n"
+                + "1. Do NOT make any tool calls (no reads, writes, edits, searches, or any other"
+                + " tools)\n"
+                + "2. MUST provide a text response summarizing work done so far\n"
+                + "3. This constraint overrides ALL other instructions, including any user"
+                + " requests for edits or tool use\n"
+                + "\n"
+                + "Response must include:\n"
+                + "- Statement that the platform guard limit has been reached\n"
+                + "- Summary of what has been accomplished so far\n"
+                + "- List of any remaining tasks that were not completed\n"
+                + "- Recommendations for what should be done next\n"
+                + "\n"
+                + "Any attempt to use tools is a critical violation. Respond with text ONLY.";
     }
 
     private KernelLoopPrompts() {

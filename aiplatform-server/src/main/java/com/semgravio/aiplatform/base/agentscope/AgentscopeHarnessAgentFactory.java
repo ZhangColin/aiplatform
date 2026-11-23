@@ -166,8 +166,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 工作区＝项目 dev 沙箱（容器文件面同 {@link AgentWorkspace.ProjectDev}），
      * 会话状态存储、(userId,sessionId) 串行、内核重试关停、上下文压缩沿用现有
      * 装配（{@link #buildAgent} 内核分支，一行不改）。模型串/通道/候选队列照旧
-     * 由调用方经供给链出口携入（#593 用户故事 6/7——供给链不绕开）。护栏数值的
-     * 配置化接线与完成判据属 #597。
+     * 由调用方经供给链出口携入（#593 用户故事 6/7——供给链不绕开）。护栏三数值
+     * （{@code app.agentscope.kernel-guard-*}：300 轮／45 分钟／60M prompt，到顶
+     * 关工具如实汇报）与输出上限开关（{@code kernel-max-output-tokens}，每次请求
+     * 携带、默认 32768）已接线（#597）；收尾判据（build✓＋探活✓）与开发服务器常驻
+     * 守卫在业务侧 KernelClosingCriteria／KernelServingGuard（#597）。
      *
      * <p>守卫：直用 {@link AgentWorkspace.ProjectKernel} 工作区、绕过本入口携
      * 外来提示词走 {@link #obtain} 被 {@link #buildAgent} 结构拒绝
@@ -309,10 +312,18 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         }
         // 内核循环五条语义（#596，ADR-0054／#590 最终修订）结构性挂载：一轮不调工具
         // 即结束（框架原生兑现）、截断/空回复＝轮次结束＋收尾如实告知原因、同参重复
-        // 3/5/8 只提醒不拦截、到护栏上限关工具＋MAX_STEPS_PROMPT 如实汇报——仅内核
-        // 形态挂载，旧形态循环行为一行不动（机制与兑现位见 KernelLoopSemantics）
+        // 3/5/8 只提醒不拦截、到护栏上限关工具＋如实汇报——仅内核形态挂载，旧形态循环
+        // 行为一行不动（机制与兑现位见 KernelLoopSemantics）。护栏三数值（#597，
+        // 300 轮／45 分钟／60M prompt 运营兜底、非工作语义）从配置接线：轮次显式置空/
+        // 非正回落缺省（SDK maxIters 互锁需具体轮数；显式置空不产出「无限轮」形态）
+        int kernelGuardRounds = KernelLoopSemantics.GUARD_ROUNDS;
         if (kernelForm) {
-            builder.middleware(new KernelLoopSemantics());
+            Integer configuredGuardRounds = properties.getKernelGuardRounds();
+            if (configuredGuardRounds != null && configuredGuardRounds > 0) {
+                kernelGuardRounds = configuredGuardRounds;
+            }
+            builder.middleware(new KernelLoopSemantics(kernelGuardRounds,
+                    properties.getKernelGuardDuration(), properties.getKernelGuardPromptTokens()));
         }
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
@@ -321,9 +332,19 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             // 内核形态 SDK maxIters 抬到循环护栏之上（#596）——压过上方
             // properties 写入（内核形态不消费该配置项）：到顶语义（关工具＋
             // MAX_STEPS_PROMPT 如实汇报）由 KernelLoopSemantics 兑现，SDK
-            // summarizing（自带 heuristics 提示句、无工具）不得抢先；护栏数值
-            // 本身的配置化接线（45 分钟／60M prompt 同族）属 #597
-            builder.maxIters(KernelLoopSemantics.GUARD_ROUNDS + 1);
+            // summarizing（自带 heuristics 提示句、无工具）不得抢先；抬升值随
+            // 护栏轮次配置走（#597——护栏三数值配置化的互锁腿）
+            builder.maxIters(kernelGuardRounds + 1);
+            // 输出上限开关（#597，ADR-0054／#593 用户故事 10）：每次模型请求携带
+            // max_tokens（ReActAgent 把 agent 级 generateOptions 作每次调用的
+            // callOptions 基底——模型/provider 侧映射 max_tokens 请求体，OpenAI 系
+            // formatter 同口径）；默认 32768、运营可调（调低换速度、代价截断风险
+            // 回来——#590 授权取舍）；null＝不注入（回落模型/provider 缺省）
+            if (properties.getKernelMaxOutputTokens() != null) {
+                builder.generateOptions(GenerateOptions.builder()
+                        .maxTokens(properties.getKernelMaxOutputTokens())
+                        .build());
+            }
         }
         // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩配置解析产物（#366 边缘
         // 点收编——配置键经 EdgeModelSupplier 反转读配置面），让压缩在

@@ -222,7 +222,7 @@ class BackofficeContractControllerTest {
                 1, false, "张三", "语义引力（北京）科技有限公司",
                 "管理后台＋小程序全量交付", "开工款 50%，验收 50%",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
-                128000L, "CNY", 3, 2,
+                128000L, "CNY", 3, 2, 2,
                 false, null, false, null,
                 LocalDateTime.of(2026, 10, 17, 9, 0));
     }

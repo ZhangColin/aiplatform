@@ -348,7 +348,7 @@ class BackofficeOrderControllerTest {
     private static BackofficeOrderDetailResponse backofficeDetail() {
         return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.QUOTED, "已报价",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 List.of(
                         new BackofficePriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",
@@ -362,7 +362,7 @@ class BackofficeOrderControllerTest {
 
     private static OrderResponse quotedOrder() {
         return new OrderResponse("900", "100", OrderStatus.QUOTED, "已报价",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 99000L, "CNY", "调整：去掉导入功能",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 99000L, "CNY", "调整：去掉导入功能",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(
@@ -376,7 +376,7 @@ class BackofficeOrderControllerTest {
     /** #157 取消回执：用户面同构（无取消原因——运营内部口径不进用户面响应形）。 */
     private static OrderResponse cancelledOrder() {
         return new OrderResponse("900", "100", OrderStatus.CANCELLED, "已取消",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
@@ -388,7 +388,7 @@ class BackofficeOrderControllerTest {
     /** #158 重试归档回执：用户面同构（归档操作者不进用户面响应形）。 */
     private static OrderResponse archivedOrder() {
         return new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",

@@ -34,11 +34,11 @@ import lombok.extern.slf4j.Slf4j;
  * 订单语义重对位基座；#338 取消边界收窄＋归档取版对齐）。#337 起 mock 支付闭环
  * 退役（同步支付端点与 {@code #pay} 用例连代码删除——支付语义并入付款节点凭证
  * 核验路径，不留两轨并存；「已支付＝开工条件满足」的判定器＝{@link
- * KickoffAppService}〔#338 接通〕，本服务不再有「支付」入口）：确认下单 = 过双确认门（最新 PRD 版本＋Demo 确认版本）
- * 后冻结 PRD 最新版全文冗余拷贝＋双版本引用＋交付物类型入单，待报价起步
- * （「待确认报价」占位态）。下单快照的上游＝PRD 版本行（#330 确认即成版→
- * <b>#462 去门化读法顺延</b>：版本表＝Demo 类 run 起跑自动记行的构建基准快照，
- * ADR-0039——下单/合同/归档取版统一读「最新版」，冻结字段结构与既有数据不动）。
+ * KickoffAppService}〔#338 接通〕，本服务不再有「支付」入口）：确认下单 = 过下单
+ * 前置门（PRD 已产出＋存在已确认用户面版本，<b>#629 商业面改接</b>）后冻结当前
+ * 工作区 PRD 全文冗余拷贝＋已确认用户面版本号＋交付物类型入单，待报价起步
+ * （「待确认报价」占位态）。版本引用收敛为一个用户面版本号（不再读旧 PRD/Demo
+ * 版本表）；历史订单自含双版本引用与 PRD 快照，照常可读。
  * 项目事实（存在性/归档态/双确认引用）经 {@code business.project} 应用
  * 层软引用——跨 BC 无 FK，同一口径。
  *
@@ -95,24 +95,24 @@ public class OrderAppService {
     }
 
     /**
-     * 确认下单（#335 引用语义落位；<b>#462 去门化读法顺延</b>——ADR-0039）：下单
-     * 前置门＝存在 PRD 版本（最新构建基准）＋Demo 确认版本（「确认此版本，准备
-     * 签约」＝下单入口——现「确认下单」按钮语义改挂；缺失如实拦截 ORD_018/ORD_019，
-     * 前端 toast 提示）；过门即冻结双版本引用＋PRD 最新版全文冗余拷贝（快照源＝
-     * 版本行，非工作区正文——订单自含，冻结字段结构与既有订单数据不动）＋
-     * 交付物类型入单（待报价起步，「待确认报价」占位态——后台落定报价〔＋范围
-     * 文本，#336 起〕后翻已报价）。下单即冻结迭代——对话区停止受理意见（project
-     * 上下文冻结守卫，{@code ORD_006}）。交付物类型一律冻结为系统单值（#611——
-     * 设计线退役后不再从项目终点类型映射设计交付物；只插不改）。取消即解冻回迭代。
+     * 确认下单（#335 引用语义落位；<b>#629 商业面改接用户面版本</b>——ADR-0056）：
+     * 下单前置门＝PRD 已产出＋存在已确认用户面版本（「确认此版本，准备签约」＝
+     * 下单入口；缺失如实拦截 ORD_018/ORD_019，前端 toast 提示）；过门即冻结当前
+     * 工作区 PRD 全文冗余拷贝＋已确认用户面版本号（旧的两套版本引用收敛为一个；
+     * 不读旧 PRD/Demo 版本表——订单自含）＋交付物类型入单（待报价起步，「待确认
+     * 报价」占位态——后台落定报价〔＋范围文本，#336 起〕后翻已报价）。下单即冻结
+     * 迭代——对话区停止受理意见（project 上下文冻结守卫，{@code ORD_006}）。交付物
+     * 类型一律冻结为系统单值（#611——设计线退役后不再从项目终点类型映射设计交付物；
+     * 只插不改）。取消即解冻回迭代。
      *
-     * @return 订单（待报价起步，双版本引用＋快照与交付物类型已冻结）
+     * @return 订单（待报价起步，已确认用户面版本号＋PRD 快照与交付物类型已冻结）
      * @throws ApplicationException PRJ_001 项目不存在（项目上下文原样透传）；
      *                              ORD_017 签约门——未登录绑定（访客身份）走下单
      *                              入口被拦，前端认 ORD_017 弹 M01；ORD_004 项目已
      *                              归档；ORD_003 该项目已有未终结订单（预检或并发
      *                              撞索引，先于版本门——重复下单的主导事实）；
-     *                              ORD_018 无 PRD 版本（尚无构建基准记行）；
-     *                              ORD_019 未确认 Demo 版本
+     *                              ORD_018 PRD 未产出（当前工作区无 PRD 全文）；
+     *                              ORD_019 未确认用户面版本
      */
     public OrderResponse place(Long projectId) {
         // 签约门（#328，spec 段②）：进下单/签约流程即要求绑定——访客身份（有效
@@ -128,24 +128,22 @@ public class OrderAppService {
         if (orderRepository.findActiveByProject(projectId).isPresent()) {
             throw new ApplicationException(OrderMessage.ORDER_ALREADY_ACTIVE);
         }
-        // 下单前置门（#335，spec #320 ④「加门」；#462 读法顺延）：双版本确认缺一
-        // 即拦（先于昂贵的打包面——廉价库读守卫前置惯例）。引用集一次取齐：
-        // 版本号＋最新版全文。
-        ProjectQueryAppService.LatestVersionRefs refs =
-                projectQueryAppService.latestVersionRefs(projectId);
-        if (refs.prdVersionNo() == null) {
+        // 下单前置门（#629，ADR-0056 商业面改接）：PRD 已产出（冻结其全文）＋存在
+        // 已确认用户面版本，缺一即拦（先于昂贵的打包面——廉价读守卫前置惯例）。
+        ProjectQueryAppService.OrderFreezeRefs refs =
+                projectQueryAppService.orderFreezeRefs(projectId);
+        if (refs.prdContent() == null) {
             throw new ApplicationException(OrderMessage.ORDER_PRD_VERSION_REQUIRED);
         }
-        if (refs.demoVersionNo() == null) {
+        if (refs.confirmedVersionNo() == null) {
             throw new ApplicationException(OrderMessage.ORDER_DEMO_VERSION_REQUIRED);
         }
-        // 快照源＝最新版全文（冗余拷贝，#335）——不读工作区（过门即必有版本行
-        // 全文，PRJ_015 未产出不再可能是下单障碍）
-        String prdSnapshot = refs.prdContent();
+        // 快照源＝当前工作区 PRD 全文（冗余拷贝）＋已确认用户面版本号（两套旧版本
+        // 引用收敛为一个，不再依赖旧 PRD/Demo 版本表）
         // #611 交付物类型收窄为系统单值：不再从项目终点类型映射（设计线退役）
         Order order = Order.place(projectId, RequestContext.getUserId(),
-                GuestContext.guestId(), prdSnapshot, OrderDeliverableType.SYSTEM,
-                refs.prdVersionNo(), refs.demoVersionNo());
+                GuestContext.guestId(), refs.prdContent(), OrderDeliverableType.SYSTEM,
+                refs.confirmedVersionNo());
         try {
             order = orderRepository.save(order);
         } catch (DataIntegrityViolationException e) {
@@ -337,15 +335,15 @@ public class OrderAppService {
     }
 
     /**
-     * 归档沉淀取版（#338；<b>#462 读法顺延</b>——ADR-0039）：订单最近合同已签署
-     * 完成 → 合同冻结的 PRD 版全文（合同自含冗余拷贝，签约即定格）；无已签合同
-     * （mock 时代遗留单/异常路径）→ 回退项目最新版（latestVersionRefs）。两源都
-     * 不在场（legacy）如实 null——sinkPrd 空内容跳过。
+     * 归档沉淀取版（#338；#629 改接当前 PRD 正文）：订单最近合同已签署完成 →
+     * 合同冻结的 PRD 全文（合同自含冗余拷贝，签约即定格）；无已签合同（mock 时代
+     * 遗留单/异常路径）→ 回退当前工作区 PRD 全文（currentPrdContent）。两源都不在
+     * 场（legacy/未产出）如实 null——sinkPrd 空内容跳过。
      */
     private String archivePrdContent(Long orderId, Long projectId) {
         return contractRepository.findLatestSignedByOrderId(orderId)
                 .map(Contract::getPrdSnapshot)
-                .orElseGet(() -> projectQueryAppService.latestVersionRefs(projectId).prdContent());
+                .orElseGet(() -> projectQueryAppService.currentPrdContent(projectId));
     }
 
     /**

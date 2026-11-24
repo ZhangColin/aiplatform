@@ -706,39 +706,42 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.ownerDisplayName").value(nullValue()));
     }
 
-    // ---------- #391：双版本引用详情列（真 place 冻结直读＋遗留单 null） ----------
+    // ---------- #391/#629：已确认用户面版本引用详情列（真 place 冻结直读＋遗留单 null） ----------
 
     @Test
-    void given_placed_order_with_distinct_refs_when_signed_detail_then_frozen_version_refs_visible()
+    void given_placed_order_with_confirmed_version_when_signed_detail_then_frozen_version_ref_visible()
             throws Exception {
-        // 真 place 冻结双版本引用（stub 供给可分辨值 PRD v4＋Demo v7——非缺省 v1，
-        // 冻结直读可溯源）→ 详情带两列：与 prdSnapshot 同批冻结的交易事实，admin
-        // BFF 镜像之源（AiplatformOrderResponse 同形 Integer）
-        OrderResponse order = placeOrderWithVersionRefs(910901L, 4, 7);
+        // 真 place 冻结已确认用户面版本号（stub 供给可分辨值 v7——非缺省 v1，冻结
+        // 直读可溯源）→ 详情带该列：与 prdSnapshot 同批冻结的交易事实，admin BFF
+        // 镜像之源（AiplatformOrderResponse 同形 Integer）。旧双列不写。
+        OrderResponse order = placeOrderWithConfirmedVersion(910901L, 7);
         stubProjectName();
 
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/orders/" + order.id()),
                         "/api/backoffice/orders/" + order.id(), null))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.prdVersionNo").value(4))
-                .andExpect(jsonPath("$.data.demoVersionNo").value(7));
+                .andExpect(jsonPath("$.data.confirmedVersionNo").value(7))
+                .andExpect(jsonPath("$.data.prdVersionNo").value(nullValue()))
+                .andExpect(jsonPath("$.data.demoVersionNo").value(nullValue()));
     }
 
     @Test
     void given_legacy_order_when_signed_detail_then_version_refs_null() throws Exception {
         // 遗留单（确认制之前下的单）：库列 NULL 如实呈现 null——新单（有冻结）与
-        // 遗留单（无引用）呈现有别，是本票灵魂（admin 抽屉两行不再恒「—」）
+        // 遗留单（无引用）呈现有别
         OrderResponse order = placeOrder();
         stubProjectName();
         jdbcTemplate.update(
-                "UPDATE ord_orders SET prd_version_no = NULL, demo_version_no = NULL WHERE id = ?",
+                "UPDATE ord_orders SET confirmed_version_no = NULL, prd_version_no = NULL, "
+                        + "demo_version_no = NULL WHERE id = ?",
                 Long.parseLong(order.id()));
 
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/orders/" + order.id()),
                         "/api/backoffice/orders/" + order.id(), null))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.confirmedVersionNo").value(nullValue()))
                 .andExpect(jsonPath("$.data.prdVersionNo").value(nullValue()))
                 .andExpect(jsonPath("$.data.demoVersionNo").value(nullValue()));
     }
@@ -898,12 +901,11 @@ class BackofficeOrderSeamTest {
                 () -> appService.place(projectId));
     }
 
-    /** 指定双确认版本的下单夹具（#391——覆写缺省 v1/v1 桩，冻结值可溯源）。 */
-    private OrderResponse placeOrderWithVersionRefs(long projectId, int prdVersionNo,
-                                                    int demoVersionNo) {
+    /** 指定已确认用户面版本的下单夹具（#629——覆写缺省 v1 桩，冻结值可溯源）。 */
+    private OrderResponse placeOrderWithConfirmedVersion(long projectId, int confirmedVersionNo) {
         stubProject(projectId);
-        when(projectQueryAppService.latestVersionRefs(projectId)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(prdVersionNo, PRD, demoVersionNo));
+        when(projectQueryAppService.orderFreezeRefs(projectId)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(PRD, confirmedVersionNo));
         try {
             return RequestContext.runFor(
                     new RequestContext(null, null, null, null, /* userId */ DEFAULT_ACCOUNT_ID,
@@ -924,9 +926,11 @@ class BackofficeOrderSeamTest {
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z"),
                 PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
-        // 下单前置双确认缺省桩（#335）：已确认 PRD v1＋Demo v1
-        when(projectQueryAppService.latestVersionRefs(projectId)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(1, PRD, 1));
+        // 下单前置缺省桩（#629）：PRD 全文＋已确认用户面版本 v1
+        when(projectQueryAppService.orderFreezeRefs(projectId)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(PRD, 1));
+        // 归档沉淀无合同回退腿：当前工作区 PRD 全文（#629）
+        when(projectQueryAppService.currentPrdContent(projectId)).thenReturn(PRD);
     }
 
     /** 库内下单时点（边界断言以库值为准，不依赖应用时钟）。 */

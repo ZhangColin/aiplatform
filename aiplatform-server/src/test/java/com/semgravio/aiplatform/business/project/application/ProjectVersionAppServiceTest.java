@@ -131,6 +131,92 @@ class ProjectVersionAppServiceTest {
         assertThat(versions.get(1).runId()).isNull();
     }
 
+    // ---------- 确认用于签约（#629 商业面改接用户面版本） ----------
+
+    @Test
+    void given_platform_versions_when_confirm_then_pointer_set_and_response_confirmed() {
+        // 确认动作标记当前用户面版本：指针落项目单指针（版本号＋确认时间），回执
+        // confirmed=true；不产生新版本（版本序列零改动）
+        Long projectId = persistedProject("9930");
+        stubExec((command, out) -> out.stdout =
+                platformLogLine(HASH_2, 1700000200L, "把按钮改成蓝色", 2, "run-2")
+                        + platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1"));
+
+        VersionResponse confirmed = appService.confirm(projectId, 2);
+
+        assertThat(confirmed.versionNo()).isEqualTo(2);
+        assertThat(confirmed.current()).isTrue();
+        assertThat(confirmed.confirmed()).isTrue();
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        assertThat(project.getConfirmedDemoVersionNo()).isEqualTo(2);
+        assertThat(project.getConfirmedDemoAt()).isNotNull();
+        // 回执不产生版本行（版本正本＝git log，确认不动它）
+        assertThat(recordedCommands).noneMatch(command -> command.contains("git commit"));
+    }
+
+    @Test
+    void given_confirmed_v1_when_confirm_v2_then_pointer_moves() {
+        Long projectId = persistedProject("9931");
+        stubExec((command, out) -> out.stdout =
+                platformLogLine(HASH_2, 1700000200L, "把按钮改成蓝色", 2, "run-2")
+                        + platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1"));
+        appService.confirm(projectId, 1);
+
+        appService.confirm(projectId, 2);
+
+        // 换选＝指针随移（旧标记自然失效）
+        assertThat(projectRepository.findById(projectId).orElseThrow()
+                .getConfirmedDemoVersionNo()).isEqualTo(2);
+    }
+
+    @Test
+    void given_same_version_when_confirm_twice_then_idempotent_pointer_unchanged() {
+        Long projectId = persistedProject("9932");
+        stubExec((command, out) -> out.stdout =
+                platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1"));
+        appService.confirm(projectId, 1);
+
+        appService.confirm(projectId, 1);
+
+        assertThat(projectRepository.findById(projectId).orElseThrow()
+                .getConfirmedDemoVersionNo()).isEqualTo(1);
+    }
+
+    @Test
+    void given_unknown_version_when_confirm_then_404() {
+        Long projectId = persistedProject("9933");
+        stubExec((command, out) -> out.stdout =
+                platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1"));
+
+        assertThatThrownBy(() -> appService.confirm(projectId, 7))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.VERSION_NOT_FOUND.message());
+        // 拦截零副作用：指针不落
+        assertThat(projectRepository.findById(projectId).orElseThrow()
+                .getConfirmedDemoVersionNo()).isNull();
+    }
+
+    @Test
+    void given_archived_project_when_confirm_then_409() {
+        Long projectId = persistedProject("9934");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.archive();
+        projectRepository.save(project);
+        stubExec((command, out) -> out.stdout =
+                platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1"));
+
+        assertThatThrownBy(() -> appService.confirm(projectId, 1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+    }
+
+    @Test
+    void given_missing_project_when_confirm_then_404() {
+        assertThatThrownBy(() -> appService.confirm(-1L, 1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+    }
+
     // ---------- 版本详情（锚定收尾卡） ----------
 
     @Test

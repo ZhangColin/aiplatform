@@ -48,7 +48,12 @@ import lombok.extern.slf4j.Slf4j;
  * 只拦 run 在途：脏工作树（含失败 run 残留）允许被回滚覆盖（本阶段有意语义）。</p>
  *
  * <p><b>读面</b>：git log 实时读取（exec 不经业务事务，同 {@code ProjectQueryAppService}
- * 形制）；列表首条＝当前版，confirmed 按旧确认指针映射（商业面改接归 #629）。</p>
+ * 形制）；列表首条＝当前版，confirmed 按项目确认指针映射。</p>
+ *
+ * <p><b>确认用于签约（#629，ADR-0056 商业面改接）</b>：{@link #confirm} 把项目
+ * 确认指针指向<b>当前用户面版本</b>（git 版本号，非旧 Demo/PRD 版本号）——版本号＋
+ * 确认时间落项目单指针；换选＝指针随移，重复确认同版幂等（指针不变、时间刷新）。
+ * 下单前置「存在已确认用户面版本」与订单冻结的版本引用消费本位。</p>
  */
 @Service
 @Slf4j
@@ -110,8 +115,8 @@ public class ProjectVersionAppService {
 
     /**
      * 版本序列（git log 原生序：新→旧）。零版本 = 空列表非错误。时间线标位：
-     * 首条＝当前版（最新交付）；confirmed 按项目旧确认指针映射版本号（transition
-     * ——商业面改接归 #629）。
+     * 首条＝当前版（最新交付）；confirmed 按项目确认指针映射版本号（#629 起指针
+     * 即用户面版本语义，{@link #confirm} 写入）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
      */
@@ -182,7 +187,44 @@ public class ProjectVersionAppService {
         return WorkspaceVersions.parseLog(result.stdout());
     }
 
-    /** 确认标记映射（#626 过渡）：旧 Demo 确认指针的版本号＝本用户面版本号即已确认。 */
+    /**
+     * 确认用于签约（#629，ADR-0056 商业面改接）：「确认此版本，准备签约」标记
+     * <b>当前用户面版本</b>——版本号＋确认时间落项目单指针（不产生新版本、版本
+     * 序列零改动）。换选＝指针随移（旧标记自然失效），重复确认同版幂等（指针不变、
+     * 确认时间刷新）。只认带版本号的用户面版本（回滚版 versionNo 为 null 不可确认）。
+     *
+     * @return 所确认版本的读面（含 confirmed=true）
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档（历史版本
+     *                              照读、不再确认）；PRJ_028 项目内无该用户面版本号；
+     *                              WSP_002 环境故障
+     */
+    public VersionResponse confirm(Long projectId, int versionNo) {
+        Project project = loadProject(projectId);
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        List<WorkspaceVersion> versions = readVersions(project);
+        int index = indexOfVersion(versions, versionNo);
+        if (index < 0) {
+            throw new ApplicationException(ProjectMessage.VERSION_NOT_FOUND);
+        }
+        project.confirmDemoVersion(versionNo);
+        projectRepository.save(project);
+        return VersionResponse.of(versions.get(index), index == 0, true);
+    }
+
+    /** 在版本序列里按用户面版本号定位（回滚版 versionNo 为 null 不入列）；未命中 -1。 */
+    private static int indexOfVersion(List<WorkspaceVersion> versions, int versionNo) {
+        for (int index = 0; index < versions.size(); index++) {
+            Integer candidate = versions.get(index).versionNo();
+            if (candidate != null && candidate.intValue() == versionNo) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /** 确认标记映射（#626/#629）：项目确认指针的版本号＝本用户面版本号即已确认。 */
     private static boolean confirmedOf(Project project, WorkspaceVersion version) {
         return version.versionNo() != null
                 && version.versionNo().equals(project.getConfirmedDemoVersionNo());

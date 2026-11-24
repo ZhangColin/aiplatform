@@ -66,12 +66,15 @@ public record BackofficeOrderDetailResponse(
                 example = "2")
         OrderDeliverableType deliverableType,
         String deliverableTypeName,
-        @Schema(description = "下单冻结的已确认 PRD 版本号（随单冻结，此后不随项目变更；"
-                + "null＝确认制之前的遗留单，如实缺省不虚构引用）", example = "3")
+        @Schema(description = "下单冻结的已确认 PRD 版本号（#335；#629 起新单不写、遗留单 null——"
+                + "历史单照读）", example = "3")
         Integer prdVersionNo,
-        @Schema(description = "下单冻结的已确认 Demo 版本号（下单时项目确认指针的定格值，"
-                + "随单冻结；null＝遗留单）", example = "2")
+        @Schema(description = "下单冻结的已确认 Demo 版本号（#335；#629 起新单不写、遗留单 null——"
+                + "历史单照读）", example = "2")
         Integer demoVersionNo,
+        @Schema(description = "下单冻结的已确认用户面版本号（#629：旧的两套版本引用收敛为一个；"
+                + "null＝遗留单）", example = "2")
+        Integer confirmedVersionNo,
         Long amount,
         String currency,
         String note,
@@ -107,6 +110,7 @@ public record BackofficeOrderDetailResponse(
                 order.getDeliverableType().getName(),
                 order.getPrdVersionNo(),
                 order.getDemoVersionNo(),
+                order.getConfirmedVersionNo(),
                 order.getAmount(),
                 order.getCurrency(),
                 order.currentQuoteNote(),

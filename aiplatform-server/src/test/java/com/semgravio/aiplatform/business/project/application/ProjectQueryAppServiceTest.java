@@ -210,57 +210,63 @@ class ProjectQueryAppServiceTest {
 
     // ---------- 详情 ----------
 
-    // ---------- #335：下单冻结面（latestVersionRefs——双确认引用集） ----------
+    // ---------- #629：下单冻结面（orderFreezeRefs——当前 PRD＋已确认用户面版本） ----------
 
     @Test
-    void given_confirmed_versions_when_confirmed_version_refs_then_refs_with_full_text() {
-        // 已确认 PRD 版本（多版取最新）＋Demo 确认指针 → 引用集：版本号＋确认版
-        // 全文（冗余拷贝源＝版本行正文）＋Demo 版本号
-        Project project = persistedProject(8501L, "双确认项目");
-        prdVersionRepository.save(PrdVersion.recorded(project.getId(), 1,
-                "# PRD v1\n\n旧版。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
-        PrdVersion latest = prdVersionRepository.save(PrdVersion.recorded(project.getId(), 2,
-                "# PRD v2\n\n下单引用的最新确认版全文。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
+    void given_prd_produced_and_confirmed_version_when_order_freeze_refs_then_current_prd_and_version() {
+        // 下单冻结面（#629）：快照源＝当前工作区 PRD 全文（直读 docs/PRD.md）＋
+        // 项目确认指针的已确认用户面版本号（不再读旧 PRD/Demo 版本表）
+        Project project = prdMarkedProject(8501L, "下单冻结项目");
         project.confirmDemoVersion(3);
         projectRepository.save(project);
+        when(workspaceLifecycleAppService.exec(eq("8501"), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100000\n# PRD 正文\n\n下单冻结标的。\n", "", 0));
 
-        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(project.getId());
+        ProjectQueryAppService.OrderFreezeRefs refs = appService.orderFreezeRefs(project.getId());
 
-        assertThat(refs.prdVersionNo()).isEqualTo(2);
-        assertThat(refs.prdContent()).isEqualTo(latest.getContent());
-        assertThat(refs.demoVersionNo()).isEqualTo(3);
+        assertThat(refs.prdContent()).isEqualTo("# PRD 正文\n\n下单冻结标的。\n");
+        assertThat(refs.confirmedVersionNo()).isEqualTo(3);
     }
 
     @Test
-    void given_unconfirmed_project_when_confirmed_version_refs_then_nulls_reported() {
-        // 从未确认 PRD 版本/未确认 Demo（含确认制前遗留项目）：如实上报 null——
-        // 门判定归订单侧，本口不虚构引用
-        Long projectId = persistedProject(8502L, "未确认项目").getId();
+    void given_prd_not_produced_when_order_freeze_refs_then_nulls_without_exec() {
+        // PRD 未产出（标志未落）：prdContent 如实 null，不触工作区；未确认版本同 null
+        Long projectId = persistedProject(8502L, "未产 PRD 项目").getId();
 
-        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(projectId);
+        ProjectQueryAppService.OrderFreezeRefs refs = appService.orderFreezeRefs(projectId);
 
-        assertThat(refs.prdVersionNo()).isNull();
         assertThat(refs.prdContent()).isNull();
-        assertThat(refs.demoVersionNo()).isNull();
+        assertThat(refs.confirmedVersionNo()).isNull();
+        verify(workspaceLifecycleAppService, never()).exec(anyString(), any(WorkspaceExecCommand.class));
     }
 
     @Test
-    void given_prd_confirmed_demo_not_when_confirmed_version_refs_then_partial_refs() {
-        // 单腿确认：PRD 已确认而 Demo 未确认——各腿如实上报（订单侧逐腿拦截）
-        Long projectId = persistedProject(8503L, "单腿项目").getId();
-        prdVersionRepository.save(PrdVersion.recorded(projectId, 1, "# PRD v1",
-                LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
+    void given_prd_produced_but_file_missing_when_order_freeze_refs_then_null_prd() {
+        // 标志在、工作区文件没：prdContent 如实 null（订单侧按缺 PRD 拦截）
+        Long projectId = prdMarkedProject(8503L, "文件缺项目").getId();
+        when(workspaceLifecycleAppService.exec(eq("8503"), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "test -f 失败", 1));
 
-        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(projectId);
-
-        assertThat(refs.prdVersionNo()).isEqualTo(1);
-        assertThat(refs.prdContent()).isEqualTo("# PRD v1");
-        assertThat(refs.demoVersionNo()).isNull();
+        assertThat(appService.orderFreezeRefs(projectId).prdContent()).isNull();
     }
 
     @Test
-    void given_missing_project_when_confirmed_version_refs_then_prj_001() {
-        assertThatThrownBy(() -> appService.latestVersionRefs(-1L))
+    void given_dead_container_when_order_freeze_refs_then_wsp_002() {
+        Long projectId = prdMarkedProject(8504L, "死容器项目").getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "docker: No such container", 125));
+
+        assertThatThrownBy(() -> appService.orderFreezeRefs(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+    }
+
+    @Test
+    void given_missing_project_when_order_freeze_refs_then_prj_001() {
+        assertThatThrownBy(() -> appService.orderFreezeRefs(-1L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+        assertThatThrownBy(() -> appService.currentPrdContent(-1L))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }

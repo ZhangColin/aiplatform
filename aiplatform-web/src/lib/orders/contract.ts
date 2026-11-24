@@ -52,6 +52,8 @@ export type ContractDetail = {
   currency?: string;
   prdVersionNo?: number;
   demoVersionNo?: number;
+  /** 已确认用户面版本号（#629：旧两套版本引用收敛为一个；遗留合同缺省）。 */
+  confirmedVersionNo?: number;
   partyASigned: boolean;
   partyBSigned: boolean;
   createdAt?: string;
@@ -78,6 +80,7 @@ export function normalizeContract(raw: ContractResponse): ContractDetail {
     currency: raw.currency,
     prdVersionNo: raw.prdVersionNo ?? undefined,
     demoVersionNo: raw.demoVersionNo ?? undefined,
+    confirmedVersionNo: raw.confirmedVersionNo ?? undefined,
     partyASigned: raw.partyASigned ?? false,
     partyBSigned: raw.partyBSigned ?? false,
     createdAt: raw.createdAt,

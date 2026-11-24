@@ -35,7 +35,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
@@ -102,36 +101,70 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 下单冻结面（#335，spec #320 实施序④；<b>#462 去门化：读法顺延为「最新版」</b>
-     * ——ADR-0039）：下单前置双确认的引用集——<b>最新 PRD 版本</b>（版本号＋版全文
-     * ＝订单快照的冗余拷贝源，订单自含不依赖版本表存亡；去门化后版本表＝Demo 类 run
-     * 起跑自动记行的构建基准快照，「最新版」即最新构建基准）＋项目确认指针的 Demo
-     * 版本号（「确认此版本，准备签约」的定格值）。缺失事实如实上报 {@code null}
-     * ——门判定（ORD_018/ORD_019 拦截）归订单侧，本口只报事实（判定跟职责走）；
-     * 工作区活草稿不进本面（快照源＝版本行，非工作区正文）。冻结字段结构不动，
-     * 既有订单/合同数据自含兼容。
+     * 下单冻结面（#629，ADR-0056 商业面改接）：下单前置两事实的读面——<b>当前
+     * 工作区 PRD 全文</b>（冗余拷贝源；PRD 未产出/工作区无该文件＝null）＋<b>项目
+     * 确认指针的当前用户面版本号</b>（「确认此版本，准备签约」的定格值）。缺失事实
+     * 如实上报 {@code null}——门判定（ORD_018/ORD_019 拦截）归订单侧，本口只报事实
+     * （判定跟职责走）。<b>不再读旧 PRD/Demo 版本表</b>：版本引用收敛为用户面版本号。
      *
-     * @throws ApplicationException PRJ_001 项目不存在
+     * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
      */
-    public LatestVersionRefs latestVersionRefs(Long projectId) {
+    public OrderFreezeRefs orderFreezeRefs(Long projectId) {
         Project project = loadProject(projectId);
-        PrdVersion latest = prdVersionRepository
-                .findFirstByProjectIdOrderByVersionNoDesc(projectId).orElse(null);
-        boolean neverRecorded = latest == null;
-        return new LatestVersionRefs(
-                neverRecorded ? null : latest.getVersionNo(),
-                neverRecorded ? null : latest.getContent(),
+        PrdSnapshot snapshot = project.getPrdProducedAt() == null ? null : readPrdSnapshotOrNull(project);
+        return new OrderFreezeRefs(snapshot == null ? null : snapshot.content(),
                 project.getConfirmedDemoVersionNo());
     }
 
     /**
      * 下单冻结面的引用集形状（跨 BC 内部端口形，不进 REST 面）。
      *
-     * @param prdVersionNo  最新 PRD 版本号（null＝尚无构建基准记行——legacy）
-     * @param prdContent    最新版全文（冗余拷贝源；与版本号同空同在）
-     * @param demoVersionNo 项目确认指针的 Demo 版本号（null＝未确认任何 Demo 版本）
+     * @param prdContent        当前工作区 PRD 全文（冗余拷贝源；null＝PRD 未产出/无该文件）
+     * @param confirmedVersionNo 项目确认指针的当前用户面版本号（null＝未确认任何版本）
      */
-    public record LatestVersionRefs(Integer prdVersionNo, String prdContent, Integer demoVersionNo) {
+    public record OrderFreezeRefs(String prdContent, Integer confirmedVersionNo) {
+    }
+
+    /**
+     * 当前工作区 PRD 全文（订单冻结快照源，#629）：PRD 未产出标志未落＝null（不触
+     * 工作区）；标志已落才 exec 直读 {@code docs/PRD.md}。文件缺（退出码 1）＝null
+     * 由调用方按「缺 PRD」拦截；环境故障（125/126 等）照抛 WSP_002。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
+     */
+    public String currentPrdContent(Long projectId) {
+        Project project = loadProject(projectId);
+        PrdSnapshot snapshot = project.getPrdProducedAt() == null ? null : readPrdSnapshotOrNull(project);
+        return snapshot == null ? null : snapshot.content();
+    }
+
+    /** 工作区 PRD 快照（stat 首行 mtime＋正文，同一 exec 取齐；#629 起下单/归档共用）。 */
+    private record PrdSnapshot(long mtimeSeconds, String content) {
+    }
+
+    /**
+     * 读工作区 PRD 快照：文件缺（exec 退出码 1）＝null；其它非零＝WSP_002；首行
+     * epoch 秒缺失/畸形＝WSP_002。正本＝{@code docs/PRD.md}（一次 exec 取齐 mtime 与正文）。
+     */
+    private PrdSnapshot readPrdSnapshotOrNull(Project project) {
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(READ_PRD_COMMAND));
+        if (result.exitCode() == 1) {
+            return null;
+        }
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "PRD 读取失败: " + result.stderr());
+        }
+        int newline = result.stdout().indexOf('\n');
+        try {
+            long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
+            return new PrdSnapshot(mtimeSeconds, result.stdout().substring(newline + 1));
+        } catch (RuntimeException e) {
+            // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "PRD 读取结果畸形: " + result.stdout());
+        }
     }
 
     /**
@@ -236,31 +269,16 @@ public class ProjectQueryAppService {
     public PrdResponse prd(Long projectId) {
         Project project = loadProject(projectId);
         // 未产出期短路（#478）：标志未落＝savePrd 未收口——PRJ_015 直回不 exec
-        if (project.getPrdProducedAt() == null) {
+        PrdSnapshot snapshot = project.getPrdProducedAt() == null
+                ? null : readPrdSnapshotOrNull(project);
+        if (snapshot == null) {
             throw new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED);
         }
-        ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(READ_PRD_COMMAND));
-        if (result.exitCode() == 1) {
-            throw new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED);
-        }
-        if (result.exitCode() != 0) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "PRD 读取失败: " + result.stderr());
-        }
-        int newline = result.stdout().indexOf('\n');
-        try {
-            long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
-            String content = result.stdout().substring(newline + 1);
-            // 收敛度投影（#331）：对正文即时解析——收敛卡（#346 呈现面）同源判定，
-            // 草稿演进投影随之（#462 去确认门：原确认门/停驻差异摘要读面随门退役）
-            return new PrdResponse(projectId.toString(), content,
-                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)));
-        } catch (RuntimeException e) {
-            // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "PRD 读取结果畸形: " + result.stdout());
-        }
+        // 收敛度投影（#331）：对正文即时解析——收敛卡（#346 呈现面）同源判定，
+        // 草稿演进投影随之（#462 去确认门：原确认门/停驻差异摘要读面随门退役）
+        return new PrdResponse(projectId.toString(), snapshot.content(),
+                Instant.ofEpochSecond(snapshot.mtimeSeconds()),
+                PrdReadinessResponse.from(PrdReadiness.parse(snapshot.content())));
     }
 
     /**

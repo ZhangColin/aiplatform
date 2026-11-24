@@ -122,10 +122,12 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     private LocalDateTime generationRequestedAt;
 
     /**
-     * 确认标记所在 Demo 版本（#333 单指针，NULL = 未确认任何版本）：「确认此
-     * 版本，准备签约」＝既有版本上打标记（选定动作、不产生新版本号——版本行
-     * 不可变，标记归本指针；换确认版本＝指针移动，旧标记随移）。下单/合同冻结
-     * 引用（#335）与签约门投影消费本位。
+     * 确认用于签约的用户面版本号（#629 改义；单指针，NULL = 未确认任何版本）：
+     * 「确认此版本，准备签约」＝标记当前用户面版本（git 版本号，非旧 Demo/PRD
+     * 版本号）——选定动作、不产生新版本号；换选＝指针移动、旧标记随移，重复确认
+     * 同版幂等（时间刷新）。下单前置「存在已确认用户面版本」与订单冻结的版本引用
+     * 消费本位。列名 {@code confirmed_demo_version_no} 为历史沿用，#630 迁移改义
+     * 为 {@code confirmed_version_no}。
      */
     @Column(name = "confirmed_demo_version_no")
     private Integer confirmedDemoVersionNo;
@@ -277,9 +279,10 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     /**
-     * Demo 版本确认标记移动（#333「确认此版本，准备签约」）：既有版本上打标记
-     * ——不产生新版本号（版本行不可变，标记归本聚合单指针），换确认版本＝指针
-     * 随移（旧标记自然失效）。目标版本存在性守卫归应用层（PRJ_054）。
+     * 确认用于签约的用户面版本标记移动（#333 起「确认此版本，准备签约」；#629
+     * 改义为用户面版本号）：不产生新版本号，标记归本聚合单指针；换选＝指针随移
+     * （旧标记自然失效），重复确认同版幂等（时间刷新）。目标版本存在性守卫归应用层
+     * （#629 起＝用户面版本序列的 PRJ_028）。
      */
     public void confirmDemoVersion(int versionNo) {
         this.confirmedDemoVersionNo = versionNo;

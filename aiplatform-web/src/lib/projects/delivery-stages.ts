@@ -13,11 +13,10 @@ import type { ProjectDetail } from "@/lib/projects/detail";
  *
  * <p>门事实（{@link StageGateFacts}）是语义正本位；从 REST 事实的投影
  * （{@link stageGateFactsOf}）只接现有事实——PRD 记行＝版本列表非空
- * （GET …/prd/versions，#462 起为构建基准序清单）；Demo 已确认＝版本清单存在
- * 确认标记行
- * （#333 的 GET …/demo-versions——confirmedAt 是项目确认指针在清单行的投影，
- * 换选随指针移动）；付款门接现有订单事实。判定函数不动。阶段页路由约定：
- * 需求分析＝项目页本路由，其余阶段页＝项目路由下路径段
+ * （GET …/prd/versions，#462 起为构建基准序清单）；Demo 已确认＝用户面版本清单
+ * 存在确认标记行（#629 起读 GET …/versions——confirmed 是项目确认指针在版本行
+ * 的投影，换选随指针移动）；付款门接现有订单事实。判定函数不动。阶段页路由
+ * 约定：需求分析＝项目页本路由，其余阶段页＝项目路由下路径段
  * （/projects/[id]/demo｜contract｜production——#347/#348/#349 各自落页）。</p>
  */
 
@@ -53,25 +52,25 @@ const LOCK_REASONS: Partial<Record<DeliveryStageKey, string>> = {
 /** 已确认 PRD 版本列表的最小消费形状（versionNo 只用于存在性，不在此呈现）。 */
 type PrdVersionPresence = readonly { versionNo?: number }[];
 
-/** Demo 版本列表的最小消费形状（确认标记存在性——confirmedAt 在清单行的投影）。 */
-type DemoVersionPresence = readonly { versionNo?: number; confirmedAt?: string | null }[];
+/** 用户面版本列表的最小消费形状（确认标记存在性——confirmed 是项目确认指针在行的投影）。 */
+type VersionPresence = readonly { versionNo?: number; confirmed?: boolean }[];
 
 /**
  * REST 事实 → 门事实投影：PRD 记行＝版本列表非空（#462 语义顺延——首个构建
- * run 起跑自动记行：空/缺省即首 Demo 未起）；Demo 已确认＝版本清单存在确认标记
- * 行（#333 接真——confirmedAt 非空行在场即门开，换选随指针移动投影自动跟随）；
- * 付款门接现有订单事实——未终结单已支付、或项目/最近单已归档（支付完成归档
- * 即终点，生产承接页仍可回访）。
+ * run 起跑自动记行：空/缺省即首 Demo 未起）；Demo 已确认＝用户面版本清单存在
+ * confirmed=true 行（#629 接用户面版本——换选随指针移动投影自动跟随）；付款门
+ * 接现有订单事实——未终结单已支付、或项目/最近单已归档（支付完成归档即终点，
+ * 生产承接页仍可回访）。
  */
 export function stageGateFactsOf(
   detail: ProjectDetail | undefined | null,
   prdVersions?: PrdVersionPresence | null,
-  demoVersions?: DemoVersionPresence | null,
+  versions?: VersionPresence | null,
 ): StageGateFacts {
   const status = detail?.activeOrder?.status ?? detail?.latestOrder?.status;
   return {
     prdConfirmed: (prdVersions?.length ?? 0) > 0,
-    demoConfirmed: (demoVersions ?? []).some((version) => !!version.confirmedAt),
+    demoConfirmed: (versions ?? []).some((version) => version.confirmed === true),
     orderPaid:
       !!detail?.archived ||
       status === ORDER_STATUS.paid ||

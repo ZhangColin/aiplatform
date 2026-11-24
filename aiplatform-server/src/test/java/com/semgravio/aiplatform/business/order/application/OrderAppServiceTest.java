@@ -33,7 +33,6 @@ import com.semgravio.aiplatform.business.project.application.PrdReadiness;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
-import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,9 +59,8 @@ class OrderAppServiceTest {
     private static final long PROJECT_ID = 900100L;
     private static final String PRD = "# PRD\n\n需求背景：缝测试。";
 
-    /** 下单冻结缺省版本号（#335 引用集缺省桩）：PRD v3＋Demo v2。 */
-    private static final int PRD_VERSION_NO = 3;
-    private static final int DEMO_VERSION_NO = 2;
+    /** 下单冻结缺省已确认用户面版本号（#629 引用集缺省桩）。 */
+    private static final int CONFIRMED_VERSION_NO = 2;
 
     @Autowired
     private OrderAppService appService;
@@ -132,12 +130,12 @@ class OrderAppServiceTest {
     // ---------- #335：下单前置门（双确认）＋随单冻结双版本引用＋冗余拷贝语义 ----------
 
     @Test
-    void given_no_confirmed_prd_version_when_place_then_rejected_ord_018() {
-        // 下单前置门·PRD 腿：无已确认 PRD 版本（确认制前遗留/从未确认）——拦截
-        // 提示且零落行（拦截与提示，spec #320 ④「加门」）
+    void given_no_prd_when_place_then_rejected_ord_018() {
+        // 下单前置门·PRD 腿（#629）：PRD 未产出（工作区无 PRD 全文）——拦截提示
+        // 且零落行
         stubProject(ProjectStatus.IN_PROGRESS);
-        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(null, null, null));
+        when(projectQueryAppService.orderFreezeRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(null, null));
 
         assertThatThrownBy(() -> appService.place(PROJECT_ID))
                 .isInstanceOf(ApplicationException.class)
@@ -147,11 +145,11 @@ class OrderAppServiceTest {
     }
 
     @Test
-    void given_prd_confirmed_but_demo_unconfirmed_when_place_then_rejected_ord_019() {
-        // 下单前置门·Demo 腿：「确认此版本，准备签约」＝下单入口——确认指针空则拦
+    void given_prd_produced_but_version_unconfirmed_when_place_then_rejected_ord_019() {
+        // 下单前置门·版本腿（#629）：「确认此版本，准备签约」＝下单入口——确认指针空则拦
         stubProject(ProjectStatus.IN_PROGRESS);
-        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(PRD_VERSION_NO, PRD, null));
+        when(projectQueryAppService.orderFreezeRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(PRD, null));
 
         assertThatThrownBy(() -> appService.place(PROJECT_ID))
                 .isInstanceOf(ApplicationException.class)
@@ -166,8 +164,8 @@ class OrderAppServiceTest {
         // ORD_018/019）
         stubProject(ProjectStatus.IN_PROGRESS);
         appService.place(PROJECT_ID);
-        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(null, null, null));
+        when(projectQueryAppService.orderFreezeRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(null, null));
 
         assertThatThrownBy(() -> appService.place(PROJECT_ID))
                 .isInstanceOf(ApplicationException.class)
@@ -175,27 +173,27 @@ class OrderAppServiceTest {
     }
 
     @Test
-    void given_confirmed_versions_when_place_then_refs_frozen_and_snapshot_is_confirmed_full_text() {
-        // 冗余拷贝语义灵魂用例（#335）：快照源＝已确认版本全文（引用语义落位——
-        // 非工作区正文），双版本引用随单冻结；工作区读取面缺席（PRJ_015 未产出）
-        // 不影响下单——订单自含，不依赖工作区存亡
+    void given_confirmed_version_when_place_then_snapshot_current_prd_and_single_version_ref() {
+        // 版本引用收敛（#629）：快照源＝当前工作区 PRD 全文；只冻结一个已确认用户面
+        // 版本号，旧 PRD/Demo 双列不写（为 #630 删表铺路）
         stubProject(ProjectStatus.IN_PROGRESS);
-        String confirmedContent = "# PRD v3\n\n已确认版本全文——下单引用的正身。";
-        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(3, confirmedContent, 2));
-        when(projectQueryAppService.prd(PROJECT_ID)).thenThrow(
-                new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
+        String currentPrd = "# PRD\n\n当前工作区 PRD 全文——下单冻结标的。";
+        when(projectQueryAppService.orderFreezeRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(currentPrd, 2));
 
         OrderResponse order = appService.place(PROJECT_ID);
 
         Map<String, Object> row = jdbcTemplate.queryForMap(
-                "SELECT prd_snapshot, prd_version_no, demo_version_no FROM ord_orders WHERE id = ?",
+                "SELECT prd_snapshot, confirmed_version_no, prd_version_no, demo_version_no "
+                        + "FROM ord_orders WHERE id = ?",
                 Long.parseLong(order.id()));
-        assertThat(row.get("prd_snapshot")).isEqualTo(confirmedContent); // 冗余拷贝＝确认版全文
-        assertThat(row.get("prd_version_no")).isEqualTo(3);
-        assertThat(row.get("demo_version_no")).isEqualTo(2);
-        assertThat(order.prdVersionNo()).isEqualTo(3);
-        assertThat(order.demoVersionNo()).isEqualTo(2);
+        assertThat(row.get("prd_snapshot")).isEqualTo(currentPrd);
+        assertThat(row.get("confirmed_version_no")).isEqualTo(2);
+        assertThat(row.get("prd_version_no")).isNull();
+        assertThat(row.get("demo_version_no")).isNull();
+        assertThat(order.confirmedVersionNo()).isEqualTo(2);
+        assertThat(order.prdVersionNo()).isNull();
+        assertThat(order.demoVersionNo()).isNull();
     }
 
     @Test
@@ -683,9 +681,8 @@ class OrderAppServiceTest {
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z"),
                 PrdReadinessResponse.from(PrdReadiness.parse(prd))));
-        // 下单前置双确认缺省桩（#335）：已确认 PRD v3＋Demo v2（快照源＝确认版全文，
-        // 与工作区正文同文——分离用例在冗余拷贝灵魂用例单独覆盖）
-        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(PRD_VERSION_NO, prd, DEMO_VERSION_NO));
+        // 下单前置缺省桩（#629）：PRD 已产出（冻结全文）＋已确认用户面版本 v2
+        when(projectQueryAppService.orderFreezeRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(prd, CONFIRMED_VERSION_NO));
     }
 }

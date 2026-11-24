@@ -4464,6 +4464,8 @@ export interface components {
             prdVersionNo?: number;
             /** Format: int32 */
             demoVersionNo?: number;
+            /** Format: int32 */
+            confirmedVersionNo?: number;
             /** Format: int64 */
             amount?: number;
             currency?: string;
@@ -4774,6 +4776,8 @@ export interface components {
             prdVersionNo?: number;
             /** Format: int32 */
             demoVersionNo?: number;
+            /** Format: int32 */
+            confirmedVersionNo?: number;
             partyASigned?: boolean;
             /** Format: date-time */
             partyASignedAt?: string;
@@ -6577,6 +6581,12 @@ export interface components {
              * @example 2
              */
             demoVersionNo?: number;
+            /**
+             * Format: int32
+             * @description 下单冻结的已确认用户面版本号（#629：旧的两套版本引用收敛为一个；null＝遗留单）
+             * @example 2
+             */
+            confirmedVersionNo?: number;
             /** Format: int64 */
             amount?: number;
             currency?: string;

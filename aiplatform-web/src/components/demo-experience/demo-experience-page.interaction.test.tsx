@@ -11,12 +11,11 @@ import { useVersionRecordStore } from "@/lib/store/version-record";
 
 import { DemoExperiencePage } from "./demo-experience-page";
 
-type DemoVersion = components["schemas"]["DemoVersionSummaryResponse"];
+type GitVersion = components["schemas"]["VersionResponse"];
 
 const seed = vi.hoisted(() => ({
   detail: undefined as ProjectDetail | undefined,
-  demoVersions: [] as DemoVersion[],
-  prdVersions: [] as { versionNo: number }[],
+  gitVersions: [] as GitVersion[],
   confirmMutate: vi.fn(),
   confirmOptions: undefined as { onSuccess?: () => void } | undefined,
   orderMutate: vi.fn(),
@@ -36,17 +35,6 @@ vi.mock("@/hooks/use-project", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: seed.demoVersions }),
-  useConfirmDemoVersion: () => ({
-    mutate: (versionNo: number, options?: { onSuccess?: () => void }) => {
-      seed.confirmOptions = options;
-      seed.confirmMutate(versionNo, options);
-    },
-    isPending: false,
-  }),
-}));
-
 vi.mock("@/hooks/use-order", () => ({
   usePlaceOrder: () => ({
     mutate: (_input?: unknown, options?: { onSuccess?: () => void; onError?: (e: unknown) => void }) => {
@@ -61,16 +49,15 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: seed.routerPush }),
 }));
 
-vi.mock("@/hooks/use-prd", () => ({
-  usePrdVersions: () => ({ data: seed.prdVersions }),
-}));
-
-// 版本 chip（#626 单轴时间线）：最新用户面版本（Demo 页横幅 chip 改接版本 vN）
+// 用户面版本（#626 单轴时间线；#629 商业确认改接）：最新版本 chip/基准卡与确认动作同源
 vi.mock("@/hooks/use-version", () => ({
-  useGitVersions: () => ({
-    data: [{ commitHash: "c1", versionNo: 1, subject: "做一个预约系统", current: true }],
+  useGitVersions: () => ({ data: seed.gitVersions, isPending: false, isError: false }),
+  useConfirmVersion: () => ({
+    mutate: (versionNo: number, options?: { onSuccess?: () => void }) => {
+      seed.confirmOptions = options;
+      seed.confirmMutate(versionNo, options);
+    },
     isPending: false,
-    isError: false,
   }),
   useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -98,17 +85,17 @@ function seedReadyProject() {
     generatedAt: "2026-10-18T02:00:00Z",
     generationState: "generated",
   } as ProjectDetail;
-  seed.demoVersions = [
+  seed.gitVersions = [
     {
-      projectId: "p1",
+      commitHash: "c1",
       versionNo: 1,
-      prdVersionNo: 2,
+      subject: "做一个预约系统",
       runId: "run-1",
-      createdAt: "2026-10-18T02:00:00Z",
-      confirmedAt: undefined,
+      committedAt: "2026-10-18T02:00:00Z",
+      current: true,
+      confirmed: false,
     },
   ];
-  seed.prdVersions = [{ versionNo: 2 }];
 }
 
 function renderPage() {
@@ -138,13 +125,15 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
 
     expect(screen.getByText("PROJECT")).toBeTruthy();
     expect(screen.getByText("智能企业客户预约系统")).toBeTruthy();
-    expect(screen.getByText("版本 v1")).toBeTruthy();
+    // 横幅版本 chip 与基准卡头部同时呈现当前版本号
+    expect(screen.getAllByText("版本 v1").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("预览运行中 (Ready)")).toBeTruthy();
     expect(screen.getByRole("button", { name: "阶段存盘" })).toBeTruthy();
 
     expect(screen.getByText("版本交付基准")).toBeTruthy();
-    expect(screen.getByText("PRD v2 对齐")).toBeTruthy();
     expect(screen.getByText("历史版本生成流流水")).toBeTruthy();
+    // 基准卡吃用户面版本（#629）：版本号＋用户那句话
+    expect(screen.getByText(/v1 · 做一个预约系统/)).toBeTruthy();
     expect(screen.getByText("ALL GREEN")).toBeTruthy();
     expect(screen.getByText("演示数据")).toBeTruthy();
     expect(screen.getByText("演示限制")).toBeTruthy();
@@ -185,22 +174,13 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
 
   it("生成中同页切换状态胶囊与基准流水，不虚构下一版 Demo 号", () => {
     seed.detail = { ...seed.detail!, generationState: "generating", generatedAt: undefined };
-    seed.demoVersions = [];
+    seed.gitVersions = [];
     renderPage();
 
     expect(screen.getByText("Demo 生成中 (Generating)")).toBeTruthy();
     expect(screen.getByText("GENERATING")).toBeTruthy();
     expect(screen.queryByText("版本 v2")).toBeNull();
     expect(screen.getByRole("button", { name: "确认当前版本 · 进入签约流程" }).hasAttribute("disabled")).toBe(true);
-  });
-
-  it("遗留 Demo 没有 PRD 锚时不拿最新 PRD 版本补写关联", () => {
-    seed.demoVersions = [{ ...seed.demoVersions[0]!, prdVersionNo: undefined }];
-    seed.prdVersions = [{ versionNo: 9 }];
-    renderPage();
-
-    expect(screen.getByText("PRD 对齐")).toBeTruthy();
-    expect(screen.queryByText("PRD v9 对齐")).toBeNull();
   });
 
 });
@@ -262,7 +242,7 @@ describe("Demo 体验页 · 确认门并入下单（#350：顶栏旧「确认下
   it("已确认未建单（确认后建单失败/存量）：按钮转「重新提交订单」——入口不死路", () => {
     renderPage();
 
-    // 确认标记落库、建单失败（非 5017）→ 详情重拉后 confirmedAt 在场、无未终结订单
+    // 确认标记落库、建单失败（非 5017）→ 详情重拉后版本行 confirmed 在场、无未终结订单
     fireEvent.click(screen.getByRole("button", { name: "确认此版本，准备签约" }));
     act(() => seed.confirmOptions?.onSuccess?.());
     act(() => {
@@ -270,7 +250,7 @@ describe("Demo 体验页 · 确认门并入下单（#350：顶栏旧「确认下
     });
     cleanup(); // 重拉后的新挂载（旧实例退场，防双挂假性多按钮）
 
-    seed.demoVersions = [{ ...seed.demoVersions[0]!, confirmedAt: "2026-10-18T03:00:00Z" }];
+    seed.gitVersions = [{ ...seed.gitVersions[0]!, confirmed: true }];
     renderPage();
 
     const retryButtons = screen.getAllByRole("button", { name: /重新提交订单/ });
@@ -286,7 +266,7 @@ describe("Demo 体验页 · 确认门并入下单（#350：顶栏旧「确认下
   });
 
   it("已确认且已有未终结订单：维持「当前版本已确认」禁用（不出重试位）", () => {
-    seed.demoVersions = [{ ...seed.demoVersions[0]!, confirmedAt: "2026-10-18T03:00:00Z" }];
+    seed.gitVersions = [{ ...seed.gitVersions[0]!, confirmed: true }];
     seed.detail = {
       ...seed.detail!,
       activeOrder: { id: "o1", status: 1 },

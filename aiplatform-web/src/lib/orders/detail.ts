@@ -35,10 +35,12 @@ export type OrderDetail = {
   /** OrderDeliverableType code：2=系统（下单冻结；#611 收窄为单值）。 */
   deliverableType?: number;
   deliverableTypeName?: string;
-  /** 下单冻结的已确认 PRD 版本号（#335；确认制前遗留单缺省）。 */
+  /** 下单冻结的已确认 PRD 版本号（#335；#629 起新单缺省——历史单照读）。 */
   prdVersionNo?: number;
-  /** 下单冻结的已确认 Demo 版本号（#335；遗留单缺省）。 */
+  /** 下单冻结的已确认 Demo 版本号（#335；#629 起新单缺省——历史单照读）。 */
   demoVersionNo?: number;
+  /** 下单冻结的已确认用户面版本号（#629：旧两套版本引用收敛为一个；遗留单缺省）。 */
+  confirmedVersionNo?: number;
   /** 当前总价（分；待报价缺省——呈现＝「待确认报价」占位态）。 */
   amount?: number;
   /** 币种（v1 恒 CNY；待报价缺省）。 */
@@ -84,6 +86,7 @@ export function normalizeOrder(raw: OrderResponse): OrderDetail {
     deliverableTypeName: raw.deliverableTypeName,
     prdVersionNo: raw.prdVersionNo ?? undefined,
     demoVersionNo: raw.demoVersionNo ?? undefined,
+    confirmedVersionNo: raw.confirmedVersionNo ?? undefined,
     amount: toAmount(raw.amount),
     currency: raw.currency,
     note: raw.note,

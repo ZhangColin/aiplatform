@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.business.project.endpoints.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
@@ -81,6 +82,29 @@ class ProjectVersionControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_version_when_confirm_then_confirmed_version_wrapped() throws Exception {
+        when(versionAppService.confirm(any(), anyInt())).thenReturn(
+                new VersionResponse("a1a1a1a1", "做一个预约系统", 1, "111", null,
+                        LocalDateTime.of(2026, 9, 5, 11, 0), true, true));
+
+        performAsUser(post("/api/projects/100/versions/1/confirm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.confirmed").value(true));
+    }
+
+    @Test
+    void given_no_such_version_when_confirm_then_404() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.VERSION_NOT_FOUND))
+                .when(versionAppService).confirm(any(), anyInt());
+
+        performAsUser(post("/api/projects/100/versions/7/confirm"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4028))
+                .andExpect(jsonPath("$.message").value("版本不存在"));
     }
 
     @Test

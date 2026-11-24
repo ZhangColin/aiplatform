@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api/client";
@@ -31,6 +31,25 @@ export function useGitVersions(
     queryFn: ({ signal }) =>
       api.get<GitVersion[]>(`/projects/${projectId}/versions`, { signal }),
     enabled: options?.enabled ?? true,
+  });
+}
+
+/**
+ * 确认当前版本用于签约（#629，ADR-0056 商业面改接）：把项目确认指针指向该用户面
+ * 版本（换选＝指针随移、重复确认同版幂等）。成功即失效整项目域——时间线 confirmed
+ * 标位、阶段门「Demo 已确认」、下单前置「存在已确认用户面版本」同源刷新。
+ */
+export function useConfirmVersion(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionNo: number) =>
+      api.post<GitVersion>(`/projects/${projectId}/versions/${versionNo}/confirm`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    },
+    onError: (error) => {
+      toast.error(errorText(error, "确认失败，请稍后重试"));
+    },
   });
 }
 

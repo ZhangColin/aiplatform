@@ -77,10 +77,9 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.projectId").value("100"))
                 .andExpect(jsonPath("$.data.status").value(1)) // PENDING_QUOTE → Integer code
                 .andExpect(jsonPath("$.data.statusName").value("待报价"))
-                // 双版本引用随单冻结（#335）＋待报价缺省无金额（「待确认报价」占位
-                // 态的数据面——不以 0 元或示例价代替）
-                .andExpect(jsonPath("$.data.prdVersionNo").value(3))
-                .andExpect(jsonPath("$.data.demoVersionNo").value(2))
+                // 已确认用户面版本号随单冻结（#629 版本引用收敛为一个）＋待报价缺省
+                // 无金额（「待确认报价」占位态的数据面——不以 0 元或示例价代替）
+                .andExpect(jsonPath("$.data.confirmedVersionNo").value(2))
                 .andExpect(jsonPath("$.data.amount").doesNotExist());
 
         verify(appService).place(100L);
@@ -226,6 +225,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.amount").value(128000))
                 .andExpect(jsonPath("$.data.prdVersionNo").value(3))
                 .andExpect(jsonPath("$.data.demoVersionNo").value(2))
+                .andExpect(jsonPath("$.data.confirmedVersionNo").value(2))
                 .andExpect(jsonPath("$.data.partyASigned").value(false))
                 .andExpect(jsonPath("$.data.partyBSigned").value(false));
 
@@ -352,14 +352,14 @@ class OrderControllerTest {
                 1, needsUpdate, "张三", "语义引力（北京）科技有限公司",
                 "管理后台＋小程序全量交付", "开工款 50%，验收 50%",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
-                128000L, "CNY", 3, 2,
+                128000L, "CNY", 3, 2, 2,
                 false, null, false, null,
                 LocalDateTime.of(2026, 10, 17, 9, 0));
     }
 
     private static OrderResponse order(String id, OrderStatus status, LocalDateTime cancelledAt) {
         return new OrderResponse(id, "100", status, status.getName(),
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, null, null, null,
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, null, null, null,
                 null, null, null, null, java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt, null, null);
     }

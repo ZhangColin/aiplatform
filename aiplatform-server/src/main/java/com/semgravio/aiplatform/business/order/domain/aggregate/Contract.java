@@ -36,8 +36,9 @@ import com.semgravio.aiplatform.business.order.domain.model.Operator;
 /**
  * 合同聚合根（{@code ord_contracts}，#336 六态照交接包原样立）：「确认范围并
  * 准备合同」（用户确认动作）或后台重建时刻捕获<b>范围快照冻结集</b>——报价版本
- * 引用（冻结时点价目行）＋范围文本不可变副本＋双版本引用（PRD 确认版全文冗余
- * 拷贝＋版本号、Demo 确认版本号——#335 下单冻结集的合同侧冗余，合同自含）。
+ * 引用（冻结时点价目行）＋范围文本不可变副本＋已确认用户面版本号与 PRD 确认版
+ * 全文冗余拷贝（#629 商业面改接：旧的双版本引用收敛为一个用户面版本号；遗留合同
+ * 沿用 PRD/Demo 双列照读——合同自含）。
  * 编号（SG-＋TSID base36）创建即定格、全局唯一；合同版本自 1 起、草稿同号重录
  * +1。
  *
@@ -115,17 +116,25 @@ public class Contract extends Auditable implements AggregateRoot<Contract, Long>
     @Column(name = "scope_timeline", nullable = false, length = CONTENT_MAX_LENGTH)
     private String scopeTimeline;
 
-    /** PRD 确认版本号（#335 下单冻结值冗余）。 */
-    @Column(name = "prd_version_no", nullable = false, updatable = false)
-    private int prdVersionNo;
+    /** PRD 确认版本号（#335 历史沿用：#629 起新合同不再写入；遗留合同照读）。 */
+    @Column(name = "prd_version_no", updatable = false)
+    private Integer prdVersionNo;
 
     /** PRD 确认版全文冗余拷贝（合同自含，不依赖版本表与订单存亡）。 */
     @Column(name = "prd_snapshot", nullable = false, updatable = false)
     private String prdSnapshot;
 
-    /** Demo 确认版本号引用（#15 冻结集）。 */
-    @Column(name = "demo_version_no", nullable = false, updatable = false)
-    private int demoVersionNo;
+    /** Demo 确认版本号引用（#15 历史沿用：#629 起新合同不再写入；遗留合同照读）。 */
+    @Column(name = "demo_version_no", updatable = false)
+    private Integer demoVersionNo;
+
+    /**
+     * 已确认用户面版本号（#629，ADR-0056 商业面改接）：下单冻结集在合同侧的冗余
+     * ——旧的两套版本引用收敛为这一个用户面版本号。null＝遗留合同（沿用
+     * {@link #prdVersionNo}/{@link #demoVersionNo} 双列照读）。
+     */
+    @Column(name = "confirmed_version_no", updatable = false)
+    private Integer confirmedVersionNo;
 
     /** 甲方主体（客户方；后台录入，草稿态可改）。 */
     @Column(name = "party_a", length = PARTY_MAX_LENGTH)
@@ -188,12 +197,14 @@ public class Contract extends Auditable implements AggregateRoot<Contract, Long>
         if (order == null || quote == null) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
-        // 范围文本与双版本引用是合同必冻结维：范围未录入＝确认门未过（ORD_026）；
-        // #335 确认制之前下的遗留单如实无版本引用——不虚构，该类老单不进合同流
+        // 范围文本与版本引用是合同必冻结维：范围未录入＝确认门未过（ORD_026）；
+        // #629 起新单＝已确认用户面版本号（历史单＝PRD/Demo 双版本引用）；两者都无
+        // （确认制之前下的遗留单）——不虚构引用，该类老单不进合同流
         if (!order.scopeEntered()) {
             throw new DomainException(OrderMessage.CONTRACT_SCOPE_REQUIRED);
         }
-        if (order.getPrdVersionNo() == null || order.getDemoVersionNo() == null) {
+        boolean hasLegacyRefs = order.getPrdVersionNo() != null && order.getDemoVersionNo() != null;
+        if (order.getConfirmedVersionNo() == null && !hasLegacyRefs) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
         Contract contract = new Contract();
@@ -217,6 +228,7 @@ public class Contract extends Auditable implements AggregateRoot<Contract, Long>
         this.prdVersionNo = order.getPrdVersionNo();
         this.prdSnapshot = order.getPrdSnapshot();
         this.demoVersionNo = order.getDemoVersionNo();
+        this.confirmedVersionNo = order.getConfirmedVersionNo();
     }
 
     /**

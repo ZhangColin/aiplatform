@@ -12,6 +12,7 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,6 +24,9 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class AgentEventBridge {
+
+    /** 平台侧动作（#627 回滚复用工作消息呈现）的 engine/model 占位值：非内核 run。 */
+    static final String PLATFORM_ENGINE = "platform";
 
     private final EventsAppService eventsAppService;
 
@@ -169,6 +173,48 @@ public class AgentEventBridge {
                 EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId,
                 AgentEventTypes.ERROR_MESSAGE_FIELD, message));
+    }
+
+    /**
+     * 平台侧异步动作的「工作消息起点」（#627 回滚复用工作消息呈现）：回滚等平台动作
+     * 不是内核 run，但复用现有工作消息壳呈现进度——run-start 携 {@code agent=executor}
+     * （前端据此起工作消息、登记编码 run 状态）＋ {@code slice.title}（标题
+     * 「回到版本 vN」）。engine/model 给 {@code platform} 占位（无真实模型/引擎）；
+     * 不新增 SSE 事件类型。发射失败只记日志（呈现面不承担正确性）。
+     */
+    public void emitPlatformActionStarted(Project project, String runId, String title) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.RUN_PROMPT_FIELD, title);
+        payload.put(AgentEventTypes.RUN_MODEL_FIELD, PLATFORM_ENGINE);
+        payload.put(AgentEventTypes.ENGINE_FIELD, PLATFORM_ENGINE);
+        payload.put(AgentEventTypes.AGENT_FIELD, AgentProfile.EXECUTOR.key());
+        payload.put(AgentEventTypes.SLICE_FIELD, Map.of("title", title));
+        publishQuietly(AgentEventTypes.RUN_START, payload);
+    }
+
+    /**
+     * 平台侧异步动作的「工作消息收口」（#627 回滚复用工作消息呈现）：run-finish
+     * <b>不携 closing</b>——平台动作不是内核 run、不出收尾卡；工作消息原地定格。
+     * sessionId 用 coder- 前缀的会话寻址（断线补发窗口的补建判据同口径）。
+     */
+    public void emitPlatformActionFinished(Project project, String runId, String sessionId) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
+        payload.put(AgentEventTypes.ENGINE_FIELD, PLATFORM_ENGINE);
+        payload.put(AgentEventTypes.FINISH_FIELD, "end");
+        publishQuietly(AgentEventTypes.RUN_FINISH, payload);
+    }
+
+    /**
+     * 平台侧异步动作失败终态（#627 回滚失败）：复用 run-failed 明确展示——message
+     * 由调用方给定（失败原因＋两条恢复路）。不携 failure 扩载、不落失败留账行
+     * （平台动作不是内核 run、无尝试账，避免对话面出现无归属的失败行）；平台分析
+     * 面只记日志（调用方记录）。
+     */
+    public void emitPlatformActionFailed(Project project, String runId, String message) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, message);
+        publishQuietly(AgentEventTypes.RUN_FAILED, payload);
     }
 
     /**

@@ -19,15 +19,17 @@ import com.semgravio.aiplatform.business.project.application.ProjectVersionAppSe
 import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.VersionRollbackStartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 版本 REST 面（#91 版本层地基；#605 起收口成版提交退役）：版本列表（git log
- * 即正本，新→旧；成员判据只余 Rollback-From）与版本详情（元数据）。版本语义
- * 归阶段四重建（单轴时间线、探活通过即自动成版）。版本是项目子资源，独立控制器
- * 分列（照 OrderController 先例——ProjectController 已满）。
+ * 版本 REST 面（#91 版本层地基；#605 起收口成版提交退役；#626/#627 阶段四重建）：
+ * 版本列表（git log 即正本，新→旧；成员判据＝平台版本标记/回滚标记）、版本详情
+ * （元数据）、查看当时（起快照容器，归 #628 拆除）与回到某版（#627 平台侧异步：
+ * restore→停→build→起→探活→成版）。版本是项目子资源，独立控制器分列（照
+ * OrderController 先例——ProjectController 已满）。
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/versions")
@@ -76,14 +78,19 @@ public class ProjectVersionController {
     }
 
     @PostMapping("/{ref}/rollback")
-    @Operation(summary = "回滚到此（追加新版本）",
-            description = "把系统代码复位到该版本（ref = commit hash）、追加为新版本——历史只追加"
-                    + "不改写（rebase/force 零使用）、只回代码不回数据；回滚后迭代照常（下一轮 run"
-                    + "基于回滚后代码）。返回追加出的新版本（runId 空、rollbackFrom 锚定源版本）。"
-                    + "版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；环境故障 WSP_002")
-    public ApiResponse<VersionResponse> rollback(@PathVariable String projectId,
+    @Operation(summary = "回到某版（异步整回＋build＋重启＋探活）",
+            description = "平台侧异步动作：校验版本存在、项目未归档、无 run 在途后受理，后台把"
+                    + "系统代码整回该版本（ref = commit hash，只 restore tracked 文件——数据/依赖/.env"
+                    + " 原样保留、活库不倒带）、停 8081 旧进程、重新 build（删旧 .next）、按平台起服"
+                    + "路径重启、8081 探活；通过则记为新版本 vN+1（主题「回到 vN」）并发 preview-ready。"
+                    + "进度复用工作消息起止呈现（标题「回到版本 vN」），失败经 run-failed 明确展示"
+                    + "（不记版本）。只拦 run 在途——脏工作树允许被回滚覆盖。立即返回 runId 与版本标签。"
+                    + "版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；项目已归档 409 PRJ_013；"
+                    + "在途 run 409 PRJ_031；环境故障 WSP_002")
+    public ApiResponse<VersionRollbackStartResponse> rollback(@PathVariable String projectId,
             @PathVariable String ref) {
-        return ApiResponse.ok(versionAppService.rollback(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
+        return ApiResponse.ok(versionAppService.rollback(
+                Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
     }
 
     @DeleteMapping("/{ref}/view/{viewId}")

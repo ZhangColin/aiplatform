@@ -105,26 +105,25 @@ class WorkspaceVersionsTest {
     }
 
     @Test
-    void given_ref_and_subject_when_rollback_command_then_restore_then_append_commit_with_rollback_trailer() {
-        String command = WorkspaceVersions.rollbackCommand("a1b2c3d", "回滚到「更新了系统」");
+    void given_ref_when_restore_command_then_restores_tracked_files_only_without_committing() {
+        String command = WorkspaceVersions.restoreCommand("a1b2c3d");
 
-        // 复位工作树到目标 commit（restore --source，只动 tracked——数据不在跟踪面保留）→
-        // 追加新 commit（HEAD 不动、无 rebase/force）→ 携 Rollback-From trailer 锚定源版本
+        // 只复位 tracked 文件（restore --source --staged --worktree）：数据/依赖/.env
+        // 不在跟踪面原样保留；不提交——成版由回滚编排在 build＋起服＋探活全过后落定
         assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
         assertThat(command).contains("git restore --source='a1b2c3d' --staged --worktree .");
-        assertThat(command).contains("git commit -q --allow-empty");
-        assertThat(command).contains("-m '回滚到「更新了系统」'");
-        assertThat(command).contains("-m 'Rollback-From: a1b2c3d'");
-        assertThat(command).contains("git rev-parse HEAD");
-        // 历史只追加不改写——绝无 reset --hard / rebase / push --force 类操作
+        assertThat(command).doesNotContain("git commit");
+        assertThat(command).doesNotContain("git clean");
         assertThat(command).doesNotContain("rebase").doesNotContain("--hard").doesNotContain("--force");
     }
 
     @Test
-    void given_non_hex_ref_when_rollback_command_then_rejected_before_shell() {
-        assertThatThrownBy(() -> WorkspaceVersions.rollbackCommand("main; rm -rf /", "x"))
+    void given_non_hex_ref_when_restore_command_then_rejected_before_shell() {
+        assertThatThrownBy(() -> WorkspaceVersions.restoreCommand("main; rm -rf /"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> WorkspaceVersions.rollbackCommand("$(id)", "x"))
+        assertThatThrownBy(() -> WorkspaceVersions.restoreCommand("$(id)"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WorkspaceVersions.restoreCommand(""))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -150,33 +149,6 @@ class WorkspaceVersionsTest {
         String command = WorkspaceVersions.commitVersionCommand(1, "r1", "it's done");
 
         assertThat(command).contains("-m 'it'\\''s done'");
-    }
-
-    @Test
-    void given_workspace_when_status_command_then_porcelain_full() {
-        String command = WorkspaceVersions.statusCommand();
-
-        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git status --porcelain");
-    }
-
-    // ---------- 脏树解析（#100 回滚并发守卫） ----------
-
-    @Test
-    void given_clean_porcelain_when_has_uncommitted_tracked_changes_then_false() {
-        // 空输出（无改动）或仅有 untracked（??）行——restore 不触 untracked，不算会被丢弃的改动
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("")).isFalse();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("?? data/new.txt\n?? draft.md")).isFalse();
-    }
-
-    @Test
-    void given_tracked_change_when_has_uncommitted_tracked_changes_then_true() {
-        // modified（工作树）/ staged / deleted 等 tracked 改动——restore 会静默丢弃
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(" M src/app.js")).isTrue();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("M  src/app.js")).isTrue();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(" D src/old.js")).isTrue();
-        // 混合：untracked 与 tracked 并存，只要有 tracked 即脏
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("?? new.txt\n M src/app.js")).isTrue();
     }
 
     // ---------- log 解析（Rollback-From 成员判据；Run-Id 已随 #605 退役） ----------

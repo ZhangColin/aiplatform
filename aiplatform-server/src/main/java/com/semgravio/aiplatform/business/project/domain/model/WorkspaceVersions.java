@@ -13,16 +13,17 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 命令构造归本类纯函数、执行归 exec 通道（{@code EnvironmentBackend.exec}）、
  * 输出解析归本类。收拢保留四件事——幂等仓库初始化（懒初始化：存量工作区与
  * 容器重建自愈同覆盖，repo-local 身份配置随卷持久；<b>跑前快照链的阶段四施工
- * 留存工具</b>）、版本序列读取（git log 即正本）、单版本元数据读取、回滚到此
- * （#93 复位工作树到目标 commit 并追加新版本——Rollback-From trailer 锚定源
- * 版本，历史只追加不改写）。
+ * 留存工具</b>）、版本序列读取（git log 即正本）、单版本元数据读取、回滚代码复位
+ * （{@link #restoreCommand}：#627 回滚只复位 tracked 文件，成版由回滚编排在
+ * build＋起服＋探活全过后经 {@link #commitVersionCommand} 落定——历史只追加不改写）。
  *
  * <p><b>版本语义（#605 退役→#626 重建，ADR-0056）</b>：旧 Run-Id trailer 成版随
  * 审查与收口组出局（#605）；阶段四重建为<b>用户面版本</b>——每轮生成探活通过后
  * 平台自动成版（{@link #commitVersionCommand}：{@code Platform-Version}＋
- * {@code Run-Id} trailer），版本序列＝按标记过滤的 git log。回滚版本仍带
- * {@code Rollback-From} trailer（历史兼容）。段起点／段失败回滚／fork 补丁等旧
- * 生成栈 git 辅助件随切片与轨道机器（#602）一并清场。</p>
+ * {@code Run-Id} trailer），版本序列＝按标记过滤的 git log。旧回滚版本带
+ * {@code Rollback-From} trailer（历史兼容；#627 起新回滚成功后经
+ * {@link #commitVersionCommand} 以 {@code Platform-Version} 成版）。段起点／段失败
+ * 回滚／fork 补丁等旧生成栈 git 辅助件随切片与轨道机器（#602）一并清场。</p>
  *
  * <p>git 跟踪面 = 交付物全集——
  * .gitignore 由 {@link WorkspaceLayout#NON_DELIVERABLE_DIRS} + {@link WorkspaceLayout#ENV_FILE}
@@ -35,7 +36,8 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  */
 public final class WorkspaceVersions {
 
-    /** 回滚 commit 的源版本锚定 trailer（#93 回滚到此——回滚版本的成员判据）。 */
+    /** 旧回滚 commit 的源版本锚定 trailer（#93 历史成员判据；#627 起新回滚改用
+     * {@link #VERSION_TRAILER} 成版——本 trailer 只用于识别存量回滚版本）。 */
     public static final String ROLLBACK_TRAILER = "Rollback-From: ";
 
     /** 用户面版本标记 trailer（#626 自动成版——版本序列的成员判据，值为 vN）。 */
@@ -129,48 +131,23 @@ public final class WorkspaceVersions {
     }
 
     /**
-     * 回滚到此（#93）：把工作树与索引复位到目标 commit 的树（{@code git restore
-     * --source --staged --worktree}——只动 tracked 文件：数据 / node_modules /
-     * .env / .platform 等非交付物不在跟踪面，原样保留），再提交为一个<b>新</b>
-     * commit（HEAD 不动，历史只追加不改写——无 rebase/force 类操作），携
-     * Rollback-From trailer 锚定源版本。{@code --allow-empty} 兜「回滚到当前
-     * HEAD」（树同形、空提交）的边界。stdout = 新版本 commit hash。
+     * 回滚代码复位（#627 异步回滚的第一步）：把工作树与索引复位到目标 commit 的
+     * 树（{@code git restore --source --staged --worktree}——只动 tracked 文件：
+     * 数据 / node_modules / .env / .platform 等非交付物不在跟踪面，原样保留）。
+     * 不提交——回滚的「记为新版本」要等停旧进程、重新 build、起服、探活全过后由
+     * {@link #commitVersionCommand} 落定（成功才成版，失败不记版本）。untracked
+     * 文件不在 restore 面，失败 run 留下的未提交 tracked 改动被这份代码覆盖
+     * （有意语义：#627 只拦 run 在途，不拦脏树）。
      *
      * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝——用户
      *                                  可控入参不进 shell）
      */
-    public static String rollbackCommand(String ref, String subject) {
+    public static String restoreCommand(String ref) {
         if (ref == null || !VALID_REF.matcher(ref).matches()) {
             throw new IllegalArgumentException("版本引用必须是 commit hash（hex）: " + ref);
         }
         return "cd " + WorkspaceLayout.ROOT
-                + " && git restore --source='" + ref + "' --staged --worktree ."
-                + " && " + commitTail(subject, ROLLBACK_TRAILER + ref);
-    }
-
-    /**
-     * 工作树脏检（#100 回滚并发守卫）：{@code git status --porcelain} 全量输出，
-     * stdout 逐行 = 工作树/索引相对 HEAD 的改动（含 untracked {@code ??} 行——
-     * restore 不触 untracked，故解析时过滤）。
-     */
-    public static String statusCommand() {
-        return "cd " + WorkspaceLayout.ROOT + " && git status --porcelain";
-    }
-
-    /**
-     * 是否存未提交的 tracked 改动（#100）：{@code git restore} 只动 tracked 文件，
-     * 故 untracked（{@code ??} 行）不算会被丢弃的改动；其余任何行（modified /
-     * staged / deleted / added 等）都表示 restore 会静默丢弃的未提交 tracked 改动。
-     */
-    public static boolean hasUncommittedTrackedChanges(String stdout) {
-        for (String line : stdout.split("\n")) {
-            String status = line.trim();
-            if (status.isEmpty() || status.startsWith("??")) {
-                continue;
-            }
-            return true;
-        }
-        return false;
+                + " && git restore --source='" + ref + "' --staged --worktree .";
     }
 
     /**
@@ -236,13 +213,6 @@ public final class WorkspaceVersions {
         catch (NumberFormatException malformed) {
             return null;
         }
-    }
-
-    /** 提交尾（回滚成版）：提交携 Rollback-From trailer → 回读 HEAD hash。 */
-    private static String commitTail(String subject, String trailer) {
-        return "git commit -q --allow-empty -m '" + escapeSingleQuote(subject) + "'"
-                + " -m '" + trailer + "'"
-                + " && git rev-parse HEAD";
     }
 
     /** 提交正文（%b）取指定 trailer 值；无该 trailer = null（野 commit / 异类版本）。 */

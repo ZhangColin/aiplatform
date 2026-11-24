@@ -89,7 +89,11 @@ export function VersionTimelineSheet({ projectId }: { projectId: string }) {
   );
 }
 
-/** 时间线单条：版本号＋当前/已确认标记＋时间＋用户那句话＋预览入口＋回到此版。 */
+/**
+ * 时间线单条：版本号＋当前/已确认标记＋时间＋用户那句话＋预览入口＋回到此版。
+ * 「回到此版」对当前版也不禁用（#627）：回滚失败后「再点一次最新版的回到此版
+ * 回到最新版」是恢复路之一，故当前版必须可点。
+ */
 function VersionTimelineRow({
   version,
   previewUrl,
@@ -134,7 +138,7 @@ function VersionTimelineRow({
           <button
             type="button"
             onClick={onRollback}
-            disabled={rollbackPending || version.current || !version.commitHash}
+            disabled={rollbackPending || !version.commitHash}
             aria-label={`回到 ${versionText}`}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-soft/80 bg-white px-2.5 py-1 text-label-sm font-medium text-ink-secondary shadow-xs transition-colors hover:bg-surface-dawn disabled:pointer-events-none disabled:opacity-45"
           >

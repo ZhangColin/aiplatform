@@ -89,6 +89,12 @@ public final class AgentEventTypes {
     /** 运行关联字段（事件 id 的 streamId 同值；payload 必带）。 */
     public static final String RUN_FIELD = "runId";
 
+    /** run-start 的本场提示词键（#627 平台侧动作——回滚复用工作消息呈现时给标题占位）。 */
+    public static final String RUN_PROMPT_FIELD = "prompt";
+
+    /** run-start 的模型串键（#627 平台侧动作给「platform」占位；非内核 run 无真实模型）。 */
+    public static final String RUN_MODEL_FIELD = "model";
+
     /** 会话标识（会话建立后各事件携带）。 */
     public static final String SESSION_FIELD = "sessionId";
 

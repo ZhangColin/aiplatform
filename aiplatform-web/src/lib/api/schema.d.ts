@@ -435,8 +435,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 回滚到此（追加新版本）
-         * @description 把系统代码复位到该版本（ref = commit hash）、追加为新版本——历史只追加不改写（rebase/force 零使用）、只回代码不回数据；回滚后迭代照常（下一轮 run基于回滚后代码）。返回追加出的新版本（runId 空、rollbackFrom 锚定源版本）。版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；环境故障 WSP_002
+         * 回到某版（异步整回＋build＋重启＋探活）
+         * @description 平台侧异步动作：校验版本存在、项目未归档、无 run 在途后受理，后台把系统代码整回该版本（ref = commit hash，只 restore tracked 文件——数据/依赖/.env 原样保留、活库不倒带）、停 8081 旧进程、重新 build（删旧 .next）、按平台起服路径重启、8081 探活；通过则记为新版本 vN+1（主题「回到 vN」）并发 preview-ready。进度复用工作消息起止呈现（标题「回到版本 vN」），失败经 run-failed 明确展示（不记版本）。只拦 run 在途——脏工作树允许被回滚覆盖。立即返回 runId 与版本标签。版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；项目已归档 409 PRJ_013；在途 run 409 PRJ_031；环境故障 WSP_002
          */
         post: operations["rollback"];
         delete?: never;
@@ -4483,6 +4483,18 @@ export interface components {
             viewId?: string;
             previewUrl?: string;
         };
+        ApiResponseVersionRollbackStartResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["VersionRollbackStartResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        VersionRollbackStartResponse: {
+            runId?: string;
+            label?: string;
+        };
         ApiResponseVersionResponse: {
             /** Format: int32 */
             code?: number;
@@ -7783,7 +7795,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ApiResponseVersionResponse"];
+                    "*/*": components["schemas"]["ApiResponseVersionRollbackStartResponse"];
                 };
             };
         };

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 
@@ -6,21 +6,22 @@ import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 import { errorText } from "@/lib/api/api-error";
 import { queryKeys } from "@/lib/api/keys";
+import { useVersionRecordStore } from "@/lib/store/version-record";
 
 /**
- * 版本动作数据层（#92 查看当时 + #93 回滚到此）：收尾卡上「查看当时 / 回滚到此」
+ * 版本动作数据层（#92 查看当时 + #627 异步回滚）：收尾卡上「查看当时 / 回到此版」
  * 两个动作的请求面。查看当时 = 起快照容器（POST view，返回 viewId + 预览 URL，
- * 逛完经 DELETE 关闭销毁）；回滚到此 = 追加新版本（POST rollback，只回代码不回
- * 数据）。回滚成功只 toast 提示——版本动作不产对话条目，预览刷新归下一轮 run
- * （回滚不代起应用）。
+ * 逛完经 DELETE 关闭销毁）；回到此版 = 平台侧异步动作（restore 代码 → 停进程 →
+ * 重新 build → 重启 → 探活 → 记新版本）。回滚进度经工作消息起止呈现（SSE），
+ * 成功由 run-finish 失效项目域刷新时间线/预览，失败经 run-failed 明确展示。
  */
 
 /** 查看会话起服结果（#92）：viewId 是关闭动作的寻址锚，previewUrl 是快照预览。 */
 type VersionViewStart = components["schemas"]["VersionViewStartResponse"];
 /** 版本行（#91 版本层 git log 投影）。 */
 type GitVersion = components["schemas"]["VersionResponse"];
-/** 回滚追加出的新版本（#93）：runId 空、rollbackFrom 锚定源版本。 */
-type RolledVersion = GitVersion;
+/** 回到某版受理回执（#627）：runId＝SSE 锚，label＝版本标签（回到 vN）。 */
+type RollbackStart = components["schemas"]["VersionRollbackStartResponse"];
 
 /**
  * run 收口版本表（#91：git log 即版本序列，新→旧）。版本记录抽屉 Demo 条目
@@ -115,16 +116,20 @@ export function useStopVersionView(projectId: string) {
   });
 }
 
-/** 回滚到此：追加新版本（历史只追加不改写、只回代码不回数据）。 */
+/**
+ * 回到某版（#627 异步回滚）：POST 立即受理（返回 runId＋版本标签），进度经工作
+ * 消息起止呈现（SSE「回到版本 vN」）；成功由 run-finish 失效项目域刷新时间线与
+ * 预览，失败经 run-failed 明确展示（含两条恢复路）。受理成功即收起时间线抽屉让
+ * 用户回到主视图看进度；同步拒绝（版本不存在/已归档/在途）走 toast。
+ */
 export function useRollbackVersion(projectId: string) {
-  const queryClient = useQueryClient();
+  const closeVersionRecord = useVersionRecordStore((s) => s.closeVersionRecord);
   return useMutation({
     mutationFn: (version: string) =>
-      api.post<RolledVersion>(`/projects/${projectId}/versions/${version}/rollback`),
-    onSuccess: () => {
-      // 追加出的新版本进时间线：失效项目域（版本列表挂 projects 域）随刷新
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-      toast.success("已回滚到该版本，系统代码已复原");
+      api.post<RollbackStart>(`/projects/${projectId}/versions/${version}/rollback`),
+    onSuccess: (result) => {
+      closeVersionRecord();
+      if (result?.label) toast.info(`正在${result.label}，完成后会自动刷新`);
     },
     onError: (error) => {
       toast.error(errorText(error, "回滚失败，请稍后重试"));

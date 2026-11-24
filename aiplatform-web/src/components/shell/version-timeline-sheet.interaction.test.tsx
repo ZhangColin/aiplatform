@@ -141,7 +141,7 @@ describe("VersionTimelineSheet · 单轴列表（时间＋那句话＋预览＋�
     ).toBe(true);
   });
 
-  it("「回到此版」回滚到该版 commit；当前版按钮禁用", () => {
+  it("「回到此版」回滚到该版 commit；当前版也可点（回滚失败的恢复路）", () => {
     seed.versions = [
       { commitHash: "c2", versionNo: 2, subject: "把按钮改成蓝色", current: true },
       { commitHash: "a1", versionNo: 1, subject: "做一个预约系统" },
@@ -149,10 +149,11 @@ describe("VersionTimelineSheet · 单轴列表（时间＋那句话＋预览＋�
     render(<VersionTimelineSheet projectId="p1" />);
     openTimeline();
 
-    // 当前版不可再回滚（禁用）
-    expect(
-      (screen.getByRole("button", { name: "回到 v2" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    // 当前版不禁用：回滚失败后「再点最新版的回到此版」是恢复路（#627）
+    const current = screen.getByRole("button", { name: "回到 v2" }) as HTMLButtonElement;
+    expect(current.disabled).toBe(false);
+    fireEvent.click(current);
+    expect(seed.rollbackMutate).toHaveBeenCalledWith("c2");
     // 历史版可回滚到该版 commit
     fireEvent.click(screen.getByRole("button", { name: "回到 v1" }));
     expect(seed.rollbackMutate).toHaveBeenCalledWith("a1");

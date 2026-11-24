@@ -3,16 +3,24 @@ package com.semgravio.aiplatform.business.project.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -20,21 +28,25 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.semgravio.aiplatform.IntegrationTest;
+import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
-import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.VersionRollbackStartResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 版本 API 应用服务（#91 版本层地基；#605 起收口成版提交退役）：版本列表（git log
- * 即正本，零版本 = 空列表非错误；成员判据只余 Rollback-From）、版本详情（closing
- * 恒空）、回滚到此（追加版本）；ref 为用户可控入参——非 hash 形态 404 且不触
- * 工作区（shell 注入防线）。
+ * 版本 API 应用服务（#91 版本层地基；#605 起收口成版提交退役；#627 异步回滚）：
+ * 版本列表（git log 即正本，零版本 = 空列表非错误；成员判据＝版本标记/回滚标记）、
+ * 版本详情（closing 恒空）、回到某版（异步：restore tracked → 停旧进程 → 全新
+ * build → 起服 → 探活 → 成版；只拦 run 在途、脏树允许覆盖）；ref 为用户可控入参
+ * ——非 hash 形态 404 且不触工作区（shell 注入防线）。
  */
 @IntegrationTest
 class ProjectVersionAppServiceTest {
@@ -60,8 +72,30 @@ class ProjectVersionAppServiceTest {
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
+    @MockitoBean
+    private AgentSessionExecutor sessionExecutor;
+
+    @MockitoBean
+    private KernelServingGuard kernelServingGuard;
+
+    @MockitoBean
+    private ClosingProbes closingProbes;
+
+    @MockitoBean
+    private EventsAppService eventsAppService;
+
     @Autowired
     private CodingRunTrack codingRunTrack;
+
+    @BeforeEach
+    void runRollbackTaskInline() {
+        // 回滚是异步动作：测试里让提交任务同步跑完，直接在应用服务边界断言可观测行为
+        doAnswer(invocation -> {
+            Runnable task = invocation.getArgument(1);
+            task.run();
+            return CompletableFuture.completedFuture(null);
+        }).when(sessionExecutor).submitGeneration(anyString(), any(Runnable.class));
+    }
 
     @AfterEach
     void tearDown() {
@@ -129,38 +163,62 @@ class ProjectVersionAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
-    // ---------- 回滚到此 ----------
+    // ---------- 回到某版（#627 异步回滚） ----------
 
     @Test
-    void given_valid_ref_when_rollback_then_appends_new_version_anchored_to_source() {
+    void given_valid_ref_when_rollback_then_async_sequence_and_version_recorded() {
         Long projectId = persistedProject("9910");
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://preview.local/"));
         stubExec((command, out) -> {
-            if (command.contains("git status")) {
-                out.stdout = ""; // 工作树干净（并发守卫放行）
-            } else if (command.contains("git restore")) {
-                out.stdout = HASH_2 + "\n";
-            } else if (command.contains(HASH_2)) {
-                out.stdout = rollbackLogLine(HASH_2, 1700000200L, "回滚到「首次生成了系统」", HASH_1);
-            } else {
-                out.stdout = rollbackLogLine(HASH_1, 1700000100L,
-                        "回滚到「更早的版本」", "cafebabe");
+            if (command.contains("git log -1")) {
+                out.stdout = platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1");
+            } else if (command.contains("curl")) {
+                out.exitCode = 1; // 停旧进程的等待：8081 已不可达
+            } else if (command.contains("git log --format")) {
+                out.stdout = platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1");
+            } else if (command.contains("git commit")) {
+                out.stdout = "newhash";
             }
         });
 
-        VersionResponse rolled = appService.rollback(projectId, HASH_1);
+        VersionRollbackStartResponse started = appService.rollback(projectId, HASH_1);
 
-        assertThat(rolled.commitHash()).isEqualTo(HASH_2);
-        assertThat(rolled.rollbackFrom()).isEqualTo(HASH_1);
-        assertThat(rolled.runId()).isNull();
-        assertThat(rolled.subject()).isEqualTo("回滚到「首次生成了系统」");
-        // 寻址守卫（show 目标）→ 脏树守卫（status）→ rollbackCommand（restore + Rollback-From）
-        // → 回读新版本（show）
-        assertThat(recordedCommands).hasSize(4);
+        assertThat(started.label()).isEqualTo("回到 v1");
+        assertThat(started.runId()).isNotBlank();
+        // 顺序：寻址 → restore tracked → 停旧进程 → 探活到停 → 全新 build → 成版（读列表→提交）
+        assertThat(recordedCommands).hasSize(7);
         assertThat(recordedCommands.get(0)).contains("git log -1").contains(HASH_1);
-        assertThat(recordedCommands.get(1)).contains("git status --porcelain");
-        assertThat(recordedCommands.get(2))
-                .contains("git restore").contains("Rollback-From: " + HASH_1);
-        assertThat(recordedCommands.get(3)).contains("git log -1").contains(HASH_2);
+        assertThat(recordedCommands.get(1))
+                .contains("git restore --source='" + HASH_1 + "'").contains("--staged --worktree");
+        assertThat(recordedCommands.get(2)).contains("pkill").contains("[n]ext");
+        assertThat(recordedCommands.get(3)).contains("curl");
+        assertThat(recordedCommands.get(4)).contains("rm -rf .next").contains("pnpm build");
+        assertThat(recordedCommands.get(5)).contains("git log --format");
+        assertThat(recordedCommands.get(6)).contains("git commit")
+                .contains("-m '回到 v1'")
+                .contains("Platform-Version: 2")
+                .contains("Run-Id: " + started.runId());
+        // 只拦 run 在途——不拦脏树：绝不查 git status
+        assertThat(recordedCommands).noneMatch(command -> command.contains("git status"));
+        // 工作消息起点：标题「回到版本 v1」、agent=executor（前端起工作消息）
+        ArgumentCaptor<Map<String, Object>> eventPayload = payloadCaptor();
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_START), eventPayload.capture());
+        Map<String, Object> startedPayload = eventPayload.getValue();
+        assertThat(startedPayload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(started.runId());
+        assertThat(startedPayload.get(AgentEventTypes.AGENT_FIELD)).isEqualTo("executor");
+        assertThat(sliceTitle(startedPayload)).isEqualTo("回到版本 v1");
+        // 收口：run-finish 不携 closing（平台动作不出收尾卡）
+        ArgumentCaptor<Map<String, Object>> finishPayload = payloadCaptor();
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH), finishPayload.capture());
+        assertThat(finishPayload.getValue()).doesNotContainKey(AgentEventTypes.CLOSING_FIELD);
+        // preview-ready 推送（成功面）
+        ArgumentCaptor<Map<String, Object>> previewPayload = payloadCaptor();
+        verify(eventsAppService).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
+                previewPayload.capture());
+        assertThat(previewPayload.getValue().get(ProjectEventTypes.URL_FIELD))
+                .isEqualTo("http://preview.local/");
+        assertThat(codingRunTrack.isInFlight(projectId)).isFalse();
     }
 
     @Test
@@ -184,74 +242,107 @@ class ProjectVersionAppServiceTest {
     }
 
     @Test
-    void given_exec_failure_when_rollback_then_environment_failure_not_quiet() {
-        Long projectId = persistedProject("9913");
-        stubExec((command, out) -> {
-            if (command.contains("git status")) {
-                out.stdout = ""; // 脏树守卫放行，让 restore 失败走到环境故障
-            } else if (command.contains("git restore")) {
-                out.exitCode = 128;
-            } else {
-                out.stdout = rollbackLogLine(HASH_1, 1700000100L,
-                        "回滚到「更早的版本」", "cafebabe");
-            }
-        });
-
-        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
-    }
-
-    @Test
     void given_run_in_flight_when_rollback_then_409_before_restore() {
         Long projectId = persistedProject("9914");
-        stubExec((command, out) -> out.stdout = rollbackLogLine(HASH_1, 1700000100L,
-                "回滚到「更早的版本」", "cafebabe"));
+        stubExec((command, out) -> out.stdout = platformLogLine(HASH_1, 1700000100L,
+                "做一个预约系统", 1, "run-1"));
         codingRunTrack.begin(projectId);
 
-        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.VERSION_ROLLBACK_RUN_IN_FLIGHT.message());
-        // 在途守卫在寻址后即拒：只过 show，未触脏树检查 / restore（不丢在途改动）
+        try {
+            assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
+                    .isInstanceOf(ApplicationException.class)
+                    .hasMessageContaining(ProjectMessage.VERSION_ROLLBACK_RUN_IN_FLIGHT.message());
+        } finally {
+            codingRunTrack.end(projectId);
+        }
+        // 在途守卫在寻址后即拒：只过 show，未触 restore（不丢在途改动）
         assertThat(recordedCommands).hasSize(1);
         assertThat(recordedCommands.get(0)).contains("git log -1").contains(HASH_1);
+        verify(sessionExecutor, never()).submitGeneration(anyString(), any(Runnable.class));
     }
 
     @Test
-    void given_dirty_tree_when_rollback_then_409_not_silent_discard() {
-        Long projectId = persistedProject("9915");
-        stubExec((command, out) -> {
-            if (command.contains("git status")) {
-                out.stdout = " M src/app.js"; // 未提交 tracked 改动（如失败 run 残留）
-            } else {
-                out.stdout = rollbackLogLine(HASH_1, 1700000100L,
-                        "回滚到「更早的版本」", "cafebabe");
-            }
-        });
-
-        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.VERSION_ROLLBACK_DIRTY_TREE.message());
-        // 脏树守卫即拒：show + status 两命令，未触 restore（不静默丢弃）
-        assertThat(recordedCommands).hasSize(2);
-        assertThat(recordedCommands.get(1)).contains("git status --porcelain");
-    }
-
-    @Test
-    void given_status_exec_failure_when_rollback_then_environment_failure() {
+    void given_archived_project_when_rollback_then_409_before_restore() {
         Long projectId = persistedProject("9916");
-        stubExec((command, out) -> {
-            if (command.contains("git status")) {
-                out.exitCode = 128;
-            } else {
-                out.stdout = rollbackLogLine(HASH_1, 1700000100L,
-                        "回滚到「更早的版本」", "cafebabe");
-            }
-        });
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.archive();
+        projectRepository.save(project);
+        stubExec((command, out) -> out.stdout = platformLogLine(HASH_1, 1700000100L,
+                "做一个预约系统", 1, "run-1"));
 
         assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
                 .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+        assertThat(recordedCommands).hasSize(1);
+        verify(sessionExecutor, never()).submitGeneration(anyString(), any(Runnable.class));
+    }
+
+    @Test
+    void given_build_fails_when_rollback_then_run_failed_with_two_paths_and_no_version() {
+        Long projectId = persistedProject("9913");
+        stubExec((command, out) -> {
+            if (command.contains("git log -1")) {
+                out.stdout = platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1");
+            } else if (command.contains("curl")) {
+                out.exitCode = 1;
+            } else if (command.contains("pnpm build")) {
+                out.exitCode = 1;
+                out.stderr = "Type error: boom";
+            }
+        });
+
+        appService.rollback(projectId, HASH_1);
+
+        // 失败不记版本、不推 preview-ready
+        assertThat(recordedCommands).noneMatch(command -> command.contains("git commit"));
+        verify(eventsAppService, never()).publishNotification(eq(ProjectEventTypes.PREVIEW_READY), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH), anyMap());
+        // 复用 run-failed 明确展示：原因 + 两条路
+        ArgumentCaptor<Map<String, Object>> failed = payloadCaptor();
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), failed.capture());
+        String message = String.valueOf(failed.getValue().get(AgentEventTypes.ERROR_MESSAGE_FIELD));
+        assertThat(message)
+                .contains("没能回到 v1")
+                .contains("Type error: boom")
+                .contains("最新版")
+                .contains("修改意见");
+        assertThat(codingRunTrack.isInFlight(projectId)).isFalse();
+    }
+
+    @Test
+    void given_probe_fails_when_rollback_then_run_failed_and_no_version() {
+        Long projectId = persistedProject("9917");
+        stubExec((command, out) -> {
+            if (command.contains("git log -1")) {
+                out.stdout = platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1");
+            } else if (command.contains("curl")) {
+                out.exitCode = 1;
+            }
+        });
+        doThrow(new IllegalStateException("8081 不可达（curl 退出码 7）"))
+                .when(closingProbes).requireReachable(any());
+
+        appService.rollback(projectId, HASH_1);
+
+        assertThat(recordedCommands).noneMatch(command -> command.contains("git commit"));
+        ArgumentCaptor<Map<String, Object>> failed = payloadCaptor();
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), failed.capture());
+        assertThat(String.valueOf(failed.getValue().get(AgentEventTypes.ERROR_MESSAGE_FIELD)))
+                .contains("应用没有起来");
+        assertThat(codingRunTrack.isInFlight(projectId)).isFalse();
+    }
+
+    /** {@code Map<String,Object>} 的捕获器（编译期泛型擦除的样板收口）。 */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static ArgumentCaptor<Map<String, Object>> payloadCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);
+    }
+
+    /** run-start 载荷的 slice.title（工作消息头部标题）。 */
+    @SuppressWarnings("unchecked")
+    private static String sliceTitle(Map<String, Object> payload) {
+        Object slice = payload.get(AgentEventTypes.SLICE_FIELD);
+        return slice instanceof Map<?, ?> map ? (String) map.get("title") : null;
     }
 
     // ---------- 自动成版与单轴时间线（#626） ----------
@@ -351,7 +442,7 @@ class ProjectVersionAppServiceTest {
             recordedCommands.add(command.command());
             ExecOut out = new ExecOut();
             script.apply(command.command(), out);
-            return new ExecResultResponse(out.stdout, "", out.exitCode);
+            return new ExecResultResponse(out.stdout, out.stderr, out.exitCode);
         }).when(workspaceLifecycleAppService).exec(anyString(), any());
     }
 
@@ -363,6 +454,7 @@ class ProjectVersionAppServiceTest {
 
     private static final class ExecOut {
         String stdout = "";
+        String stderr = "";
         int exitCode = 0;
     }
 }

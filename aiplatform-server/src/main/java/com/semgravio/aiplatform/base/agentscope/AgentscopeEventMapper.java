@@ -240,8 +240,8 @@ final class AgentscopeEventMapper {
             String agentKey, RunHeading heading) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
-        payload.put("prompt", prompt);
-        payload.put("model", model);
+        payload.put(AgentEventTypes.RUN_PROMPT_FIELD, prompt);
+        payload.put(AgentEventTypes.RUN_MODEL_FIELD, model);
         payload.put(AgentEventTypes.ENGINE_FIELD, engine);
         if (agentKey != null && !agentKey.isBlank()) {
             payload.put(AgentEventTypes.AGENT_FIELD, agentKey);

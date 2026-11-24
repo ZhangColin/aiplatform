@@ -32,6 +32,7 @@ import com.semgravio.aiplatform.business.project.application.ProjectVersionAppSe
 import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.VersionRollbackStartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 
@@ -157,16 +158,14 @@ class ProjectVersionControllerTest {
     }
 
     @Test
-    void given_valid_ref_when_rollback_then_new_version_wrapped() throws Exception {
+    void given_valid_ref_when_rollback_then_run_id_and_label_wrapped() throws Exception {
         when(versionAppService.rollback(any(), anyString())).thenReturn(
-                new VersionResponse("d3d3d3d3", "回滚到「更新了系统」", null, null, "a1a1a1a1",
-                        LocalDateTime.of(2026, 9, 5, 13, 0), false, false));
+                new VersionRollbackStartResponse("run-627", "回到 v1"));
 
         performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.commitHash").value("d3d3d3d3"))
-                .andExpect(jsonPath("$.data.rollbackFrom").value("a1a1a1a1"))
-                .andExpect(jsonPath("$.data.runId").isEmpty());
+                .andExpect(jsonPath("$.data.runId").value("run-627"))
+                .andExpect(jsonPath("$.data.label").value("回到 v1"));
     }
 
     @Test
@@ -192,14 +191,13 @@ class ProjectVersionControllerTest {
     }
 
     @Test
-    void given_dirty_tree_when_rollback_then_409() throws Exception {
-        doThrow(new ApplicationException(ProjectMessage.VERSION_ROLLBACK_DIRTY_TREE))
+    void given_archived_project_when_rollback_then_409() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
                 .when(versionAppService).rollback(any(), anyString());
 
         performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(4032))
-                .andExpect(jsonPath("$.message").value("系统有未完成的改动，请稍后再回滚"));
+                .andExpect(jsonPath("$.code").value(4013));
     }
 
     static class ExceptionAdviceConfig {

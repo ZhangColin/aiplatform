@@ -19,11 +19,12 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
 
 /**
- * 容器内 git 管道活体（#91 版本层地基，B0 §5 副作用以真实状态为准）：真 dev
- * 容器里跑 {@link WorkspaceVersions} 保留命令——仓库初始化（#430 身份自愈）、
- * 工作树脏检、回滚到此（追加版本、只回代码不回数据）、.git 不进源码包。
- * 收口成版（Run-Id trailer）与段失败回滚等旧生成栈辅助件随审查与收口组退役
- * （#605）——本活体只覆盖留存项。daemon 不在则跳过（CI 无 docker 时不红）。
+ * 容器内 git 管道活体（#91 版本层地基，B0 §5 副作用以真实状态为准；#627 回滚
+ * 语义）：真 dev 容器里跑 {@link WorkspaceVersions} 保留命令——仓库初始化（#430
+ * 身份自愈）、用户面版本成版／列表（#626）、回滚代码复位（只 restore tracked、
+ * 数据/活库不倒带）后成版、.git 不进源码包。脏树检随 #627「只拦 run 在途」语义
+ * 删除；收口成版（Run-Id trailer）与段失败回滚等旧生成栈辅助件随审查与收口组
+ * 退役（#605）——本活体只覆盖留存项。daemon 不在则跳过（CI 无 docker 时不红）。
  */
 @Tag("live")
 class WorkspaceVersionsLiveTest {
@@ -97,53 +98,59 @@ class WorkspaceVersionsLiveTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_versions_when_rollback_then_append_version_code_reverted_data_kept_and_iteration_continues() {
+    void given_versions_when_restore_then_code_reverted_data_kept_and_iteration_continues() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
 
-        // 两版（Rollback-From trailer 即版本成员判据）：v1 → v2（v2 改动 index.html）
+        // 两版用户面版本（Platform-Version trailer 即成员判据）：v1 → v2（v2 改 index.html）
         exec("echo '<html>v1</html>' > /workspace/index.html");
-        String hash1 = versionCommit("首次生成了系统", "11111111");
+        String hash1 = platformVersionCommit(1, "run-1", "首次生成了系统");
         exec("echo '<html>v2</html>' > /workspace/index.html");
-        String hash2 = versionCommit("更新了系统", "22222222");
+        String hash2 = platformVersionCommit(2, "run-2", "更新了系统");
         // 业务数据（非跟踪面，落 data/ 进卷）：回滚只回代码、不应触碰
         exec("mkdir -p /workspace/data && echo 'keep-me' > /workspace/data/keep.txt");
 
-        // 回滚到 v1：追加新 commit、代码复位、数据保留
-        ExecResult rolled = exec(WorkspaceVersions.rollbackCommand(hash1, "回滚到「首次生成了系统」"));
-        assertThat(rolled.exitCode()).as("回滚应成功：%s", rolled.stderr()).isZero();
+        // 回滚第一步：只 restore tracked 文件（不提交——成版由编排在 build/起服/探活后做）
+        ExecResult restored = exec(WorkspaceVersions.restoreCommand(hash1));
+        assertThat(restored.exitCode()).as("代码复位应成功：%s", restored.stderr()).isZero();
+        // 未提交：HEAD 仍是 v2（restore 只改工作树/索引），历史不被改写
+        assertThat(exec("git -C /workspace rev-parse HEAD").stdout().trim()).isEqualTo(hash2);
+        assertThat(exec("cat /workspace/index.html").stdout().trim())
+                .as("工作树应已复位到 v1 代码").isEqualTo("<html>v1</html>");
+        assertThat(exec("cat /workspace/data/keep.txt").stdout().trim())
+                .as("业务数据应保留（回滚只回代码）").isEqualTo("keep-me");
+
+        // 回滚成版（成功路径）：vN+1 携版本标记、主题「回到 v1」，历史只追加
+        ExecResult rolled = exec(WorkspaceVersions.commitVersionCommand(3, "rollback-run", "回到 v1"));
+        assertThat(rolled.exitCode()).as("回滚成版应成功：%s", rolled.stderr()).isZero();
         String rollbackHash = rolled.stdout().trim();
         assertThat(rollbackHash).isNotEmpty().isNotEqualTo(hash1).isNotEqualTo(hash2);
 
-        // git log 即版本序列：追加新版本（新→旧：回滚 → v2 → v1），历史只追加不改写
+        // git log 即版本序列：新→旧：回滚版 → v2 → v1
         ExecResult log = exec(WorkspaceVersions.listCommand());
         assertThat(log.exitCode()).isZero();
         var versions = WorkspaceVersions.parseLog(log.stdout());
         assertThat(versions).hasSize(3);
         assertThat(versions.get(0).commitHash()).isEqualTo(rollbackHash);
-        assertThat(versions.get(0).rollbackFrom()).isEqualTo(hash1);
-        assertThat(versions.get(0).runId()).isNull();
+        assertThat(versions.get(0).versionNo()).isEqualTo(3);
+        assertThat(versions.get(0).subject()).isEqualTo("回到 v1");
         assertThat(versions.get(1).commitHash()).isEqualTo(hash2);
         assertThat(versions.get(2).commitHash()).isEqualTo(hash1);
 
-        // 系统代码回到当时（回滚 commit 树 = v1 内容）、数据保留
+        // 回滚 commit 树 = v1 代码；数据保留
         assertThat(exec("git -C /workspace show " + rollbackHash + ":index.html").stdout().trim())
                 .as("回滚 commit 树应含 v1 代码").isEqualTo("<html>v1</html>");
-        assertThat(exec("cat /workspace/index.html").stdout().trim())
-                .as("工作树应已复位到 v1 代码").isEqualTo("<html>v1</html>");
-        assertThat(exec("cat /workspace/data/keep.txt").stdout().trim())
-                .as("业务数据应保留（回滚只回代码）").isEqualTo("keep-me");
-        // 回滚后数据仍可写（AC2「可继续读写」——非跟踪面数据目录随卷可写、不被回滚触碰）
+        // 回滚后数据仍可写（非跟踪面数据目录随卷可写、不被回滚触碰）
         exec("echo 'after-rollback' > /workspace/data/keep2.txt");
         assertThat(exec("cat /workspace/data/keep2.txt").stdout().trim())
                 .as("回滚后业务数据应可继续写").isEqualTo("after-rollback");
 
         // 回滚后可继续迭代：下一轮提交正常成新版本（基于回滚后代码）
-        exec("echo '<html>v3-after-rollback</html>' > /workspace/index.html");
-        String hash3 = versionCommit("回滚后继续迭代", "33333333");
-        assertThat(hash3).isNotEmpty().isNotEqualTo(rollbackHash);
-        assertThat(exec("git -C /workspace show " + hash3 + ":index.html").stdout().trim())
-                .as("回滚后继续迭代的产物应基于回滚后代码").isEqualTo("<html>v3-after-rollback</html>");
+        exec("echo '<html>v4-after-rollback</html>' > /workspace/index.html");
+        String hash4 = platformVersionCommit(4, "run-4", "回滚后继续迭代");
+        assertThat(hash4).isNotEmpty().isNotEqualTo(rollbackHash);
+        assertThat(exec("git -C /workspace show " + hash4 + ":index.html").stdout().trim())
+                .as("回滚后继续迭代的产物应基于回滚后代码").isEqualTo("<html>v4-after-rollback</html>");
     }
 
     @Test
@@ -181,41 +188,12 @@ class WorkspaceVersionsLiveTest {
         assertThat(versions).noneMatch(version -> version.commitHash().equals(snapshotHash));
     }
 
-    @Test
-    @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_dirty_worktree_when_status_then_untracked_ignored_tracked_detected() {
-        requireDockerDaemon();
-        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
-
-        // 干净树（提交后无未提交 tracked 改动）
-        exec(WorkspaceVersions.ensureRepoCommand());
-        exec("echo '<html>v1</html>' > /workspace/index.html");
-        exec("cd /workspace && git add -A && git commit -q -m '提交'");
-        ExecResult clean = exec(WorkspaceVersions.statusCommand());
-        assertThat(clean.exitCode()).isZero();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(clean.stdout())).isFalse();
-
-        // 仅 untracked（scratch.txt，非交付面）→ restore 不触，不算会被丢弃的改动
-        exec("echo 'draft' > /workspace/scratch.txt");
-        ExecResult onlyUntracked = exec(WorkspaceVersions.statusCommand());
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(onlyUntracked.stdout())).isFalse();
-
-        // 改动 tracked 交付物（index.html）→ 脏树检出（回滚会静默丢弃，须拒）
-        exec("echo '<html>v2-wip</html>' > /workspace/index.html");
-        ExecResult dirty = exec(WorkspaceVersions.statusCommand());
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(dirty.stdout())).isTrue();
-    }
-
     // ---------- 工具 ----------
 
-    /** 幂等 init + 手动提交携 Rollback-From trailer（版本成员判据；回读 HEAD hash）。 */
-    private String versionCommit(String subject, String rollbackFrom) {
-        ExecResult ensured = exec(WorkspaceVersions.ensureRepoCommand());
-        assertThat(ensured.exitCode()).as("仓库初始化应成功：%s", ensured.stderr()).isZero();
-        ExecResult committed = exec("cd /workspace && git add -A"
-                + " && git commit -q --allow-empty -m '" + subject + "'"
-                + " -m 'Rollback-From: " + rollbackFrom + "'"
-                + " && git rev-parse HEAD");
+    /** 平台用户面版本提交（#626/#627：Platform-Version＋Run-Id trailer；回读 HEAD hash）。 */
+    private String platformVersionCommit(int versionNo, String runId, String subject) {
+        ExecResult committed =
+                exec(WorkspaceVersions.commitVersionCommand(versionNo, runId, subject));
         assertThat(committed.exitCode()).as("提交应成功：%s", committed.stderr()).isZero();
         return committed.stdout().trim();
     }

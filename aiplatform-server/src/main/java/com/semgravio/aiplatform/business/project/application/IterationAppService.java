@@ -401,7 +401,8 @@ public class IterationAppService {
                             (attemptRunId, attemptChanges) -> closeKernelFix(project, attemptRunId,
                                     prdVersionNo, attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),
-                            RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN);
+                            RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
+                            /* includePatch= */ true); // 迭代清单携单文件只读 diff（#619）
                 }
                 catch (RunStoppedException e) {
                     // 停止收口（#359 生成取消）：失败账口径——本场（＋排队残队的意见

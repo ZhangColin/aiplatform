@@ -601,7 +601,8 @@ public class GenerationAppService {
                 KERNEL_FIRST_RUN_PROMPT,
                 (attemptRunId, attemptChanges) -> closeKernelGeneration(project),
                 CodingRunDispatcher.GENERATE_LABEL, true, CodingRunDispatcher.RunSeat.kernel(),
-                RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN);
+                RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN,
+                /* includePatch= */ false); // 首建清单只出真实行数（目录汇总归 #620）
         if (!result.succeeded()) {
             reopenFirstBuildRequest(projectId);
             eventBridge.emitRunFailed(project, firstRunId, result.failure());

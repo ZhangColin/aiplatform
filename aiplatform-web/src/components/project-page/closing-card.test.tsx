@@ -119,6 +119,25 @@ describe("ClosingCard · 五字段（#617）", () => {
     expect(html).toContain("用时");
   });
 
+  it("patch 超限省略：行数保留、卡上标注「diff 过大」（#619）", () => {
+    const html = renderCard(
+      closing({ files: [{ path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true }] }),
+    );
+
+    expect(html).toContain("/src/Huge.jsx");
+    expect(html).toContain("+500");
+    expect(html).toContain("diff 过大");
+  });
+
+  it("变更清单不可用：标注不可用、不出合计与文件行，其余字段照常（#619 降级）", () => {
+    const html = renderCard(closing({ files: [], filesUnavailable: true }));
+
+    expect(html).toContain("变更清单不可用");
+    expect(html).not.toContain("个文件");
+    expect(html).toContain("生成完成");
+    expect(html).toContain("用时");
+  });
+
   it("长清单默认收五条，「查看全部 N 个文件」收进折叠", () => {
     const files = Array.from({ length: 7 }, (_, index) => ({
       path: `/src/File${index + 1}.jsx`,

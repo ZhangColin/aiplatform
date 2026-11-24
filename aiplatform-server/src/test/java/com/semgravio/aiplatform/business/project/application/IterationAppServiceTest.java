@@ -512,14 +512,21 @@ class IterationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_scripted_update_round_when_fix_closes_then_run_finish_carries_five_field_closing() {
-        // 灵魂用例（#617）：脚本化更新轮收口——五字段骨架齐（用时/判据逐件/内核
-        // 自述/变更清单/预览入口由前端查询提供）；判定键与平台句式摘要退役；
-        // 清单与统计源 = 工具调用观察（文件级，真实 diff 归 #619）+ run 时长
+        // 灵魂用例（#617/#619）：脚本化更新轮收口——五字段骨架齐（用时/判据逐件/
+        // 内核自述/变更清单/预览入口由前端查询提供）；判定键与平台句式摘要退役；
+        // 变更清单来源 = 工作区真实 diff（跑前快照基线 + 收口 numstat），迭代另携
+        // 单文件只读 patch——工具参数观察不再参与
         Long projectId = persistedGeneratedProject("9915");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(List.of(
-                new FileChange("/src/pages/Orders.jsx", 12, 3),
-                new FileChange("/src/App.jsx", 4, 0)));
+        givenSnapshotAndDiff(
+                "12\t3\tsrc/pages/Orders.jsx\n4\t0\tsrc/App.jsx\n",
+                "diff --git a/src/App.jsx b/src/App.jsx\n"
+                        + "--- a/src/App.jsx\n+++ b/src/App.jsx\n@@ -1 +1,4 @@\n+新增\n"
+                        + "diff --git a/src/pages/Orders.jsx b/src/pages/Orders.jsx\n"
+                        + "--- a/src/pages/Orders.jsx\n+++ b/src/pages/Orders.jsx\n"
+                        + "@@ -1,3 +1,12 @@\n-旧\n+新\n");
+        // 工具参数观察与真实 diff 刻意不同——收尾卡必须取 diff
+        givenConverseClosing(List.of(new FileChange("/src/pages/Orders.jsx", 99, 99)));
 
         appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
         tracks.remove(0).run();
@@ -539,10 +546,16 @@ class IterationAppServiceTest {
         // 旧平台句式摘要与「需求文档／系统」判定键退役
         assertThat(closing).doesNotContainKeys(
                 "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
-        // 变更清单：文件级、路径排序稳定
-        assertThat((List<Map<String, Object>>) closing.get("files")).containsExactly(
-                Map.of("path", "/src/App.jsx", "added", 4, "removed", 0),
-                Map.of("path", "/src/pages/Orders.jsx", "added", 12, "removed", 3));
+        // 变更清单：真实 diff 行数、路径排序稳定、单文件只读 patch 在场
+        List<Map<String, Object>> files = (List<Map<String, Object>>) closing.get("files");
+        assertThat(files).extracting(file -> file.get("path"))
+                .containsExactly("/src/App.jsx", "/src/pages/Orders.jsx");
+        assertThat(files.get(0)).containsEntry("added", 4).containsEntry("removed", 0);
+        assertThat(files.get(1)).containsEntry("added", 12).containsEntry("removed", 3);
+        assertThat((String) files.get(0).get("patch")).contains("+新增");
+        assertThat((String) files.get(1).get("patch")).contains("-旧").contains("+新");
+        assertThat(files).allSatisfy(file -> assertThat(file).doesNotContainKey("patchOmitted"));
+        assertThat(closing).doesNotContainKey("filesUnavailable");
         // 轮末统计：时长在场（≥0——起跑到收口的活动量，非墙钟断言）
         assertThat(closing.get("durationMs")).isInstanceOf(Long.class);
         assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);
@@ -550,13 +563,46 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void given_patch_over_limit_when_fix_closes_then_patch_omitted_but_lines_kept() {
+        // #619 AC：单文件 patch 超限（300 行）省略但保留行数并标注——前端呈现
+        // 「diff 过大」；行数事实来自 numstat 不受 patch 省略影响
+        Long projectId = persistedGeneratedProject("9921");
+        List<Runnable> tracks = givenTrackQueued();
+        StringBuilder huge = new StringBuilder("diff --git a/src/Big.jsx b/src/Big.jsx");
+        for (int index = 0; index < 301; index++) {
+            huge.append("\n+line ").append(index);
+        }
+        givenSnapshotAndDiff("500\t0\tsrc/Big.jsx\n", huge.toString());
+        givenConverseClosing(List.of());
+
+        appService.startFixRun(projectId, "大改一页", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat((List<Map<String, Object>>) closing.get("files")).singleElement()
+                .satisfies(file -> {
+                    assertThat(file).containsEntry("path", "/src/Big.jsx")
+                            .containsEntry("added", 500)
+                            .containsEntry("removed", 0)
+                            .containsEntry("patchOmitted", true)
+                            .doesNotContainKey("patch");
+                });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void given_scripted_update_round_when_fix_closes_then_closing_has_no_version_anchor() {
         // 收口自动成版（Run-Id trailer）随审查与收口组退役（#605）：收尾卡不再携
-        // version 键、收口路径不再提交 git 版本（版本语义归阶段四重建）
+        // version 键；#619 跑前快照会提交 git（平台标识、无 trailer）——快照不是
+        // 用户面版本，版本序列成员判据（Rollback-From）天然过滤
         Long projectId = persistedGeneratedProject("9917");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(List.of(
-                new FileChange("/src/pages/Orders.jsx", 12, 3)));
+        givenSnapshotAndDiff("12\t3\tsrc/pages/Orders.jsx\n", "");
+        givenConverseClosing(List.of());
 
         appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
         tracks.remove(0).run();
@@ -570,17 +616,21 @@ class IterationAppServiceTest {
         ArgumentCaptor<WorkspaceExecCommand> execs =
                 ArgumentCaptor.forClass(WorkspaceExecCommand.class);
         verify(workspaceLifecycleAppService, atLeast(0)).exec(any(), execs.capture());
+        // 只允许无 trailer 的跑前快照提交；不得出现带 Rollback-From 的版本提交
         assertThat(execs.getAllValues().stream().map(WorkspaceExecCommand::command))
-                .noneSatisfy(command -> assertThat(command).contains("git commit"));
+                .noneSatisfy(command -> assertThat(command).contains("Rollback-From"));
+        assertThat(execs.getAllValues().stream().map(WorkspaceExecCommand::command))
+                .anySatisfy(command -> assertThat(command).contains("-m 'snapshot "));
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void given_no_file_changes_when_fix_closes_then_closing_has_empty_change_list() {
-        // #617：系统无实际文件改动的轮——变更清单为空（不再有「系统无需改动」
-        // 判定行）；判据双件仍全过才收口，内核自述照常取末次文本
+        // #617/#619：系统无实际文件改动的轮——真实 diff 为空清单（不再有「系统无需
+        // 改动」判定行）；判据双件仍全过才收口，内核自述照常取末次文本
         Long projectId = persistedGeneratedProject("9916");
         List<Runnable> tracks = givenTrackQueued();
+        givenSnapshotAndDiff("", "");
         givenConverseClosing(List.of());
 
         appService.startFixRun(projectId, "把配送范围改成全国", null);
@@ -598,6 +648,50 @@ class IterationAppServiceTest {
         assertThat(closing).doesNotContainKeys(
                 "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
         assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+        assertThat(closing).doesNotContainKey("filesUnavailable"); // 空清单不是降级
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_diff_fails_when_fix_closes_then_run_succeeds_and_changes_unavailable() {
+        // #619 降级：快照或 diff 失败只降级变更清单（标注「变更清单不可用」）——
+        // 修正 run 照常成功收口，其余字段照常
+        Long projectId = persistedGeneratedProject("9922");
+        List<Runnable> tracks = givenTrackQueued();
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse("", "fatal: bad revision", 128));
+        givenConverseClosing(List.of());
+
+        appService.startFixRun(projectId, "列表页加一列状态", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).containsEntry("filesUnavailable", true)
+                .containsEntry("narrative", "修正完成");
+        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true);
+    }
+
+    /** 跑前快照成功（回读 hash）＋收口 numstat 与完整 patch 脚本（#619 diff 缝）。 */
+    private void givenSnapshotAndDiff(String numstat, String patch) {
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse(numstat, "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("diff --cached --no-renames '"))))
+                .thenReturn(new ExecResultResponse(patch, "", 0));
     }
 
     // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------

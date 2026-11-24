@@ -85,17 +85,30 @@ export type WorkClosingCriteria = {
 };
 
 /**
- * 收尾卡权威事实（#617 五字段骨架，#89 起归对话流）：用时（durationMs）/
- * 判据逐件（criteria）/变更清单（files，文件级；本票仍为工具调用观察来源，
- * #619 改真实 diff）/内核自述（narrative，内核末次文本）/预览入口（取既有
- * 预览查询，不入载荷）。live 经 run-finish.closing 到达、回访经对话史水合
- * ——同载荷同形；旧载荷（summary/判定键）由读侧回落呈现（见 toWorkClosing）。
+ * 收尾卡权威事实（#617 五字段骨架；#619 变更清单改真实 diff，#89 起归对话流）：
+ * 用时（durationMs）/判据逐件（criteria）/变更清单（files，跑前快照基线的真实
+ * ± 行数；迭代携单文件只读 patch、首建只出行数）/内核自述（narrative，内核末次
+ * 文本）/预览入口（取既有预览查询，不入载荷）。live 经 run-finish.closing 到达、
+ * 回访经对话史水合——同载荷同形；旧载荷（summary/判定键/活动量行数）由读侧
+ * 回落呈现（见 toWorkClosing）。
  */
+export type WorkClosingFile = {
+  path: string;
+  added: number;
+  removed: number;
+  /** 单文件只读 diff 文本（#619 迭代）；首建与超限省略时缺省。 */
+  patch?: string;
+  /** patch 超限省略（#619）——卡上标注「diff 过大」，行数仍保留。 */
+  patchOmitted?: boolean;
+};
+
 export type WorkClosing = {
   /** 内核自述（markdown 源；空则卡片不出该块）。 */
   narrative?: string;
   criteria: WorkClosingCriteria;
-  files: { path: string; added: number; removed: number }[];
+  files: WorkClosingFile[];
+  /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
+  filesUnavailable?: boolean;
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；#605 后新载荷不再携带，存量旧卡沿用）。 */
   version?: string;
@@ -863,12 +876,15 @@ function appendMessage(chat: ProjectChat, message: ChatMessage): ProjectChat {
 }
 
 /**
- * closing 载荷的容错收窄（#617 五字段；live 事件与水合同形）：只兜「载荷非对象」
- * 的形状异常（视同无收尾卡，不出坏卡）；files 非数组回落空清单。
+ * closing 载荷的容错收窄（#617 五字段；#619 变更清单真实 diff；live 事件与水合
+ * 同形）：只兜「载荷非对象」的形状异常（视同无收尾卡，不出坏卡）；files 非数组
+ * 回落空清单。filesUnavailable 只在明确 true 时呈现降级；patch/patchOmitted
+ * 按可选字段收窄。
  *
  * <p>旧载荷回落可读（旧对话史不出坏卡）：#617 前落库的收尾卡没有 criteria /
- * narrative，而是平台句式 summary＋「需求文档／系统」判定键。旧 summary 作为
- * 内核自述的回退文本呈现；判据按收口不变式（closing 在场 ⟺ build＋预览双件
+ * narrative，而是平台句式 summary＋「需求文档／系统」判定键；#619 前的 files
+ * 行数是工具参数活动量、无 patch——同样按文件级呈现，只少 diff 展开。旧 summary
+ * 作为内核自述的回退文本呈现；判据按收口不变式（closing 在场 ⟺ build＋预览双件
  * 全过）回落双 ✓。新载荷的 narrative 为空/缺省时不出该块。</p>
  */
 export function toWorkClosing(raw: unknown): WorkClosing | undefined {
@@ -890,15 +906,19 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     files: Array.isArray(record.files)
       ? record.files.flatMap((file) => {
           const entry = asRecord(file);
-          return entry && typeof entry.path === "string"
-            ? [{
-                path: entry.path,
-                added: typeof entry.added === "number" ? entry.added : 0,
-                removed: typeof entry.removed === "number" ? entry.removed : 0,
-              }]
-            : [];
+          if (!entry || typeof entry.path !== "string") return [];
+          return [{
+            path: entry.path,
+            added: typeof entry.added === "number" ? entry.added : 0,
+            removed: typeof entry.removed === "number" ? entry.removed : 0,
+            ...(typeof entry.patch === "string" && entry.patch.length > 0
+              ? { patch: entry.patch }
+              : {}),
+            ...(entry.patchOmitted === true ? { patchOmitted: true } : {}),
+          }];
         })
       : [],
+    ...(record.filesUnavailable === true ? { filesUnavailable: true } : {}),
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
   };

@@ -192,6 +192,18 @@ class GenerationAppServiceTest {
                 });
     }
 
+    /** 智能体边界正常收口并发出 run-finish（收口扩载断言用：closing 只在真收口时产生）。 */
+    private void givenConverseFinishing(String text) {
+        when(agentClient.converse(any(AgentCommand.class), any()))
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), text);
+                });
+    }
+
     /**
      * 链式收口脚本（thenThrow/thenReturn 链的带验证登记形，登记仍作观测面——
      * #435 起非收口要件）：第 n 次调用按序取 outcomes（{@link AgentReply}＝成功回复〔先登记
@@ -749,12 +761,14 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_scripted_generation_when_closes_then_run_finish_carries_five_field_closing() {
-        // #617 收口扩载·生成轨道五字段骨架：用时 / 判据逐件（build＋预览）/
-        // 内核自述（内核末次文本）/ 变更清单（本票仍为工具调用观察）/ 预览入口由
-        // 前端既有预览查询提供；旧平台句式摘要与「需求文档／系统」判定键不再写
+        // #617 收口扩载·生成轨道五字段骨架；#619 变更清单来源改工作区真实 diff：
+        // 用时 / 判据逐件（build＋预览）/ 内核自述（内核末次文本）/ 变更清单
+        // （跑前快照基线 + 收口 numstat，不再用工具参数推算）/ 预览入口由前端
+        // 既有预览查询提供；旧平台句式摘要与「需求文档／系统」判定键不再写
         Long projectId = persistedProject("9811");
         givenSessionExecutorRunsInline();
         givenWorkspaceExecSucceeds();
+        givenSnapshotAndNumstat("12\t3\tsrc/App.jsx\n60\t0\tsrc/pages/Home.jsx\n");
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
@@ -762,6 +776,8 @@ class GenerationAppServiceTest {
                     Map.of("prompt", command.prompt())));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 工具参数观察与真实 diff 刻意不同——收尾卡必须取 diff（命令行改的
+            // 文件也计入、行数为真实结果），并证明来源已切换
             return new AgentReply(command.runId(), "系统已生成", null, List.of(
                     new FileChange("/src/App.jsx", 40, 0),
                     new FileChange("/src/pages/Home.jsx", 60, 0)));
@@ -784,8 +800,137 @@ class GenerationAppServiceTest {
         // 旧平台句式摘要与「需求文档／系统」判定键退役
         assertThat(sliceClosing).doesNotContainKeys(
                 "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
-        assertThat((List<Map<String, Object>>) sliceClosing.get("files")).hasSize(2);
+        // 变更清单 = 真实 diff 行数（不是 FileChange 的 40/60），按路径排序；
+        // 首建不携 patch（目录汇总归 #620，本票先不造无用载荷）
+        assertThat((List<Map<String, Object>>) sliceClosing.get("files")).containsExactly(
+                Map.of("path", "/src/App.jsx", "added", 12, "removed", 3),
+                Map.of("path", "/src/pages/Home.jsx", "added", 60, "removed", 0));
+        assertThat(sliceClosing).doesNotContainKey("filesUnavailable");
         assertThat((Long) sliceClosing.get("durationMs")).isGreaterThanOrEqualTo(0L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_generation_when_runs_then_snapshot_commit_before_model_converse_and_not_a_version() {
+        // #619：每次编码 run 起跑前自动快照提交（幂等仓库 + 全量提交），先于模型
+        // 对话；快照 commit 不带 Rollback-From trailer——不进用户面版本序列
+        Long projectId = persistedProject("9825");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceExecSucceeds();
+        givenSnapshotAndNumstat("4\t0\tsrc/App.jsx\n");
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+
+        InOrder order = inOrder(workspaceLifecycleAppService, agentClient);
+        order.verify(workspaceLifecycleAppService).exec(eq("9825"),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot ")));
+        order.verify(agentClient).converse(any(), any());
+        ArgumentCaptor<WorkspaceExecCommand> execs = ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9825"), execs.capture());
+        List<String> snapshotCommands = execs.getAllValues().stream()
+                .map(WorkspaceExecCommand::command)
+                .filter(command -> command.contains("-m 'snapshot "))
+                .toList();
+        assertThat(snapshotCommands).hasSize(1);
+        assertThat(snapshotCommands.get(0))
+                .contains("git add -A")
+                .doesNotContain("Rollback-From");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_snapshot_fails_when_closes_then_run_succeeds_and_changes_unavailable() {
+        // #619 降级：快照失败只降级变更清单（标注「变更清单不可用」），生成照常
+        // 成功、其余字段照常——不把 git 副作用升级成生成失败
+        Long projectId = persistedProject("9826");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceExecSucceeds();
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("", "fatal: unable to write", 128));
+        givenConverseFinishing("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+
+        assertThat(generatedAt(projectId)).isNotNull(); // 生成照常成功
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).containsEntry("filesUnavailable", true)
+                .containsEntry("narrative", "完成");
+        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+        // 其余字段照常：判据逐件与用时仍在
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
+        assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);
+        // 快照失败即无基线——不再尝试 diff
+        verify(workspaceLifecycleAppService, never()).exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_diff_fails_when_closes_then_run_succeeds_and_changes_unavailable() {
+        // #619 降级：快照成功但收口 diff 执行失败——生成仍成功，变更清单标注不可用
+        Long projectId = persistedProject("9827");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceExecSucceeds();
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse("", "fatal: bad revision", 128));
+        givenConverseFinishing("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).containsEntry("filesUnavailable", true);
+        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_real_diff_when_closes_then_conversation_history_same_payload() {
+        // #619 AC：对话史落库与 SSE 收尾载荷同形——读回落库条目，变更清单
+        // （文件级行数与不可用标记）按值一致
+        Long projectId = persistedProject("9828");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceExecSucceeds();
+        givenSnapshotAndNumstat("7\t2\tsrc/App.jsx\n");
+        givenConverseFinishing("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> persisted = conversationHistory.read(projectId).stream()
+                .filter(entry -> entry.closing() != null)
+                .reduce((first, second) -> second).orElseThrow().closing();
+        assertThat(normalized(persisted)).isEqualTo(normalized(closing));
+    }
+
+    /** 跑前快照成功（回读 hash）＋收口 numstat 脚本（#619 变更清单真实 diff 缝）。 */
+    private void givenSnapshotAndNumstat(String numstat) {
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse(numstat, "", 0));
     }
 
     @Test

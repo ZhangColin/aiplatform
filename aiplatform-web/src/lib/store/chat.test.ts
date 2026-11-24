@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RaisedQuestion } from "@/lib/chat/qa";
 
-import { pendingQuestionOf, useChatStore, type ChatMessage } from "./chat";
+import { pendingQuestionOf, toWorkClosing, useChatStore, type ChatMessage } from "./chat";
 
 function question(id: string, overrides: Partial<RaisedQuestion> = {}): RaisedQuestion {
   return {
@@ -701,5 +701,38 @@ describe("chat store · 试用拦截卡（#533 计费②门②）", () => {
 
     const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
     expect(messages.map((m) => m.kind)).toEqual(["intercept", "agent"]);
+  });
+});
+
+describe("toWorkClosing · 变更清单真实 diff 收窄（#619）", () => {
+  it("携 patch / patchOmitted / filesUnavailable：按可选字段收窄，行数保留", () => {
+    const closing = toWorkClosing({
+      narrative: "修正完成",
+      criteria: { buildPassed: true, previewPassed: true },
+      files: [
+        { path: "/src/App.jsx", added: 4, removed: 0, patch: "diff --git a/src/App.jsx\n+新\n" },
+        { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true },
+      ],
+      filesUnavailable: true,
+      durationMs: 1000,
+    });
+
+    expect(closing?.files).toEqual([
+      { path: "/src/App.jsx", added: 4, removed: 0, patch: "diff --git a/src/App.jsx\n+新\n" },
+      { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true },
+    ]);
+    expect(closing?.filesUnavailable).toBe(true);
+  });
+
+  it("旧载荷（无 patch / 无 filesUnavailable）：文件级行数照读，不凭空标降级", () => {
+    const closing = toWorkClosing({
+      summary: "更新了系统",
+      files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
+      durationMs: 1,
+    });
+
+    expect(closing?.files).toEqual([{ path: "/src/App.jsx", added: 40, removed: 0 }]);
+    expect(closing?.filesUnavailable).toBeUndefined();
+    expect(closing?.narrative).toBe("更新了系统");
   });
 });

@@ -33,6 +33,7 @@ import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
+import com.semgravio.aiplatform.business.project.domain.model.WorkspaceChanges;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -152,6 +153,7 @@ class CodingRunDispatcher {
     private final ConversationHistoryAppService conversationHistory;
     private final CodingRunTrack codingRunTrack;
     private final SegmentSettlementAppService segmentSettlement;
+    private final WorkspaceChangeAppService workspaceChanges;
 
     CodingRunDispatcher(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
@@ -159,7 +161,8 @@ class CodingRunDispatcher {
             GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
             CodingRunTrack codingRunTrack,
-            SegmentSettlementAppService segmentSettlement) {
+            SegmentSettlementAppService segmentSettlement,
+            WorkspaceChangeAppService workspaceChanges) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
@@ -169,6 +172,7 @@ class CodingRunDispatcher {
         this.conversationHistory = conversationHistory;
         this.codingRunTrack = codingRunTrack;
         this.segmentSettlement = segmentSettlement;
+        this.workspaceChanges = workspaceChanges;
     }
 
     /**
@@ -179,7 +183,11 @@ class CodingRunDispatcher {
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
             RunSeat seat, RunHeading heading, List<String> meterRunIds, String knowledgePrefix,
             Instant runStartedAt, List<FileChange> runChanges,
-            List<AttemptDuration> attemptDurations) {
+            List<AttemptDuration> attemptDurations,
+            /** 跑前快照 commit hash（#619 收口 diff 基线）；快照失败 = null（清单降级）。 */
+            String changeBaseline,
+            /** 变更清单是否携单文件只读 diff（迭代 true / 首建 false）。 */
+            boolean includePatch) {
     }
 
     /**
@@ -210,9 +218,10 @@ class CodingRunDispatcher {
      * 即终态，失败语义＝明确展示＋重跑即恢复、不自动重跑（ADR-0055 #580-13：不造
      * 第三层重试）。#610 设计座与有界重试环随设计线整条退役拆除。</p>
      *
-     * <p><b>收口扩载（#617）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
+     * <p><b>收口扩载（#617/#619）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
      * 载荷——判据逐件（onSuccess 返回的权威事实）/ 内核自述（内核末次文本）/
-     * 变更清单（{@link AgentReply#changes()} 的文件级观察）/ 用时（起跑到收口）/
+     * 变更清单（#619 起为工作区真实 diff：跑前快照基线 + 收口 numstat；迭代另携
+     * 单文件只读 patch，首建只出行数——目录汇总归 #620）/ 用时（起跑到收口）/
      * 阶段耗时分布（#111 durationBreakdown——平台分析口径、前端不渲染）。
      * 咨询/纯追问轮不经本层，run-finish 无扩载（无收尾卡）。</p>
      *
@@ -226,6 +235,8 @@ class CodingRunDispatcher {
      * @param heading        工作消息头部标题（#118：标题 + 生成轨道进度；可空——
      *                       主智能体对话轮不经本层）——随 run-start 的 slice 字段
      *                       透出
+     * @param includePatch   变更清单是否携单文件只读 diff（迭代 = true；首建 = false，
+     *                       目录汇总与不携 patch 归 #620）
      * @return               收场事实（成败 + 收口终文）；失败转终态后的兜底归轨道层
      *                       ——终态收口事件 run-failed 锚 runId，用户侧重跑即恢复
      *                       （#604 失败新语义：生成/更新走点火入口「继续生成」，
@@ -234,14 +245,18 @@ class CodingRunDispatcher {
     RunResult run(Project project, String firstRunId, String sessionId, String prompt,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
             boolean injectKnowledge, RunSeat seat, RunHeading heading,
-            SegmentType segmentType) {
+            SegmentType segmentType, boolean includePatch) {
         Long projectId = project.getId();
         List<String> meterRunIds = new ArrayList<>();
+        // 跑前快照（#619）：内核起跑前对工作区做一次幂等全量提交，hash 作为收口
+        // diff 基线。失败不阻断（null → 变更清单降级），快照不进用户面版本序列。
+        String changeBaseline = workspaceChanges.snapshot(project.getWorkspaceId(), firstRunId);
         try {
             RunState state = new RunState(project, firstRunId, sessionId, prompt, onSuccess,
                     what, seat, heading, meterRunIds,
                     injectKnowledge ? knowledgeAppService.dispatchInjection(prompt) : "",
-                    Instant.now(), new ArrayList<>(), new ArrayList<>());
+                    Instant.now(), new ArrayList<>(), new ArrayList<>(), changeBaseline,
+                    includePatch);
             AttemptOutcome outcome = attempt(state);
             if (outcome.terminal() != null) {
                 return outcome.terminal();
@@ -391,8 +406,13 @@ class CodingRunDispatcher {
             ClosingJudgment judgment = state.onSuccess().apply(attemptRunId, runChanges);
             if (pendingFinish.get() != null) {
                 // 内核自述 = 内核自然终止时的末次文本（#617；模型文本不直播，
-                // 只在此落收尾卡）
-                Map<String, Object> closing = closingPayload(judgment, runChanges,
+                // 只在此落收尾卡）。变更清单 = 工作区真实 diff（#619）：快照基线在
+                // 场则对基线取 numstat（迭代另取单文件 patch），否则降级不可用。
+                WorkspaceChanges.ChangeSet changeSet = state.changeBaseline() == null
+                        ? WorkspaceChanges.ChangeSet.degraded()
+                        : workspaceChanges.diff(workspaceId, state.changeBaseline(),
+                                state.includePatch());
+                Map<String, Object> closing = closingPayload(judgment, changeSet,
                         runStartedAt, reply.text());
                 // 阶段耗时分布（#111）：收口尾序止表于载荷定型（落库自指不可测——
                 // 载荷先于落库定型，量级极小忽略）；三桶齐备 + 逐尝试分布
@@ -527,16 +547,18 @@ class CodingRunDispatcher {
     static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
 
     /**
-     * 收口扩载拼装（#617 五字段骨架）：被押后的 run-finish 载荷加 {@code closing}
-     * 对象——schema 见 SSE事件清单·收口扩载（对话史落库 #89 复用同一载荷，
-     * 拼装单点：SSE 扩载与对话史落库取同一 map）。五字段 = 用时（durationMs）/
-     * 判据逐件（criteria）/ 变更清单（files，本票仍为工具调用观察，#619 改真实
-     * diff）/ 内核自述（narrative，空文本不写）/ 预览入口（前端取既有预览查询，
-     * 不入载荷）。旧平台句式摘要与「需求文档／系统」判定键退役；档案内旧载荷由
-     * 前端读侧回落呈现（旧对话史不出坏卡）。
+     * 收口扩载拼装（#617 五字段骨架；#619 变更清单改真实 diff）：被押后的
+     * run-finish 载荷加 {@code closing} 对象——schema 见 SSE事件清单·收口扩载
+     * （对话史落库 #89 复用同一载荷，拼装单点：SSE 扩载与对话史落库取同一 map）。
+     * 五字段 = 用时（durationMs）/ 判据逐件（criteria）/ 变更清单（files，工作区
+     * 真实 diff；迭代携 patch、首建只出行数）/ 内核自述（narrative，空文本不写）/
+     * 预览入口（前端取既有预览查询，不入载荷）。快照或 diff 失败时 files 为空并
+     * 携 {@code filesUnavailable=true}（卡上标注「变更清单不可用」，其余字段照常）。
+     * 旧平台句式摘要与「需求文档／系统」判定键退役；档案内旧载荷由前端读侧回落
+     * 呈现（旧对话史不出坏卡）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
-            List<FileChange> changes, Instant runStartedAt, String narrative) {
+            WorkspaceChanges.ChangeSet changes, Instant runStartedAt, String narrative) {
         Map<String, Object> closing = new LinkedHashMap<>();
         if (narrative != null && !narrative.isBlank()) {
             closing.put(CLOSING_NARRATIVE_FIELD, narrative);
@@ -545,9 +567,36 @@ class CodingRunDispatcher {
         criteria.put("buildPassed", judgment.buildPassed());
         criteria.put("previewPassed", judgment.previewPassed());
         closing.put(CLOSING_CRITERIA_FIELD, criteria);
-        closing.put("files", filePayloads(changes));
+        closing.put("files", changePayloads(changes));
+        if (changes.unavailable()) {
+            closing.put(CLOSING_FILES_UNAVAILABLE_FIELD, true);
+        }
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
         return closing;
+    }
+
+    /** 收口扩载变更清单不可用标记键（#619：快照或 diff 执行失败时的降级事实）。 */
+    static final String CLOSING_FILES_UNAVAILABLE_FIELD = "filesUnavailable";
+
+    /**
+     * 真实 diff 变更清单载荷：文件级 ± 行数恒在；patch 可缺省（首建不携 / 超限
+     * 省略），{@code patchOmitted=true} 标注超限（前端呈现「diff 过大」）。顺序
+     * 已由 {@link WorkspaceChanges#assemble} 按路径排定。
+     */
+    private static List<Map<String, Object>> changePayloads(WorkspaceChanges.ChangeSet changes) {
+        return changes.files().stream().map(file -> {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("path", file.path());
+            payload.put("added", file.added());
+            payload.put("removed", file.removed());
+            if (file.patch() != null) {
+                payload.put("patch", file.patch());
+            }
+            if (file.patchOmitted()) {
+                payload.put("patchOmitted", true);
+            }
+            return payload;
+        }).toList();
     }
 
     /**

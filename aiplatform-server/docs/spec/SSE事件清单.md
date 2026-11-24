@@ -85,9 +85,9 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 > **来源归属（#95 委派位）**：委派子智能体转发进父流的过程事件带 `source` 字段（值 = 子智能体声明名，引擎 source 路径的末段）；run 执行体自身产出的过程事件**不携带** `source`（缺省 = 执行体——用户面仍无角色标签，source 只用于过程呈现归属）。携带范围：引擎透传事件（`text`/`reasoning`/`tool`/`step-*`，payload 顶层）与消息部件事件（`part-signal`/`part-action`）。生命周期事件（`run-start`/`run-finish` 等）恒为执行体层级，不带 source。
 
-#### 收口扩载 closing schema（#617 五字段骨架）
+#### 收口扩载 closing schema（#617 五字段骨架；#619 变更清单真实 diff）
 
-run-finish 的 `closing` 对象——收尾卡（工作消息定格后的收尾部件，非另起的卡）的唯一权威事实源，**对话史落库（#89）复用同一载荷**。判据与清单以平台可观测事实为准（工具调用/探活），不由模型自报：
+run-finish 的 `closing` 对象——收尾卡（工作消息定格后的收尾部件，非另起的卡）的唯一权威事实源，**对话史落库（#89）复用同一载荷**。判据与清单以平台可观测事实为准（build＋探活、工作区 git diff），不由模型自报：
 
 ```
 closing: {
@@ -98,22 +98,29 @@ closing: {
     buildPassed:   true,            #   pnpm build exit 0 = 可构建
     previewPassed: true             #   8081 探活有响应 = 预览可用
   },                                #   双件全过才判完成（closing 在场 ⟺ 双件全过）
-  files: [                          # 变更清单（文件清单级——服务端不产出 patch 类事件，
-                                    # 清单由本扩载权威承载；本票仍为工具调用观察来源，
-                                    # 真实 diff 归 #619）
-    { path: "src/App.jsx", added: 40, removed: 0 }    # path = write_file/edit_file 参数原形
-    ...                                              # （提示词示例为相对形、模型可携锚定形——两形自选，
-                                                     # 呈现面纯文本零语义消费，#306）；行数为
-                                                     # write_file（新文件行数）/ edit_file（新旧串行数）
-  ],                               # 的活动量口径：同路径跨尝试合并、按路径排序；
-                                   # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
+  files: [                          # 变更清单（#619：工作区真实 diff——跑前快照基线 +
+                                    # 收口 numstat；命令行改的文件也计入。服务端不产出
+                                    # patch 类事件，清单由本扩载权威承载）
+    { path: "/src/App.jsx",         # path = 工作区锚定形（/ 前缀；git 仓库相对形归一）
+      added: 12, removed: 3,        # 行数 = 对基线的真实 ± 行数（同路径按路径排序）
+      patch: "diff --git ..." },    # 单文件只读 diff（迭代模式；首建不携带——目录汇总
+                                    # 与首建不携 patch 归 #620）。patch 超限（300 行 /
+                                    # 20KB 单文件、128KB 整卡）省略该键并标 patchOmitted
+    { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true }
+  ],
+  filesUnavailable: true,           # 可缺省——快照或 diff 执行失败时 files 为空并标 true
+                                    # （卡上呈现「变更清单不可用」，生成照常成功）
   durationMs: 183420               # 用时（起跑到收口；文件数/变更行数由 files 派生，卡上
                                    # 只在变更清单头部呈现一次）
+  # 跑前快照提交（#619）：每场编码 run 起跑前自动 commit，提交信息只用平台标识
+  # （snapshot <runId>）、不带 Rollback-From——不进用户面版本序列、无确认门、无新按钮。
   # 预览入口不入载荷：前端取既有预览查询（GET /projects/{id}/preview）的 URL——
   # 未就绪禁用、就绪走既有「新窗口打开」动作（#617）。
   # 旧平台句式摘要 summary 与「需求文档／系统」判定键（prdChanged/prdNote/
   # systemChanged/systemNote）自 #617 起不再写入；存量旧行由前端读侧回落呈现
   # （旧 summary 作内核自述文本、判据按收口不变式回落双 ✓——旧对话史不出坏卡）。
+  # #619 前的 files 行数为工具参数活动量、无 patch/patchOmitted——前端同样按文件级
+  # 呈现，只少 diff 展开（旧对话史不出坏卡）。
   # drafts / designLint 为设计线历史记录（设计线整条退役 #610/#613）。
   # modelTier 已随模型路由退役（#606，ADR-0055 #583）：路由判定留档不再携带；
   # 逐尝试生效配置仍见 durationBreakdown.attempts[].modelId（供给链归因）。
@@ -169,7 +176,7 @@ closing: {
 ```
 
 - **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 收口判据通过（build＋8081 探活双件）——前端过程明细（动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。失败/停止不出现收尾卡（回归现状）。
-- **五字段（#617）**：用时（`durationMs`）/ 判据结果（`criteria` 逐件）/ 变更清单（`files`，本票仍为工具调用观察；真实 diff 归 #619、首建目录汇总归 #620）/ 内核自述（`narrative`，markdown）/ 预览入口（前端既有预览查询，不入载荷）。
+- **五字段（#617；#619 变更清单改真实 diff）**：用时（`durationMs`）/ 判据结果（`criteria` 逐件）/ 变更清单（`files`，跑前快照基线的真实 ± 行数；迭代携单文件 `patch`、超限标 `patchOmitted`；首建只出行数，目录汇总归 #620；快照或 diff 失败标 `filesUnavailable`）/ 内核自述（`narrative`，markdown）/ 预览入口（前端既有预览查询，不入载荷）。
 - **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 收口尾序 / 每迭代平台开销（#453 `overhead`——残差饼图）+ 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。验证桶 verifyMs 随验证机器退役（#605）。
 - **旧载荷读侧回落（#617）**：新写入不再携带 `summary` 与判定键；存量对话史中的旧 closing 由前端 `toWorkClosing` 回落（旧 summary 作内核自述文本、判据按收口不变式回落双 ✓），旧卡不空白不坏卡。
 

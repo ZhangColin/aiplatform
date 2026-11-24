@@ -122,27 +122,33 @@ type AgentPayload = {
   sessionId?: string;
 };
 
-/** 收口扩载的文件条目（正本 closing.files 元素）：path = write_file/edit_file
- *  参数原形（提示词示例为相对形、模型可携锚定形——两形自选，呈现面纯文本零语义
- *  消费），行数为活动量口径。 */
+/** 收口扩载的文件条目（正本 closing.files 元素，#619 起为工作区真实 diff）：
+ *  path = 工作区锚定形（{@code /src/App.jsx}），行数为跑前快照基线的真实 ± 行数；
+ *  patch = 单文件只读 diff（迭代模式；首建不携）；patchOmitted = patch 超限省略
+ *  （卡上标注「diff 过大」，行数仍保留）。 */
 export type SseClosingFile = {
   path: string;
   added: number;
   removed: number;
+  patch?: string;
+  patchOmitted?: boolean;
 };
 
 /**
- * 收口扩载（#617 正本 closing schema，五字段骨架）：收尾卡的服务端权威事实——
- * 内核自述（末次文本，空则缺省）/判据逐件（build 与预览）/变更清单（文件级，
- * 本票仍为工具调用观察来源，#619 改真实 diff）/用时。预览入口取既有预览查询，
- * 不入载荷；旧平台句式摘要与「需求文档／系统」判定键已退役（旧对话史由读侧
- * toWorkClosing 回落呈现）。判据与清单以平台可观测事实为准，不由模型自报。
+ * 收口扩载（#617 正本 closing schema，五字段骨架；#619 变更清单改真实 diff）：
+ * 收尾卡的服务端权威事实——内核自述（末次文本，空则缺省）/判据逐件（build 与
+ * 预览）/变更清单（工作区真实 diff：跑前快照基线 + 收口 numstat）/用时。预览
+ * 入口取既有预览查询，不入载荷；旧平台句式摘要与「需求文档／系统」判定键已退役
+ * （旧对话史由读侧 toWorkClosing 回落呈现）。判据与清单以平台可观测事实为准，
+ * 不由模型自报。
  */
 export type SseClosing = {
   /** 内核自述（markdown 源；内核末次文本为空时缺省）。 */
   narrative?: string;
   criteria: { buildPassed: boolean; previewPassed: boolean };
   files: SseClosingFile[];
+  /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
+  filesUnavailable?: boolean;
   durationMs: number;
   /** 成版 commit hash（#91；#605 后新载荷不再携带，存量旧卡沿用）——版本控件锚。 */
   version?: string;

@@ -51,6 +51,44 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("ClosingCard · 单文件只读 diff（#619）", () => {
+  const files = [
+    {
+      path: "/src/App.jsx",
+      added: 4,
+      removed: 0,
+      patch: "diff --git a/src/App.jsx b/src/App.jsx\n@@ -1 +1,4 @@\n+新增一行\n",
+    },
+    { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true },
+  ];
+
+  it("点单个文件展开只读 diff，再点收起", () => {
+    renderCard(card({ files }));
+
+    expect(screen.queryByText("+新增一行")).toBeNull();
+    const toggle = screen.getByRole("button", { name: "查看 /src/App.jsx 的差异" });
+    fireEvent.click(toggle);
+    expect(screen.getByText("+新增一行")).toBeTruthy();
+    expect(screen.getByText("diff --git a/src/App.jsx b/src/App.jsx")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起 /src/App.jsx 的差异" }));
+    expect(screen.queryByText("+新增一行")).toBeNull();
+  });
+
+  it("超限文件（patchOmitted）没有 diff 展开入口，只标注「diff 过大」", () => {
+    renderCard(card({ files }));
+
+    expect(screen.getByText("diff 过大")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Huge\.jsx 的差异/ })).toBeNull();
+  });
+
+  it("变更清单不可用：显示降级文案，不显示文件行", () => {
+    renderCard(card({ files: [], filesUnavailable: true }));
+
+    expect(screen.getByText("变更清单不可用")).toBeTruthy();
+  });
+});
+
 describe("ClosingCard · 预览入口（#617）", () => {
   it("未就绪：入口禁用（无地址可开）", () => {
     renderCard(card());

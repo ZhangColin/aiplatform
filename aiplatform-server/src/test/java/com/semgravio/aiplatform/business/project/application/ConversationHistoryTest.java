@@ -142,6 +142,17 @@ class ConversationHistoryTest {
         // 真收口（收尾卡 #88 同载荷）→ 对话史读口按写入序完整回放、顺序正确
         Long projectId = persistedGeneratedProject("9800");
         givenSessionExecutorRunsInline();
+        // #619 收口变更清单改工作区真实 diff：跑前快照基线 + 收口 numstat/patch 的
+        // 脚本化缝（收尾卡载荷取 diff 行数，不再取 AgentReply.changes）
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse("40\t0\tsrc/App.jsx\n", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("diff --cached --no-renames '"))))
+                .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) { // 意见轮：以追问挂起

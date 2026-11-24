@@ -336,6 +336,13 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_CANCEL_SIGNED.message()));
     }
 
+    @Test
+    void given_retired_design_package_route_when_get_then_not_found() throws Exception {
+        // #611 设计交付物包退场：用户面端点不再注册——寻址如实 404
+        performAsUser(get("/api/orders/900/design-package"))
+                .andExpect(status().isNotFound());
+    }
+
     // ---------- 夹具 ----------
 
     /** 合同回执夹具（status/needsUpdate 按用例变参，其余定格）。 */

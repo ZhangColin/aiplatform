@@ -184,15 +184,15 @@ class SpringDocBackofficeContractTest {
     void given_order_surfaces_when_read_schemas_then_deliverable_type_coded_and_self_described()
             throws Exception {
         // #298 交付物类型列加：订单清单/详情两读面 type=integer（BaseEnum 房规）＋
-        // 取值对照自描述＋取件端点指路（消费方按类型二选一取件）
+        // 单值语义与取件端点指路（#611 设计线退役后只剩系统单，取件走源码包）
         for (String schema : List.of("BackofficeOrderSummaryResponse", "BackofficeOrderDetailResponse")) {
             JsonNode deliverableType = property(fetchGroup("order"), schema, "deliverableType");
             assertThat(deliverableType.path("type").asText(null))
                     .as("%s.deliverableType 应渲染 type=integer（BaseEnum 房规）", schema)
                     .isEqualTo("integer");
             assertThat(deliverableType.path("description").asText(""))
-                    .as("%s.deliverableType 应自描述冻结语义与取件端点", schema)
-                    .contains("design-package")
+                    .as("%s.deliverableType 应自描述单值语义与取件端点", schema)
+                    .contains("系统单值")
                     .contains("source-package");
             assertThat(property(fetchGroup("order"), schema, "deliverableTypeName").isMissingNode())
                     .as("%s.deliverableTypeName 中文名随行（#186 枚举出口配 *Name）", schema)

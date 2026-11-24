@@ -32,11 +32,10 @@ import com.semgravio.aiplatform.business.order.domain.model.Operator;
 /**
  * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即冻结双版本
  * 引用＋PRD 确认版全文冗余拷贝＋交付物类型入单（#335 引用语义——订单自含，
- * 不依赖版本表与工作区存亡）；系统单源码不快照（交付经 source-package 实时
- * 取），设计面交付物在下单冻结时打包（#297 设计资产包——暂存/落名编排归应用
- * 层，聚合只记类型）；金额单位分（Long）、v1 恒 CNY，随报价落值。projectId
- * 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户
- * 查）。
+ * 不依赖版本表与工作区存亡）；源码不快照（交付经 source-package 实时取，
+ * #611 交付物类型收窄为系统单值）；金额单位分（Long）、v1 恒 CNY，随报价落值。
+ * projectId 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余下单
+ * 账号（按用户查）。
  *
  * <p>状态机（五态单向，骨架不动、语义重对位见 {@link OrderStatus}）：{@link
  * #cancel}（取消门＝未支付态聚合腿；合同签署完成后关门＋取消联动活跃合同
@@ -95,9 +94,8 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     private OrderStatus status;
 
     /**
-     * 交付物类型（#297，下单即冻结自项目终点类型；只插不改）：决定下单冻结面——
-     * 设计＝设计资产包、系统＋设计＝统一部件容器（源码＋选定设计稿）、系统＝
-     * 源码包实时取零冻结件。不参与交易机制（报价/改价/状态机/取消同一律）。
+     * 交付物类型（#297 下单即冻结；只插不改；#611 收窄为系统单值）：交付物是
+     * 源码包实时取、零冻结件。不参与交易机制（报价/改价/状态机/取消同一律）。
      */
     @Column(name = "deliverable_type", nullable = false, updatable = false)
     private OrderDeliverableType deliverableType;
@@ -226,9 +224,9 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
      * 引用＋交付物类型在此冻结——{@code prdSnapshot}＝{@code prdVersionNo} 指向的
      * 已确认版本全文的冗余拷贝（订单自含，不依赖版本表与工作区存亡），{@code
      * demoVersionNo}＝下单时项目确认指针的 Demo 版本（下单前置门在应用层，聚合
-     * 只收已过门的正整数版本号）。此后 PRD 修订与项目终点变更均不影响本单
-     * （取消再下 = 新单新快照新引用新类型）。下单者归属 owner 双列（账户/访客
-     * 互斥，随请求上下文其一，#326）。
+     * 只收已过门的正整数版本号）。此后 PRD 修订不影响本单（取消再下 = 新单
+     * 新快照新引用）。下单者归属 owner 双列（账户/访客互斥，随请求上下文其一，
+     * #326）。
      */
     public static Order place(Long projectId, Long ownerAccountId, Long ownerGuestId,
             String prdSnapshot, OrderDeliverableType deliverableType,
@@ -256,17 +254,6 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         }
         this.status = OrderStatus.CANCELLED;
         this.cancelledAt = LocalDateTime.now();
-    }
-
-    /**
-     * 设计资产包可取守卫（#297 用户面下载 / #298 后台取件共用单点——纯判定先于
-     * 支付门与取件）：交付物含设计面（设计/系统＋设计）即过；系统单交付物是
-     * 源码包（实时取口径），ORD_016 如实——寻址成功而类型不符不假装有包。
-     */
-    public void requireDesignDeliverable() {
-        if (!deliverableType.designInvolved()) {
-            throw new DomainException(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE);
-        }
     }
 
     /**

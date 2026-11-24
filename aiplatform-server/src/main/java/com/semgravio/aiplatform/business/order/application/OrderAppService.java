@@ -20,7 +20,6 @@ import com.semgravio.aiplatform.business.order.domain.model.Operator;
 import com.semgravio.aiplatform.business.order.domain.repository.ContractRepository;
 import com.semgravio.aiplatform.business.order.domain.repository.OrderRepository;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
-import com.semgravio.aiplatform.business.project.application.DesignPackageAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectKnowledgeAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
@@ -31,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#297 交付物
- * 类型＋设计资产包下单冻结——交易机制零改版，下单多冻结一维；#335 下单改版与
+ * 类型下单冻结；#611 交付物类型收窄为系统单值〔设计线退役〕；#335 下单改版与
  * 订单语义重对位基座；#338 取消边界收窄＋归档取版对齐）。#337 起 mock 支付闭环
  * 退役（同步支付端点与 {@code #pay} 用例连代码删除——支付语义并入付款节点凭证
  * 核验路径，不留两轨并存；「已支付＝开工条件满足」的判定器＝{@link
@@ -40,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
  * （「待确认报价」占位态）。下单快照的上游＝PRD 版本行（#330 确认即成版→
  * <b>#462 去门化读法顺延</b>：版本表＝Demo 类 run 起跑自动记行的构建基准快照，
  * ADR-0039——下单/合同/归档取版统一读「最新版」，冻结字段结构与既有数据不动）。
- * 项目事实（存在性/归档态/双确认引用/终点类型）经 {@code business.project} 应用
+ * 项目事实（存在性/归档态/双确认引用）经 {@code business.project} 应用
  * 层软引用——跨 BC 无 FK，同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
@@ -74,8 +73,6 @@ public class OrderAppService {
     private final ProjectLifecycleAppService projectLifecycleAppService;
     private final ProjectKnowledgeAppService projectKnowledgeAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
-    private final DesignPackageAppService designPackageAppService;
-    private final OrderQueryAppService orderQueryAppService;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
 
@@ -85,8 +82,6 @@ public class OrderAppService {
                            ProjectLifecycleAppService projectLifecycleAppService,
                            ProjectKnowledgeAppService projectKnowledgeAppService,
                            ConversationHistoryAppService conversationHistoryAppService,
-                           DesignPackageAppService designPackageAppService,
-                           OrderQueryAppService orderQueryAppService,
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
         this.orderRepository = orderRepository;
@@ -95,8 +90,6 @@ public class OrderAppService {
         this.projectLifecycleAppService = projectLifecycleAppService;
         this.projectKnowledgeAppService = projectKnowledgeAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
-        this.designPackageAppService = designPackageAppService;
-        this.orderQueryAppService = orderQueryAppService;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
     }
@@ -109,13 +102,8 @@ public class OrderAppService {
      * 版本行，非工作区正文——订单自含，冻结字段结构与既有订单数据不动）＋
      * 交付物类型入单（待报价起步，「待确认报价」占位态——后台落定报价〔＋范围
      * 文本，#336 起〕后翻已报价）。下单即冻结迭代——对话区停止受理意见（project
-     * 上下文冻结守卫，{@code ORD_006}）。交付物类型自项目终点类型冻结（#297
-     * 一单一程——此后项目终点变更不影响本单，取消再下 = 新单新类型）。设计面单
-     * （设计/系统＋设计）在下单时冻结设计资产包：<b>暂存打包先于落库</b>（打包
-     * 失败＝下单失败零残留，不产生「有单无包」半成态）、<b>落名在落库后</b>（以
-     * 落库分配的订单 id 定格该单冻结件——同目录原子改名，失败仅容器中途消亡可
-     * 达，如实上抛）；系统单零打包（源码包实时取口径不变）。取消不清理冻结件
-     * （后台取件正本，残留备案口径）。
+     * 上下文冻结守卫，{@code ORD_006}）。交付物类型一律冻结为系统单值（#611——
+     * 设计线退役后不再从项目终点类型映射设计交付物；只插不改）。取消即解冻回迭代。
      *
      * @return 订单（待报价起步，双版本引用＋快照与交付物类型已冻结）
      * @throws ApplicationException PRJ_001 项目不存在（项目上下文原样透传）；
@@ -124,9 +112,7 @@ public class OrderAppService {
      *                              归档；ORD_003 该项目已有未终结订单（预检或并发
      *                              撞索引，先于版本门——重复下单的主导事实）；
      *                              ORD_018 无 PRD 版本（尚无构建基准记行）；
-     *                              ORD_019 未确认 Demo
-     *                              版本；WSP_002 设计资产包打包失败（环境故障，
-     *                              零残留）
+     *                              ORD_019 未确认 Demo 版本
      */
     public OrderResponse place(Long projectId) {
         // 签约门（#328，spec 段②）：进下单/签约流程即要求绑定——访客身份（有效
@@ -153,16 +139,12 @@ public class OrderAppService {
         if (refs.demoVersionNo() == null) {
             throw new ApplicationException(OrderMessage.ORDER_DEMO_VERSION_REQUIRED);
         }
-        OrderDeliverableType deliverableType =
-                OrderDeliverableType.ofCode(project.endpointType().getCode());
         // 快照源＝最新版全文（冗余拷贝，#335）——不读工作区（过门即必有版本行
         // 全文，PRJ_015 未产出不再可能是下单障碍）
         String prdSnapshot = refs.prdContent();
-        DesignPackageAppService.StagedPackage staged = deliverableType.designInvolved()
-                ? designPackageAppService.stageForOrder(projectId)
-                : null;
+        // #611 交付物类型收窄为系统单值：不再从项目终点类型映射（设计线退役）
         Order order = Order.place(projectId, RequestContext.getUserId(),
-                GuestContext.guestId(), prdSnapshot, deliverableType,
+                GuestContext.guestId(), prdSnapshot, OrderDeliverableType.SYSTEM,
                 refs.prdVersionNo(), refs.demoVersionNo());
         try {
             order = orderRepository.save(order);
@@ -175,29 +157,8 @@ public class OrderAppService {
             }
             throw e;
         }
-        if (staged != null) {
-            designPackageAppService.sealForOrder(staged, order.getId());
-        }
         publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return OrderResponse.of(order);
-    }
-
-    /**
-     * 用户面设计资产包下载（#297，对偶源码包端点——订单锚取件：交付物包是
-     * 下单冻结件、按单定格）：守卫序＝订单存在 → 交付物类型（系统单无设计资产包
-     * ，ORD_016 如实）→ 支付门（{@link OrderQueryAppService#requireDownloadable}
-     * 单点：曾支付/已归档即开放，ORD_015）→ 冻结件读取（PRJ_051 缺失不顶替）。
-     * 文件名/HTTP 头归 REST 层。
-     *
-     * @throws ApplicationException ORD_001 订单不存在；ORD_016 系统单交付物不含
-     *                              设计资产包；ORD_015 未支付（门语义）；PRJ_051
-     *                              冻结件缺失；WSP_002 读取失败（环境故障）
-     */
-    public byte[] downloadableDesignPackage(Long orderId) {
-        Order order = requireOrder(orderId);
-        order.requireDesignDeliverable();
-        orderQueryAppService.requireDownloadable(order.getProjectId());
-        return designPackageAppService.frozenPackage(order.getProjectId(), orderId);
     }
 
     /**

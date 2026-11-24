@@ -20,7 +20,7 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
  * @param projectId           所属项目标识
  * @param status              订单状态（code）：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消
  * @param statusName          状态名
- * @param deliverableType     交付物类型（code，#297 下单冻结）：1=设计 2=系统 3=系统＋设计
+ * @param deliverableType     交付物类型（code，#297 下单冻结；#611 收窄为系统单值）：2=系统
  * @param deliverableTypeName 交付物类型名
  * @param prdVersionNo        下单冻结的已确认 PRD 版本号（#335；遗留单 NULL）
  * @param demoVersionNo       下单冻结的已确认 Demo 版本号（#335；遗留单 NULL）

@@ -29,7 +29,7 @@
 ### 1.3 预览网关与子域路由
 
 - 配置在仓：`aiplatform-server/src/main/resources/docker/gateway/`。
-- 路由：`{workspaceId}.{PREVIEW_BASE}` → `ws-{id}:8081`（Docker 内置 DNS 按容器名解析）；快照 `snap-{viewId}.{PREVIEW_BASE}` 同理。
+- 路由：`{workspaceId}.{PREVIEW_BASE}` → `ws-{id}:8081`（Docker 内置 DNS 按容器名解析）。（`snap-{viewId}` 快照子域随 #628 快照机制退役，不再配置。）
 - prod：80→443 跳转＋泛域名证书（Let's Encrypt，DNS-01）；`PREVIEW_BASE` **无默认值，缺失启动 fail-fast**。
 - 主预览页 sub_filter 注入标注脚本；WebSocket 升级透传；`proxy_read_timeout 3600s`。
 

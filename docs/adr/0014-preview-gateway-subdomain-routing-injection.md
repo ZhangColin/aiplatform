@@ -13,6 +13,10 @@
 > 经网关同源反代（`/.aiplatform/trial-notice`，X-Preview-Workspace 头由子域捕获
 > 注入、上游 `$platform_api` 由各消费方 server 块派生——同 `$upstream_host` 单源
 > 先例），零 CORS；快照路由维持不注入（「只逛不换」）。
+>
+> **演进注记（#628／#631，不改正文决议）**：「查看当时」快照容器与 `snap-{viewId}`
+> 子域路由整条退役——本 ADR 中所有快照子域/不注入相关描述均为历史记录；现行网关
+> 只承载主预览子域（圈注＋试用提示注入）。
 
 系统预览从「Docker 随机宿主端口（`localhost:随机端口`）直接暴露」改为「平台级 nginx 网关按子域路由 + 注入圈注脚本」。每个工作区一个稳定子域 `{workspaceId}.preview.{domain}`（开发 `{workspaceId}.localhost`），网关按 Host 子域路由到对应容器 `ws-{id}:8081`，并在 HTML 响应注入平台标注脚本（annotation.js）。一套配置吃开发与生产两个 profile（只差 base 域名与 TLS）。
 

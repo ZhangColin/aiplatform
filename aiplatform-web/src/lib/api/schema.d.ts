@@ -107,7 +107,7 @@ export interface paths {
         post?: never;
         /**
          * 配置删除（被绑定引用即拒）
-         * @description 删除配置行；仍被智能体运营配置绑定（model_config_key/routing_strong_model_config_key 任一＝该语义键）即 409 PRJ_073——先改绑或清空绑定再删（悬空引用不留静默坑；临时下线用停用不删行）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401
+         * @description 删除配置行；仍被智能体运营配置绑定（model_config_key＝该语义键）即 409 PRJ_073——先改绑或清空绑定再删（悬空引用不留静默坑；临时下线用停用不删行）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_066 — 模型配置不存在
@@ -201,12 +201,11 @@ export interface paths {
         get: operations["config_1"];
         /**
          * 智能体配置全量写（覆盖态终态＋变更留痕）
-         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelConfigKey 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelConfigKey/routingFileCountThreshold/routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；token 越出小/中/大封闭集 400 PRJ_079）。路由结构性信号两开关（#454，ADR-0037）：routingFileCountSignalEnabled/routingSizeLabelSignalEnabled 缺省 false/null＝关＝对应信号不参与升档判定（观测值照留进判定快照）；true＝恢复对应判据（阈值/映射旋钮照旧生效）；失败重试信号不受两开关影响、常开。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射命中）升强档，无信号回落人工档（modelConfigKey 覆盖 → 枚举缺省快档，覆盖即基础档、快配置可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。配置键即时校验（#367）：modelConfigKey 与 routingStrongModelConfigKey 非空时必须在模型配置面（/model-configs）有行且启用——缺行 400 PRJ_074、停用 400 PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
+         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelConfigKey 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。配置键即时校验（#367）：modelConfigKey 非空时必须在模型配置面（/model-configs）有行且启用——缺行 400 PRJ_074、停用 400 PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor 两座智能体）
          *     - 400 PRJ_034 — 操作者不能为空
-         *     - 400 PRJ_079 — 升档规模标签须为小/中/大封闭集内的值：{0}（null/缺省＝清空回落代码缺省「大」；空列表＝空映射）
          */
         put: operations["update_3"];
         post?: never;
@@ -225,7 +224,7 @@ export interface paths {
         };
         /**
          * 边缘调用点配置读面（生效值＋覆盖标记＋默认预览）
-         * @description 边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/工具开关/路由件）。寻址稳定键四把：naming=项目取名 / compaction=上下文压缩 / classification=入口分类 / precheck=技能预检。改配置下一轮命令构建即生效（装配动态查库，进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401
+         * @description 边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/工具开关）。寻址稳定键四把：naming=项目取名 / compaction=上下文压缩 / classification=入口分类 / precheck=技能预检。改配置下一轮命令构建即生效（装配动态查库，进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_064 — 边缘调用点不存在（配置面只有 naming/compaction/classification/precheck 四点）
@@ -4221,30 +4220,6 @@ export interface components {
             webSearchEnabled?: boolean;
             /** @description 增强工具开关：网页抓取（缺省 true＝开；生效语义同 webSearchEnabled） */
             fetchUrlEnabled?: boolean;
-            /** @description 模型路由开关（#354：缺省 true＝开——路由判定优先；false＝既有人工定档口径。仅 run 执行体消费） */
-            routingEnabled?: boolean;
-            /**
-             * @description 强模型档语义键（#354 路由升档落点；null/缺省/纯空白＝清空回落代码缺省 pro。即时校验同 modelConfigKey（#367）
-             * @example pro
-             */
-            routingStrongModelConfigKey?: string;
-            /**
-             * Format: int32
-             * @description 文件面阈值（#354/#426：应用文件面——工作区已跟踪文件数扣基座基数 ≥ 此值升强档；null＝清空回落代码缺省 30）
-             * @example 30
-             */
-            routingFileCountThreshold?: number;
-            /**
-             * @description 升档规模标签映射（#426：集内标签的片升强档，缺省 ["大"]；token 须在小/中/大封闭集内——非法值 PRJ_079；空数组＝空映射＝规模标签信号整体关停；null/缺省＝清空回落代码缺省）
-             * @example [
-             *       "大"
-             *     ]
-             */
-            routingEscalatingSizeLabels?: string[];
-            /** @description 文件面信号开关（#454，ADR-0037：缺省 false/null＝关＝文件面不参与升档判定〔观测值照留进判定快照〕；true＝恢复阈值判据——阈值旋钮照旧生效。失败重试信号不受本开关影响、常开。仅 run 执行体行消费） */
-            routingFileCountSignalEnabled?: boolean;
-            /** @description 规模标签信号开关（#454，ADR-0037：缺省 false/null＝关＝规模标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。仅 run 执行体行消费） */
-            routingSizeLabelSignalEnabled?: boolean;
         };
         ApiResponseBackofficeAgentConfigResponse: {
             /** Format: int32 */
@@ -4274,7 +4249,7 @@ export interface components {
             modelConfigKey?: string;
             /** @description systemPrompt 是否库覆盖值（true＝覆盖；false＝枚举默认） */
             systemPromptOverridden?: boolean;
-            /** @description 模型配置是否库覆盖值（true＝覆盖；false＝枚举默认；路由开时为兜底基础档——信号升档可越过；路由关时＝钉死人工档） */
+            /** @description 模型配置是否库覆盖值（true＝覆盖；false＝枚举默认） */
             modelConfigKeyOverridden?: boolean;
             /** @description 枚举默认 systemPrompt（预览：清空覆盖即落此值——身份与配置分治的缺省正本） */
             defaultSystemPrompt?: string;
@@ -4287,54 +4262,6 @@ export interface components {
             webSearchEnabled?: boolean;
             /** @description 网页抓取开关生效态（生效语义同 webSearchEnabled；无覆盖行语境＝true 开） */
             fetchUrlEnabled?: boolean;
-            /** @description 模型路由开关生效态（#354：开＝路由判定优先；关＝既有人工定档口径。仅 run 执行体消费，无覆盖行语境＝true 开） */
-            routingEnabled?: boolean;
-            /**
-             * @description 强模型档生效值（#354 路由升档落点；库覆盖值或代码缺省——对照 routingStrongModelConfigKeyOverridden 知来源）
-             * @example pro
-             */
-            routingStrongModelConfigKey?: string;
-            /** @description 强模型档是否库覆盖值（true＝覆盖；false＝代码缺省） */
-            routingStrongModelConfigKeyOverridden?: boolean;
-            /**
-             * @description 代码缺省强模型档（预览：清空覆盖即落此值）
-             * @example pro
-             */
-            defaultRoutingStrongModelConfigKey?: string;
-            /**
-             * Format: int32
-             * @description 文件面阈值生效值（#354/#426：应用文件面——已跟踪文件数扣基座基数 ≥ 此值升强档；库覆盖值或代码缺省）
-             * @example 30
-             */
-            routingFileCountThreshold?: number;
-            /** @description 文件面阈值是否库覆盖值（true＝覆盖；false＝代码缺省） */
-            routingFileCountThresholdOverridden?: boolean;
-            /**
-             * Format: int32
-             * @description 代码缺省文件面阈值（预览：清空覆盖即落此值）
-             * @example 30
-             */
-            defaultRoutingFileCountThreshold?: number;
-            /**
-             * @description 升档规模标签映射生效值（#426：集内标签的片升强档，缺省["大"]；空数组＝信号整体关停）
-             * @example [
-             *       "大"
-             *     ]
-             */
-            routingEscalatingSizeLabels?: string[];
-            /** @description 映射是否库覆盖值（true＝覆盖；false＝代码缺省） */
-            routingEscalatingSizeLabelsOverridden?: boolean;
-            /**
-             * @description 代码缺省升档映射（预览：清空覆盖即落此值）
-             * @example [
-             *       "大"
-             *     ]
-             */
-            defaultRoutingEscalatingSizeLabels?: string[];
-            /** @description 文件面信号开关生效态（#454，ADR-0037：缺省 false＝关＝文件面不参与升档判定〔观测值照留进判定快照〕；true＝恢复阈值判据——阈值旋钮照旧生效。失败重试信号不受本开关影响、常开。仅 run 执行体消费） */
-            routingFileCountSignalEnabled?: boolean;
-            /** @description 规模标签信号开关生效态（#454，ADR-0037：缺省 false＝关＝规模标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。仅 run 执行体消费） */
-            routingSizeLabelSignalEnabled?: boolean;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700200
@@ -5545,7 +5472,7 @@ export interface components {
         };
         ModelConfigCreateCommand: {
             /**
-             * @description 配置语义键（引用腿——三座/边缘点/路由强档绑定的值）
+             * @description 配置语义键（引用腿——两座智能体/边缘点绑定的值）
              * @example doubao-flagship
              */
             configKey?: string;
@@ -6020,7 +5947,7 @@ export interface components {
              */
             questionOrdinal?: number;
             /**
-             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, modelTier?, durationBreakdown{llmMs,toolsMs,closingMs,overhead{configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略；验证统计/version 锚随审查与收口组退役 #605）
+             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, durationBreakdown{llmMs,toolsMs,closingMs,overhead{configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略；验证统计/version 锚随审查与收口组退役 #605；modelTier 随模型路由退役 #606）
              * @example {
              *       "summary": "完成首次生成：构建通过、预览可访问",
              *       "prdChanged": false,
@@ -7222,21 +7149,6 @@ export interface components {
             oldWebSearchEnabled?: boolean;
             /** @description 变更前网页抓取开关 */
             oldFetchUrlEnabled?: boolean;
-            /** @description 变更前模型路由开关（#354） */
-            oldRoutingEnabled?: boolean;
-            /** @description 变更前强模型档（null＝此前即回落代码缺省） */
-            oldRoutingStrongModelConfigKey?: string;
-            /**
-             * Format: int32
-             * @description 变更前文件面阈值（null 同上）
-             */
-            oldRoutingFileCountThreshold?: number;
-            /** @description 变更前升档规模标签映射（#426 存储形逗号接 token，如「中,大」；null＝此前即回落代码缺省；空串＝空映射） */
-            oldRoutingEscalatingSizeLabels?: string;
-            /** @description 变更前文件面信号开关（#454；恒有值——缺省态恒 false＝不参与升档判定） */
-            oldRoutingFileCountSignalEnabled?: boolean;
-            /** @description 变更前规模标签信号开关（#454；恒有值——缺省态恒 false） */
-            oldRoutingSizeLabelSignalEnabled?: boolean;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
             /** @description 变更后模型配置（null＝本次清空回落） */
@@ -7245,21 +7157,6 @@ export interface components {
             newWebSearchEnabled?: boolean;
             /** @description 变更后网页抓取开关 */
             newFetchUrlEnabled?: boolean;
-            /** @description 变更后模型路由开关（#354） */
-            newRoutingEnabled?: boolean;
-            /** @description 变更后强模型档（null＝本次清空回落代码缺省） */
-            newRoutingStrongModelConfigKey?: string;
-            /**
-             * Format: int32
-             * @description 变更后文件面阈值（null 同上）
-             */
-            newRoutingFileCountThreshold?: number;
-            /** @description 变更后升档规模标签映射（#426 存储形逗号接 token；null＝本次清空回落代码缺省；空串＝空映射） */
-            newRoutingEscalatingSizeLabels?: string;
-            /** @description 变更后文件面信号开关（#454；恒有值） */
-            newRoutingFileCountSignalEnabled?: boolean;
-            /** @description 变更后规模标签信号开关（#454；恒有值） */
-            newRoutingSizeLabelSignalEnabled?: boolean;
             /**
              * @description 变更操作者 id
              * @example 700200

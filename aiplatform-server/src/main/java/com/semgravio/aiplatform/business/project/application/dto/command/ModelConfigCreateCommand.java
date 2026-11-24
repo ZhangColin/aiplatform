@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * 模型配置创建命令（#367，POST——语义键随体，已存在即 409 PRJ_068；所属通道
- * 必须已有行，PRJ_071）。语义键即引用腿：智能体运营配置与路由强档绑定的就是它
+ * 必须已有行，PRJ_071）。语义键即引用腿：智能体运营配置（两座智能体＋边缘点）绑定的就是它
  * ——建行后即可被绑定（即时校验放行）。
  *
  * @param configKey         语义键（运营短名，如 flash/pro/doubao-flagship）
@@ -15,7 +15,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param thinkingEnabled 深度思考开关（#370；缺省 false＝显式关）
  */
 public record ModelConfigCreateCommand(
-        @Schema(description = "配置语义键（引用腿——三座/边缘点/路由强档绑定的值）",
+        @Schema(description = "配置语义键（引用腿——两座智能体/边缘点绑定的值）",
                 example = "doubao-flagship")
         String configKey,
         @Schema(description = "所属通道键（必须已存在——先建通道行再挂配置）",

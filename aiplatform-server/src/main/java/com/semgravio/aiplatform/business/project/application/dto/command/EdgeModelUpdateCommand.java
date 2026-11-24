@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * 边缘调用点配置命令（#366，PUT 全量语义）：请求体即该边缘点覆盖态终态——值面
- * 仅模型配置一件（边缘点无 systemPrompt/工具开关/路由策略语义，窄形拒绝误带）。
+ * 仅模型配置一件（边缘点无 systemPrompt/工具开关语义，窄形拒绝误带）。
  * null／缺省／纯空白＝清空覆盖（装配回落 {@code AgentEdgePoint} 代码缺省配置键）。
  *
  * <p>配置键即时校验与三座同口径（#367）：非空须在模型配置面有行且启用

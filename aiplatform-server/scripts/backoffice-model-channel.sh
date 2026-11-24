@@ -134,10 +134,6 @@ demo() {
   step "8. 绑定合法新档（即时校验放行——演示档生效）"
   show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"modelId":"t-demo-config"}')"
 
-  step "8b. 路由结构性信号开关（#454：缺省关＝观测值照留但不参与升档判定，失败重试升档不受影响；清场步 PUT {} 回落缺省关）"
-  show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"routingFileCountSignalEnabled":true,"routingSizeLabelSignalEnabled":true}')"
-  show "$(call_get "/api/backoffice/agent-configs/executor")"
-
   step "9. 删除守卫（配置被绑定——409 PRJ_073）"
   show "$(call_json DELETE "$CONFIGS_PATH/t-demo-config" '{}')"
 
@@ -237,12 +233,7 @@ delete_config() { show "$(call_json DELETE "$CONFIGS_PATH/$1" '{}')"; }
 
 AGENT_CONFIGS_PATH="/api/backoffice/agent-configs"
 
-set_signal_switches() { # <fileCount true|false> <sizeLabel true|false>（#454 路由结构性信号开关；缺省关）
-  show "$(call_json PUT "$AGENT_CONFIGS_PATH/executor" \
-    "{\"routingFileCountSignalEnabled\":$1,\"routingSizeLabelSignalEnabled\":$2}")"
-}
-
-get_agent_config() { # <agentKey> 智能体配置读面（生效值＋覆盖标记＋缺省预览＋信号开关生效态）
+get_agent_config() { # <agentKey> 智能体配置读面（生效值＋覆盖标记＋缺省预览）
   show "$(call_get "$AGENT_CONFIGS_PATH/$1")"
 }
 
@@ -276,11 +267,7 @@ usage() {
                                             trackedConfigKeys 空＝建议入库，勾选后走
                                             create-config，modelName 填条目 modelId）
   delete-channel <key> / delete-config <key> 删除（被引用即 409）
-  set-signal-switches <fileCount> <sizeLabel>
-                                            路由结构性信号开关（#454；true|false——缺省
-                                            关＝不参与升档判定，失败重试升档不受影响；
-                                            traces 前后快照含两开关，回滚腿完整）
-  get-agent-config <agentKey>               智能体配置读面（executor 行含两信号开关生效态）
+  get-agent-config <agentKey>               智能体配置读面
 环境：BACKOFFICE_API_KEY/SECRET（同 backoffice-quote.sh）、OP_ID/OP_NAME（写留痕）
 候选面主备配法（运维口诀）：add-candidate flash <备通道> <同档模型> → 队列即主备；
 改完下一轮命令构建即生效、进行中 run 不定格。
@@ -310,7 +297,6 @@ case "${1:-}" in
   pull-models) pull_models "$2" ;;
   delete-channel) delete_channel "$2" ;;
   delete-config) delete_config "$2" ;;
-  set-signal-switches) shift; set_signal_switches "$@" ;;
   get-agent-config) get_agent_config "$2" ;;
   *) usage ;;
 esac

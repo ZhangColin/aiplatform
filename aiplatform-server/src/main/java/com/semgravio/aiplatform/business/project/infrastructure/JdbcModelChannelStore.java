@@ -124,10 +124,9 @@ public class JdbcModelChannelStore implements ModelChannelStore {
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """;
 
-    /** 绑定引用守卫：配置键出现在三座/边缘点的模型配置或路由强档覆盖列即被引用。 */
+    /** 绑定引用守卫：配置键出现在三座/边缘点的模型配置覆盖列即被引用。 */
     private static final String CONFIG_BOUND_SQL = """
-            SELECT EXISTS (SELECT 1 FROM prj_agent_configs
-                WHERE model_config_key = ? OR routing_strong_model_config_key = ?)
+            SELECT EXISTS (SELECT 1 FROM prj_agent_configs WHERE model_config_key = ?)
             """;
 
     /** 引用守卫：配置行直引或候选行引用（V79 起候选 FK 指通道——都是引用）。 */
@@ -278,7 +277,7 @@ public class JdbcModelChannelStore implements ModelChannelStore {
 
     @Override
     public boolean configBoundByAgentConfigs(String configKey) {
-        Boolean bound = jdbcTemplate.queryForObject(CONFIG_BOUND_SQL, Boolean.class, configKey, configKey);
+        Boolean bound = jdbcTemplate.queryForObject(CONFIG_BOUND_SQL, Boolean.class, configKey);
         return Boolean.TRUE.equals(bound);
     }
 

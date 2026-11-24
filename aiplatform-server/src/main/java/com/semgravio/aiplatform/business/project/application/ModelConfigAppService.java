@@ -22,8 +22,8 @@ import com.cartisan.core.exception.ApplicationException;
  * 队列语义，ADR-0053 ③）：绑定配置键 → 配置行 → 有序候选队列（{@code
  * prj_model_config_candidates}，priority 升序；主备＝队列前两名）→ 每候选
  * 通道行 → 模型串（前缀:实际模型名）＋创建上下文（baseUrl/apiKey/
- * enableThinking）。三座智能体（{@code AgentConfigAppService} 生效配置）与模型
- * 路由强档的命令构建一律经本服务解析——供应商/配置/凭证三层配置改一处，全部
+ * enableThinking）。两座智能体（{@code AgentConfigAppService} 生效配置）与
+ * 边缘调用点的命令构建一律经本服务解析——供应商/配置/凭证三层配置改一处，全部
  * 引用自动跟上（下一轮命令构建即生效，进行中 run 不定格）。
  *
  * <p><b>队列数据源（软着陆）</b>：配置<b>未配置</b>候选行时回退配置行现列

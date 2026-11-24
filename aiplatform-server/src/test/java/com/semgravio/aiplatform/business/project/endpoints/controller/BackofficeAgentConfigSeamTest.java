@@ -14,7 +14,6 @@ import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelConfigSeed;
-import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
@@ -342,197 +341,6 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.message").value("Signature required"));
     }
 
-    // ---------- 模型路由策略四件（#354；#426 信号面修订：阈值重校＋标签映射） ----------
-
-    @Test
-    void given_no_routing_override_when_get_then_code_defaults_with_unoverridden_marks()
-            throws Exception {
-        // 路由策略读面缺省：开关 true＝开、强档/文件面阈值/升档标签映射回落代码缺省
-        // （覆盖标记 false、默认预览同值）——路由开且无钉死即路由判定（缺省快档）；
-        // 文件面阈值缺省 30（应用文件面——#426 排除基座基数后重校）、映射缺省 [大]
-        signedGet("executor")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingStrongModelConfigKey").value("pro"))
-                .andExpect(jsonPath("$.data.routingStrongModelConfigKeyOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingStrongModelConfigKey").value("pro"))
-                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data.routingFileCountThresholdOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels").isArray())
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("大"))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingEscalatingSizeLabels").isArray())
-                .andExpect(jsonPath("$.data.defaultRoutingEscalatingSizeLabels[0]").value("大"));
-        // 装配读面同步：路由开、三可空件 null（回落缺省归路由判定单点）
-        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.routingEnabled()).isTrue();
-        assertThat(executor.routingStrongModelConfigKey()).isNull();
-        assertThat(executor.routingFileCountThreshold()).isNull();
-        assertThat(executor.routingEscalatingSizeLabels()).isNull();
-    }
-
-    @Test
-    void given_routing_strategy_updated_when_get_and_traces_then_effective_and_snapshots()
-            throws Exception {
-        // 策略覆盖写（开关关＋强档换＋阈值换＋映射换）→ GET 生效值＝库值、覆盖标记
-        // true；留痕前后快照含路由四件（映射留存储形逗号接 token）；清空（null）
-        // 回落代码缺省。强档键取夹具配置 t-strong（doubao-flagship 已随 V79 退场；
-        // #367 起改配置即时校验配置键——裸名已写不进去）
-        jdbcTemplate.update(
-                "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled) "
-                        + "VALUES ('t-strong', 'deepseek', 'some-strong-model', TRUE)");
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"routingEnabled": false, "routingStrongModelConfigKey": "t-strong",
-                 "routingFileCountThreshold": 50,
-                 "routingEscalatingSizeLabels": ["中", "大"]}
-                """)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingStrongModelConfigKey").value("t-strong"))
-                .andExpect(jsonPath("$.data.routingStrongModelConfigKeyOverridden").value(true))
-                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(50))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels").isArray())
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels.length()").value(2))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("中"))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[1]").value("大"))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(true));
-        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.routingEnabled()).isFalse();
-        assertThat(executor.routingStrongModelConfigKey()).isEqualTo("t-strong");
-        assertThat(executor.routingEscalatingSizeLabels())
-                .containsExactlyInAnyOrder(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE);
-
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(1)))
-                // 旧态＝缺省（开关开、三可空件 null），新态＝本次覆盖——回滚依据
-                .andExpect(jsonPath("$.data[0].oldRoutingEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].oldRoutingStrongModelConfigKey").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].oldRoutingEscalatingSizeLabels").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingStrongModelConfigKey").value("t-strong"))
-                .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(50))
-                .andExpect(jsonPath("$.data[0].newRoutingEscalatingSizeLabels").value("中,大"))
-                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
-
-        // 清空回落：路由策略件全 null＝回代码缺省（开关 null 归一缺省 true＝开）
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingStrongModelConfigKey").value("pro"))
-                .andExpect(jsonPath("$.data.routingStrongModelConfigKeyOverridden").value(false))
-                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("大"))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(false));
-    }
-
-    @Test
-    void given_routing_size_label_mapping_invalid_token_when_put_then_400_no_write()
-            throws Exception {
-        // 封闭集校验（#426）：升档标签映射的 token 须在小/中/大封闭集内——非法
-        // token 错值写不进去（对偶配置键即时校验口径），行与留痕零写入
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"routingEscalatingSizeLabels\": [\"大\", \"巨\"]}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4079));
-        assertThat(configRowCount()).isZero();
-        assertThat(traceRowCount()).isZero();
-
-        // 空映射合法（规模标签信号整体关停的运营选择）——覆盖标记 true、生效 []
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"routingEscalatingSizeLabels\": []}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels.length()").value(0))
-                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(true));
-        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)
-                .routingEscalatingSizeLabels()).isEmpty();
-    }
-
-    // ---------- 路由结构性信号开关两件（#454：缺省关＝不参与升档判定，失败信号常开） ----------
-
-    @Test
-    void given_no_signal_switch_override_when_get_then_defaults_off() throws Exception {
-        // #454 缺省态（无覆盖行）：两开关 false＝结构性信号不参与升档判定（新缺省）；
-        // 路由总开关仍开＝失败重试升档照常；装配读面同步
-        signedGet("executor")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
-        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.routingFileCountSignalEnabled()).isFalse();
-        assertThat(executor.routingSizeLabelSignalEnabled()).isFalse();
-    }
-
-    @Test
-    void given_signal_switches_flipped_when_get_and_traces_then_effective_and_snapshots()
-            throws Exception {
-        // 翻转打开（恢复结构性判据）→ GET 生效值＝库值；留痕前后快照含两开关
-        // （old=false 缺省态 → new=true）；幂等重写不落痕；清空（PUT {}）回落缺省关
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"routingFileCountSignalEnabled\": true, \"routingSizeLabelSignalEnabled\": true}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(true));
-        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.routingFileCountSignalEnabled()).isTrue();
-        assertThat(executor.routingSizeLabelSignalEnabled()).isTrue();
-
-        // 幂等重写（PUT 全量语义：同值携带——值面无动不落痕，写者不漂移）
-        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
-                "{\"routingFileCountSignalEnabled\": true, \"routingSizeLabelSignalEnabled\": true}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].oldRoutingFileCountSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].oldRoutingSizeLabelSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingFileCountSignalEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].newRoutingSizeLabelSignalEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
-
-        // 切回缺省关＝旧值写回（一次新变更、留新痕——不做版本树）
-        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
-                "{\"routingFileCountSignalEnabled\": false, \"routingSizeLabelSignalEnabled\": false}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(2)))
-                .andExpect(jsonPath("$.data[0].oldRoutingFileCountSignalEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].newRoutingFileCountSignalEnabled").value(false));
-
-        // 清空回落缺省：null 归一 false＝结构性信号关（#454 新缺省）
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
-    }
-
-    @Test
-    void given_one_signal_switch_on_when_put_then_independent_flip() throws Exception {
-        // 两开关独立可翻转：只开文件面信号——GET 单件 true；留痕只记本件变更
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"routingFileCountSignalEnabled\": true}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
-        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        assertThat(executor.routingFileCountSignalEnabled()).isTrue();
-        assertThat(executor.routingSizeLabelSignalEnabled()).isFalse();
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].oldRoutingFileCountSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingFileCountSignalEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].oldRoutingSizeLabelSignalEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingSizeLabelSignalEnabled").value(false));
-    }
-
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
 
     @Test
@@ -543,15 +351,11 @@ class BackofficeAgentConfigSeamTest {
                 "INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled) "
                         + "VALUES ('t-off', 'deepseek', 'some-off-model', FALSE)");
 
-        // 三座 modelConfigKey/路由强档与边缘点配置：缺行键 400 PRJ_074、停用键 400 PRJ_075
+        // 三座 modelConfigKey 与边缘点配置：缺行键 400 PRJ_074、停用键 400 PRJ_075
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"t-nope\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4074))
                 .andExpect(jsonPath("$.message").value(containsString("t-nope")));
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"routingStrongModelConfigKey\": \"t-nope\"}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4074));
         signedPutEdge("naming", OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"t-nope\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4074));

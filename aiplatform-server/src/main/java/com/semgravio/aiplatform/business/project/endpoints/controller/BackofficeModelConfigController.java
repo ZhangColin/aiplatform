@@ -29,7 +29,7 @@ import com.semgravio.aiplatform.business.project.domain.model.Operator;
  * 后台模型配置维护 REST 面（#367，spec #364-T3，ADR-0031；机机签名——五头 HMAC
  * 强制闸，同 agent-configs 面）：配置 CRUD＋变更留痕。语义键/实际模型名/所属
  * 通道/显示名/启用态/深度思考开关（#370：跟配置/模型走，缺省 false＝显式关）；
- * 被智能体运营配置与路由强档引用的即语义键——改配置写口（agent-configs 面）
+ * 被智能体运营配置引用的即语义键——改配置写口（agent-configs 面）
  * 对本面 enabled=true 行集即时校验放行。错误码 PRJ_066/068/070/071/073。
  * 操作者透传头写操作必留痕。
  */
@@ -101,8 +101,8 @@ public class BackofficeModelConfigController {
 
     @DeleteMapping("/{configKey}")
     @Operation(summary = "配置删除（被绑定引用即拒）",
-            description = "删除配置行；仍被智能体运营配置绑定（model_config_key/"
-                    + "routing_strong_model_config_key 任一＝该语义键）即 409 PRJ_073——先"
+            description = "删除配置行；仍被智能体运营配置绑定（model_config_key＝"
+                    + "该语义键）即 409 PRJ_073——先"
                     + "改绑或清空绑定再删（悬空引用不留静默坑；临时下线用停用不删"
                     + "行）。删成落痕（new 全 null，留痕跨行存活）。X-User-Id/"
                     + "X-User-Name 必留痕。需要机机签名（五头 HMAC），无签名 401")

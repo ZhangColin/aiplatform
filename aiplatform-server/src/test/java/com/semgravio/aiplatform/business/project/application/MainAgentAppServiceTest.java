@@ -2042,9 +2042,9 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_corrective_round_1_fails_when_round_2_escalates_strong_and_rescues() {
-        // 纠偏链②：①（主档 flash）仍失格 → ②升强档（routingStrongModelConfigKey 缺省 pro）
-        // ＋同款微指令——「flash 为主、做不到升 pro」的升档落点（ADR-0036）；救回即不播报
+    void given_corrective_round_1_fails_when_round_2_same_tier_rescues() {
+        // 纠偏链②：①（主档 flash）仍失格 → ②同档（升档随模型路由退役，#606）
+        // ＋同款微指令——纠正只靠确定性微指令；救回即不播报
         Long projectId = persistedProject("9761");
         givenSessionExecutorRunsInline();
         java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
@@ -2070,7 +2070,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         assertThat(commands.getAllValues().get(2).modelString())
-                .isEqualTo("deepseek:deepseek-v4-pro");
+                .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
     }
 
     @Test
@@ -2087,24 +2087,6 @@ class MainAgentAppServiceTest {
                 argThat(payload -> run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
                         && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
                                 .contains("上一轮没有正常完成")));
-        assertThat(appService.interviewDangling(projectId)).isTrue();
-    }
-
-    @Test
-    void given_routing_disabled_when_corrective_fails_then_no_escalation_and_remedy() {
-        // 纯人工定档运营姿态（routingEnabled=关）：跳过升档、①失格即播报——不自动升 pro
-        Long projectId = persistedProject("9763");
-        givenSessionExecutorRunsInline();
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, routing_enabled)
-                VALUES ('main', FALSE)
-                ON CONFLICT (agent_key) DO UPDATE SET routing_enabled = EXCLUDED.routing_enabled
-                """);
-
-        appService.runOpinionTurn(projectId, "做一个官网");
-
-        verify(agentClient, times(2)).converse(any(), any());
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
         assertThat(appService.interviewDangling(projectId)).isTrue();
     }
 

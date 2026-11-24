@@ -51,8 +51,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}——systemPrompt/
  * 模型配置经运营配置读面 {@link AgentConfigAppService} 取生效值，#251 库值优先、
- * 缺省回落枚举默认；模型配置另经模型路由判定 {@link ModelRoutingAppService} 选档
- * ——路由判定优先、人工覆盖兜底（钉死位＝路由关），#354 只对 run 执行体座生效）、
+ * 缺省回落枚举默认；模型路由已随 #606 退役——run 起跑直接取执行体生效档）、
  * 会话寻址由轨道层拼装传入（#114 每 run 换会话——已落盘成果保留，同工作区不丢
  * 数据）、owner 寻址、活超时、计量 dims（agentKind=executor）、项目工作区、流
  * 关联。知识命中前置注入只进首跑 prompt（一次下发一次注入）。</p>
@@ -89,7 +88,7 @@ class CodingRunDispatcher {
      * 命令按内核装配形态构建（系统提示＝{@link KernelSystemPrompt} 权威版本、
      * 装配键＝{@link AgentscopeHarnessAgentFactory#KERNEL_AGENT_NAME}——不带
      * executor 键，决策提示／verify 自决旧中间件结构性挂不上；工具面＝恰四件经
-     * 装配兑现，本层不发放工具规格）。模型配置寻址／模型路由／计量 dims 仍随
+     * 装配兑现，本层不发放工具规格）。模型配置寻址／计量 dims 仍随
      * {@link AgentProfile#EXECUTOR} 座（供给链照现路径——模型配置→候选队列→
      * 通道行，#601 供给链不绕开）。</p>
      */
@@ -97,7 +96,7 @@ class CodingRunDispatcher {
 
         /**
          * 生成内核座席（#601 接线）：首建与迭代重建派发走新内核装配——profile 仍
-         * EXECUTOR（模型配置／路由／计量 dims 连续性），装配面四件内核形态由
+         * EXECUTOR（模型配置／计量 dims 连续性），装配面四件内核形态由
          * kernelForm 分叉（提示词权威版本／内核装配键／无工具面规格）。
          */
         static RunSeat kernel() {
@@ -151,7 +150,7 @@ class CodingRunDispatcher {
 
     /**
      * run 的耗时账（#111 阶段耗时分布）：run 墙钟 + 跨流段（converse）合并的阶段
-     * 耗时事实 + 生效模型配置（#354 路由留档——哪档可归因，收尾卡
+     * 耗时事实 + 生效模型配置（供给链留档——用了哪档可归因，收尾卡
      * durationBreakdown.attempts[].modelId）。墙钟口径：成功/判据未过的 run =
      * converse 起跑 → 收口落定（核验起计收口尾序桶，判据未过的核验时间未归因，
      * 探活类量级小）；中段崩的 run = 起跑到异常点（含全部在途），桶 = 该流段已闭合
@@ -169,7 +168,6 @@ class CodingRunDispatcher {
     private final ModelConfigAppService modelConfigs;
     private final GenerationProperties properties;
     private final ConversationHistoryAppService conversationHistory;
-    private final ModelRoutingAppService modelRouting;
     private final CodingRunTrack codingRunTrack;
     private final SegmentSettlementAppService segmentSettlement;
 
@@ -178,7 +176,7 @@ class CodingRunDispatcher {
             AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
-            ModelRoutingAppService modelRouting, CodingRunTrack codingRunTrack,
+            CodingRunTrack codingRunTrack,
             SegmentSettlementAppService segmentSettlement) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -187,7 +185,6 @@ class CodingRunDispatcher {
         this.modelConfigs = modelConfigs;
         this.properties = properties;
         this.conversationHistory = conversationHistory;
-        this.modelRouting = modelRouting;
         this.codingRunTrack = codingRunTrack;
         this.segmentSettlement = segmentSettlement;
     }
@@ -320,7 +317,7 @@ class CodingRunDispatcher {
             throw new RunStoppedException(firstRunId,
                     failureFace(true, null, attemptDurations, runStartedAt));
         }
-        // 关停旁路（#477）：宽限窗内不起尝试（不烧预算、不升档）——直抛轨道层关停
+        // 关停旁路（#477）：宽限窗内不起尝试（不烧预算）——直抛轨道层关停
         // 收口（重启后由重跑入口恢复）
         if (AgentShutdownGate.isShuttingDown()) {
             throw new RunShutdownException(firstRunId,
@@ -333,20 +330,10 @@ class CodingRunDispatcher {
         // 全扣（「失败也扣、停止也扣」，结算挂 run finally）
         state.meterRunIds().add(attemptRunId);
         AgentConfigAppService.EffectiveConfig agent = agentConfigs.effectiveOf(seat.profile());
-        // 模型路由判定（#354）：只对 run 执行体座生效（Demo 阶段模型档＝run
-        // 执行体的模型档）；路由判定优先、人工覆盖兜底——run 起跑时读档定档
-        // （进行中 run 不定格）。单发后恒首轮首试（attempt=1/round=1）
-        ModelRoutingAppService.ConfigSelection config = seat.profile() == AgentProfile.EXECUTOR
-                ? modelRouting.select(agent, Long.toString(workspaceId), 1, 1,
-                        ModelRoutingAppService.SegmentSignals.none())
-                : null;
-        if (config != null) {
-            log.info("[{}] 项目 {} 本场 run 模型路由：{}（来源 {}，理由 {}）",
-                    what, projectId, config.modelConfigKey(), config.source(), config.reasons());
-        }
-        // 配置键 → 模型串＋通道注入（ADR-0031 解析单点）：路由选定档或座
-        // 生效档统一在此解析——供应商/凭证/配置变更下一场 run 起跑即生效
-        String attemptModelConfigKey = config != null ? config.modelConfigKey() : agent.modelConfigKey();
+        // 配置键 → 模型串＋通道注入（ADR-0031 解析单点）：run 直接取执行体生效档
+        // （库值优先、缺省回落枚举——起跑时读档，进行中 run 不定格；模型路由已随
+        // #606 退役）
+        String attemptModelConfigKey = agent.modelConfigKey();
         // #557 整候选队列（多候选＝failover 装配面，五个 resolve 面之一）
         ModelCandidateQueue model = modelConfigs.resolveQueue(attemptModelConfigKey);
         // 提示：单发提示＋知识命中前置注入（一次下发一次注入）
@@ -410,8 +397,8 @@ class CodingRunDispatcher {
             }
             attemptChanges.addAll(reply.changes());
             runChanges.addAll(attemptChanges);
-            // 本尝试账先记——核验/收口段抛错不重记。配置随账留档（#354 路由
-            // 可观测——收尾卡 attempts[].modelId）；尝试墙钟止于核验前
+            // 本尝试账先记——核验/收口段抛错不重记。配置随账留档（供给链归因
+            // ——收尾卡 attempts[].modelId）；尝试墙钟止于核验前
             attemptDurations.add(new AttemptDuration(1,
                     Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                     reply.durations(), attemptModelConfigKey, /* channelInstant= */ false));
@@ -433,7 +420,7 @@ class CodingRunDispatcher {
             emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
             if (pendingFinish.get() != null) {
                 Map<String, Object> closing = closingPayload(judgment, runChanges,
-                        runStartedAt, what, config);
+                        runStartedAt, what);
                 // 阶段耗时分布（#111）：收口尾序止表于载荷定型（落库自指不可测——
                 // 载荷先于落库定型，量级极小忽略）；三桶齐备 + 逐尝试分布
                 closing.put(CLOSING_BREAKDOWN_FIELD, durationBreakdown(attemptDurations,
@@ -569,15 +556,12 @@ class CodingRunDispatcher {
      * 拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径行数
      * 合并——用户面一场 run 的活动量口径）；时长 = 起跑到本收口。验证统计／
-     * 基座 lint／已知缺陷清单随审查与收口组退役（#605）。模型路由（#354）另扩
-     * {@code modelTier}——收口 run 的路由判定（哪场用了哪档、为什么：配置 + 来源
-     * + 升档理由 + 判定依据快照）；{@code config} 非空才携带（run 执行体座的编码
-     * run，平台分析口径、前端不渲染——逐尝试配置另见
-     * durationBreakdown.attempts[].modelId）。
+     * 基座 lint／已知缺陷清单随审查与收口组退役（#605）；模型路由判定留档
+     * {@code modelTier} 随 #606 退役——逐尝试生效配置仍见
+     * {@code durationBreakdown.attempts[].modelId}（供给链归因）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
-            List<FileChange> changes, Instant runStartedAt, String what,
-            ModelRoutingAppService.ConfigSelection config) {
+            List<FileChange> changes, Instant runStartedAt, String what) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -590,19 +574,8 @@ class CodingRunDispatcher {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        if (config != null) {
-            closing.put(CLOSING_MODEL_CONFIG_FIELD, config.payload());
-        }
         return closing;
     }
-
-    /**
-     * 收口扩载的模型路由键（#354：收口 run 的路由判定留档——{@code { modelId,
-     * source, reasons?, signals }}；run 执行体座的编码 run 在场、其余缺省不携带。
-     * 平台分析口径、前端不渲染，随收尾卡落对话史——「哪场用了哪档、为什么」的
-     * 可查留档；逐尝试配置见 {@code durationBreakdown.attempts[].modelId}）。
-     */
-    static final String CLOSING_MODEL_CONFIG_FIELD = "modelTier";
 
     /**
      * 阶段耗时分布装配（#111；#417 口径修真；#453 增每迭代平台开销归因桶）：
@@ -633,7 +606,7 @@ class CodingRunDispatcher {
     }
 
     /** 逐 run 分布条目：run 墙钟 + 三桶（无收口尾序——归级）+ 每迭代平台开销归因
-     * 桶（#453，同级 overhead 口径）+ 生效模型配置（#354 路由留档——哪档可归因）。 */
+     * 桶（#453，同级 overhead 口径）+ 生效模型配置（供给链归因——用了哪档）。 */
     private static Map<String, Object> attemptPayload(AttemptDuration attempt) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("attempt", attempt.attempt());

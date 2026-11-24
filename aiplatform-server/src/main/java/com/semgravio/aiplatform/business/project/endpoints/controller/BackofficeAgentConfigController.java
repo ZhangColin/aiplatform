@@ -72,35 +72,20 @@ public class BackofficeAgentConfigController {
                     + "默认——调整工作协议、换模型不发版）；webSearchEnabled/"
                     + "fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即"
                     + "退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/"
-                    + "{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run"
-                    + " 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；"
-                    + "false＝钉死位——人工档恒生效，对账/对比的定档通道）；"
-                    + "routingStrongModelConfigKey/routingFileCountThreshold/"
-                    + "routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、"
-                    + "文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、"
-                    + "升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；"
-                    + "token 越出小/中/大封闭集 400 PRJ_079）。路由结构性信号两开关"
-                    + "（#454，ADR-0037）：routingFileCountSignalEnabled/"
-                    + "routingSizeLabelSignalEnabled 缺省 false/null＝关＝对应信号不参与"
-                    + "升档判定（观测值照留进判定快照）；true＝恢复对应判据（阈值/映射"
-                    + "旋钮照旧生效）；失败重试信号不受两开关影响、常开。协同口径：路由"
-                    + "判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射"
-                    + "命中）升强档，无信号回落人工档（modelConfigKey 覆盖 → 枚举缺省快档，"
-                    + "覆盖即基础档、快配置可经覆盖配置不关路由）。装配生效语义：动态查库，"
+                    + "{toolName}）。装配生效语义：动态查库，"
                     + "变更后下一轮命令构建自然"
                     + "取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——"
                     + "新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面"
                     + "有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；"
                     + "同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次"
                     + "新变更、留新痕，不做版本树）。配置键即时校验（#367）："
-                    + "modelConfigKey 与 routingStrongModelConfigKey 非空时必须在模型配置面"
+                    + "modelConfigKey 非空时必须在模型配置面"
                     + "（/model-configs）有行且启用——缺行 400 PRJ_074、停用 400 "
                     + "PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落"
                     + "缺省不校验）。X-User-Id/X-User-Name 透传头"
-                    + "必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大"
-                    + "封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。"
+                    + "必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。"
                     + "回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"PRJ_033", "PRJ_034", "PRJ_079"})
+    @ErrorCodes({"PRJ_033", "PRJ_034"})
     public ApiResponse<BackofficeAgentConfigResponse> update(@PathVariable String agentKey,
             @RequestBody AgentConfigUpdateCommand command) {
         return ApiResponse.ok(appService.update(agentKey, command, currentOperator()));
@@ -124,7 +109,7 @@ public class BackofficeAgentConfigController {
     @Operation(summary = "边缘调用点配置读面（生效值＋覆盖标记＋默认预览）",
             description = "边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或"
                     + "代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/"
-                    + "工具开关/路由件）。寻址稳定键四把：naming=项目取名 / "
+                    + "工具开关）。寻址稳定键四把：naming=项目取名 / "
                     + "compaction=上下文压缩 / classification=入口分类 / "
                     + "precheck=技能预检。改配置下一轮命令构建即生效（装配动态查库，"
                     + "进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401")

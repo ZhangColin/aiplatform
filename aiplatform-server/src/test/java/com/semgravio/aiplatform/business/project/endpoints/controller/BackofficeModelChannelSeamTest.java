@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>留痕＋回滚</b>：每次实际变更一痕（前后全量快照＋操作者＋倒序）、幂等
  * 重写不落痕；回滚＝旧值写回即一次新痕；创建痕 old 全 null、删除痕 new 全 null；</li>
  * <li><b>绑定即时校验</b>：改配置写不存在的配置键 400 PRJ_074、停用档 400
- * PRJ_075（三座 modelConfigKey/路由强档＋边缘点同拦）；</li>
+ * PRJ_075（两座 modelConfigKey＋边缘点同拦）；</li>
  * <li><b>缓存指纹</b>：通道换 key 后解析单点取新 key、通道指纹变（下一轮命令
  * 构建即新实例——工厂缓存键含指纹）；</li>
  * <li><b>删除守卫</b>：被引用的配置/通道删除 409（悬空引用不留静默坑）；</li>
@@ -629,20 +629,16 @@ class BackofficeModelChannelSeamTest {
         assertThat(after.channel().fingerprint()).isNotEqualTo(beforeFingerprint);
     }
 
-    // ---------- 绑定即时校验（AC）：三座/路由强档/边缘点改配置写错值即拒 ----------
+    // ---------- 绑定即时校验（AC）：三座/边缘点改配置写错值即拒 ----------
 
     @Test
     void given_binding_when_agent_config_put_unknown_or_disabled_tier_then_rejected()
             throws Exception {
-        // 缺行配置键：三座 modelConfigKey 与路由强档、边缘点配置三面同拦
+        // 缺行配置键：三座 modelConfigKey 与边缘点配置两面同拦
         putAgentConfig("executor", "{\"modelConfigKey\": \"t-nope\"}", OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(TIER_BINDING_NOT_FOUND_CODE))
                 .andExpect(jsonPath("$.message").value(containsString("t-nope")));
-        putAgentConfig("executor", "{\"routingStrongModelConfigKey\": \"t-nope\"}",
-                OPERATOR_ID, OPERATOR_NAME)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(TIER_BINDING_NOT_FOUND_CODE));
         putAgentConfig("edge/naming", "{\"modelConfigKey\": \"t-nope\"}", OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(TIER_BINDING_NOT_FOUND_CODE));

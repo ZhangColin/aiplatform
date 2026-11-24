@@ -1,11 +1,8 @@
 package com.semgravio.aiplatform.business.project.application;
 
-import java.util.Set;
-
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -44,21 +41,14 @@ public class AgentConfigAppService {
 
     /**
      * 生效配置束（一次查库同取——prompt 与配置在命令构建处恒结伴，工具开关
-     * #252 同批；模型路由策略 #354 同批——路由判定消费，阈值/强档的代码缺省
-     * 回落归 {@code ModelRoutingAppService}）：生效 systemPrompt、生效
-     * 配置键（ADR-0031：语义键，模型串与通道注入由 {@code ModelConfigAppService
-     * #resolve} 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关
-     * 生效态、配置覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
-     * 结构性信号两开关 #454 同批——文件面/规模标签信号缺省 false＝不参与升档判定
-     * （失败重试信号常开不受影响），路由判定处随生效配置同取。验证面／收口闸／
-     * 基座 lint 阻断已随审查与收口组退役（#605，V84 删列）。
+     * #252 同批）：生效 systemPrompt、生效配置键（ADR-0031：语义键，模型串与
+     * 通道注入由 {@code ModelConfigAppService#resolve} 在命令构建处解析——本服务
+     * 只管覆盖态读腿，不越层）、增强工具开关生效态。验证面／收口闸／基座 lint
+     * 阻断已随审查与收口组退役（#605，V84 删列）；模型路由策略与结构性信号
+     * 开关已随 #606 退役（V88 删列）。
      */
     public record EffectiveConfig(String systemPrompt, String modelConfigKey,
-            boolean webSearchEnabled, boolean fetchUrlEnabled,
-            boolean modelConfigKeyOverridden, boolean routingEnabled,
-            String routingStrongModelConfigKey, Integer routingFileCountThreshold,
-            Set<SliceSizeLabel> routingEscalatingSizeLabels,
-            boolean routingFileCountSignalEnabled, boolean routingSizeLabelSignalEnabled) {
+            boolean webSearchEnabled, boolean fetchUrlEnabled) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -76,11 +66,7 @@ public class AgentConfigAppService {
                 override != null ? override : AgentOperationalConfig.defaults(profile.key());
         return new EffectiveConfig(config.effectiveSystemPrompt(profile.systemPrompt()),
                 config.effectiveModelConfigKey(profile.modelConfigKey()),
-                config.webSearchEnabled(), config.fetchUrlEnabled(),
-                config.modelConfigKey() != null, config.routingEnabled(),
-                config.routingStrongModelConfigKey(), config.routingFileCountThreshold(),
-                config.routingEscalatingSizeLabels(),
-                config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled());
+                config.webSearchEnabled(), config.fetchUrlEnabled());
     }
 
     /**

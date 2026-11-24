@@ -205,6 +205,18 @@ class ModelConfigRenameMigrationReplayTest {
         assertThat(queryStrings("SELECT config_key || '#' || priority FROM "
                 + REPLAY_SCHEMA + ".prj_model_config_candidates ORDER BY config_key"))
                 .containsExactly("flash#1", "pro#1");
+        // 全链终态含 V88 模型路由列拆除（#606）：配置列与留痕镜像列零残留
+        assertThat(columnsOf("prj_agent_configs"))
+                .doesNotContain("routing_enabled", "routing_strong_model_config_key",
+                        "routing_file_count_threshold", "routing_escalating_size_labels",
+                        "routing_file_count_signal_enabled", "routing_size_label_signal_enabled");
+        assertThat(columnsOf("prj_agent_config_traces"))
+                .doesNotContain("old_routing_enabled", "new_routing_enabled",
+                        "old_routing_strong_model_config_key", "new_routing_strong_model_config_key",
+                        "old_routing_file_count_threshold", "new_routing_file_count_threshold",
+                        "old_routing_escalating_size_labels", "new_routing_escalating_size_labels",
+                        "old_routing_file_count_signal_enabled", "new_routing_file_count_signal_enabled",
+                        "old_routing_size_label_signal_enabled", "new_routing_size_label_signal_enabled");
     }
 
     // -------- 回放脚手架（照 ModelChannelHaMigrationReplayTest） --------

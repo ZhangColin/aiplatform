@@ -69,7 +69,7 @@ public interface ModelChannelStore {
     /** 配置行删除（引用守卫在应用层先查，此处纯删）。 */
     void deleteConfig(String configKey);
 
-    /** 配置是否被智能体运营配置引用（model_config_key/routing_strong_model_config_key 任一＝配置键）。 */
+    /** 配置是否被智能体运营配置引用（model_config_key＝配置键）。 */
     boolean configBoundByAgentConfigs(String configKey);
 
     /** 通道是否被引用（配置行直引或候选行引用——V79 起候选 FK 也指通道；裸 FK 报错不可读的先检面）。 */

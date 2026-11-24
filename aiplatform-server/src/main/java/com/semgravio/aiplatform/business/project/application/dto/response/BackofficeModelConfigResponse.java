@@ -8,7 +8,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelConfig;
 
 /**
  * 模型配置读面（#367）：GET/POST/PUT 回执同形。语义键→实际模型名＋所属通道＋
- * 显示名＋启用态；绑定面（三座/边缘点/路由强档）引用的即语义键，绑定即时校验
+ * 显示名＋启用态；绑定面（两座智能体/边缘点）引用的即语义键，绑定即时校验
  * 放行值＝本读面 enabled=true 的行集。
  *
  * @param configKey         语义键（引用腿）

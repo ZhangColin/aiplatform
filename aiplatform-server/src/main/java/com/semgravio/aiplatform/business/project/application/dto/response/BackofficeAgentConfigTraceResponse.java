@@ -9,33 +9,19 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
 /**
  * 配置变更留痕读面行（#251 历史可查）：一次实际变更的前后全量值快照＋操作者＋
  * 时刻，按时间倒序（最近先）。append-only——留痕不随任何动作删除；回滚＝把旧值
- * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。值面全量（含路由策略四件
- * #354）留痕；验证面与收口闸留痕面随审查与收口组退役（#605，V84 删列）。
+ * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。值面四件（systemPrompt、
+ * modelConfigKey、两工具开关）全量留痕。模型路由策略与结构性信号开关的留痕面
+ * 随 #606 退役（V88 删列）；验证面与收口闸留痕面随审查与收口组退役（#605，V84）。
  *
  * @param id                  留痕标识（TSID 十进制串）
  * @param oldSystemPrompt     变更前 systemPrompt（null＝此前即缺省回落）
  * @param oldModelConfigKey          变更前模型配置（null 同上）
  * @param oldWebSearchEnabled 变更前联网搜索开关
  * @param oldFetchUrlEnabled  变更前网页抓取开关
- * @param oldRoutingEnabled   变更前模型路由开关
- * @param oldRoutingStrongModelConfigKey 变更前强模型档（null＝回落代码缺省）
- * @param oldRoutingFileCountThreshold 变更前文件面阈值（null 同上）
- * @param oldRoutingEscalatingSizeLabels 变更前升档规模标签映射（存储形逗号接 token，
- *                                       如「中,大」；null 同上；空串＝空映射，#426）
- * @param oldRoutingFileCountSignalEnabled 变更前文件面信号开关（#454；恒有值——缺省
- *                                       态恒 false＝不参与升档判定）
- * @param oldRoutingSizeLabelSignalEnabled 变更前规模标签信号开关（#454；同上）
  * @param newSystemPrompt     变更后 systemPrompt（null＝本次清空回落）
  * @param newModelConfigKey          变更后模型配置（null 同上）
  * @param newWebSearchEnabled 变更后联网搜索开关
  * @param newFetchUrlEnabled  变更后网页抓取开关
- * @param newRoutingEnabled   变更后模型路由开关
- * @param newRoutingStrongModelConfigKey 变更后强模型档（null＝本次清空回落代码缺省）
- * @param newRoutingFileCountThreshold 变更后文件面阈值（null 同上）
- * @param newRoutingEscalatingSizeLabels 变更后升档规模标签映射（存储形逗号接 token；
- *                                       null 同上；空串＝空映射）
- * @param newRoutingFileCountSignalEnabled 变更后文件面信号开关（#454；恒有值）
- * @param newRoutingSizeLabelSignalEnabled 变更后规模标签信号开关（#454；恒有值）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -51,19 +37,6 @@ public record BackofficeAgentConfigTraceResponse(
         boolean oldWebSearchEnabled,
         @Schema(description = "变更前网页抓取开关")
         boolean oldFetchUrlEnabled,
-        @Schema(description = "变更前模型路由开关（#354）")
-        boolean oldRoutingEnabled,
-        @Schema(description = "变更前强模型档（null＝此前即回落代码缺省）")
-        String oldRoutingStrongModelConfigKey,
-        @Schema(description = "变更前文件面阈值（null 同上）")
-        Integer oldRoutingFileCountThreshold,
-        @Schema(description = "变更前升档规模标签映射（#426 存储形逗号接 token，如「中,大」；"
-                + "null＝此前即回落代码缺省；空串＝空映射）")
-        String oldRoutingEscalatingSizeLabels,
-        @Schema(description = "变更前文件面信号开关（#454；恒有值——缺省态恒 false＝不参与升档判定）")
-        boolean oldRoutingFileCountSignalEnabled,
-        @Schema(description = "变更前规模标签信号开关（#454；恒有值——缺省态恒 false）")
-        boolean oldRoutingSizeLabelSignalEnabled,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型配置（null＝本次清空回落）")
@@ -72,19 +45,6 @@ public record BackofficeAgentConfigTraceResponse(
         boolean newWebSearchEnabled,
         @Schema(description = "变更后网页抓取开关")
         boolean newFetchUrlEnabled,
-        @Schema(description = "变更后模型路由开关（#354）")
-        boolean newRoutingEnabled,
-        @Schema(description = "变更后强模型档（null＝本次清空回落代码缺省）")
-        String newRoutingStrongModelConfigKey,
-        @Schema(description = "变更后文件面阈值（null 同上）")
-        Integer newRoutingFileCountThreshold,
-        @Schema(description = "变更后升档规模标签映射（#426 存储形逗号接 token；null＝本次"
-                + "清空回落代码缺省；空串＝空映射）")
-        String newRoutingEscalatingSizeLabels,
-        @Schema(description = "变更后文件面信号开关（#454；恒有值）")
-        boolean newRoutingFileCountSignalEnabled,
-        @Schema(description = "变更后规模标签信号开关（#454；恒有值）")
-        boolean newRoutingSizeLabelSignalEnabled,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -97,14 +57,8 @@ public record BackofficeAgentConfigTraceResponse(
         return new BackofficeAgentConfigTraceResponse(Long.toString(trace.id()),
                 trace.oldSystemPrompt(), trace.oldModelConfigKey(),
                 trace.oldWebSearchEnabled(), trace.oldFetchUrlEnabled(),
-                trace.oldRoutingEnabled(), trace.oldRoutingStrongModelConfigKey(),
-                trace.oldRoutingFileCountThreshold(), trace.oldRoutingEscalatingSizeLabels(),
-                trace.oldRoutingFileCountSignalEnabled(), trace.oldRoutingSizeLabelSignalEnabled(),
                 trace.newSystemPrompt(), trace.newModelConfigKey(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
-                trace.newRoutingEnabled(), trace.newRoutingStrongModelConfigKey(),
-                trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
-                trace.newRoutingFileCountSignalEnabled(), trace.newRoutingSizeLabelSignalEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

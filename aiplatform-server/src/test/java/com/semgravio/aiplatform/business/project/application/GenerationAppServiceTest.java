@@ -1471,60 +1471,17 @@ class GenerationAppServiceTest {
         return projectRepository.save(project).getId();
     }
 
-    // ---------- 模型路由（#354：路由判定优先、人工覆盖兜底；钉死位＝路由关；
-    // #604 失败升档腿随尝试环退役——失败信号路由（历史 attempt 计数）无消费面，
-    // 升档系用例删除；路由判定本体归 #606） ----------
+    // ---------- 模型档（#606 模型路由退役后：run 直接取执行体生效档，收口无
+    // modelTier 判定留档） ----------
 
     @Test
-    void given_large_file_surface_when_dispatch_then_strong_from_first_attempt() {
-        // 文件面大小信号：应用文件面（探针输出已扣基座基数）≥ 阈值（代码缺省 30，
-        // #426 排除基座基数后重校）——首试即升强档。结构性信号开关开（#454：缺省
-        // 关＝不参与判定——本用例验证开关开态的升档链）
-        Long projectId = persistedProject("9851");
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, routing_file_count_signal_enabled)
-                VALUES ('executor', true)
-                """);
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
-                cmd.command().contains("git ls-files"))))
-                .thenReturn(new ExecResultResponse(" 87\n", "", 0));
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
-                    Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            return new AgentReply(command.runId(), "完成");
-        });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString)
-                .containsExactly("deepseek:deepseek-v4-pro");
-
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
-                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
-                .get("modelTier");
-        assertThat((List<String>) sliceTier.get("reasons")).contains("文件面超出阈值（87 ≥ 30）");
-        assertThat((Map<String, Object>) sliceTier.get("signals")).containsEntry("fileCount", 87);
-    }
-
-    @Test
-    void given_routing_off_with_override_when_dispatch_then_pinned_manual_tier() {
-        // 钉死位＝路由关＋人工档：人工档恒生效（#604 单发形态：一次 run 一档，
-        // 无失败升档腿——路由关时档位于起跑即定）
+    void given_executor_model_config_override_when_dispatch_then_override_tier_used() {
+        // 库覆盖即生效档：一次 run 一支配置（单发无升档腿）；收尾卡不再携
+        // modelTier（路由判定留档随 #606 退役）
         Long projectId = persistedProject("9854");
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, model_config_key, routing_enabled)
-                VALUES ('executor', 'pro', false)
+                INSERT INTO prj_agent_configs (agent_key, model_config_key)
+                VALUES ('executor', 'pro')
                 """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -1546,24 +1503,20 @@ class GenerationAppServiceTest {
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payloads.capture());
-        Map<String, Object> config = (Map<String, Object>) ((Map<String, Object>) payloads
-                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
-                .get("modelTier");
-        assertThat(config)
-                .containsEntry("modelId", "pro")
-                .containsEntry("source", "pinned")
-                .doesNotContainKey("reasons");
+        Map<String, Object> closing = (Map<String, Object>) payloads
+                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).doesNotContainKey("modelTier");
+        // 供给链归因仍在：逐尝试生效配置随 durationBreakdown 留档
+        Map<String, Object> breakdown = (Map<String, Object>) closing.get("durationBreakdown");
+        assertThat((List<Map<String, Object>>) breakdown.get("attempts"))
+                .singleElement()
+                .satisfies(attempt -> assertThat(attempt).containsEntry("modelId", "pro"));
     }
 
     @Test
-    void given_routing_off_no_override_when_dispatch_then_enum_default_kept() {
-        // 路由关＋无覆盖：缺省档恒生效（快档）——单发一次 run 即枚举缺省档（#604
-        // 无失败升档腿）
+    void given_no_executor_override_when_dispatch_then_enum_default_tier_used() {
+        // 无覆盖：枚举缺省快档（flash）——单发一次 run 一支配置
         Long projectId = persistedProject("9855");
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, routing_enabled)
-                VALUES ('executor', false)
-                """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {

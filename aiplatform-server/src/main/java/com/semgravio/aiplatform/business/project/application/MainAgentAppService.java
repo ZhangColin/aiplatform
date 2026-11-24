@@ -545,8 +545,8 @@ public class MainAgentAppService {
     /**
      * 纠偏轮命令（#445；<b>#462 统一微指令修订</b>——ADR-0036 补记）：同主对话命令的
      * 会话/配置/计量/只读面（system prompt 与工具规格同取 MAIN 生效值——纠偏轮也是
-     * 主智能体的轮），prompt 换统一纠偏微指令、模型配置按轮次解析（{@link
-     * #correctiveModelOf}）。
+     * 主智能体的轮），prompt 换统一纠偏微指令；模型配置同主对话档（主智能体生效档，
+     * 升档已随模型路由退役，#606）。
      */
     private AgentCommand correctiveCommand(Project project, String runId,
             AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model) {
@@ -694,7 +694,7 @@ public class MainAgentAppService {
      * 只有「再问一问」（挂起问答）或「产出 PRD」两形；无问无 PRD 即悬空。命中不
      * 立即播报——先走收口纠偏链（主档＋统一纠偏微指令重派〔一条指令覆盖正文提问
      * 与「说可出 PRD 但未调 savePrd」两形——平台无可观测信号可靠区分，确定性纠正
-     * 不解析自由文本〕，失格升强档兜底，封顶两轮，{@link #dispatchCorrectiveChain}），
+     * 不解析自由文本〕，失格再派一轮同档兜底，封顶两轮，{@link #dispatchCorrectiveChain}），
      * 双失格才置 {@link #danglingInterviews}＋平台补救（文案按 savePrd 失败事实分形）。
      * 两合法形与迭代期、归档路径随观测清除标记（接管解除单点归一）；平台轮不入
      * 契约。轮失败（判死等异常上抛）不经本观测与纠偏链——悬空补救在轮任务的
@@ -762,11 +762,11 @@ public class MainAgentAppService {
                     // quotaCorrectiveRounds 账）；非额度平台轮不入契约（原口径）
                     if (!platformRound || quotaClosure) {
                         // ADR-0036（#445）收口纠偏链：用户轮悬空命中不立即播报——先
-                        // 自动纠偏（主档＋确定性微指令重派），失格再升强档兜底，双失
-                        // 格才置标记＋平台补救（markDanglingInterview 单点收口，文案
-                        // 按 savePrd 失败事实分形——点名/泛形）。纠偏轮封顶两轮防烧
-                        // token；均为平台轮不入本契约（不递归）；routingEnabled=关的
-                        // 纯人工定档姿态跳过升档、第 1 轮失格即播报。轮失败（异常收
+                        // 自动纠偏（主档＋确定性微指令重派），失格再派一轮同档兜底，
+                        // 双失格才置标记＋平台补救（markDanglingInterview 单点收口，
+                        // 文案按 savePrd 失败事实分形——点名/泛形）。纠偏轮封顶两轮
+                        // 防烧 token；均为平台轮不入本契约（不递归）。升强档随模型
+                        // 路由退役（#606）——纠正只靠确定性微指令。轮失败（异常收
                         // 口）不经本链——catch 侧 remedyFailedInterviewTurn 即时点名
                         // 播报（环境性失败重试照样失败，ADR-0032 原 rationale 保持）
                         dispatchCorrectiveChain(project, sessionId, runId, prdSaveFailed,
@@ -854,9 +854,9 @@ public class MainAgentAppService {
      * savePrd 失败形两条分形指令合并为一条覆盖两形的确定性微指令，ADR-0036 补记）：
      * 平台发起的纠正轮序列——把「模型纯文本提问／说可出 PRD 但未调 savePrd／
      * savePrd 未落成」的格式失格在会话锁死（首轮坏示范被后续轮自模仿延续）前扳回
-     * 工具轨道。第 1 轮用主智能体生效档（flash 为主）＋统一微指令；仍失格第 2 轮
-     * 升强档（路由面生效值，缺省 pro）——「flash 做不到再升 pro」与执行体路由
-     * （ADR-0030）同一总姿态。成功判据＝合法收口形两形（挂起问答在场或 PRD 已产出，
+     * 工具轨道。两轮同用主智能体生效档＋统一微指令——升强档随模型路由退役
+     * （#606，ADR-0030/0036 改记），纠正只靠确定性微指令、不靠换档。成功判据＝
+     * 合法收口形两形（挂起问答在场或 PRD 已产出，
      * {@link #correctiveSettled}）；每轮新 runId、会话执行器串行、回复照常落对话史。
      * 链不占悬空标记——标记双失格才置（接管面不扩大）；播报文案仍按 savePrd 失败
      * 事实分形（点名/泛形——{@code prdSaveFailed} 只进文案，不再选指令）。
@@ -876,7 +876,7 @@ public class MainAgentAppService {
      * 的失格收口唯一出口＝产出 PRD。两形——挂起在场（模型漂移又提问）：平台以收口
      * 指令代答该问题并续跑同一 run（引擎 ASKING 态拒新 converse，代答续跑是唯一
      * 通路；同缺口重派不另计——计数读口按缺口标识去重）；无挂起（死收口）：收口
-     * 微指令新轮（主档起、失格升强档，同 ADR-0036 姿态）。推进经重入收口观测（代答/
+     * 微指令新轮（两轮同主档，同 ADR-0036 姿态；升档已随 #606 退役）。推进经重入收口观测（代答/
      * 微指令轮的 {@link #dispatchOnTurnClose} 再走收窄链）累积
      * {@link #quotaCorrectiveRounds} 账，封顶两轮播报悬空（防烧 token）。
      */
@@ -889,13 +889,7 @@ public class MainAgentAppService {
             return;
         }
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelCandidateQueue model = correctiveModelOf(main, attempt);
-        if (model == null) {
-            // 路由关的纯人工定档姿态：不自动升档（第 1 轮失格即播报，同非额度链语义）
-            quotaCorrectiveRounds.remove(sessionId);
-            markDanglingInterview(project, originRunId, DANGLING_REMEDY_QUOTA_EXHAUSTED);
-            return;
-        }
+        ModelCandidateQueue model = modelConfigs.resolveQueue(main.modelConfigKey());
         if (suspensionPending) {
             resumeWithPlatformClosureAnswer(project, sessionId, originRunId);
             return;
@@ -993,16 +987,11 @@ public class MainAgentAppService {
         });
     }
 
-    /** 纠偏轮单轮派发：配置解析（null＝不升档的直接播报收口）→ 命令构建 → 串行执行 → 成功判据 → 推进/收口。 */
+    /** 纠偏轮单轮派发：配置解析（主智能体生效档——两轮同档，#606）→ 命令构建 → 串行执行 → 成功判据 → 推进/收口。 */
     private void submitCorrectiveRound(Project project, String sessionId, String originRunId,
             boolean prdSaveFailed, int attempt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelCandidateQueue model = correctiveModelOf(main, attempt);
-        if (model == null) {
-            markDanglingInterview(project, originRunId,
-                    prdSaveFailed ? DANGLING_REMEDY_PRD_FAILED : DANGLING_REMEDY_GENERIC);
-            return;
-        }
+        ModelCandidateQueue model = modelConfigs.resolveQueue(main.modelConfigKey());
         Long projectId = project.getId();
         String runId = EventsAppService.newRunId();
         AgentCommand command = correctiveCommand(project, runId, main, model);
@@ -1049,25 +1038,6 @@ public class MainAgentAppService {
             return true;
         }
         return agentClient.hasAskingToolCall(project.ownerUserId(), sessionId);
-    }
-
-    /**
-     * 纠偏轮配置解析：第 1 轮＝主智能体生效档（库值优先、缺省回落枚举——与对话轮
-     * 同腿）；第 2 轮＝升强档，路由开关关（纯人工定档运营姿态）返回 null——调用方
-     * 直接播报、不自动升档。强档取路由面生效值（运营可换、不发版，ADR-0031），
-     * 缺省 {@link ModelRoutingAppService#DEFAULT_STRONG_MODEL_CONFIG_KEY}。
-     */
-    private ModelCandidateQueue correctiveModelOf(
-            AgentConfigAppService.EffectiveConfig main, int attempt) {
-        if (attempt == 1) {
-            return modelConfigs.resolveQueue(main.modelConfigKey());
-        }
-        if (!main.routingEnabled()) {
-            return null;
-        }
-        return modelConfigs.resolveQueue(main.routingStrongModelConfigKey() != null
-                ? main.routingStrongModelConfigKey()
-                : ModelRoutingAppService.DEFAULT_STRONG_MODEL_CONFIG_KEY);
     }
 
     /** 收口即消费：意见锚与修订事实同口径清掉（不留过轮）——归档 / 未产出 PRD /

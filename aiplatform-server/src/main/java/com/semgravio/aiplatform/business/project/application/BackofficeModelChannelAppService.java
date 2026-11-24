@@ -55,7 +55,7 @@ import lombok.extern.slf4j.Slf4j;
  * 复启；创建缺省才归一 true）。</p>
  *
  * <p><b>删除守卫</b>（悬空引用不留静默坑，spec #364 故事 9）：配置被智能体运营
- * 配置绑定（model_config_key/routing_strong_model_config_key）不可删（PRJ_073）；通道被配置行
+ * 配置绑定（model_config_key）不可删（PRJ_073）；通道被配置行
  * 引用不可删（PRJ_072——FK 裸错的读面化）。临时下线＝停用不删行（既有绑定装配
  * 明确报错、新绑定被即时校验拒绝——错误可定位不静默）。</p>
  *
@@ -314,8 +314,8 @@ public class BackofficeModelChannelAppService {
     }
 
     /**
-     * 配置删除（DELETE）：被智能体运营配置绑定即拒（PRJ_073——model_config_key/
-     * routing_strong_model_config_key 引用面）；删成落痕（new 全 null）。
+     * 配置删除（DELETE）：被智能体运营配置绑定即拒（PRJ_073——model_config_key
+     * 引用面；路由强档引用面随 #606 退役）；删成落痕（new 全 null）。
      *
      * @throws ApplicationException PRJ_066 配置不存在；PRJ_073 被绑定引用；
      *                              PRJ_034 操作者缺

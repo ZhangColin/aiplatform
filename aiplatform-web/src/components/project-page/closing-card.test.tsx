@@ -6,25 +6,6 @@ import type { WorkClosing } from "@/lib/store/chat";
 
 import { ClosingCard } from "./closing-card";
 
-// 版本动作 hook 契约面 mock（起/停快照、回滚——请求面归 use-version 与后端测试，
-// 本测试只验收尾卡形态与版本控件的成版锚点门控）
-vi.mock("@/hooks/use-version", () => ({
-  useStartVersionView: () => ({
-    isPending: false,
-    isError: false,
-    data: undefined,
-    mutate: vi.fn(),
-    reset: vi.fn(),
-  }),
-  useStopVersionView: () => ({ mutate: vi.fn() }),
-  useRollbackVersion: () => ({ mutate: vi.fn() }),
-  useVersionViewSession: () => ({
-    startView: { isPending: false, isError: false, data: undefined, mutate: vi.fn(), reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-}));
-
 // 预览入口（#617）取既有预览查询：此处替身直给 URL 就绪态（请求面归
 // use-project-preview 测试）
 const previewState = vi.hoisted(() => ({
@@ -193,21 +174,5 @@ describe("ClosingCard · 五字段（#617）", () => {
 
     expect(html).toContain('aria-label="在新窗口打开预览"');
     expect(html).not.toContain('disabled=""');
-  });
-});
-
-describe("ClosingCard · 版本控件（#92/#93，存量旧卡）", () => {
-  it("成版锚点（version）在场：出「查看当时 / 回滚到此」两动作", () => {
-    const html = renderCard(closing({ version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" }));
-
-    expect(html).toContain("查看当时");
-    expect(html).toContain("回滚到此");
-  });
-
-  it("成版失败（缺 version 键）：不出版本控件", () => {
-    const html = renderCard(closing({ version: undefined }));
-
-    expect(html).not.toContain("查看当时");
-    expect(html).not.toContain("回滚到此");
   });
 });

@@ -47,9 +47,8 @@ export const queryKeys = {
      */
     demoVersions: (id: string) => ["projects", "demo-versions", id] as const,
     /**
-     * run 收口版本表（#91 版本层：git log 即正本，commitHash×runId 锚）。版本
-     * 记录抽屉 Demo 条目经 runId→commitHash 映射接「查看当时」（#344）；挂
-     * projects 域随 run-finish 失效刷新。
+     * run 收口版本表（#626：git log 即正本，commitHash×runId 锚）。单轴版本
+     * 时间线的唯一数据源；挂 projects 域随 run-finish 失效刷新。
      */
     versions: (id: string) => ["projects", "versions", id] as const,
   },

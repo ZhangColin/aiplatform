@@ -17,16 +17,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => previewState,
 }));
 
-// 版本动作请求面本测试不消费（卡上无 version 键）
-vi.mock("@/hooks/use-version", () => ({
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: { isPending: false, isError: false, data: undefined, mutate: vi.fn(), reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-}));
-
 function card(overrides: Partial<WorkClosing> = {}): WorkClosing {
   return {
     narrative: "生成完成",

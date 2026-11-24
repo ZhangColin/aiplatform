@@ -4,7 +4,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,7 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,17 +27,14 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.semgravio.aiplatform.business.project.application.ProjectVersionAppService;
-import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
-import com.semgravio.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionRollbackStartResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 版本 REST 面（swagger 契约验收，#91）：ApiResponse 信封、版本列表（新→旧）、
- * 版本详情（锚定收尾卡载荷）；PRJ_001（项目不存在）与 PRJ_028（版本不存在）
- * → 404。
+ * 版本 REST 面（swagger 契约验收，#626/#627）：ApiResponse 信封、版本列表（新→旧）、
+ * 回到某版（异步受理）；PRJ_001（项目不存在）与 PRJ_028（版本不存在）→ 404。
+ * 「查看当时」起/停快照端点随 #628 快照容器拆除退役。
  */
 @WebMvcTest(ProjectVersionController.class)
 @Import({ProjectVersionControllerTest.ExceptionAdviceConfig.class,
@@ -51,9 +46,6 @@ class ProjectVersionControllerTest {
 
     @MockitoBean
     private ProjectVersionAppService versionAppService;
-
-    @MockitoBean
-    private VersionSnapshotAppService snapshotAppService;
 
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
         return RequestContext.runFor(
@@ -81,21 +73,6 @@ class ProjectVersionControllerTest {
     }
 
     @Test
-    void given_version_with_closing_when_detail_then_anchored_payload() throws Exception {
-        when(versionAppService.detail(any(), anyString())).thenReturn(
-                new VersionDetailResponse("a1a1a1a1", "更新了系统", "222", null,
-                        LocalDateTime.of(2026, 9, 5, 12, 0),
-                        Map.of("summary", "更新了系统", "systemChanged", true)));
-
-        performAsUser(get("/api/projects/100/versions/a1a1a1a1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.commitHash").value("a1a1a1a1"))
-                .andExpect(jsonPath("$.data.runId").value("222"))
-                .andExpect(jsonPath("$.data.closing.summary").value("更新了系统"))
-                .andExpect(jsonPath("$.data.closing.systemChanged").value(true));
-    }
-
-    @Test
     void given_missing_project_when_list_then_404() throws Exception {
         when(versionAppService.list(any())).thenThrow(
                 new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
@@ -104,57 +81,6 @@ class ProjectVersionControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
-    }
-
-    @Test
-    void given_unknown_ref_when_detail_then_404() throws Exception {
-        doThrow(new ApplicationException(ProjectMessage.VERSION_NOT_FOUND))
-                .when(versionAppService).detail(any(), anyString());
-
-        performAsUser(get("/api/projects/100/versions/beefbeef"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4028))
-                .andExpect(jsonPath("$.message").value("版本不存在"));
-    }
-
-    @Test
-    void given_valid_ref_when_start_view_then_view_id_and_preview_url() throws Exception {
-        when(snapshotAppService.startView(any(), anyString())).thenReturn(
-                new VersionViewStartResponse("view-1", "http://localhost:30001/"));
-
-        performAsUser(post("/api/projects/100/versions/a1a1a1a1/view"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.viewId").value("view-1"))
-                .andExpect(jsonPath("$.data.previewUrl").value("http://localhost:30001/"));
-    }
-
-    @Test
-    void given_active_view_when_stop_view_then_ok() throws Exception {
-        performAsUser(delete("/api/projects/100/versions/a1a1a1a1/view/view-1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
-    }
-
-    @Test
-    void given_unknown_view_when_stop_view_then_404() throws Exception {
-        doThrow(new ApplicationException(ProjectMessage.VERSION_VIEW_NOT_FOUND))
-                .when(snapshotAppService).stopView(any(), anyString());
-
-        performAsUser(delete("/api/projects/100/versions/a1a1a1a1/view/gone"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4030))
-                .andExpect(jsonPath("$.message").value("该查看会话不存在或已关闭"));
-    }
-
-    @Test
-    void given_view_limit_when_start_view_then_409() throws Exception {
-        doThrow(new ApplicationException(ProjectMessage.VERSION_VIEW_LIMIT))
-                .when(snapshotAppService).startView(any(), anyString());
-
-        performAsUser(post("/api/projects/100/versions/a1a1a1a1/view"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(4029))
-                .andExpect(jsonPath("$.message").value("同时查看的版本过多，请先关闭一个再查看"));
     }
 
     @Test

@@ -75,23 +75,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 
-// 收尾卡版本控件（#92/#93）的请求面：服务端直读种子渲染，无 QueryClient 可挂——
-// 收尾卡用例只断言呈现序，版本动作不发请求
-vi.mock("@/hooks/use-version", () => ({
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: {
-      mutate: vi.fn(),
-      isPending: false,
-      isError: false,
-      data: undefined,
-      reset: vi.fn(),
-    },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-}));
-
 afterEach(() => {
   seed.quota = null;
 });

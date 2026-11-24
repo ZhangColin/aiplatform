@@ -120,8 +120,6 @@ export type WorkClosing = {
   /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
   filesUnavailable?: boolean;
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；#605 后新载荷不再携带，存量旧卡沿用）。 */
-  version?: string;
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -167,8 +165,8 @@ export type ChatMessage =
       /**
        * 收尾卡（#88 定格收口，#89 起归对话流常驻）：编码 run 真收口的凝聚物——
        * live 经 run-finish.closing 到达（id = 事件 id，重放去重），回访经对话史
-       * 水合（id = 库条目 id，退位合并的锚之一）。「查看当时/回滚到此」版本控件
-       * 归版本层（#91）。
+       * 水合（id = 库条目 id，退位合并的锚之一）。版本回看与回滚归单轴时间线
+       * （#626/#627）。
        */
       kind: "closing";
       id: string;
@@ -879,7 +877,6 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
       : {}),
     ...(record.filesUnavailable === true ? { filesUnavailable: true } : {}),
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
-    version: typeof record.version === "string" ? record.version : undefined,
   };
 }
 

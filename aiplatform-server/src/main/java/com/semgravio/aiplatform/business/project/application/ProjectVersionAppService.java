@@ -454,19 +454,6 @@ public class ProjectVersionAppService {
         return VersionDetailResponse.of(resolveVersion(project, ref), null);
     }
 
-    /**
-     * 校验 ref 是可查看的成版 commit（存在 + hex 形态）；不存在抛 PRJ_028。供
-     * 「查看当时」（#92）等版本动作的寻址守卫——用户可控入参不进 shell。
-     */
-    public void requireVersion(Long projectId, String ref) {
-        requireVersion(loadProject(projectId), ref);
-    }
-
-    /** 同上，但复用调用方已加载的聚合（避免查看编排的二次查库）。 */
-    public void requireVersion(Project project, String ref) {
-        resolveVersion(project, ref);
-    }
-
     /** ref → 版本 commit 元数据（showCommand + 解析）；非版本 / 野 commit / 非 hex 一律 PRJ_028。 */
     private WorkspaceVersion resolveVersion(Project project, String ref) {
         ExecResultResponse result;

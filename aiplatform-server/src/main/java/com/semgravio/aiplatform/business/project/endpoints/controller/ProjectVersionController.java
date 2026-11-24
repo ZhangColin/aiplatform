@@ -2,7 +2,6 @@ package com.semgravio.aiplatform.business.project.endpoints.controller;
 
 import java.util.List;
 
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,20 +15,17 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import com.cartisan.web.response.ApiResponse;
 
 import com.semgravio.aiplatform.business.project.application.ProjectVersionAppService;
-import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
-import com.semgravio.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionRollbackStartResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 版本 REST 面（#91 版本层地基；#605 起收口成版提交退役；#626/#627 阶段四重建）：
- * 版本列表（git log 即正本，新→旧；成员判据＝平台版本标记/回滚标记）、版本详情
- * （元数据）、查看当时（起快照容器，归 #628 拆除）与回到某版（#627 平台侧异步：
- * restore→停→build→起→探活→成版）。版本是项目子资源，独立控制器分列（照
- * OrderController 先例——ProjectController 已满）。
+ * 版本 REST 面（#91 版本层地基；#605 起收口成版提交退役；#626/#627 阶段四重建；
+ * #628 拆「查看当时」快照容器与旧版本入口）：版本列表（git log 即正本，新→旧；
+ * 成员判据＝平台版本标记/回滚标记）与回到某版（#627 平台侧异步：restore→停→
+ * build→起→探活→成版）。版本是项目子资源，独立控制器分列（照 OrderController
+ * 先例——ProjectController 已满）。
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/versions")
@@ -38,12 +34,9 @@ import com.semgravio.aiplatform.support.Tsid;
 public class ProjectVersionController {
 
     private final ProjectVersionAppService versionAppService;
-    private final VersionSnapshotAppService snapshotAppService;
 
-    public ProjectVersionController(ProjectVersionAppService versionAppService,
-            VersionSnapshotAppService snapshotAppService) {
+    public ProjectVersionController(ProjectVersionAppService versionAppService) {
         this.versionAppService = versionAppService;
-        this.snapshotAppService = snapshotAppService;
     }
 
     @GetMapping
@@ -55,26 +48,6 @@ public class ProjectVersionController {
                     + "项目不存在 404 PRJ_001；环境故障 WSP_002")
     public ApiResponse<List<VersionResponse>> list(@PathVariable String projectId) {
         return ApiResponse.ok(versionAppService.list(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
-    }
-
-    @GetMapping("/{ref}")
-    @Operation(summary = "版本详情",
-            description = "版本元数据（hash / 摘要 / 锚定 run / 成版时刻）；收尾卡载荷字段 closing "
-                    + "随 Run-Id 联接退役（#605）恒空，留至阶段四版本重建。ref = commit hash（hex）——"
-                    + "非 hash 形态 404 PRJ_028 且不触工作区（shell 注入防线）。项目不存在 404 PRJ_001")
-    public ApiResponse<VersionDetailResponse> detail(@PathVariable String projectId,
-            @PathVariable String ref) {
-        return ApiResponse.ok(versionAppService.detail(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
-    }
-
-    @PostMapping("/{ref}/view")
-    @Operation(summary = "查看当时（起快照容器）",
-            description = "起该版本（ref = commit hash）的运行态快照容器：同卷只读 + 数据副本 + "
-                    + "检出当时代码起应用，返回 viewId 与快照预览 URL；逛完经 DELETE 关闭销毁。"
-                    + "版本不存在 404 PRJ_028；同项目并发查看达上限 409 PRJ_029；环境故障 WSP_002")
-    public ApiResponse<VersionViewStartResponse> startView(@PathVariable String projectId,
-            @PathVariable String ref) {
-        return ApiResponse.ok(snapshotAppService.startView(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
     }
 
     @PostMapping("/{ref}/rollback")
@@ -91,15 +64,5 @@ public class ProjectVersionController {
             @PathVariable String ref) {
         return ApiResponse.ok(versionAppService.rollback(
                 Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
-    }
-
-    @DeleteMapping("/{ref}/view/{viewId}")
-    @Operation(summary = "关闭查看会话（销毁快照容器）",
-            description = "销毁 viewId 对应的快照容器（副本随容器可写层消失，工作区零变化）。"
-                    + "ref 仅为 URL 对称占位（寻址锚是 viewId）；会话不存在 404 PRJ_030")
-    public ApiResponse<Void> stopView(@PathVariable String projectId,
-            @PathVariable String ref, @PathVariable String viewId) {
-        snapshotAppService.stopView(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), viewId);
-        return ApiResponse.ok();
     }
 }

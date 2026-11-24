@@ -104,15 +104,6 @@ vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
-vi.mock("@/hooks/use-version", () => ({
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: { mutate: vi.fn(), isPending: false, isError: false, data: undefined, reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-}));
-
 /** 标准播种：闲聊期（无 PRD）项目。 */
 function seedChatOnlyProject() {
   seed.detail = { id: "p1", name: "宠物医院预约管理系统" } as ProjectDetail;

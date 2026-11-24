@@ -39,11 +39,6 @@ vi.mock("@/hooks/use-demo-version", () => ({
 vi.mock("@/hooks/use-version", () => ({
   useGitVersions: () => ({ data: [], isPending: false, isError: false }),
   useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: { mutate: vi.fn(), reset: vi.fn(), data: undefined, isPending: false, isError: false },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
 }));
 vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),

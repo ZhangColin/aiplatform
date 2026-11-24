@@ -18,8 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * serve.js 纯静态职责回归（#138）：真实起服（node 进程 + curl 探针），断言 HTML
  * 响应与磁盘文件**逐字节一致**——旧路径（#97 圈注 B 档）对含 {@code </body>} 的
  * HTML 内联注入标注脚本，本测试钉死该路径已删；预览注入唯一源 = 网关
- * sub_filter（ADR-0014，见 {@link PreviewGatewaySmokeTest}）。快照「查看当时」
- * 的静态兜底起服与此同路径，透传即其无注入口径。
+ * sub_filter（ADR-0014，见 {@link PreviewGatewaySmokeTest}）。
  * node 不在则跳过（与 docker 缺席同口径，CI 无 node 时不红）。
  */
 class ServeJsStaticPassthroughTest {

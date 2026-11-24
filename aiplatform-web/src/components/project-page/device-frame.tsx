@@ -7,24 +7,20 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
 /**
- * 设备壳两件套单源（#201，正本 = 系统 tab #80 口径）：系统 tab 与「查看当时」
- * 弹窗的设备外壳（DeviceFrame）与设备切换控件（DeviceToggle）原系两份手抄实现，
- * 漂移已实证（弹窗浅色锁定舞台抄漏文字色；#182 触碰先行、#139 Esc 补位的演进
- * 从未回流弹窗侧）——共享核心收敛本模块，两处调用点仅存一份。
+ * 设备壳两件套单源（#201，正本 = 系统 tab #80 口径）：系统 tab 的设备外壳
+ * （DeviceFrame）与设备切换控件（DeviceToggle）——共享核心收敛本模块，调用点
+ * 仅存一份。
  *
- * <p>随附归一：设备档类型（PreviewDevice，弹窗侧 ViewDevice 抄本删除）、浅色锁定
- * 舞台口径常量（LIGHT_LOCK_STAGE_CLASS）、浏览器条钮样式常量（BAR_BUTTON_CLASS）
- * 同出本模块。</p>
+ * <p>随附归一：设备档类型（PreviewDevice）、浅色锁定舞台口径常量
+ * （LIGHT_LOCK_STAGE_CLASS）、浏览器条钮样式常量（BAR_BUTTON_CLASS）同出本模块。</p>
  *
- * <p>不进共享件、各归原位：地址框／手动刷新／更新中内联／新窗口打开（两处不同身
- * ——系统 tab 带 #182 触碰先行，弹窗无：快照闲置计时锚起服时刻，项目触碰不保活
- * 快照）、iframe 纪元接线、圈注通道、phase 呈现。</p>
+ * <p>不进共享件、各归原位：地址框／手动刷新／更新中内联／新窗口打开（系统 tab
+ * 带 #182 触碰先行）、iframe 纪元接线、圈注通道、phase 呈现。</p>
  */
 
 /**
  * 预览设备宽度档：手机档 = 390px 手机框居中（窄视口不破——框宽 min(390px,100%)，
- * #350 破点②消解：原固定 390px 在 390/360px 视口两侧被裁；version-view-dialog
- * 复用同框同消），桌面档全幅。
+ * #350 破点②消解：原固定 390px 在 390/360px 视口两侧被裁），桌面档全幅。
  * （单源——原系统 tab PreviewDevice 与弹窗 ViewDevice 两份抄本归一。）
  */
 export type PreviewDevice = "desktop" | "mobile";

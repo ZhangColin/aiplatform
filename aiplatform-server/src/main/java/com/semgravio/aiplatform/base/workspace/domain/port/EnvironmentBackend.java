@@ -13,7 +13,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.EnvironmentUsage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.OrphanSweepReport;
-import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
@@ -24,11 +23,10 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
  * 不塞业务语义。后端可替换：本地 Docker（Docker CLI 子进程）→ 上云 TKE/远端
  * （配置切换适配器，接口不动）。
  *
- * <p>本片实现六条：createWorkspace（单容器 all-in-one 沙箱：容器入口脚本自愈起
- * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→快照→卷
- * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）/
- * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
- * 用完即销毁）。#170 唤醒底座补两条：容器实态探查（唤醒触发判据，#176 起与
+ * <p>本片实现：createWorkspace（单容器 all-in-one 沙箱：容器入口脚本自愈起
+ * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→卷
+ * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）。
+ * 「查看当时」快照容器随 #628 拆除（时间旅行由回滚覆盖）。#170 唤醒底座补两条：容器实态探查（唤醒触发判据，#176 起与
  * 观测面共用 {@link #containerState} 四态直判，布尔探查已删）/ startApp（8081
  * 应用拉起——平台职责）。#173 观测面补两条：
  * containerState（实态一瞥）/ volumeSizeBytes（卷用量）；#485 销毁三清校验补一条
@@ -185,45 +183,11 @@ public interface EnvironmentBackend {
     byte[] packSource(WorkspaceHandle handle);
 
     /**
-     * 起「查看当时」快照容器（#92，ADR 0007 解路二）：同镜像、同工作区卷挂
-     * {@code :ro}、入口脚本旁路；平台经 exec 确定性驱动——复制 PGDATA 到容器本地
-     * → 清 pid → 起 pg → 起 redis → 检出 {@code ref} 当时代码到容器本地 → 起应用
-     * （DATABASE_URL 指容器内 localhost）。数据只落副本、卷只读，主容器零扰动。
-     * #141 网关化：进 previewnet（别名 {@code snap-{viewId}}、无宿主端口映射）；
-     * #397 起，起服等待用与主预览 {@link #exposePort} 同款收口判据（经网关＋浏览器
-     * 真实头），起服后返回句柄（含网关子域预览 URL）。
-     *
-     * @param ref 成版 commit hash（hex，调用方已校验存在性；本层只做命令引用）
-     */
-    SnapshotHandle startSnapshot(WorkspaceHandle mainHandle, String viewId, String ref);
-
-    /**
-     * 销毁快照容器（#92）：{@code docker rm -f}，无销毁协调（副本随容器可写层
-     * 消失，卷内零残留）；幂等——容器已不在时为 no-op。
-     */
-    void stopSnapshot(SnapshotHandle snapshot);
-
-    /**
-     * 清扫全部孤儿快照容器（#92 启动自愈）：快照容器是临时视图、不承载持久状态，
-     * 平台重启后注册表丢账、在途查看会话即孤儿——启动期按命名扫清所有
-     * {@code ws-*-snap-*} 容器，不留常驻孤儿（「不留孤儿容器」验收的兜底面）。
-     */
-    void sweepSnapshotContainers();
-
-    /**
-     * 清扫保留集之外的快照容器（#171 运行期孤儿兜底）：孤儿清扫原只在启动期跑，
-     * 运行期同样有漏网——关窗销毁删失败、注册表丢账等——保留集（在用会话容器名）
-     * 之外按命名扫清。返回清扫数。
-     */
-    int sweepSnapshotContainersExcept(Collection<String> keepContainerNames);
-
-    /**
      * 清扫无主工作区容器（#179 触发器，运行期无主兜底；#489 返回值扩为逐项处置
      * 报告）：「记录照删、物理尽力而为」的销毁（{@link #destroyWorkspace} 撞
      * daemon 抖动窗）会把容器留在 Docker 侧而库中无记录——休眠扫描只遍历注册表，
      * 无主容器永久不可见、永不休眠。按命名扫清在跑的 {@code ws-<id>} 主容器
-     * （保留集 = 注册表全量编号；快照容器 {@code ws-*-snap-*} 归
-     * {@link #sweepSnapshotContainersExcept}，不在本面）。只动启动时刻早于宽限线
+     * （保留集 = 注册表全量编号）。只动启动时刻早于宽限线
      * 的容器——新建资源可能尚在「容器已建、记录未落」窗口（fork 先建容器后落
      * 记录），误杀窗口内容器＝杀在途 run。在册项不动但进报告（跳过原因＝在册）。
      *

@@ -1,6 +1,5 @@
 package com.semgravio.aiplatform.business.project.endpoints.scheduler;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -16,26 +15,24 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceHibernationAppService;
-import com.semgravio.aiplatform.base.workspace.application.WorkspaceProperties;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceScanFact;
 import com.semgravio.aiplatform.business.project.application.CodingRunTrack;
-import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * 休眠扫描组合根（#171 → #197 正名）：组合根测试——项目域事实（run 在途 / 已生成）
- * 随扫描递入 base.workspace（不反向依赖）、归档项目同一判定（无特殊分支）、闲置
- * 快照同一轮清扫。总开关已内移 base 扫描入口，本层不再读开关（关闭与否是 base
- * 扫描的内政）。@Scheduled 装配以反射断言 + 应用服务直调验证（不等真实定时）。
+ * 随扫描递入 base.workspace（不反向依赖）、归档项目同一判定（无特殊分支）。总开关
+ * 已内移 base 扫描入口，本层不再读开关（关闭与否是 base 扫描的内政）。@Scheduled
+ * 装配以反射断言 + 应用服务直调验证（不等真实定时）。闲置快照清扫随 #628 快照容器
+ * 拆除退役。
  */
 @ExtendWith(MockitoExtension.class)
 class WorkspaceHibernationSchedulerTest {
@@ -44,14 +41,9 @@ class WorkspaceHibernationSchedulerTest {
     private WorkspaceHibernationAppService hibernationAppService;
 
     @Mock
-    private VersionSnapshotAppService snapshotAppService;
-
-    @Mock
     private ProjectRepository projectRepository;
 
     private final CodingRunTrack codingRunTrack = new CodingRunTrack();
-
-    private final WorkspaceProperties properties = new WorkspaceProperties();
 
     @Test
     void given_projects_when_scan_round_then_facts_passed_with_run_and_generated_flags() {
@@ -78,9 +70,6 @@ class WorkspaceHibernationSchedulerTest {
                 3L, new WorkspaceScanFact(true, true)));
         // 认领集＝项目行在的工作区编号（#488 在册失联判定的正本，随扫描递入）
         assertThat(claimed.getValue()).containsExactlyInAnyOrder(1L, 2L, 3L);
-        // 同轮清扫闲置快照（同一闲置阈值）
-        verify(snapshotAppService).sweepIdleViews(any(LocalDateTime.class),
-                eq(Duration.ofMinutes(60)));
     }
 
     @Test
@@ -90,8 +79,6 @@ class WorkspaceHibernationSchedulerTest {
         newScheduler().scanRound();
 
         verify(hibernationAppService).scanOnce(anyMap(), any(), any(LocalDateTime.class));
-        verify(snapshotAppService).sweepIdleViews(any(LocalDateTime.class),
-                eq(Duration.ofMinutes(60)));
     }
 
     @Test
@@ -139,7 +126,7 @@ class WorkspaceHibernationSchedulerTest {
     }
 
     private WorkspaceHibernationScheduler newScheduler() {
-        return new WorkspaceHibernationScheduler(hibernationAppService, snapshotAppService,
-                codingRunTrack, projectRepository, properties);
+        return new WorkspaceHibernationScheduler(hibernationAppService,
+                codingRunTrack, projectRepository);
     }
 }

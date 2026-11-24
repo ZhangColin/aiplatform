@@ -405,26 +405,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{projectId}/versions/{ref}/view": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 查看当时（起快照容器）
-         * @description 起该版本（ref = commit hash）的运行态快照容器：同卷只读 + 数据副本 + 检出当时代码起应用，返回 viewId 与快照预览 URL；逛完经 DELETE 关闭销毁。版本不存在 404 PRJ_028；同项目并发查看达上限 409 PRJ_029；环境故障 WSP_002
-         */
-        post: operations["startView"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{projectId}/versions/{ref}/rollback": {
         parameters: {
             query?: never;
@@ -2275,26 +2255,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{projectId}/versions/{ref}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 版本详情
-         * @description 版本元数据（hash / 摘要 / 锚定 run / 成版时刻）；收尾卡载荷字段 closing 随 Run-Id 联接退役（#605）恒空，留至阶段四版本重建。ref = commit hash（hex）——非 hash 形态 404 PRJ_028 且不触工作区（shell 注入防线）。项目不存在 404 PRJ_001
-         */
-        get: operations["detail"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{projectId}/delivery-status": {
         parameters: {
             query?: never;
@@ -3849,26 +3809,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{projectId}/versions/{ref}/view/{viewId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * 关闭查看会话（销毁快照容器）
-         * @description 销毁 viewId 对应的快照容器（副本随容器可写层消失，工作区零变化）。ref 仅为 URL 对称占位（寻址锚是 viewId）；会话不存在 404 PRJ_030
-         */
-        delete: operations["stopView"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4470,18 +4410,6 @@ export interface components {
             generationStateName?: string;
             activeOrder?: components["schemas"]["OrderBriefResponse"];
             latestOrder?: components["schemas"]["OrderBriefResponse"];
-        };
-        ApiResponseVersionViewStartResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["VersionViewStartResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        VersionViewStartResponse: {
-            viewId?: string;
-            previewUrl?: string;
         };
         ApiResponseVersionRollbackStartResponse: {
             /** Format: int32 */
@@ -7754,29 +7682,6 @@ export interface operations {
             };
         };
     };
-    startView: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: string;
-                ref: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVersionViewStartResponse"];
-                };
-            };
-        };
-    };
     rollback: {
         parameters: {
             query?: never;
@@ -9703,29 +9608,6 @@ export interface operations {
             };
         };
     };
-    detail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: string;
-                ref: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVersionDetailResponse"];
-                };
-            };
-        };
-    };
     deliveryStatus: {
         parameters: {
             query?: never;
@@ -11309,30 +11191,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseTrialNoticeResponse"];
-                };
-            };
-        };
-    };
-    stopView: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: string;
-                ref: string;
-                viewId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
         };

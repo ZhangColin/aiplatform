@@ -4,34 +4,20 @@ import {
   Check,
   ChevronDown,
   Clock3,
-  Eye,
   ExternalLink,
   Monitor,
-  RotateCcw,
   ShieldCheck,
   X,
 } from "lucide-react";
 import { useState } from "react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useProjectPreview } from "@/hooks/use-project-preview";
-import { useRollbackVersion, useVersionViewSession } from "@/hooks/use-version";
 import type { WorkClosing } from "@/lib/store/chat";
 import { cn } from "@/lib/utils";
 
 import { ChatMarkdown } from "./chat-markdown";
 import { formatDuration } from "./work-message";
-import { VersionViewDialog } from "./version-view-dialog";
 
 /** 变更清单默认可见条数（其余收进「查看全部」——清单可长，卡不无限长）。 */
 const VISIBLE_FILES = 5;
@@ -86,9 +72,8 @@ function CriterionRow({
  * 打开）。快照或 diff 失败时清单区标注「变更清单不可用」（生成照常成功）。旧
  * 平台句式摘要与「需求文档／系统」判定行退场；档案内旧载荷由 store 读侧回落
  * （toWorkClosing），旧对话史不出坏卡。变更清单头部认合计（文件数/±行数，一次
- * 呈现——旧轮末统计行里的重复计数已并入此处）。「查看当时 / 回滚到此」版本控件
- * （#92/#93）随 closing.version 成版锚点呈现（#605 后新载荷不携 version，存量
- * 旧卡可回；版本语义归阶段四重建）。
+ * 呈现——旧轮末统计行里的重复计数已并入此处）。版本回看与回滚归单轴时间线
+ * （#626/#627），收尾卡不再携旧版本控件（#628 拆「查看当时」）。
  */
 export function ClosingCard({
   closing,
@@ -112,25 +97,6 @@ export function ClosingCard({
   // 预览入口（#617）：URL 取既有预览查询；轮询/事件推送归查询层，本卡只消费
   const preview = useProjectPreview(projectId, true);
   const previewUrl = preview.data?.url;
-
-  // 版本动作（#92/#93）：查看当时 = 起快照（关窗即销毁——起服/销毁生命周期归
-  // useVersionViewSession 单点，#344 收敛）；回滚 = 追加新版本
-  const version = closing.version;
-  const [viewOpen, setViewOpen] = useState(false);
-  const [rollbackOpen, setRollbackOpen] = useState(false);
-  const { startView, start, finish } = useVersionViewSession(projectId);
-  const rollback = useRollbackVersion(projectId);
-
-  function openView() {
-    if (!version) return;
-    setViewOpen(true);
-    start(version);
-  }
-
-  function handleViewOpenChange(open: boolean) {
-    if (!open) finish();
-    setViewOpen(open);
-  }
 
   /** 新窗口打开预览（#126 既有动作；#182 触碰先行——先 refetch 唤醒休眠沙箱）。 */
   function openPreview() {
@@ -344,54 +310,6 @@ export function ClosingCard({
           打开预览
         </Button>
       </div>
-
-      {/* 版本控件（#92/#93）：成版锚点在场才可用——查看当时（起快照只逛不换）/回滚到此
-          （追加版本、只回代码不回数据）。#605 后新载荷不携 version，存量旧卡可回。 */}
-      {version ? (
-        <>
-          <div className="mt-2.5 flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={openView}>
-              <Eye className="size-3.5" />
-              查看当时
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1 px-2.5 text-xs"
-              onClick={() => setRollbackOpen(true)}
-            >
-              <RotateCcw className="size-3.5" />
-              回滚到此
-            </Button>
-          </div>
-
-          <VersionViewDialog
-            open={viewOpen}
-            onOpenChange={handleViewOpenChange}
-            pending={startView.isPending}
-            error={startView.isError}
-            previewUrl={startView.data?.previewUrl}
-            summary={closing.narrative}
-          />
-
-          <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>回滚到这个版本？</AlertDialogTitle>
-                <AlertDialogDescription>
-                  系统代码会回到该版本，业务数据保留；回滚会追加一个新版本，历史不丢失。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>再想想</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={() => rollback.mutate(version)}>
-                  回滚
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </>
-      ) : null}
     </div>
   );
 }

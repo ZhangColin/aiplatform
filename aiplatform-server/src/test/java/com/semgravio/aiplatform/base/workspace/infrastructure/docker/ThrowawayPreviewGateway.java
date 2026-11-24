@@ -13,7 +13,7 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 /**
  * 活体测试用一次性预览网关（#397 收口探针走网关）：dev 网关配置原样起一个
  * previewnet 容器、挂 {@code preview-gateway} 网络别名——工作区容器内的收口探针
- * （exposePort/startApp/startSnapshot）经它打到应用，与用户浏览器同观察点。
+ * （exposePort/startApp）经它打到应用，与用户浏览器同观察点。
  *
  * <p><b>网关资产清单与起容参数的单源（#401，终结 #397 code-review 标记的
  * Duplicated Code）</b>：classpath 资产清单（{@link #ASSETS}）、挂载形态、

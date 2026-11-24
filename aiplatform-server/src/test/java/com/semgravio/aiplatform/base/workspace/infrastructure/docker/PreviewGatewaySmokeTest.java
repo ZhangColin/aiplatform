@@ -16,12 +16,10 @@ import com.cartisan.core.exception.ApplicationException;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
-import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
-import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -37,11 +35,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 真实起服，HTML 与磁盘逐字节一致）、网关注入恰一次（无双注入——防重入 guard 已随
  * 单源删除）。
  * daemon 不在则跳过（CI 无 docker 时不红）。
- * #141 快照网关化：加验 {@code snap-{viewId}.localhost} 经网关路由到快照容器
- * （别名 DNS）——当时代码可逛、且 HTML <b>不含</b>注入标签（「只逛不换」ADR 0007
- * 口径的网关侧收口：快照 server 块不 include 注入块）、句柄 previewUrl 与路由同源。
  * #180 A 片自恢复页：上游不可达（死子域/杀起服）时网关回平台风格提示页（文案
- * 命中、no-store、自恢复脚本随页下发、状态码仍 5xx），主预览与快照子域同口径；
+ * 命中、no-store、自恢复脚本随页下发、状态码仍 5xx），主预览子域口径；
  * 上游起服恢复后同一子域经网关 200（恢复条件在网关缝可观测）；应用自身回的
  * 5xx 原样透传不被提示页替换（不开响应拦截）。自恢复脚本的浏览器轮询→重载
  * 行为不在自动化射程，走 #184 亲手联调。
@@ -280,10 +275,9 @@ class PreviewGatewaySmokeTest {
                     + "GW_EOF");
 
             // #180 A 片：死子域（无对应容器，DNS 解析失败）→ 网关回自恢复提示页而非
-            // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发；快照子域
-            // 同口径（提示页在共享的代理块，主预览/快照/两 profile 一并生效）
+            // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发（提示页在
+            // 共享的代理块，主预览/两 profile 一并生效）
             assertUnavailablePage(curlFull(gatewayPort, "987654321012.localhost", "/"), "死主预览子域");
-            assertUnavailablePage(curlFull(gatewayPort, "snap-987654321012.localhost", "/"), "死快照子域");
 
             // #180 A 片：应用自身的 5xx 原样透传、不被提示页替换（网关不开响应拦截）
             ExecResult appBoom = curlFull(gatewayPort, id + ".localhost", "/__app-boom");
@@ -298,7 +292,7 @@ class PreviewGatewaySmokeTest {
                     .as("镜像内不应再携带标注脚本副本").contains("CLEAN");
 
             // #138 serve.js 纯静态职责：容器内真实起服，HTML 响应与磁盘逐字节一致
-            // （旧路径在此插入 data-aiplatform 注入标签；快照「查看当时」兜底同路径）
+            // （旧路径在此插入 data-aiplatform 注入标签）
             String pureHtml = "<html><head><title>pure</title></head><body>static only</body></html>";
             execIn(handle, "mkdir -p /tmp/pure && printf '%s' '" + pureHtml + "' > /tmp/pure/index.html"
                     + " && nohup node /opt/serve.js /tmp/pure 8099 >/dev/null 2>&1 & echo started");
@@ -306,27 +300,6 @@ class PreviewGatewaySmokeTest {
                     "curl -s --retry 10 --retry-delay 1 --retry-connrefused http://localhost:8099/");
             assertThat(pure.exitCode()).as("serve.js 应起服可探（exit=%s）", pure.exitCode()).isZero();
             assertThat(pure.stdout()).as("serve.js 应逐字节透传（无注入）").isEqualTo(pureHtml);
-
-            // #141 快照路由：成版当前态 → 起快照（真实 startSnapshot，容器进 previewnet
-            // 挂别名）→ snap-{viewId}.localhost 经网关路由到快照容器——只逛不换：HTML
-            // 不含注入标签（快照 server 块不 include 注入块），句柄 URL 与路由同源
-            String viewId = "483920104737";
-            String hash = commit(handle, "首次生成了系统");
-            SnapshotHandle snap = backend.startSnapshot(handle, viewId, hash);
-            try {
-                assertThat(snap.previewUrl().toString())
-                        .isEqualTo("http://snap-" + viewId + ".localhost/");
-                ExecResult snapRouted = curlHost(gatewayPort, "snap-" + viewId + ".localhost", "/");
-                assertThat(snapRouted.exitCode())
-                        .as("网关应路由快照子域（exit=%s）%s", snapRouted.exitCode(), snapRouted.stderr())
-                        .isZero();
-                assertThat(snapRouted.stdout())
-                        .as("快照应服务当时代码且不注入圈注（只逛不换）")
-                        .contains("hello gateway")
-                        .doesNotContain("data-aiplatform");
-            } finally {
-                backend.stopSnapshot(snap);
-            }
 
             // #180 A 片恢复弧：杀上游起服 → 同一活子域经网关回 5xx＋提示页
             // （连接拒绝也走 error_page）；重启起服 → 同子域恢复 200——恢复条件
@@ -477,17 +450,6 @@ class PreviewGatewaySmokeTest {
 
     private static ExecResult execIn(WorkspaceHandle handle, String command) {
         return docker("exec", handle.containerName(), "sh", "-c", command);
-    }
-
-    /** 幂等 init + 手动提交（照 WorkspaceVersions 纯函数——快照检出的 ref 来源）。 */
-    private static String commit(WorkspaceHandle handle, String summary) {
-        ExecResult ensured = execIn(handle, WorkspaceVersions.ensureRepoCommand());
-        assertThat(ensured.exitCode()).as("仓库初始化应成功：%s", ensured.stderr()).isZero();
-        ExecResult committed = execIn(handle, "cd /workspace && git add -A"
-                + " && git commit -q --allow-empty -m '" + summary + "'"
-                + " && git rev-parse HEAD");
-        assertThat(committed.exitCode()).as("提交应成功：%s", committed.stderr()).isZero();
-        return committed.stdout().trim();
     }
 
     private static ExecResult docker(String... args) {

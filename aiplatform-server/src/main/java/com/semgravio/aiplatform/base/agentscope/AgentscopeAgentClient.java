@@ -444,8 +444,6 @@ public class AgentscopeAgentClient {
             else {
                 events.blockLast(timeout != null ? timeout : properties.getTimeout());
             }
-            // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
-            drainParts(prepared.parts(), sink);
             RequireUserConfirmEvent suspension = suspended.get();
             if (suspension == null) {
                 sink.accept(AgentscopeEventMapper.runFinish(
@@ -471,7 +469,6 @@ public class AgentscopeAgentClient {
                 scope.markClosed();
             }
             interruptKernel(prepared, runId);
-            drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
             // 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更与
             // 已闭合区间的阶段耗时随失败携出（观察器全程在流上累积，此处取快照；
@@ -652,10 +649,8 @@ public class AgentscopeAgentClient {
             text.append(delta.getDelta());
         }
         else if (event instanceof RequireUserConfirmEvent confirm) {
-            // 挂起：先出部件解说尾段（问答卡前不留解说尾巴）再发挂起事件
-            // （question-raised 问答卡），不产透传事件
+            // 挂起：发挂起事件（question-raised 问答卡），不产透传事件
             suspended.set(confirm);
-            drainParts(parts, sink);
             sink.accept(mapper.suspension(confirm));
             return;
         }
@@ -682,11 +677,6 @@ public class AgentscopeAgentClient {
     /** 挂起事件的待确认工具最小面（AgentSuspension.toolCalls 的形状，同事件 data.toolCalls）。 */
     private static List<Map<String, Object>> toolCallFace(RequireUserConfirmEvent event) {
         return AgentscopeEventMapper.toolCallPayloads(event.getToolCalls());
-    }
-
-    /** 部件收尾：解说余段出部件（幂等）。 */
-    private static void drainParts(AgentscopePartsMapper parts, Consumer<AgentEvent> sink) {
-        parts.drain().forEach(sink);
     }
 
     /**

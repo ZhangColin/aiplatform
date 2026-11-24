@@ -46,12 +46,9 @@ const VISIBLE_FILES = 5;
 export function ClosingCard({
   closing,
   projectId,
-  round,
 }: {
   closing: WorkClosing;
   projectId: string;
-  /** 轮次序数（#142「查看当时」标题语境源：对话流收尾卡序数，装配层数出）。 */
-  round?: number;
 }) {
   const [filesOpen, setFilesOpen] = useState(false);
   const files = closing.files;
@@ -199,7 +196,6 @@ export function ClosingCard({
             pending={startView.isPending}
             error={startView.isError}
             previewUrl={startView.data?.previewUrl}
-            round={round}
             summary={closing.summary}
           />
 

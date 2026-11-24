@@ -5,8 +5,8 @@ import { ForkCard } from "./fork-card";
 
 // 请求面 mock 掉（无 QueryClient 可挂——呈现面断言归本文件，引导流编排归
 // interaction 测试）
-vi.mock("@/hooks/use-resume-generation", () => ({
-  useResumeGeneration: () => ({ mutate: vi.fn(), isPending: false }),
+vi.mock("@/hooks/use-start-generation", () => ({
+  useStartGeneration: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/use-continue-discussion", () => ({
   useContinueDiscussion: () => ({ mutate: vi.fn(), isPending: false }),

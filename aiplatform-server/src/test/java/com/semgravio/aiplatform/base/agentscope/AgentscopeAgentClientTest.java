@@ -129,10 +129,10 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         var reply = client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
-        // 透传 text 事件照发，解说尾段另成 part-text 部件（收口事件前）
+        // 透传 text 事件照发；模型文本不直播（ADR-0057）——无解说部件，收口直接接上
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START,
-                "text", "text", "text", AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
+                "text", "text", "text", AgentEventTypes.RUN_FINISH);
         // 开场事件形状
         assertThat(frames.get(0).payload()).containsOnly(
                 Map.entry("runId", "run-1"), Map.entry("prompt", "你好"),
@@ -142,12 +142,8 @@ class AgentscopeAgentClientTest {
                 "runId", "run-1", "sessionId", "s-1", "engine", "agentscope"));
         assertThat(frames.get(1).payload().get("data"))
                 .isEqualTo(Map.of("delta", "你", "blockId", "b-1"));
-        // 解说部件 = 完整段（句读/收尾切段，非增量）、扁平载荷无 data 键
-        assertThat(frames.get(4).payload()).containsOnly(
-                Map.entry("runId", "run-1"), Map.entry("sessionId", "s-1"),
-                Map.entry("engine", "agentscope"), Map.entry("text", "你好呀"));
         // 收口事件
-        assertThat(frames.get(5).payload()).containsEntry("finish", "end");
+        assertThat(frames.get(4).payload()).containsEntry("finish", "end");
         // 回复文本 = 增量拼接
         assertThat(reply.runId()).isEqualTo("run-1");
         assertThat(reply.text()).isEqualTo("你好呀");
@@ -160,7 +156,6 @@ class AgentscopeAgentClientTest {
         // （消息部件是全部智能体事件的呈现地基——主智能体对话轮也产部件）
         givenStream(
                 new ModelCallStartEvent("r-1"),
-                new TextBlockDeltaEvent("r-1", "b-1", "访谈自述。"),
                 new ToolCallEndEvent("r-1", "tc-1", "execute"));
 
         List<AgentEvent> frames = new ArrayList<>();
@@ -171,7 +166,7 @@ class AgentscopeAgentClientTest {
                         || type.equals("run-created") || type.equals("run-retrying")
                         || type.equals("fix-unchanged") || type.equals("dispatch-stage"));
         assertThat(frames.stream().map(AgentEvent::type))
-                .contains(AgentEventTypes.PART_TEXT, AgentEventTypes.PART_ACTION);
+                .contains(AgentEventTypes.PART_ACTION);
     }
 
     @Test
@@ -335,15 +330,13 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
-        // 部件序列（步骤分组已退役 #115：ModelCallStart 不产 part-step）：
-        // 解说段 → 动作 started（参数在途，通用对象）→ 动作 running（参数落定，
-        // 具体对象）→ 动作 completed → 解说尾段 → 收口
+        // 部件序列（步骤分组已退役 #115：ModelCallStart 不产 part-step；模型文本
+        // 不直播 ADR-0057：无解说部件）：动作 started（参数在途，通用对象）→ 动作
+        // running（参数落定，具体对象）→ 动作 completed → 收口
         assertThat(frames.stream().map(AgentEvent::type)).containsSubsequence(
-                AgentEventTypes.PART_TEXT,
                 AgentEventTypes.PART_ACTION,
                 AgentEventTypes.PART_ACTION,
                 AgentEventTypes.PART_ACTION,
-                AgentEventTypes.PART_TEXT,
                 AgentEventTypes.RUN_FINISH);
 
         List<AgentEvent> actions = frames.stream()
@@ -438,17 +431,12 @@ class AgentscopeAgentClientTest {
         assertThat(texts).hasSize(2);
         assertThat(texts.get(0).payload()).doesNotContainKey(AgentEventTypes.SOURCE_FIELD);
         assertThat(texts.get(1).payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
-        // 部件事件：part-text / part-action 带来源归属（分角色播的依据）
+        // 部件事件：动作卡带来源归属（分角色播的依据；part-text 已随 #608 退役）
         List<AgentEvent> parts = frames.stream()
                 .filter(f -> f.type().startsWith("part-")).toList();
         assertThat(parts.stream().filter(f -> f.type().equals(AgentEventTypes.PART_ACTION)))
                 .singleElement().satisfies(f ->
                         assertThat(f.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify"));
-        assertThat(parts.stream().filter(f -> f.type().equals(AgentEventTypes.PART_TEXT)))
-                .anySatisfy(f -> assertThat(f.payload())
-                        .containsEntry(AgentEventTypes.SOURCE_FIELD, "verify"))
-                .anySatisfy(f -> assertThat(f.payload())
-                        .doesNotContainKey(AgentEventTypes.SOURCE_FIELD));
     }
 
     /**
@@ -697,9 +685,9 @@ class AgentscopeAgentClientTest {
         assertThat(resumeMsg.getMetadata()
                 .get(Msg.METADATA_CONFIRM_RESULTS)).isInstanceOf(List.class);
         assertThat(resumeMsg.getTextContent()).isEqualTo("approved");
-        // 续跑流部件恒挂：解说尾段部件在收口事件前
+        // 续跑流照常收口（模型文本不直播——无解说部件）
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                "text", AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
+                "text", AgentEventTypes.RUN_FINISH);
         verify(factory).obtain(any(), any(), eq("deepseek:deepseek-v4-flash"), any(), any(), any(), any(), any());
     }
 

@@ -20,15 +20,14 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 /**
  * 部件映射表单点（parts 契约的生产方）：AgentScope 事件 → 平台消息部件事件
  * （词汇正本 = eventhub {@link AgentEventTypes} 部件组；词根取 agentscope 原生
- * part 族，薄翻译不套某家词表）。解说切段与动作行内核独立承载
- * （{@link NarrationSegments} / {@link ToolActionLines}）。工具动作<b>开始即出事件</b>
- * （动作卡全生命周期），以 toolCallId 锚定跨状态（开始/进行中/完成/失败）。
- * 全事件流恒挂（不限编码 run）——消息 = 有序部件集合是全部智能体事件的呈现地基。
+ * part 族，薄翻译不套某家词表）。动作行内核独立承载（{@link ToolActionLines}）。
+ * 工具动作<b>开始即出事件</b>（动作卡全生命周期），以 toolCallId 锚定跨状态
+ * （开始/进行中/完成/失败）。全事件流恒挂（不限编码 run）——消息 = 有序部件集合
+ * 是全部智能体事件的呈现地基。
  *
  * <table border="1">
  *   <caption>AgentScope 事件 → 消息部件事件</caption>
  *   <tr><th>AgentScope 事件</th><th>部件 type</th><th>部件字段</th></tr>
- *   <tr><td>TextBlockDelta（累积切段，机器语法段守卫丢弃——#234）</td><td>{@code part-text}</td><td>text（完整段）</td>
  *   <tr><td>TextBlockDelta（机器语法吞段开始——#240）</td><td>{@code part-signal}</td><td>signal=derailed（人话留痕，不携带原文）</td>
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
@@ -37,10 +36,10 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *
  * <p>思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的呈现位随
  * 需要扩表。工具参数与结果文本增量只累积不出部件（label 在边界点取、error 在
- * 终 failed 提取，#229）。动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
- * 调用方 {@link #drain()} 出尾段（幂等）。步骤分组已退役（#115：步骤序号对
- * 用户零信息，部件按序竖排）；步骤清单快照部件随 update_plan 工具一并退役
- * （#604——计划部件无生产面）。</p>
+ * 终 failed 提取，#229）。模型文本一律不直播（ADR-0057）：解说切段内核
+ * （{@link NarrationSegments}）只留机器语法守卫半边——人话段不出部件，吞段照出
+ * 脱轨信号；步骤分组已退役（#115）；步骤清单快照部件随 update_plan 工具一并退役
+ * （#604），事件类型随 #608 呈现面清场退役。</p>
  */
 final class AgentscopePartsMapper {
 
@@ -64,7 +63,7 @@ final class AgentscopePartsMapper {
         // 呈现归属）
         String source = AgentscopeEventMapper.sourceOf(event);
         if (event instanceof TextBlockDeltaEvent delta) {
-            return textParts(narration.offer(delta, source));
+            return signalParts(narration.offer(delta, source));
         }
         if (event instanceof ToolCallDeltaEvent delta) {
             // 工具参数增量只累积不出部件（短语/快照在边界点取）
@@ -78,13 +77,11 @@ final class AgentscopePartsMapper {
         }
         List<AgentEvent> parts = new ArrayList<>();
         if (event instanceof ToolCallStartEvent start) {
-            drainNarrationInto(parts);
             actionPart(parts, start.getToolCallName(), start.getToolCallId(),
                     AgentEventTypes.PART_ACTION_STATE_STARTED, false, source);
             return parts;
         }
         if (event instanceof ToolCallEndEvent end) {
-            drainNarrationInto(parts);
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
                     AgentEventTypes.PART_ACTION_STATE_RUNNING, false, source);
             return parts;
@@ -99,11 +96,6 @@ final class AgentscopePartsMapper {
         }
         // 其余事件（思考/读类工具/块尾/挂起等）：不出部件
         return List.of();
-    }
-
-    /** run 收尾（run-finish / error / 挂起前）：出解说余段部件（幂等，无尾段即空）。 */
-    List<AgentEvent> drain() {
-        return textParts(narration.drain());
     }
 
     // ---------- 内部 ----------
@@ -154,24 +146,24 @@ final class AgentscopePartsMapper {
         parts.add(new AgentEvent(AgentEventTypes.PART_ACTION, payload));
     }
 
-    private List<AgentEvent> textParts(List<NarrationSegments.Outcome> outcomes) {
+    /**
+     * 文本增量 → 脱轨信号部件（ADR-0057 模型文本不直播）：人话段不出部件；机器
+     * 语法吞段每次起点出一件 part-signal（只报发生事实、不携带原文）。
+     */
+    private List<AgentEvent> signalParts(List<NarrationSegments.Outcome> outcomes) {
         List<AgentEvent> parts = new ArrayList<>();
         for (NarrationSegments.Outcome outcome : outcomes) {
             // 穷尽 switch（sealed）：Outcome 加新变体时编译期强制扩展分派
             switch (outcome) {
-                case NarrationSegments.Outcome.Narration narration -> parts.add(frame(
-                        AgentEventTypes.PART_TEXT, AgentEventTypes.PART_TEXT_FIELD,
-                        narration.text(), narration.source()));
+                case NarrationSegments.Outcome.Narration ignored -> {
+                    // 解说段不呈现（不直播模型文本，ADR-0057）
+                }
                 case NarrationSegments.Outcome.Derailed derailed -> parts.add(frame(
                         AgentEventTypes.PART_SIGNAL, AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
                         AgentEventTypes.PART_SIGNAL_DERAILED, derailed.source()));
             }
         }
         return parts;
-    }
-
-    private void drainNarrationInto(List<AgentEvent> parts) {
-        parts.addAll(textParts(narration.drain()));
     }
 
     private AgentEvent frame(String type, String field, Object value, String source) {

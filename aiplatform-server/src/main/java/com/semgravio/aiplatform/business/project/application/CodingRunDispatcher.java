@@ -403,21 +403,9 @@ class CodingRunDispatcher {
                     Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                     reply.durations(), attemptModelConfigKey, /* channelInstant= */ false));
             attemptAccounted = true;
-            // 自检播报（#85）：收口判据核验（onSuccess——生成 8081 探活 / 落稿
-            // 核验，复用既有收口链路、不新增探针）的呈现——核验前「检查中」、
-            // 落定出结果，位于被押后的 run-finish 之前（收口前播报）
-            emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_CHECKING);
             Instant closingStartedAt = Instant.now(); // 收口尾序起表（探活 → 成版）
-            ClosingJudgment judgment;
-            try {
-                judgment = state.onSuccess().apply(attemptRunId, runChanges);
-            }
-            catch (RuntimeException e) {
-                // 核验未过＝本次尝试失败：❌ 直接落定（不悬挂「检查中」）
-                emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_FAILED);
-                throw e;
-            }
-            emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
+            // 核验未过＝本次尝试失败（onSuccess 抛错直接上抛）
+            ClosingJudgment judgment = state.onSuccess().apply(attemptRunId, runChanges);
             if (pendingFinish.get() != null) {
                 Map<String, Object> closing = closingPayload(judgment, runChanges,
                         runStartedAt, what);
@@ -729,18 +717,6 @@ class CodingRunDispatcher {
                         "added", entry.getValue()[0],
                         "removed", entry.getValue()[1]))
                 .toList();
-    }
-
-    /**
-     * 自检播报事件（#85）：平台侧收口判据核验的部件事实（不经引擎部件映射表——
-     * 判据是平台事实），payload = runId + sessionId + state。经用户面投影发射。
-     */
-    private static void emitSelfCheck(Consumer<AgentEvent> projection, AgentCommand command,
-            String state) {
-        projection.accept(new AgentEvent(AgentEventTypes.PART_CHECK, Map.of(
-                AgentEventTypes.RUN_FIELD, command.runId(),
-                AgentEventTypes.SESSION_FIELD, command.sessionId(),
-                AgentEventTypes.PART_CHECK_STATE_FIELD, state)));
     }
 
     /**

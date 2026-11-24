@@ -27,22 +27,20 @@ import {
  * 套——桌面/手机宽度切换（样式切换不重挂 iframe，快照不因换设备丢状态；#201 起
  * 与系统 tab 同一件，外壳/切换/舞台口径归 ./device-frame 单源——浅色锁定文字色
  * 随单源归正，以系统 tab 为正本）+ 新窗口打开（window.open 快照真实地址；弹窗仍
- * 是快照宿主，关窗即销毁，新标签页随之失效——不引入保活）；③标题带轮次语境——
- * #142 换源为轮次序数 + 收尾摘要（双源恒在场、多弹窗可分辨；原「本轮用户发言」
- * 尽力而为管线退役，见 viewThenTitle 注释）。</p>
+ * 是快照宿主，关窗即销毁，新标签页随之失效——不引入保活）；③标题带收尾语境——
+ * 收尾摘要（closing.summary：#88 服务端权威事实，收尾卡正文同源）；轮次序数呈现
+ * 随 #608 呈现面清场退役（ADR-0057「轮次计数不呈现」）。</p>
  */
 /** 标题里收尾摘要的字数上限（最简一行——超长截断）。 */
 const TITLE_SUMMARY_MAX = 20;
 
 /**
- * 标题式样（#142 换源）：「第 N 轮结束时的系统——<收尾摘要截断>」。语境双源
- * 恒在场——序数 = 对话流收尾卡序数（装配层数出）、摘要 = closing.summary（#88
- * 服务端权威事实，收尾卡正文同源）。#140 的「本轮用户发言摘要」尽力而为管线
- * （roundPromptOf，无 runId 锚/被软上限裁即缺场，走查实测全回落不可分辨）已
- * 随本片退役；序数缺场（防御）回落裸式样。
+ * 标题式样：「那次生成结束时的系统——<收尾摘要截断>」。摘要 = closing.summary
+ * （#88 服务端权威事实，收尾卡正文同源）；轮次序数呈现随 #608 退役，摘要缺场
+ * 回落裸式样。
  */
-export function viewThenTitle(round?: number, summary?: string): string {
-  const base = round && round > 0 ? `第 ${round} 轮结束时的系统` : "那轮结束时的系统";
+export function viewThenTitle(summary?: string): string {
+  const base = "那次生成结束时的系统";
   const flat = summary?.trim().replace(/\s+/g, " ");
   if (!flat) return base;
   const brief = flat.length > TITLE_SUMMARY_MAX ? `${flat.slice(0, TITLE_SUMMARY_MAX)}…` : flat;
@@ -55,7 +53,6 @@ export function VersionViewDialog({
   pending,
   error,
   previewUrl,
-  round,
   summary,
   title,
 }: {
@@ -64,9 +61,7 @@ export function VersionViewDialog({
   pending: boolean;
   error: boolean;
   previewUrl?: string;
-  /** 轮次序数（标题语境源一：对话流收尾卡序数，装配层数出；防御可缺场）。 */
-  round?: number;
-  /** 收尾摘要（标题语境源二：closing.summary 服务端权威事实，恒在场）。 */
+  /** 收尾摘要（标题语境：closing.summary 服务端权威事实）。 */
   summary?: string;
   /** 标题覆写（#344 版本记录抽屉 Demo 条目：「Demo vN 当时的系统」版本语境）。 */
   title?: string;
@@ -79,7 +74,7 @@ export function VersionViewDialog({
       <DialogContent className="flex h-[90vh] w-[94vw] max-w-[1600px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1600px]">
         <DialogHeader className="flex-row items-center gap-2 border-b px-4 py-3 pr-12">
           <DialogTitle className="min-w-0 flex-1 truncate">
-            {title ?? viewThenTitle(round, summary)}
+            {title ?? viewThenTitle(summary)}
           </DialogTitle>
           <DeviceToggle device={device} onDeviceChange={setDevice} />
           {/* 与系统 tab 新窗口钮不同身、不进共享件（#201 钉住）：系统 tab 三入口带

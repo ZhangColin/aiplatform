@@ -25,7 +25,6 @@ import {
 import { renderMaterialsText, toImageAttachmentCommand } from "@/lib/projects/materials";
 import { rawFileUrl } from "@/lib/projects/files";
 import type { LockRow } from "@/lib/orders/lock";
-import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
@@ -85,7 +84,6 @@ export function CommandArea({
   projectId,
   lock,
   stage = "interview",
-  plan,
   onSeePrd,
   onSeeOrder,
   variant = "default",
@@ -96,8 +94,6 @@ export function CommandArea({
   lock?: LockRow;
   /** 阶段（常驻文案两态）：缺省访谈期，PRD 产出后装配层切迭代期。 */
   stage?: StageKey;
-  /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
-  plan?: GenerationSegmentFact[] | null;
   /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
   /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
@@ -288,9 +284,9 @@ export function CommandArea({
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
-              <WorkMessage work={work} plan={plan} closingArrived />
+              <WorkMessage work={work} closingArrived />
             ) : null}
-            <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
+            <MessageRow message={message} projectId={projectId} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
@@ -310,7 +306,7 @@ export function CommandArea({
             </MessageRow>
           </Fragment>
         ))}
-        {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={plan} /> : null}
+        {work && workAnchorIndex === -1 ? <WorkMessage work={work} /> : null}
         {/* PRD 更新呈现迁移位（#346 阶段页形态）：时间流内系统横幅照原型
             （「PRD 规范已增量刷新」＝旧「PRD 有更新 · 去看看」胶囊的迁移位——
             文档面常驻右栏，横幅只报事实不带跳转） */}
@@ -394,27 +390,10 @@ export function CommandArea({
   );
 }
 
-/**
- * 收尾卡的轮次序数（#142 标题语境源一）：对话流（写入序即对话序）中第 N 个
- * 收尾卡 = 第 N 轮，客户端数出、零新数据。序数即用户在对话里感知的「第几轮」，
- * 与成版是否成功无关（成版失败轮无「查看当时」入口，但占序数——对话轮与版本
- * 轮不对齐时以对话为准）。#140 的「同 runId 首条用户消息」尽力而为管线（无锚/
- * 被裁即缺场，走查实测全回落不可分辨）已随 #142 退役。
- */
-function closingRoundOf(messages: ChatMessage[], message: ChatMessage): number | undefined {
-  if (message.kind !== "closing") return undefined;
-  let round = 0;
-  for (const m of messages) {
-    if (m.kind === "closing") round += 1;
-    if (m === message) return round;
-  }
-  return undefined;
-}
-
 /** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/报价卡/受理动作卡/错误提示/平台引导左对齐。
  *  气泡形态照原型（#346）：用户气泡削右上角（rounded-tr-sm）＋用户头像视觉锚；智能体气泡削
  *  左上角（rounded-tl-sm）＋渐变头像锚——头像只作视觉锚，不落角色名（ADR 0006 无角色署名口径）。 */
-function MessageRow({ message, children, projectId, round, onSeeOrder }: { message: ChatMessage; children?: ReactNode; projectId: string; round?: number; onSeeOrder?: () => void }) {
+function MessageRow({ message, children, projectId, onSeeOrder }: { message: ChatMessage; children?: ReactNode; projectId: string; onSeeOrder?: () => void }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
   }
@@ -450,7 +429,7 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
     // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）
     return (
       <div className="flex w-full justify-start">
-        <ClosingCard closing={message.closing} projectId={projectId} round={round} />
+        <ClosingCard closing={message.closing} projectId={projectId} />
       </div>
     );
   }

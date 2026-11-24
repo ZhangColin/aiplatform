@@ -253,7 +253,7 @@ describe("CommandArea · 查看当时标题轮次语境（#142 整链：对话�
 
     fireEvent.click(screen.getByRole("button", { name: "查看当时" }));
 
-    expect(screen.getByText("第 1 轮结束时的系统——主色调已改为绿色")).toBeTruthy();
+    expect(screen.getByText("那次生成结束时的系统——主色调已改为绿色")).toBeTruthy();
   });
 });
 

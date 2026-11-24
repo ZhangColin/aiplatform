@@ -212,15 +212,10 @@ public final class AgentEventTypes {
     public static final String BALANCE_POOL_BALANCE_FIELD = "sourcePoolBalance";
 
     // ---------- 消息部件（parts 契约，词根 = agentscope 原生 part 族） ----------
-    // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具
-    // 动作部件），收口定格。由 base.agentscope 的部件映射表产出。步骤分组已退役
-    // （#115：步骤序号对用户零信息，部件按序竖排）。
-
-    /** 解说文本部件：text 为完整段非增量（服务端逐段成型，段切分内核共用）。 */
-    public static final String PART_TEXT = "part-text";
-
-    /** part-text 的段文本键（完整段）。 */
-    public static final String PART_TEXT_FIELD = "text";
+    // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（工具动作部件），收口
+    // 定格。由 base.agentscope 的部件映射表产出。步骤分组已退役（#115：步骤序号对
+    // 用户零信息，部件按序竖排）；解说文本部件随 #608 呈现面清场退役（ADR-0057：
+    // 模型文本不直播——过程流＝工具动作流，叙事段守卫的机器语法吞段仍出脱轨信号）。
 
     /**
      * 脱轨信号部件（#240 机器语法吞段的人话留痕）：叙事段守卫识别到机器语法段
@@ -274,65 +269,6 @@ public final class AgentEventTypes {
      * 初判原因。
      */
     public static final String PART_ACTION_ERROR_FIELD = "error";
-
-    /**
-     * 步骤清单部件（#236）：run 级步骤清单的<b>全量快照</b>——agent 调 update_plan
-     * 工具自产计划（步骤：稳定 id、标题、状态 ✓●○），由部件映射表从工具参数增量
-     * 解析产出（不走动作行、不留动作痕——计划变化不进部件流水）。快照式：执行中
-     * 再调即整表替换（已收口步骤不可变＝提示词纪律，平台 v1 不强制校验）；断线
-     * 补发以最后快照为准；不落库（当次会话定格留驻，刷新不回显）；步骤不设 ✗ 态
-     * （失败留痕归动作部件与收尾卡）。契约与来源解耦——本部件不携带计划来源
-     * （v1 run 执行体提示词直产；skill 线接入时再议标注）。
-     *
-     * <p><b>退役中（#604）</b>：生产方（update_plan 工具与部件映射）已随 run 尝试
-     * 体旧机制拆除；本类型与前端消费件随 #608 呈现面清场整体退役。</p>
-     */
-    public static final String PART_PLAN = "part-plan";
-
-    /** part-plan 的步骤清单键（值 = 全量快照数组，元素字段见 PART_PLAN_STEP_*）。 */
-    public static final String PART_PLAN_STEPS_FIELD = "steps";
-
-    /** part-plan 步骤的稳定 id 键（跨多次调用不变——就地整表更新的锚）。 */
-    public static final String PART_PLAN_STEP_ID_FIELD = "id";
-
-    /** part-plan 步骤的标题键（用户语言一句话）。 */
-    public static final String PART_PLAN_STEP_TITLE_FIELD = "title";
-
-    /** part-plan 步骤的状态键（值 = PART_PLAN_STATE_* 常量，✓●○ 三态）。 */
-    public static final String PART_PLAN_STEP_STATE_FIELD = "state";
-
-    /** 步骤待做（○）。 */
-    public static final String PART_PLAN_STATE_PENDING = "pending";
-
-    /** 步骤进行中（● 当前步）。 */
-    public static final String PART_PLAN_STATE_IN_PROGRESS = "in_progress";
-
-    /** 步骤已完成（✓——已收口不可变）。 */
-    public static final String PART_PLAN_STATE_COMPLETED = "completed";
-
-    /**
-     * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的
-     * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成/更新 =
-     * build 过＋8081 探活双件），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、
-     * 落定发 {@link #PART_CHECK_STATE_PASSED}/{@link #PART_CHECK_STATE_FAILED}。
-     * 生成/更新 run 单发（#604）：核验未过即发 failed，与 {@link #RUN_FAILED} 同
-     * 窗口到达；设计座重试环尝试间核验未过不发 failed——部件停在 checking（重试
-     * 信号不外泄，重复 checking 幂等），failed 仅在末次尝试未过时发。状态终值 =
-     * 探活结果，可被收尾统计消费（#88 轮末统计行）。
-     */
-    public static final String PART_CHECK = "part-check";
-
-    /** part-check 的核验状态键（值 = PART_CHECK_STATE_* 常量）。 */
-    public static final String PART_CHECK_STATE_FIELD = "state";
-
-    /** 核验进行中（收口判据核验开始——「正在检查系统」）。 */
-    public static final String PART_CHECK_STATE_CHECKING = "checking";
-
-    /** 核验通过（收口判据落定，run-finish 随之放行）。 */
-    public static final String PART_CHECK_STATE_PASSED = "passed";
-
-    /** 核验未过（仅末次尝试——超限转终态，与 run-failed 同窗口）。 */
-    public static final String PART_CHECK_STATE_FAILED = "failed";
 
     /**
      * 消息附件部件（契约预留，#97 圈注）：圈注锚随消息发送的载荷位——结构化定位

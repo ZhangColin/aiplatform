@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, FolderCode, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
+import { ExternalLink, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -8,7 +8,7 @@ import {
   useGenerationStore,
   type CoderRunStatus,
 } from "@/lib/store/generation";
-import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import {
   encodeAnnotate,
   parseAnchorEvent,
@@ -21,7 +21,6 @@ import {
   previewActive,
   resolvePreviewAddress,
   systemPanelPhase,
-  type RecoveryAction,
 } from "@/lib/preview/state";
 import type { GenerationState } from "@/lib/projects/detail";
 import { useAnnotationStore } from "@/lib/store/annotation";
@@ -36,9 +35,7 @@ import {
   type PreviewDevice,
 } from "./device-frame";
 import { PreviewToolbar } from "./preview-toolbar";
-import { RestartUpdateButton } from "./restart-update";
 import { formatClock } from "./work-message";
-import { ResumeGenerationButton } from "./resume-generation";
 import { StopGenerationButton } from "./stop-generation";
 import { DemoVersionChip } from "./demo-version-chip";
 
@@ -53,9 +50,9 @@ import { DemoVersionChip } from "./demo-version-chip";
  * 提示；有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联）；
  * 中断/失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话与重试不
  * 闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为 key，手动
- * 刷新的本地节拍并入同 key）。恢复出口单出口（#222，ADR-0020）：会话内 run 失败与
- * 从未生成（idle 档）给「继续生成」（#604 起在既有工作区重跑），更新轮失败给「继续
- * 更新」；无推倒重来按钮。正常态全无手动触发。
+ * 刷新的本地节拍并入同 key）。失败＝明确展示＋重跑即恢复（#604 新失败语义）：
+ * 面板呈现失败文案与原因；专用恢复按钮（续跑/修正轨前端件）随 #608 呈现面清场
+ * 退役，重跑走常规点火入口（岔路口卡／PRD 确认／再提意见）。正常态全无手动触发。
  *
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
@@ -72,8 +69,6 @@ export function SystemPanel({
   coderStatus,
   coderStoppedByUser,
   failureReason,
-  onGenerated,
-  onOpenFiles,
   variant = "default",
 }: {
   projectId: string;
@@ -85,15 +80,10 @@ export function SystemPanel({
   coderStoppedByUser?: boolean;
   /** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行）。 */
   failureReason?: string;
-  /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
-  onGenerated: () => void;
-  /** Demo 页文件辅助抽屉挂点；缺省不出文件按钮。 */
-  onOpenFiles?: () => void;
   /** Demo 阶段页原型壳；缺省保留旧成果区浏览器条。 */
   variant?: "default" | "demo";
 }) {
   const epoch = useGenerationStore((s) => previewEpochOf(s, projectId));
-  const parts = useWorkMessageStore((s) => workPartsOf(s, projectId));
   const workStartedAt = useWorkMessageStore((s) => s.works[projectId]?.startedAt);
   const workEndedAt = useWorkMessageStore((s) => s.works[projectId]?.endedAt);
   const [device, setDevice] = useState<PreviewDevice>("desktop");
@@ -161,7 +151,6 @@ export function SystemPanel({
     coderStoppedByUser,
     url,
     error: preview.error,
-    parts,
     failureReason,
   });
   const pageLive = phase.kind === "page" && !!url;
@@ -170,13 +159,6 @@ export function SystemPanel({
   const notice = phase.kind === "page" ? phase.notice : undefined;
   const updatingNotice = notice && !notice.failed ? notice : undefined;
   const failedNotice = notice?.failed ? notice : undefined;
-  // 恢复出口单出口（#222）：会话内 run 失败/从未生成 =「继续生成」（在既有工作区重跑）、
-  // 更新轮失败 =「继续更新」（#48，重派终态那场的交接物）
-  const resume = <ResumeGenerationButton projectId={projectId} onGenerated={onGenerated} />;
-  const restartUpdate = <RestartUpdateButton projectId={projectId} />;
-  /** 兜底入口选择（失败细条/占位终态/引导占位共用，#222）：resume = 继续生成 / restart-update = 继续更新。 */
-  const recoveryAction = (recovery?: RecoveryAction) =>
-    recovery === "resume" ? resume : recovery === "restart-update" ? restartUpdate : null;
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));
@@ -251,17 +233,6 @@ export function SystemPanel({
             沙箱演示环境 · 隔离运行不产生正式扣款
           </span>
           <div className="flex items-center gap-1">
-            {onOpenFiles ? (
-              <button
-                type="button"
-                onClick={onOpenFiles}
-                title="查看源码文件"
-                aria-label="查看源码文件"
-                className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-soft/60 bg-surface-dawn text-ink-muted transition-colors hover:bg-surface-mist hover:text-ink-primary"
-              >
-                <FolderCode className="size-3.5" aria-hidden="true" />
-              </button>
-            ) : null}
             {refreshButton}
             {openButton}
           </div>
@@ -370,7 +341,6 @@ export function SystemPanel({
                 <span className="ml-2 text-destructive/70">{failedNotice.reason}</span>
               )}
             </span>
-            {recoveryAction(failedNotice.recovery)}
           </div>
         ) : null}
         {/* 舞台浅色锁定（#80 口径，#201 起归 ./device-frame 单源：DeviceFrame 含舞台，
@@ -424,9 +394,7 @@ export function SystemPanel({
                   reason={phase.reason}
                   failed
                   stopped={coderStoppedByUser}
-                >
-                  {recoveryAction(phase.recovery)}
-                </DemoWaitingHint>
+                />
               ) : (
                 <PanelHint>
                   <TriangleAlert className="size-5 text-destructive" />
@@ -436,7 +404,6 @@ export function SystemPanel({
                       <p className="text-label-sm text-ink-faint">{phase.reason}</p>
                     )}
                   </div>
-                  {recoveryAction(phase.recovery)}
                 </PanelHint>
               )
             ) : phase.kind === "connecting" ? (
@@ -454,11 +421,8 @@ export function SystemPanel({
               <PanelHint>
                 <Monitor className="size-5 text-muted-foreground" />
                 <p>系统生成后，这里会出现可以操作的你的系统</p>
-                {/* idle 档也挂「继续生成」（#222 单出口；#542 派发门）：面板仅存在
-                    于 PRD 产出后——本档 = 岔路口/确认门待点火（试用态卡面「立即生成」
-                    与本键同单出口）或未起跑/首建未成，重发 /generate 即在既有工作区
-                    重跑（#604 失败新语义：重跑即恢复） */}
-                {resume}
+                {/* 面板仅存在于 PRD 产出后——本档 = 岔路口/确认门待点火或未起跑/
+                    首建未成；重跑走常规点火入口（#608：面板不留专用恢复按钮） */}
               </PanelHint>
             )}
           </div>
@@ -551,7 +515,7 @@ function PanelHint({ children }: { children: ReactNode }) {
 }
 
 /**
- * 预览 iframe 的重挂 key：url + 重载序号——序号汇两路信号（切片收口 run-finish
+ * 预览 iframe 的重挂 key：url + 重载序号——序号汇两路信号（run 收口 run-finish
  * 纪元；手动刷新的本地节拍 #80，调用点求和传入），同 URL 也强制重建 iframe
  * （预览刷新的唯一机制）。
  */

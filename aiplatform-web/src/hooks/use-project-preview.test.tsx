@@ -12,7 +12,7 @@ import { useProjectPreview } from "./use-project-preview";
 
 /**
  * 轮询降级（#105 URL 事件驱动）：useProjectPreview 不再无条件 3s 轮询——URL 由
- * 切片收口的 preview-ready 事件推送（bridge setQueryData 写预览查询缓存），轮询
+ * run 收口的 preview-ready 事件推送（bridge setQueryData 写预览查询缓存），轮询
  * 降级为 SSE 断线兜底。断言 query 的 refetchInterval 选项：连接健康 → false
  * （不空转、等事件推 URL）、断线 → 15s 门控兜底（重拉补齐错过的 URL）。
  */

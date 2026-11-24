@@ -246,8 +246,8 @@ class EventsControllerSseTest {
 
         SseClient siteWide = connect("");
 
-        publishAgentEvent("part-text", Map.of(
-                "projectId", "p-site", "runId", "run-site", "text", "正在准备。"));
+        publishAgentEvent("part-signal", Map.of(
+                "projectId", "p-site", "runId", "run-site", "signal", "derailed"));
         publishNotification("project-renamed", Map.of("projectId", "p-site", "projectName", "名字"));
 
         assertThat(siteWide.nextNonCommentLine()).isEqualTo("id:p-site:1");   // 只有通知族
@@ -284,19 +284,19 @@ class EventsControllerSseTest {
     @Test
     void given_agent_events_before_reconnect_when_subscribe_with_anchor_then_window_replayed()
             throws Exception {
-        publishAgentEvent("part-text", Map.of(
-                "projectId", "17", "runId", "run-anch-9", "text", "断线前已见"));
-        publishAgentEvent("part-text", Map.of(
-                "projectId", "17", "runId", "run-anch-9", "text", "断线窗口内"));
-        publishAgentEvent("part-text", Map.of(
-                "projectId", "18", "runId", "run-anch-10", "text", "别家项目的事件"));
+        publishAgentEvent("part-signal", Map.of(
+                "projectId", "17", "runId", "run-anch-9", "signal", "derailed"));
+        publishAgentEvent("part-signal", Map.of(
+                "projectId", "17", "runId", "run-anch-9", "signal", "derailed"));
+        publishAgentEvent("part-signal", Map.of(
+                "projectId", "18", "runId", "run-anch-10", "signal", "derailed"));
 
         SseClient client = connect("?projectId=17", "run-anch-9:1");
 
         // 只补锚（run-anch-9:1）之后的窗口；别项目事件被订阅谓词滤掉
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-anch-9:2");
         JsonNode envelope = nextFrameEnvelope(client);
-        assertThat(envelope.get("payload").get("text").asText()).isEqualTo("断线窗口内");
+        assertThat(envelope.get("payload").get("signal").asText()).isEqualTo("derailed");
         assertThat(client.nextNonCommentLine(1500)).isNull();
     }
 
@@ -315,8 +315,8 @@ class EventsControllerSseTest {
         SseClient client = connect("?projectId=7");
 
         assertThat(client.nextNonCommentLine(1500)).isNull();
-        publishAgentEvent("part-text", Map.of(
-                "projectId", "7", "runId", "run-9", "text", "实时事件照常"));
+        publishAgentEvent("part-signal", Map.of(
+                "projectId", "7", "runId", "run-9", "signal", "derailed"));
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-9:2");
     }
 
@@ -329,25 +329,25 @@ class EventsControllerSseTest {
     void given_part_events_before_reconnect_when_subscribe_by_project_then_window_in_order()
             throws Exception {
         // 断线窗口内的当前 run 事件（部件 + 引擎透传真实形态）
-        publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-signal", Map.of(
                 "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
-                "engine", "agentscope", "text", "正在准备演示数据。"));
+                "engine", "agentscope", "signal", "derailed"));
         publishAgentEvent("part-action", Map.of(
                 "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
                 "engine", "agentscope", "toolCallId", "tc-1", "toolName", "write_file",
                 "state", "completed", "label", "编写【订单管理】"));
-        publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-signal", Map.of(
                 "projectId", "24", "runId", "run-other", "sessionId", "coder-24",
-                "engine", "agentscope", "text", "别家项目的事件"));
+                "engine", "agentscope", "signal", "derailed"));
 
         // 锚已被逐出/丢失的断线重连（整段缓冲皆窗口）：按 ?projectId= 过滤补发
         SseClient client = connect("?projectId=23", "run-gone:9");
 
         // 补发按发射序、id 取 runId 流（部件与透传同一 id 空间）；别项目被过滤
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:1");
-        JsonNode narration = nextFrameEnvelope(client);
-        assertThat(narration.get("type").asText()).isEqualTo("part-text");
-        assertThat(narration.get("payload").get("text").asText()).isEqualTo("正在准备演示数据。");
+        JsonNode signal = nextFrameEnvelope(client);
+        assertThat(signal.get("type").asText()).isEqualTo("part-signal");
+        assertThat(signal.get("payload").get("signal").asText()).isEqualTo("derailed");
 
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:2");
         JsonNode action = nextFrameEnvelope(client);
@@ -455,7 +455,7 @@ class EventsControllerSseTest {
         assertThat(apiDocs).contains("run-start");   // 智能体事件族名册精简表
         assertThat(apiDocs).contains("projectId");
         assertThat(apiDocs).contains("question-raised");    // 问答挂起（唯一挂起源）
-        assertThat(apiDocs).contains("part-check");          // #85 自检播报补行（镜像对齐）
+        assertThat(apiDocs).contains("part-signal");         // 部件族名册（脱轨信号）
     }
 
     /** 已读过 id 行后读完整事件（event 行 + data 行）并解析信封。 */

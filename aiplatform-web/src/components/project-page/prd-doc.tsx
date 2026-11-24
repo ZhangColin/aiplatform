@@ -79,7 +79,7 @@ export function PrdDoc({
             </p>
           )}
           {/* 付费轨首建确认门（#542，ADR-0049 原动作形态恢复）：付费态∧PRD 在∧
-              首建未派发——确认即派发首个构建（幂等，失败重试走「继续生成」）；
+              首建未派发——确认即派发首个构建（幂等，失败重试重走本确认门）；
               呈现条件归门件内 GET /build-gate 服务端单源 */}
           <PrdConfirmGate projectId={projectId} variant="doc" />
         </article>

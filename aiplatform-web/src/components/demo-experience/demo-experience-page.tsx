@@ -27,7 +27,6 @@ import { cn } from "@/lib/utils";
 
 import { DeliveryBaselineCard } from "./delivery-baseline-card";
 import { DemoConfirmCard } from "./demo-confirm-card";
-import { DemoFilesDrawer } from "./demo-files-drawer";
 import { DemoHeader, type DemoHeaderStatus } from "./demo-header";
 
 /** Demo 体验页 P04/P05（#347）：预览/同页等待在左 8 列，基准、对话与确认在右 4 列。
@@ -42,7 +41,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
   const placeOrder = usePlaceOrder(projectId);
   const openM01 = useM01Store((s) => s.openM01);
   const openVersionRecord = useVersionRecordStore((s) => s.openVersionRecord);
-  const [filesOpen, setFilesOpen] = useState(false);
 
   useAgentEventChannel(projectId);
   const agentStatus = useSseStatus("agent");
@@ -171,8 +169,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
               coderStatus={coderStatus}
               coderStoppedByUser={coderStopped}
               failureReason={failureReason}
-              onGenerated={() => {}}
-              onOpenFiles={() => setFilesOpen(true)}
               variant="demo"
             />
           )}
@@ -226,7 +222,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
           />
         </aside>
       </div>
-      <DemoFilesDrawer projectId={projectId} open={filesOpen} onOpenChange={setFilesOpen} />
     </div>
   );
 }

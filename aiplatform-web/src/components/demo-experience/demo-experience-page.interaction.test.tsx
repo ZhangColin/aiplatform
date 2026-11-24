@@ -73,20 +73,11 @@ vi.mock("@/lib/sse/agent-event-channel", () => ({ useAgentEventChannel: () => ({
 vi.mock("@/lib/sse/provider", () => ({ useSseStatus: () => "connected" }));
 
 vi.mock("@/components/project-page/system-panel", () => ({
-  SystemPanel: ({ onOpenFiles }: { onOpenFiles?: () => void }) => (
-    <div>
-      <div>真实 Demo 预览与等待态</div>
-      <button type="button" onClick={onOpenFiles}>查看源码文件</button>
-    </div>
-  ),
+  SystemPanel: () => <div>真实 Demo 预览与等待态</div>,
 }));
 
 vi.mock("@/components/project-page/command-area", () => ({
   CommandArea: () => <div>对话直播、圈注附件与反馈输入</div>,
-}));
-
-vi.mock("@/components/project-page/files-panel", () => ({
-  FilesPanel: () => <div>源码树与文件内容</div>,
 }));
 
 function seedReadyProject() {
@@ -203,14 +194,6 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
     expect(screen.queryByText("PRD v9 对齐")).toBeNull();
   });
 
-  it("文件区收进 Demo 页辅助抽屉，打开后保留源码树与文件内容", () => {
-    renderPage();
-
-    fireEvent.click(screen.getByRole("button", { name: "查看源码文件" }));
-
-    expect(screen.getByText("项目文件与源码")).toBeTruthy();
-    expect(screen.getByText("源码树与文件内容")).toBeTruthy();
-  });
 });
 
 describe("Demo 体验页 · 确认门并入下单（#350：顶栏旧「确认下单」退役的并入位）", () => {

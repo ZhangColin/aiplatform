@@ -220,7 +220,7 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(archived).toContain("disabled");
   });
 
-  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——解说 + 动作卡）", () => {
+  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——工具动作流；#608 模型文本不直播）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "把主色调改成绿色" },
       { kind: "agent", id: "b1", text: "已接住意见，开始处理。" },
@@ -230,7 +230,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         runId: "run-1",
         frozen: false,
         parts: [
-          { kind: "text", id: "run-1:3", text: "正在调整全局配色。" },
           {
             kind: "action",
             id: "run-1:4",
@@ -246,7 +245,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
     expect(html).toContain("正在做");
-    expect(html).toContain("正在调整全局配色。");
     expect(html).toContain("修改【全局样式】");
     expect(html).toContain("进行中");
   });
@@ -272,13 +270,12 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         runId: "run-1",
         frozen: true,
         parts: [
-          { kind: "text", id: "run-1:3", text: "正在调整全站配色。" },
           {
             kind: "action",
             id: "run-1:4",
             toolCallId: "tc-1",
             toolName: "edit_file",
-            state: "running",
+            state: "failed",
             label: "修改【全局样式】",
           },
         ],
@@ -287,12 +284,12 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
-    expect(html).toContain("正在调整全站配色。");
+    expect(html).toContain("没做成");
     expect(html).toContain("本轮完成");
     // 定格的工作消息上承意见、下启收尾卡——过程在上、结果卡在下
-    expect(html.indexOf("正在调整全站配色。")).toBeLessThan(html.indexOf("本轮完成"));
-    // 收尾卡已入流：活性行随定格沉没——截断动作不留残骸（#235）
-    expect(html).not.toContain("修改【全局样式】");
+    expect(html.indexOf("修改【全局样式】")).toBeLessThan(html.indexOf("本轮完成"));
+    // 收尾卡已入流：活性行随定格沉没——失败红行留驻、无在跑残骸（#235）
+    expect(html).not.toContain("进行中");
     expect(html).not.toContain("animate-pulse");
   });
 
@@ -306,7 +303,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         runId: "run-1",
         frozen: true,
         parts: [
-          { kind: "text", id: "run-1:3", text: "正在调整全站配色。" },
           {
             kind: "action",
             id: "run-1:4",
@@ -321,7 +317,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
-    expect(html).toContain("正在调整全站配色。");
     expect(html).toContain("修改【全局样式】"); // 保留末行
     expect(html).not.toContain("进行中"); // 静态末行：定格卡不自称在跑
     expect(html).not.toContain("animate-spin");

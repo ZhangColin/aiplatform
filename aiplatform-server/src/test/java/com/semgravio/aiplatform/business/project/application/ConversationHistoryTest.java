@@ -378,10 +378,12 @@ class ConversationHistoryTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
-                // 脚本化过程部件（解说段/动作卡）随事件桥流出——但不应进对话史
+                // 脚本化过程部件（动作卡/脱轨信号）随事件桥流出——但不应进对话史
                 Consumer<AgentEvent> sink = invocation.getArgument(1);
-                sink.accept(new AgentEvent(AgentEventTypes.PART_TEXT, Map.of(
-                        AgentEventTypes.RUN_FIELD, command.runId(), "text", "解说段")));
+                sink.accept(new AgentEvent(AgentEventTypes.PART_SIGNAL, Map.of(
+                        AgentEventTypes.RUN_FIELD, command.runId(),
+                        AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
+                        AgentEventTypes.PART_SIGNAL_DERAILED)));
                 sink.accept(new AgentEvent(AgentEventTypes.PART_ACTION, Map.of(
                         AgentEventTypes.RUN_FIELD, command.runId(), "state", "running")));
                 return new AgentReply(command.runId(), "好的");

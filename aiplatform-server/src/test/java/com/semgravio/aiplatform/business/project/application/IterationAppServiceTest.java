@@ -491,7 +491,7 @@ class IterationAppServiceTest {
     // ---------- 收口扩载（#88：判定行 + 变更清单 + 轮末统计，服务端权威） ----------
 
     /**
-     * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 解说部件 → run-finish）
+     * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 过程部件 → run-finish）
      * + 回复携带文件变更观察（真实客户端的 AgentReply.changes 面）。
      */
     private void givenConverseClosing(List<FileChange> changes) {
@@ -500,8 +500,9 @@ class IterationAppServiceTest {
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(),
-                    Map.of(AgentEventTypes.PART_TEXT_FIELD, "正在按意见更新系统")));
+            sink.accept(scripted(AgentEventTypes.PART_SIGNAL, command.runId(),
+                    Map.of(AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
+                            AgentEventTypes.PART_SIGNAL_DERAILED)));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
             return new AgentReply(command.runId(), "修正完成", null, changes);

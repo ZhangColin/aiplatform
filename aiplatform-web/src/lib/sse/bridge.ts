@@ -7,7 +7,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore, toWorkPlanSteps } from "@/lib/store/work-message";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { orderStatusToastText, REPRICED_TOAST_TEXT } from "@/lib/orders/status";
 
@@ -45,7 +45,7 @@ const ORDER_INVALIDATIONS = [
  */
 const NOTIFICATION_INVALIDATIONS = {
   "workspace-created": [queryKeys.projects.all],
-  // 预览地址由切片收口事件推 URL（#105 载荷写入口，见下方 NOTIFICATION_PAYLOAD_
+  // 预览地址由 run 收口事件推 URL（#105 载荷写入口，见下方 NOTIFICATION_PAYLOAD_
   // WRITERS）；不在此失效 projects 前缀——preview() 每次成功仍会发本事件，失效即
   // 重拉预览查询 → 又成功 → 又发事件——自反馈死循环（写缓存非失效，不重拉 preview）
   "preview-ready": [],
@@ -80,7 +80,7 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
     if (event.payload.documentType !== "PRD") return;
     usePrdNoticesStore.getState().notePrdWritten(event.payload.projectId);
   },
-  // 预览 URL 事件驱动拿取（#105）：切片收口推 URL 直接写预览查询缓存——免 3s
+  // 预览 URL 事件驱动拿取（#105）：run 收口推 URL 直接写预览查询缓存——免 3s
   // 轮询；写缓存非失效，不会重拉 preview 再发事件（消自反馈循环顾虑）。缺省该
   // 写入方 = 空登忽略（旧口径），现在 URL 由事件推送而非 REST 副作用唯一来源
   "preview-ready": (event, queryClient) => {
@@ -352,16 +352,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       // ---- 消息部件（parts 契约）→ 工作消息 store ----
       // 部件全事件流恒挂（主智能体对话轮也产部件）——store 侧锚定守卫只收编码 run。
-      case "part-text": {
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
-            source: payload.source },
-          { kind: "text", text: payload.text },
-        );
-        return;
-      }
+      // 呈现面清场（#608）：part-text / part-check / part-plan 已退役——旧事件按
+      // 未知平台类型忽略，部件只余脱轨信号与工具动作两件。
       case "part-signal": {
         // 脱轨信号（#240）：入 parts 流水（活性行脱轨变体的推导源）——呈现归组件
         // 投影（静态面无痕），本路由不做转译（载荷只有发生事实，无原文）
@@ -388,31 +380,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             label: payload.label,
             error: payload.error, // 失败留痕（#229）：仅 failed 携带，其余态缺省
           },
-        );
-        return;
-      }
-      case "part-check": {
-        // 自检播报（#85）：收口判据核验「检查中 → ✅/❌」——平台侧产出（无 engine
-        // 字段）；一场 run 一个自检部件，跨状态原位换装归 store
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id },
-          { kind: "check", state: payload.state },
-        );
-        return;
-      }
-      // part-hint（#437 决策时微指令）2026-11-12 退役：微指令是模型面指引、用户面
-      // 只添噪（后端已停发）——历史存量事件按未知平台类型忽略（不进 parts 流水）
-      case "part-plan": {
-        // 步骤清单快照（#236）：整表替换落 `plan`（不进 parts 流水——不走动作行、
-        // 不留动作痕、不单独播报）；断线补发按事件序重放，最后快照即终态
-        const { payload } = platform;
-        work.notePlan(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
-            source: payload.source },
-          toWorkPlanSteps(payload.steps),
         );
         return;
       }

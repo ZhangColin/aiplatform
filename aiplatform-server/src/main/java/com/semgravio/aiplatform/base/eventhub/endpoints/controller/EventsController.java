@@ -82,15 +82,14 @@ public class EventsController {
             | type | 族 | payload 字段 |
             |---|---|---|
             | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed / order-repriced | 通知 | projectId（+ 各自载荷）+ ownerAccountId（路由键） |
-            | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title + 生成轨道切片 index/total） |
+            | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title） |
             | error | 智能体·生命周期 | runId, message |
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
             | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
             | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
             | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
-            | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
+            | part-signal | 智能体·部件 | signal（脱轨信号：#240 机器语法吞段的留痕，v1 唯一值 derailed） |
             | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
-            | part-check | 智能体·部件 | state（checking/passed/failed——#85 自检播报：平台侧产出，不经引擎部件映射） |
             | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
 
             名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。""")

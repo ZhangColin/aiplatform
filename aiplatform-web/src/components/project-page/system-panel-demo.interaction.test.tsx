@@ -23,16 +23,8 @@ vi.mock("@/hooks/use-project-preview", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-resume-generation", () => ({
-  useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: () => ({ data: [] }),
-}));
-
-vi.mock("@/hooks/use-restart-update", () => ({
-  useRestartUpdate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 type HappyDOMWindow = Window & {
@@ -65,7 +57,7 @@ function renderDemoPanel(options?: {
           p1: {
             runId: "run-1",
             frozen: options.endedAt != null,
-            parts: [{ kind: "text", id: "text-1", text: "正在创建首页" }],
+            parts: [],
             seenEventIds: [],
             startedAt: options.startedAt,
             endedAt: options.endedAt,
@@ -79,7 +71,6 @@ function renderDemoPanel(options?: {
         projectId="p1"
         generationState={generationState}
         coderStatus={coderStatus}
-        onGenerated={() => {}}
         variant="demo"
       />
     </QueryClientProvider>,
@@ -149,11 +140,11 @@ describe("SystemPanel · Demo 原型壳视口工具条（#347）", () => {
     expect(screen.getByText("正在为您生成系统")).toBeTruthy();
     expect(screen.getByText("已等待 01:05")).toBeTruthy();
     expect(screen.getByText("当前状态")).toBeTruthy();
-    expect(screen.getByText("正在创建首页")).toBeTruthy();
+    expect(screen.getByText("正在初始化")).toBeTruthy();
     expect(screen.queryByText(/\d+%/)).toBeNull();
   });
 
-  it("生成失败仍在同页给出原因与继续生成出口，等待时钟定格在收口事件", () => {
+  it("生成失败仍在同页给出原因，等待时钟定格在收口事件（#608 无专用恢复按钮）", () => {
     // 失败只认会话态（#604 起失败不落投影）：投影尚未重拉收敛时仍是「生成中」
     renderDemoPanel({
       previewUrl: undefined,
@@ -165,6 +156,6 @@ describe("SystemPanel · Demo 原型壳视口工具条（#347）", () => {
 
     expect(screen.getByText(/生成中断了/)).toBeTruthy();
     expect(screen.getByText("已等待 01:05")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "继续生成" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "继续生成" })).toBeNull();
   });
 });

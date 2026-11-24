@@ -34,7 +34,6 @@ function renderPanel(props: Partial<Parameters<typeof SystemPanel>[0]> = {}) {
       <SystemPanel
         projectId="p1"
         generationState="generating"
-        onGenerated={() => {}}
         variant="demo"
         {...props}
       />
@@ -74,11 +73,11 @@ describe("system panel · 停止入口（#359）", () => {
     });
   });
 
-  it("停止终态（coderStoppedByUser）：失败档出「已停止」口径，不再出停止入口、恢复出口照常", () => {
+  it("停止终态（coderStoppedByUser）：失败档出「已停止」口径，不再出停止入口（#608 无专用恢复按钮）", () => {
     renderPanel({ generationState: "never", coderStatus: "error", coderStoppedByUser: true });
     expect(screen.getByText("已停止生成，已完成的进度都保留")).toBeTruthy();
     expect(screen.getByText("已停止生成")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^停止$/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /继续生成/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /继续生成/ })).toBeNull();
   });
 });

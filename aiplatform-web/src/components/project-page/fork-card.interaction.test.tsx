@@ -10,8 +10,8 @@ import { ForkCard } from "./fork-card";
 
 // 生成端点（既有 POST /generate）的 mutation——点火动作的路由断言归本文件
 const generateState = vi.hoisted(() => ({ mutate: vi.fn(), isPending: false }));
-vi.mock("@/hooks/use-resume-generation", () => ({
-  useResumeGeneration: () => generateState,
+vi.mock("@/hooks/use-start-generation", () => ({
+  useStartGeneration: () => generateState,
 }));
 
 // 「继续讨论」引导流 mutation（#544——POST /fork/continue-discussion）＋登录态

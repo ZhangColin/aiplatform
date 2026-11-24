@@ -112,6 +112,8 @@ export function asNotificationEvent(envelope: SseEnvelope): NotificationEvent | 
 // 平台事件 = 封闭集合（字段扁平，下表为准）；引擎透传 = 开放集合，`data` 为
 // 引擎 part 原样。退役五族（role-assigned / run-created / run-retrying /
 // fix-unchanged / dispatch-stage / live-*）不进名册——旧事件到达按 miss 忽略。
+// 呈现面清场（#608，ADR-0057）：part-text / part-check / part-plan 随发射源退役，
+// 不进名册（存量事件按 miss 忽略）；部件只余 part-signal 与 part-action。
 
 /** 智能体事件 payload 的公共关联字段：必带 projectId + runId，sessionId 建立后携带。 */
 type AgentPayload = {
@@ -146,17 +148,6 @@ export type SseClosing = {
   version?: string;
 };
 
-/**
- * 步骤清单条目（#236 正本 part-plan.steps 元素）：agent 自产计划的步骤——稳定 id
- * （就地整表更新的锚）+ 用户语言标题 + 状态三值（✓●○，不设 ✗——失败留痕归
- * part-action 与收尾卡）。
- */
-export type SsePlanStep = {
-  id: string;
-  title: string;
-  state: "pending" | "in_progress" | "completed";
-};
-
 export type PlatformAgentEvent =
   | {
       /** 运行开始：一场 run 恰一次（#84 静默重试——编码 run 重试不新发，用户面
@@ -174,17 +165,11 @@ export type PlatformAgentEvent =
          */
         agent?: "main" | "executor";
         /**
-         * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成轨道 = 切片
-         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」），
-         * `index`/`total` 仅生成轨道切片携带（1-based——头部「{title}（{index}/{total}）」）；
-         * 阶段 0 与更新 run 只携 title（无进度）；
+         * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成 = 「系统初始化」、
+         * 更新 run = 「系统更新」）；切片序号/进度随切片机器退役（#602/#608）；
          * 主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。
          */
-        slice?: {
-          title: string;
-          index?: number;
-          total?: number;
-        };
+        slice?: { title: string };
       };
     }
   | { type: "error"; payload: AgentPayload & { message: string } }
@@ -298,11 +283,6 @@ export type PlatformAgentEvent =
       };
     }
   | {
-      /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口事件前出尾段）。 */
-      type: "part-text";
-      payload: AgentPayload & { engine: string; source?: string; text: string };
-    }
-  | {
       /**
        * 脱轨信号部件（#240 机器语法吞段的人话留痕）：叙事段守卫识别到机器语法段
        * （模型以原生工具参数语法直接发射、引擎未识别为工具调用——什么都没跑）时
@@ -338,29 +318,6 @@ export type PlatformAgentEvent =
          */
         error?: string;
       };
-    }
-  | {
-      /**
-       * 自检播报部件（#85「正在检查系统 → ✅/❌」）：run 收口判据核验的呈现——
-       * 平台侧产出（不经引擎映射表，无 engine 字段；判据是平台事实）。`state` ∈
-       * checking（核验中）/ passed / failed；静默重试同构：尝试间核验未过不发
-       * failed（部件停在 checking，重复 checking 幂等），failed 仅末次未过（超限
-       * 转终态）与 run-failed 同窗口。终值 = 探活结果，收尾卡统计行随 #88 消费。
-       */
-      type: "part-check";
-      payload: AgentPayload & { sessionId: string; state: "checking" | "passed" | "failed" };
-    }
-  | {
-      /**
-       * 步骤清单部件（#236）：run 级步骤清单的**全量快照**——agent 调 update_plan
-       * 工具自产计划（步骤：稳定 id、标题、状态），不走动作行、不留动作痕（计划
-       * 变化不进部件流水）。快照式：执行中再调即整表替换（已收口步骤不可变＝
-       * 提示词纪律，平台 v1 不强制校验）；断线补发以最后快照为准；不落库（当次
-       * 会话定格留驻，刷新不回显）；步骤不设 ✗ 态。契约与来源解耦——不携带计划
-       * 来源（v1 run 执行体提示词直产）。
-       */
-      type: "part-plan";
-      payload: AgentPayload & { engine: string; source?: string; steps: SsePlanStep[] };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -373,11 +330,8 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "acceptance-start",
   "intercept-card",
   "balance-reminder",
-  "part-text",
   "part-signal",
   "part-action",
-  "part-check",
-  "part-plan",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

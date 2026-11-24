@@ -10,15 +10,14 @@ import { useGenerationStore } from "@/lib/store/generation";
 type GenerationStartResponse = components["schemas"]["GenerationStartResponse"];
 
 /**
- * 继续生成（#222 单出口）：POST /api/projects/{id}/generate——重发即在既有工作区
- * 重跑（#604 失败新语义＝明确展示＋重跑即恢复：服务端续跑机器已退役，不带断点、
- * 不携错误现场）。成功即乐观登记编码 run 在途（SSE run-start 随后到，重放/回声
- * 幂等）＋失效项目域（生成态投影回「生成中」档——服务端在途标记已先落）。正常流
- * 生成由点火入口发起（岔路口「立即生成」／PRD 确认），本 mutation 只服务
- * 未起跑/会话内失败的恢复出口（岔路口卡面「立即生成」
- * 与本钩同端点，共用本 mutation）。
+ * 点火生成：POST /api/projects/{id}/generate——岔路口「立即生成」的派发动作
+ * （#542），也是失败后的重跑路径（#604 失败新语义＝明确展示＋重跑即恢复：服务端
+ * 续跑机器已退役，不带断点、不携错误现场；#608 起「继续生成」专用按钮退役，重跑
+ * 统一走本 mutation 的点火入口）。成功即乐观登记编码 run 在途（SSE run-start
+ * 随后到，重放/回声幂等）＋失效项目域（生成态投影回「生成中」档——服务端在途
+ * 标记已先落）。付费轨首建走 PRD 确认门的 mutation（use-build-gate）。
  */
-export function useResumeGeneration(projectId: string) {
+export function useStartGeneration(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
@@ -33,7 +32,7 @@ export function useResumeGeneration(projectId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
     },
     onError: (error) => {
-      toast.error(errorText(error, "继续生成失败，请稍后重试"));
+      toast.error(errorText(error, "生成发起失败，请稍后重试"));
     },
   });
 }

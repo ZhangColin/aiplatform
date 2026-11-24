@@ -27,19 +27,7 @@ export function generationStateOf(raw: number | undefined | null): GenerationSta
   return raw == null ? undefined : GENERATION_STATES[raw];
 }
 
-/**
- * 生成轨道片事实（#225 计划区的行形状）：片 = 阶段 0（ord 0）+ 切片计划逐片
- * （1..N），status =「最近一次尝试的结局」。工作消息呈现面按本形状渲染（当前片
- * 由 run-start 切片序号驱动）——#602 起 REST 片清单读面随切片机器退役，详情响应
- * 不再携带独立片清单，本类型仅作呈现形状保留。
- */
-export type GenerationSegmentFact = {
-  ord: number;
-  description: string;
-  status: "pending" | "closed" | "failed";
-};
-
-/** 消费口径的项目详情（缺省字段防御归一）：壳态只取骨架所需字段，随切片增补。 */
+/** 消费口径的项目详情（缺省字段防御归一）：壳态只取骨架所需字段，随需求增补。 */
 export type ProjectDetail = {
   id: string;
   name: string;

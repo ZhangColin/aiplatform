@@ -68,7 +68,6 @@ import com.semgravio.aiplatform.base.workspace.application.dto.command.Workspace
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
-import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
@@ -168,8 +167,6 @@ class GenerationAppServiceTest {
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_design_specs");
-        jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
@@ -178,8 +175,6 @@ class GenerationAppServiceTest {
         // 配置夹具归零（先子后父：候选行 FK 指配置——V79 起候选表在库）
         jdbcTemplate.update("DELETE FROM prj_model_config_candidates WHERE config_key LIKE 't-%'");
         jdbcTemplate.update("DELETE FROM prj_model_configs WHERE config_key LIKE 't-%'");
-        // #543 风格层 kill-switch 归位（缺省生效态——共享行，绝不把关停态留给下游）
-        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = TRUE WHERE id = 1");
     }
 
     private void givenSessionExecutorRunsInline() {
@@ -929,96 +924,6 @@ class GenerationAppServiceTest {
                 .containsEntry("wait_async_results", 11);
     }
 
-    // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------
-
-    /** oxlint 违规诊断输出（真实 --format json 形状）。 */
-    private static final String OXLINT_VIOLATIONS_JSON = """
-            { "diagnostics": [{"message": "\\"bg-red-500\\" uses the raw Tailwind palette. Use a theme token.",
-            "code": "shadcn(no-raw-colors)","severity": "error","filename": "src/app/page.tsx",
-            "labels": [{"span": {"line": 3}}]}]}
-            """;
-
-    /** 收尾卡里的设计规范扫描载荷（payload → closing → designLint 两层取值）。 */
-    private static Map<String, Object> lintOf(ArgumentCaptor<Map<String, Object>> payloads,
-            int index) {
-        Map<String, Object> closing = (Map<String, Object>) payloads.getAllValues().get(index)
-                .get(AgentEventTypes.CLOSING_FIELD);
-        return (Map<String, Object>) closing.get("designLint");
-    }
-
-    /** 带规范正本的项目（遵守链的分岔依据——直插正本行，免提炼链路）。 */
-    private void givenSpecRow(Long projectId) {
-        jdbcTemplate.update(
-                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
-                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
-                4821000000000000001L, projectId, "/design/home-1.html", "run-final-1",
-                "{\"--primary\": \"#166534\"}");
-    }
-
-    /** 平台落盘写桩（物化路径的 execWithStdin——缺省成功）。 */
-    private void givenPlatformWriteSucceeds() {
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-    }
-
-    /** oxlint 扫描违规桩（后注册优先——命令含 oxlint 的 exec 分岔到本桩）。 */
-    private void givenOxlintViolations() {
-        when(workspaceLifecycleAppService.exec(anyString(),
-                argThat(command -> command != null && command.command().contains("oxlint"))))
-                .thenReturn(new ExecResultResponse(OXLINT_VIOLATIONS_JSON, "", 1));
-    }
-
-    @Test
-    void given_no_spec_when_dispatch_then_agents_md_plain_and_zero_materialization() {
-        // 一等断言（#296 验收⑤＋#543 kill-switch 关＝回无规范现状）：风格层关停的
-        // 无规范项目派发——AGENTS.md 不带设计规范节、物化零写入（DESIGN.md／lint
-        // 配置皆不落，基座行为零改变）
-        jdbcTemplate.update("UPDATE prj_style_direction_switch SET enabled = FALSE WHERE id = 1");
-        Long projectId = persistedProject("9820");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenConverseSucceeds("已生成");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<WorkspaceExecCommand> execs =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9820"), execs.capture());
-        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command).contains("AGENTS.md"))
-                .noneSatisfy(command -> assertThat(command).contains("## 设计规范"))
-                .noneSatisfy(command -> assertThat(command).contains("DESIGN.md"));
-        verify(workspaceLifecycleAppService, never()).execWithStdin(any(), any(), any());
-    }
-
-    @Test
-    void given_spec_when_dispatch_then_materialized_and_agents_md_carries_design_section() {
-        // 灵魂用例（#296 验收①）：带规范项目首个构建起跑——物化落位（规则文件＋
-        // lint 配置）＋AGENTS.md 拼入设计规范节（提示词注入的工作区腿）
-        Long projectId = persistedProject("9821");
-        givenSpecRow(projectId);
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenPlatformWriteSucceeds();
-        givenConverseSucceeds("已生成");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<WorkspaceExecCommand> execs =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9821"), execs.capture());
-        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command)
-                        .contains("AGENTS.md").contains("## 设计规范"));
-        ArgumentCaptor<WorkspaceExecCommand> writes =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(2)).execWithStdin(eq("9821"),
-                writes.capture(), any());
-        assertThat(writes.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command).contains("DESIGN.md"))
-                .anySatisfy(command -> assertThat(command).contains(".oxlintrc.json"));
-    }
-
     /** 健壮件缺席桩（后注册优先）：探针命令（test -f 基座健壮件）退非 0——存量工作区形。 */
     private void givenRobustKitAbsent() {
         when(workspaceLifecycleAppService.exec(anyString(),
@@ -1121,7 +1026,7 @@ class GenerationAppServiceTest {
     void given_prd_never_produced_when_generate_then_prj_018() {
         // 「无门」指待定项不设门；PRD 从未产出 = 动作成立的前置事实缺失——直连调用
         // 也拦（编码 run 的任务就是读 PRD，无 PRD 起跑只会空烧重试）
-        Long projectId = projectRepository.save(Project.create("无 PRD 项目", null, null, 9816L, OWNER, null)).getId();
+        Long projectId = projectRepository.save(Project.create("无 PRD 项目", null, 9816L, OWNER, null)).getId();
 
         assertThatThrownBy(() -> appService.startGeneration(projectId))
                 .isInstanceOf(ApplicationException.class)
@@ -1526,7 +1431,7 @@ class GenerationAppServiceTest {
 
     /** 可生成形态的项目（PRD 已产出、未生成、未归档）。 */
     private Long persistedProject(String workspaceId) {
-        Project project = Project.create("生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("生成项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
@@ -1561,68 +1466,9 @@ class GenerationAppServiceTest {
     }
 
     private Long persistedArchivedProject(String workspaceId) {
-        Project project = Project.create("归档生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("归档生成项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.archive();
         return projectRepository.save(project).getId();
-    }
-
-    // ---------- #291 构建门定稿放行：稿入起跑上下文 ----------
-
-    @Test
-    void given_finalized_items_when_prompt_assembled_then_draft_context_listed() {
-        // 定稿稿引用块（#291）：已定稿件逐条列出（设计物标题＋定稿稿路径），空清单
-        // 零注入（纯系统项目不携带）
-        assertThat(GenerationAppService.finalizedDesignsContext(List.of())).isEmpty();
-        DesignItem item = DesignItem.pending(1L, 1, "品牌主 logo——方形构图",
-                LocalDateTime.now());
-        item.finalize("run-x", "/design/logo-2.html");
-        assertThat(GenerationAppService.finalizedDesignsContext(List.of(item)))
-                .contains("已定稿的设计稿")
-                .contains("品牌主 logo——方形构图")
-                .contains("/design/logo-2.html");
-    }
-
-    @Test
-    void given_system_design_all_finalized_when_generation_dispatched_then_gate_opens() {
-        // #291 验收④第二岔的生成面：设计类终点清单全部定稿——生成门放行（PRJ_042
-        // 只拦未定稿完），起跑上下文携定稿稿引用块（阶段 0 与切片同携——规范源
-        // 全程在场）
-        Long projectId = persistedSystemDesignProject("9871");
-        seedFinalizedItem(projectId, projectOf(projectId).getPrdProducedAt());
-        givenSessionExecutorRunsInline();
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("", "", 0));
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            return command != null ? new AgentReply(command.runId(), "已构建", null, List.of())
-                    : null;
-        });
-
-        GenerationAppService.GenerationRun run =
-                appService.dispatchGenerationOnTurnClose(projectId);
-
-        assertThat(run).isNotNull();
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(commands.capture(), any());
-        // 内核首跑 prompt 前置定稿稿引用块（#601 沿用 #291——规范源在场）
-        assertThat(commands.getAllValues()).extracting(AgentCommand::prompt)
-                .allSatisfy(prompt -> assertThat(prompt)
-                        .contains("已定稿的设计稿")
-                        .contains("/design/home-1.html"));
-    }
-
-    @Test
-    void given_system_design_partially_finalized_when_start_generation_then_still_gated() {
-        // 门语义（#291 修订）：PRJ_042 拦「未全部定稿」——已收口未定稿（设计进行中）
-        // 仍不放行；文案如实告知构建从定稿设计稿长出
-        Long projectId = persistedSystemDesignProject("9872");
-        seedFinalizedItem(projectId, projectOf(projectId).getPrdProducedAt());
-        jdbcTemplate.update("UPDATE prj_design_items SET status = 2 WHERE project_id = ?",
-                projectId); // 一件退回已收口（未定稿）
-
-        assertThatThrownBy(() -> appService.startGeneration(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.GENERATION_DESIGN_ENDPOINT.message());
     }
 
     // ---------- 模型路由（#354：路由判定优先、人工覆盖兜底；钉死位＝路由关；
@@ -1737,29 +1583,12 @@ class GenerationAppServiceTest {
     }
 
     /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */
-    private Long persistedSystemDesignProject(String workspaceId) {
-        Project project = Project.create("设计先行项目", null, null, Long.parseLong(workspaceId), OWNER, null);
-        project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN, null);
-        project.markPrdProduced();
-        return projectRepository.save(project).getId();
-    }
-
     private Project projectOf(Long projectId) {
         return projectRepository.findById(projectId).orElseThrow();
     }
 
-    /** 全部定稿的清单行（单件——门与起跑上下文的断言面）。 */
-    private void seedFinalizedItem(Long projectId, LocalDateTime prdAnchor) {
-        jdbcTemplate.update("""
-                INSERT INTO prj_design_items (id, project_id, ord, title, status, run_id,
-                    prd_produced_at, finalized_path, created_at, updated_at)
-                VALUES (?, ?, 1, '首页视觉', 4, 'run-x', ?, '/design/home-1.html',
-                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, System.nanoTime(), projectId, prdAnchor);
-    }
-
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("已生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("已生成项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.markGenerated();
         return projectRepository.save(project).getId();
     }

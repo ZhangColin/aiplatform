@@ -147,12 +147,12 @@ class DispatchAppServiceTest {
     }
 
     private Long persistedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("派发项目", null, null, Long.parseLong(workspaceId), OWNER, null));
+        Project project = projectRepository.save(Project.create("派发项目", null, Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("派发项目", null, null, Long.parseLong(workspaceId), OWNER, null));
+        Project project = projectRepository.save(Project.create("派发项目", null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
@@ -313,7 +313,7 @@ class DispatchAppServiceTest {
     @Test
     void given_archived_project_when_dispatch_then_prj_013_before_classification() {
         // 全局守卫（归档 = 指令区物理关闭，咨询与兜底也停）先于分类：拒绝即零调用零事件
-        Project project = projectRepository.save(Project.create("归档项目", null, null, 9806L, OWNER, null));
+        Project project = projectRepository.save(Project.create("归档项目", null, 9806L, OWNER, null));
         project.archive();
         Long projectId = projectRepository.save(project).getId();
 

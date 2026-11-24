@@ -78,10 +78,9 @@ public class BuildGateAppService {
         return true;
     }
 
-    /** 岔路口出卡前置（置位与读面同判据）：试用态 ∧ 系统终点 ∧ PRD 在 ∧ 首建未点火 ∧ 未生成未归档。 */
+    /** 岔路口出卡前置（置位与读面同判据）：试用态 ∧ PRD 在 ∧ 首建未点火 ∧ 未生成未归档。 */
     private boolean forkEligible(Project project) {
         return billingAppService.trackOf(project.getId()).trial()
-                && !project.getEndpointType().designInvolved()
                 && project.getPrdProducedAt() != null
                 && project.getGenerationRequestedAt() == null
                 && project.getGeneratedAt() == null
@@ -104,15 +103,14 @@ public class BuildGateAppService {
         boolean trial = track.trial();
         boolean firstBuildOpen = firstBuildOpen(project);
         boolean forkCardPending = trial && firstBuildOpen
-                && project.getForkState() == ForkState.PENDING
-                && !project.getEndpointType().designInvolved();
+                && project.getForkState() == ForkState.PENDING;
         // 到账自动翻转的读面信号（#544——「自动」不止收银台 onDone 单缝：他处
         // 到账〔账户页/项目账单节/他端〕后卡回读即显 settleDue，前端空 source
         // 重判即翻转、无需重走选择）：卡在场 ∧ 源已选定 ∧ 源池余额为正
         boolean forkSettleDue = forkCardPending
                 && track.deductionSource() != null && track.sourcePoolPositive();
         return new BuildGateView(forkCardPending,
-                !trial && firstBuildOpen && !project.getEndpointType().designInvolved(),
+                !trial && firstBuildOpen,
                 forkSettleDue);
     }
 
@@ -210,11 +208,10 @@ public class BuildGateAppService {
         return ForkGuideView.flippedOf(billingAppService.trackOf(projectId));
     }
 
-    /** 岔路口卡在场判定（读面同判据的命令侧镜像）：PENDING ∧ 首建未点火 ∧ 非设计终点。 */
+    /** 岔路口卡在场判定（读面同判据的命令侧镜像）：PENDING ∧ 首建未点火。 */
     private boolean forkCardOnScreen(Project project) {
         return project.getForkState() == ForkState.PENDING
-                && firstBuildOpen(project)
-                && !project.getEndpointType().designInvolved();
+                && firstBuildOpen(project);
     }
 
     /**

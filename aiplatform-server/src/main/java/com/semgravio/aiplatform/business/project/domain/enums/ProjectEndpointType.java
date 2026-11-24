@@ -5,23 +5,16 @@ import com.cartisan.data.jpa.converter.BaseEnumConverter;
 import jakarta.persistence.Converter;
 
 /**
- * 项目终点类型（#285，ADR-0024「项目不分型、终点是属性」）：项目下单前可变的
- * 交付物去向——设计（设计资产包交付）/ 系统 / 系统＋设计（先设计、系统从定稿
- * 设计稿长出）。入口两档显式选择定初值（做设计 = {@link #DESIGN}，缺省 {@link #SYSTEM}），
- * 下单即冻结；对齐订单交付物类型（#297 接线）。
+ * 项目终点类型（#285，ADR-0024「项目不分型、终点是属性」；<b>#612 收窄为系统
+ * 单值</b>：设计线整条退役，项目只剩系统一种终点——{@code DESIGN}／
+ * {@code SYSTEM_DESIGN} 退场，{@code prj_projects.endpoint_type} 列拆除）。
  *
- * <p>PRD 清单章形态跟本枚举走（技能 prd-writing 双形态的选择键）：仅
- * {@link #DESIGN} 用设计形（设计物清单），{@link #SYSTEM} 与
- * {@link #SYSTEM_DESIGN} 用系统形（功能清单——后者设计硬约束入关键约束、
- * 设计范围＝功能清单页面集，不另立清单正本）。</p>
+ * <p>码位保留 2=系统（与 {@code OrderDeliverableType} 的历史码表对齐；终点概念
+ * 收窄后所有项目恒为系统）。</p>
  */
 public enum ProjectEndpointType implements BaseEnum<ProjectEndpointType> {
 
-    DESIGN(1, "设计"),
-
-    SYSTEM(2, "系统"),
-
-    SYSTEM_DESIGN(3, "系统＋设计");
+    SYSTEM(2, "系统");
 
     private final Integer code;
     private final String name;
@@ -39,19 +32,6 @@ public enum ProjectEndpointType implements BaseEnum<ProjectEndpointType> {
     @Override
     public String getName() {
         return name;
-    }
-
-    /** 终点带设计交付（设计主线或系统＋设计）——设计过程的作用域判据。 */
-    public boolean designInvolved() {
-        return this == DESIGN || this == SYSTEM_DESIGN;
-    }
-
-    /**
-     * 缺省终点（创建不携终点初值时）：系统——主链路「生成无门」口径，入口不选
-     * 即走系统主线（ProjectType.orDefault 同款缺省兜底）。
-     */
-    public static ProjectEndpointType orDefault(ProjectEndpointType type) {
-        return type == null ? SYSTEM : type;
     }
 
     /**

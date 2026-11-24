@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 import com.semgravio.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
@@ -10,11 +9,9 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 
 /**
- * {@link ProjectDetailResponse} 测试夹具 builder（#285 备案「再扩字段时收
- * fixture builder」——#290 再扩 designItems 触发器燃起收口：此前七处测试构造随
- * 字段扩各自散补 null，收口后扩字段只改本类）。伴随字段（{@code *Name} 族）随
+ * {@link ProjectDetailResponse} 测试夹具 builder：伴随字段（{@code *Name} 族）随
  * 枚举派生，调用面不手写；缺省值＝既有各 seam 测试的共性（官网类型、系统终点、
- * 进行中、从未生成、无订单无清单），差异处链式覆盖。
+ * 进行中、从未生成、无订单），差异处链式覆盖。
  */
 public final class ProjectDetailResponseFixture {
 
@@ -30,7 +27,6 @@ public final class ProjectDetailResponseFixture {
         private final String name;
         private ProjectType type = ProjectType.WEBSITE;
         private ProjectEndpointType endpointType = ProjectEndpointType.SYSTEM;
-        private DesignScopeResponse designScope;
         private String workspaceId = "9000";
         private ProjectStatus status = ProjectStatus.IN_PROGRESS;
         private boolean archived;
@@ -39,7 +35,6 @@ public final class ProjectDetailResponseFixture {
         private GenerationState generationState = GenerationState.NEVER_GENERATED;
         private OrderBriefResponse activeOrder;
         private OrderBriefResponse latestOrder;
-        private List<DesignItemResponse> designItems;
 
         private Builder(String id, String name) {
             this.id = id;
@@ -48,11 +43,6 @@ public final class ProjectDetailResponseFixture {
 
         public Builder endpointType(ProjectEndpointType endpointType) {
             this.endpointType = endpointType;
-            return this;
-        }
-
-        public Builder designScope(DesignScopeResponse designScope) {
-            this.designScope = designScope;
             return this;
         }
 
@@ -81,17 +71,12 @@ public final class ProjectDetailResponseFixture {
             return this;
         }
 
-        public Builder designItems(List<DesignItemResponse> designItems) {
-            this.designItems = designItems;
-            return this;
-        }
-
         public ProjectDetailResponse build() {
             return new ProjectDetailResponse(id, name, type, type.getName(),
-                    endpointType, endpointType.getName(), designScope, workspaceId,
+                    endpointType, endpointType.getName(), workspaceId,
                     status, status.getName(), archived, createdAt, null, prdProducedAt,
                     null, generationState, generationState.getName(), activeOrder,
-                    latestOrder, designItems);
+                    latestOrder);
         }
     }
 }

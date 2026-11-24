@@ -92,7 +92,7 @@ class InterviewToolGateTest {
     // ---------- 内部 ----------
 
     private Long persistedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("闸测试项目", null, null,
+        Project project = projectRepository.save(Project.create("闸测试项目", null,
                 Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
     }

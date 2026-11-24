@@ -52,7 +52,7 @@ class PreviewTrialNoticeAppServiceTest {
     @Test
     void given_trial_project_without_billing_row_when_notice_then_trial_true() {
         Long workspaceId = 9701L;
-        projectRepository.save(Project.create("试用项目", null, null, workspaceId, OWNER, null));
+        projectRepository.save(Project.create("试用项目", null, workspaceId, OWNER, null));
 
         TrialNoticeResponse notice = noticeAppService.trialNotice(workspaceId);
 
@@ -64,7 +64,7 @@ class PreviewTrialNoticeAppServiceTest {
         // 源选定≠付费：未翻转仍试用（提示不熄灭——钱的承诺事实未落）
         Long workspaceId = 9702L;
         Long projectId = projectRepository
-                .save(Project.create("已选源未翻转", null, null, workspaceId, OWNER, null))
+                .save(Project.create("已选源未翻转", null, workspaceId, OWNER, null))
                 .getId();
         poolTopupAppService.topup(null, projectId, 1, null, null);
 
@@ -77,7 +77,7 @@ class PreviewTrialNoticeAppServiceTest {
         // 付费翻转即熄灭（判定单源＝bil_project_billing.flipped_at）
         Long workspaceId = 9703L;
         Long projectId = projectRepository
-                .save(Project.create("已翻转项目", null, null, workspaceId, OWNER, null))
+                .save(Project.create("已翻转项目", null, workspaceId, OWNER, null))
                 .getId();
         poolTopupAppService.topup(null, projectId, 1, null, null);
         billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);

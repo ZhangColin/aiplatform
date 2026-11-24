@@ -257,7 +257,7 @@ class ProjectVersionAppServiceTest {
     // ---------- 观测件 ----------
 
     private Long persistedProject(String workspaceId) {
-        Project project = Project.create("版本项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("版本项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();

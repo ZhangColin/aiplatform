@@ -40,7 +40,6 @@ import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
 import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
-import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -136,7 +135,7 @@ class BuildGateAppServiceTest {
     /** 试用态 PRD 已产出的系统终点项目（岔路口前置形态）。 */
     private Long persistedTrialPrdProject(String workspaceId) {
         Project project = projectRepository.save(Project.create("岔路口项目", null,
-                ProjectEndpointType.SYSTEM, Long.parseLong(workspaceId), OWNER, null));
+                Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
@@ -190,25 +189,12 @@ class BuildGateAppServiceTest {
     void given_no_prd_when_ensure_fork_pending_then_no_card() {
         // PRD 未产出＝访谈未收口——无卡无门
         Project project = projectRepository.save(Project.create("访谈中项目", null,
-                ProjectEndpointType.SYSTEM, 9903L, OWNER, null));
+                9903L, OWNER, null));
 
         assertThat(gateService.ensureForkPending(project.getId())).isFalse();
         BuildGateAppService.BuildGateView gate = gateService.gateOf(project.getId());
         assertThat(gate.forkCardPending()).isFalse();
         assertThat(gate.prdConfirmable()).isFalse();
-    }
-
-    @Test
-    void given_design_endpoint_when_ensure_fork_pending_then_no_card() {
-        // 设计类终点不走岔路口（设计轨触发律不改：PRD 收口起设计过程、全部定稿起构建）
-        Project project = projectRepository.save(Project.create("设计项目", null,
-                ProjectEndpointType.SYSTEM_DESIGN, 9904L, OWNER, null));
-        project.markPrdProduced();
-        Long projectId = projectRepository.save(project).getId();
-
-        assertThat(gateService.ensureForkPending(projectId)).isFalse();
-        assertThat(gateService.gateOf(projectId).forkCardPending()).isFalse();
-        assertThat(gateService.gateOf(projectId).prdConfirmable()).isFalse(); // 设计轨首建由定稿触发
     }
 
     @Test
@@ -336,7 +322,7 @@ class BuildGateAppServiceTest {
     @Test
     void given_no_prd_when_confirm_then_prj_018() {
         Project project = projectRepository.save(Project.create("访谈中项目", null,
-                ProjectEndpointType.SYSTEM, 9909L, OWNER, null));
+                9909L, OWNER, null));
         topupService.topup(null, project.getId(), 10_000, null, null);
         billingAppService.flipToPaid(project.getId(), FlipGate.FORK);
 

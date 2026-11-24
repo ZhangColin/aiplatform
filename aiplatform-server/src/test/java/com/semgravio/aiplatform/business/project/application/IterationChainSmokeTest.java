@@ -153,7 +153,7 @@ class IterationChainSmokeTest {
             notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(eventsAppService).publishNotification(any(), any());
-        Project project = projectRepository.save(Project.create("链必达冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        Project project = projectRepository.save(Project.create("链必达冒烟", null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         mainSessionId = MainAgentAppService.SESSION_PREFIX + projectId;
         coderSessionId = CodingRunDispatcher.SESSION_PREFIX + projectId;

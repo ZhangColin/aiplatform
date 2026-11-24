@@ -44,7 +44,6 @@ import com.semgravio.aiplatform.business.project.application.dto.command.Continu
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.RenameProjectCommand;
-import com.semgravio.aiplatform.business.project.application.dto.command.SwitchEndpointTypeCommand;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStartResponse;
@@ -129,9 +128,7 @@ public class ProjectController {
     @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理；免注册访客可用）",
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
-                    + "失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，"
-                    + "#299 入口两档 mode 进载荷）：入口选「做设计」携 1、缺省/做系统＝2 系统（主链路零变化）；"
-                    + "不合法 code 400（框架统一信封）。"
+                    + "失败保占位经改名端点可改）；类型单模板服务端缺省；终点收窄为系统单值（#612）。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。"
                     + "SSE：workspace-created → 智能体事件。"
@@ -330,8 +327,6 @@ public class ProjectController {
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
                     + "PRD 从未产出 409 PRJ_018（点火前置＝PRD 在——本守卫拦未产出直连调用）；"
-                    + "设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、"
-                    + "系统＋设计设计先行——构建从定稿设计稿长出）；"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<GenerationStartResponse> generate(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
@@ -424,24 +419,6 @@ public class ProjectController {
         return ApiResponse.ok(appService.rename(parseId(id), command.name()));
     }
 
-    @PostMapping("/{id}/endpoint-type")
-    @Operation(summary = "切换终点类型（设置 tab 终点控件＝项目内唯一变更位，#285）",
-            description = "终点类型（Integer code：1=设计 2=系统 3=系统＋设计）下单前可变、"
-                    + "下单即冻结（转轨是对话之外类型变更的一等入口，ADR-0024）。切换落库后"
-                    + "平台派主智能体切换重产轮：PRD 已产出即重产清单章（形态随终点类型走——"
-                    + "设计＝设计物清单、系统/系统＋设计＝功能清单〔后者设计硬约束入关键约束〕），"
-                    + "访谈期即转向通告；过程经 SSE agent=main 可见。作用域：系统→设计类切换"
-                    + "（PRD 已产出、功能清单在）必带 scopeType（1=全部页面 2=勾选页面，缺选"
-                    + " 400 PRJ_040），勾选形 scopePages（功能清单条目标签）非空（空集 400 "
-                    + "PRJ_041）；范围仅系统＋设计落库（设计主线由 PRD 设计物清单章承载）。"
-                    + "同目标幂等无操作。已归档 409 PRJ_013；订单处理中 409 ORD_006"
-                    + "（取消订单即解冻）；挂起问答待答 409 PRJ_024（指路作答）；"
-                    + "项目不存在 404 PRJ_001")
-    public ApiResponse<ProjectDetailResponse> switchEndpoint(@PathVariable String id,
-            @Valid @RequestBody SwitchEndpointTypeCommand command) {
-        return ApiResponse.ok(appService.switchEndpoint(parseId(id), command));
-    }
-
     @GetMapping("/{id}/usage")
     @Operation(summary = "项目用量（总量 + 分模型 + 分智能体）",
             description = "经计量查询端口按 subject=projectId 聚合，"
@@ -487,10 +464,9 @@ public class ProjectController {
                     + "本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable"
                     + "（付费态∧PRD 在∧首建未点火）。错误码：PRJ_084 试用项目（岔路口"
                     + "「立即生成」即点火）；PRJ_018 PRD 尚未产出；PRJ_013 已归档；"
-                    + "PRJ_017 已点火或生成在途；PRJ_042 设计未定稿（设计轨构建从定稿"
-                    + "设计稿长出）；BILL_025 源池余额不足（充值回正自动重派）。"
+                    + "PRJ_017 已点火或生成在途；BILL_025 源池余额不足（充值回正自动重派）。"
                     + "项目不存在 404 PRJ_001")
-    @ErrorCodes({"PRJ_001", "PRJ_013", "PRJ_017", "PRJ_018", "PRJ_042", "PRJ_084", "BILL_025"})
+    @ErrorCodes({"PRJ_001", "PRJ_013", "PRJ_017", "PRJ_018", "PRJ_084", "BILL_025"})
     public ApiResponse<GenerationStartResponse> confirmPrdGeneration(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
                 buildGateAppService.confirmFirstBuild(parseId(id)).runId()));

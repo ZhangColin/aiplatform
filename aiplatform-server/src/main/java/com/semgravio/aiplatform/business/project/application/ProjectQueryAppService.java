@@ -24,7 +24,6 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
-import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -34,22 +33,17 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DesignScopeResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
-import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
@@ -81,7 +75,6 @@ public class ProjectQueryAppService {
     private final UsageQueryPort usageQueryPort;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final OrderQueryAppService orderQueryAppService;
-    private final DesignItemRepository designItems;
     private final CodingRunTrack codingRunTrack;
     private final PrdVersionRepository prdVersionRepository;
 
@@ -89,14 +82,12 @@ public class ProjectQueryAppService {
                                   UsageQueryPort usageQueryPort,
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                   OrderQueryAppService orderQueryAppService,
-                                  DesignItemRepository designItems,
                                   CodingRunTrack codingRunTrack,
                                   PrdVersionRepository prdVersionRepository) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.orderQueryAppService = orderQueryAppService;
-        this.designItems = designItems;
         this.codingRunTrack = codingRunTrack;
         this.prdVersionRepository = prdVersionRepository;
     }
@@ -134,8 +125,7 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 下单冻结面的引用集形状（跨 BC 内部端口形——对偶
-     * {@code DesignPackageAppService.StagedPackage} 先例，不进 REST 面）。
+     * 下单冻结面的引用集形状（跨 BC 内部端口形，不进 REST 面）。
      *
      * @param prdVersionNo  最新 PRD 版本号（null＝尚无构建基准记行——legacy）
      * @param prdContent    最新版全文（冗余拷贝源；与版本号同空同在）
@@ -450,8 +440,7 @@ public class ProjectQueryAppService {
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
      * + 生成态投影（#222；#604 三档）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
-     * 摘要（归档终态「完整记录」取单面，#30）+ 生成轨道片清单（#225 计划区）
-     * + 设计轨道件清单（#290 计划区，对偶片清单）。 */
+     * 摘要（归档终态「完整记录」取单面，#30）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
                 orderQueryAppService.activeOrderOf(project.getId()).orElse(null),
@@ -459,40 +448,11 @@ public class ProjectQueryAppService {
         GenerationState generationState = generationStateOf(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 project.getEndpointType(), project.getEndpointType().getName(),
-                designScopeOf(project),
                 base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
                 project.getGeneratedAt(), generationState, generationState.getName(),
                 base.activeOrder(),
-                orderQueryAppService.latestOrderOf(project.getId()).orElse(null),
-                designItemsOf(project));
-    }
-
-    /** 设计范围响应拼装（#285）：无页面锚定（null 聚合读面）即 null。 */
-    private DesignScopeResponse designScopeOf(Project project) {
-        DesignScope scope = project.designScope();
-        if (scope == null) {
-            return null;
-        }
-        return new DesignScopeResponse(scope.type(), scope.type().getName(),
-                scope.type() == DesignScopeType.SELECTED_PAGES ? scope.pages() : List.of());
-    }
-
-    /**
-     * 设计轨道件清单读模型（#290 计划区只读透出）：轨道表
-     * 当前件集按 ord 升序映射——现行清单（PRD 版本锚门 {@link DesignItem#
-     * checklistMatchesPrd} 单点）才透出；锚不一致（PRD 已演进、旧清单是过期结构）
-     * 或无件行返回 null（过期清单的进度不是现行事实，不拿旧清单对进度）。
-     */
-    private List<DesignItemResponse> designItemsOf(Project project) {
-        List<DesignItem> items = designItems.findByProjectIdOrderByOrdAsc(project.getId());
-        if (!DesignItem.checklistMatchesPrd(items, project.getPrdProducedAt())) {
-            return null;
-        }
-        return items.stream()
-                .map(item -> new DesignItemResponse(item.getOrd(), item.getTitle(),
-                        item.getStatus(), item.getStatus().getName(), item.getFinalizedPath()))
-                .toList();
+                orderQueryAppService.latestOrderOf(project.getId()).orElse(null));
     }
 
     /**

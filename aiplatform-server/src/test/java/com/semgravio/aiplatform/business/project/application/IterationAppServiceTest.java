@@ -146,7 +146,6 @@ class IterationAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
-        jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
@@ -538,54 +537,6 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_spec_project_when_fix_then_materialized_section_and_lint_in_closing() {
-        // #296 更新 run 同律（定稿触发的按稿对齐走本轨）：派发物化（AGENTS.md 设计
-        // 规范节＋DESIGN.md／lint 配置落位）＋收口扫描事实随收尾卡；无规范项目
-        // 零物化（既有测试即证——本类其余用例从不桩 execWithStdin 而全绿）
-        Long projectId = persistedGeneratedProject("9960");
-        jdbcTemplate.update(
-                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
-                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
-                4821000000000000002L, projectId, "/design/home-1.html", "run-final-1",
-                "{\"--primary\": \"#166534\"}");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(List.of(
-                new FileChange("/src/app/globals.css", 6, 2)));
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("oxlint"))))
-                .thenReturn(new ExecResultResponse("{ \"diagnostics\": [] }", "", 0));
-
-        appService.startFixRun(projectId, "按定稿设计改配色", null);
-        tracks.remove(0).run();
-
-        // AGENTS.md 命令体含设计规范节；物化写 DESIGN.md＋lint 配置
-        ArgumentCaptor<WorkspaceExecCommand> execs =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(1)).exec(any(), execs.capture());
-        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command)
-                        .contains("AGENTS.md").contains("## 设计规范"));
-        ArgumentCaptor<WorkspaceExecCommand> writes =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(2)).execWithStdin(any(), writes.capture(),
-                any());
-        assertThat(writes.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command).contains("DESIGN.md"))
-                .anySatisfy(command -> assertThat(command).contains(".oxlintrc.json"));
-        // 收尾卡携按稿对齐扫描事实（status=passed）
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> lint = (Map<String, Object>) closing.get("designLint");
-        assertThat(lint).containsEntry("status", "passed");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
         // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/
         // 变更清单/统计）且判定行为服务端权威值（PRD 改没改 = 交接物修订说明、
@@ -809,7 +760,7 @@ class IterationAppServiceTest {
 
     @Test
     void given_never_generated_or_archived_or_missing_when_fix_then_rejected() {
-        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null, null, 9906L, OWNER, null)).getId();
+        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null, 9906L, OWNER, null)).getId();
         Long archivedId = persistedArchivedGeneratedProject("9907");
 
         assertThatThrownBy(() -> appService.startFixRun(notGeneratedId, "改一下", null))
@@ -971,7 +922,7 @@ class IterationAppServiceTest {
 
     /** 已生成形态的项目（迭代的前提事实）。 */
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("迭代项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
@@ -993,7 +944,7 @@ class IterationAppServiceTest {
     }
 
     private Long persistedArchivedGeneratedProject(String workspaceId) {
-        Project project = Project.create("归档迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("归档迭代项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         project.archive();

@@ -197,7 +197,7 @@ class BackofficeReclaimLiveTest {
     private Long seedProject(Long wsId) {
         // 带账户属主：删除级联尾部 SSE 通知要求归属路由键至少其一
         Project project = projectRepository.save(Project.create(
-                "回收live对象", ProjectType.WEBSITE, null, wsId, 900601L, null));
+                "回收live对象", ProjectType.WEBSITE, wsId, 900601L, null));
         return project.getId();
     }
 

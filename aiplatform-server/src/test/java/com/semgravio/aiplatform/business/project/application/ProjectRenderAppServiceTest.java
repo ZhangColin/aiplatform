@@ -156,7 +156,7 @@ class ProjectRenderAppServiceTest {
 
     private Project persistedProject(long workspaceId) {
         return projectRepository.save(Project
-                .create("渲染项目" + workspaceId, ProjectType.WEBSITE, null, workspaceId, null, null));
+                .create("渲染项目" + workspaceId, ProjectType.WEBSITE, workspaceId, null, null));
     }
 
     private ApplicationException catchException(Runnable action) {

@@ -203,7 +203,7 @@ class BackofficeReclaimAppServiceTest {
     private Long persistedProject(long workspaceId) {
         // 带账户属主：删除级联尾部 SSE 通知要求归属路由键至少其一（真 EventsAppService）
         Project project = projectRepository.save(Project.create(
-                "回收对象", ProjectType.WEBSITE, null, workspaceId, 740401L, null));
+                "回收对象", ProjectType.WEBSITE, workspaceId, 740401L, null));
         return project.getId();
     }
 }

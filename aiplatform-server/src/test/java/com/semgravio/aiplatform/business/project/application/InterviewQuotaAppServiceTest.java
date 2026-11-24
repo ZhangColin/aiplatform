@@ -236,7 +236,7 @@ class InterviewQuotaAppServiceTest {
     }
 
     private Long persistedInterviewProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("访谈项目", null, null,
+        Project project = projectRepository.save(Project.create("访谈项目", null,
                 Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
     }

@@ -244,7 +244,7 @@ class DeliveryStatusAppServiceTest {
 
     private Long newProject() {
         Long projectId = projectRepository.save(Project.create("六态推导项目" + WORKSPACE_SEQ.get(),
-                null, null, WORKSPACE_SEQ.incrementAndGet(), 1L, null)).getId();
+                null, WORKSPACE_SEQ.incrementAndGet(), 1L, null)).getId();
         projectIds.add(projectId);
         return projectId;
     }

@@ -28,13 +28,10 @@ import com.semgravio.aiplatform.business.billing.application.BalanceGateAppServi
 import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
-import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -138,26 +135,6 @@ public class GenerationAppService {
                     + "不必每组动作都配解说。";
 
     /**
-     * 定稿设计稿引用块（#291 稿入起跑上下文——ADR-0024「定稿稿以规范源身份经
-     * 起跑上下文喂系统轨」）：设计类终点全部定稿后的构建，起跑 prompt 前置
-     * 定稿稿清单——执行体先读稿再动手，系统的配色、字体、圆角与整体视觉语感与
-     * 定稿稿保持一致（规范级提炼与校验归一致性桥 #295/#296）。空清单＝纯系统项目
-     * 或无定稿件，零注入。
-     */
-    static String finalizedDesignsContext(List<DesignItem> finalized) {
-        if (finalized.isEmpty()) {
-            return "";
-        }
-        StringBuilder block = new StringBuilder("本项目有已定稿的设计稿（设计先行——先读稿再动手：")
-                .append("系统的配色、字体、圆角与整体视觉语感与定稿稿保持一致）：\n");
-        for (DesignItem item : finalized) {
-            block.append("- 设计物「").append(item.getTitle()).append("」定稿稿：")
-                    .append(item.getFinalizedPath()).append('\n');
-        }
-        return block.append('\n').toString();
-    }
-
-    /**
      * AGENTS.md 平台约定正文（工作区布局资产，#22 就位）：工作区物理约定的正本
      * ——harness 工作区上下文自动注入 run 执行体，也是后续迭代 run / 引擎资产的
      * 演进载体。内容平台所有（无用户可控片段），幂等覆写。
@@ -181,18 +158,6 @@ public class GenerationAppService {
             - .platform/ 是平台产物目录，不要写入；本文件（AGENTS.md）由平台维护，不要修改。
             - 每轮生成或修正收尾前，确认 8081 端口的服务在后台常驻运行——预览呈现的是活的服务。
             """;
-
-    /**
-     * AGENTS.md 设计规范节（#296 遵守三件套②提示词注入的工作区腿——短条目优于
-     * 长段，Lovable 官方指引；带规范项目才拼入，无规范项目零改变）：DESIGN.md
-     * 指路每轮读＋token 纪律。事实面（token 清单/色板/风格）在 DESIGN.md，本节
-     * 只立规矩——两级各安其位。
-     */
-    static final String AGENTS_MD_DESIGN_SPEC_SECTION = """
-
-            ## 设计规范
-
-            本项目带设计规范正本：工作区根的 DESIGN.md（随设计定稿刷新、平台维护）——每轮开工先读，系统界面的颜色、字体、圆角与组件风格照它对齐（视觉正源＝定稿设计稿）。src/app/globals.css 的 :root 是 token 生效位，其中平台维护的「平台设计规范」@theme 块已收窄默认调色板（bg-red-500 等裸色工具类不可用）：样式一律引用语义 token 或品牌色 token（bg-brand-1 等），禁裸色、禁任意值（p-[13px]）、禁 inline style；需要新颜色时在 :root 定义 token 并在 @theme 暴露，不写死色值。token 清单与细则见 DESIGN.md。""";
 
     /**
      * AGENTS.md 本栈写法规则节（#421 栈规则集；#540 扩容＝基座能力清单唯一
@@ -236,10 +201,8 @@ public class GenerationAppService {
     private final AgentEventBridge eventBridge;
     private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
-    private final DesignItemRepository designItems;
     private final TransactionTemplate transactionTemplate;
     private final ConversationHistoryAppService conversationHistory;
-    private final DesignSpecAppService designSpecs;
     private final BuildDispatchPolicy buildDispatchPolicy;
     private final DemoVersionAppService demoVersionAppService;
     private final PrdVersionAppService prdVersionAppService;
@@ -265,15 +228,6 @@ public class GenerationAppService {
     private final Map<Long, List<TurnOpinion>> firstDemoTurnOpinions = new ConcurrentHashMap<>();
 
     /**
-     * 首建派发意图账（#542 两入口退役的条件性再派，projectId 集）：终点切换重产
-     * 轮的入口是<b>用户触发面</b>（设置 tab 终点控件）——平台轮收口的再派是同一
-     * 触发链的延续（{@link #dispatchAfterEndpointShift} 消费），非无条件自动路径；
-     * 无意图的平台轮收口不派（点火归用户，卡/门读面在场）。进程内态（run 无表
-     * 口径）：重启丢账＝意图丢失，用户重点一次即兜底（卡/门仍在场）。
-     */
-    private final Set<Long> firstBuildDispatchIntents = ConcurrentHashMap.newKeySet();
-
-    /**
      * 一条在途意见轮的排队载荷（#360）：意见原文＋该轮需求侧判定（savePrd 修订
      * 说明，null = 未修订）＋意见轮 runId（明示回执的对话面锚）——排空时逐轮
      * 配对成修正轨交接物（{@link IterationAppService.FixHandoff.Round} 同形）。
@@ -295,10 +249,8 @@ public class GenerationAppService {
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             CodingRunDispatcher codingRunDispatcher, AgentEventBridge eventBridge,
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
-            DesignItemRepository designItems,
             TransactionTemplate transactionTemplate,
             ConversationHistoryAppService conversationHistory,
-            DesignSpecAppService designSpecs,
             BuildDispatchPolicy buildDispatchPolicy,
             DemoVersionAppService demoVersionAppService,
             PrdVersionAppService prdVersionAppService,
@@ -314,10 +266,8 @@ public class GenerationAppService {
         this.eventBridge = eventBridge;
         this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
-        this.designItems = designItems;
         this.transactionTemplate = transactionTemplate;
         this.conversationHistory = conversationHistory;
-        this.designSpecs = designSpecs;
         this.buildDispatchPolicy = buildDispatchPolicy;
         this.demoVersionAppService = demoVersionAppService;
         this.prdVersionAppService = prdVersionAppService;
@@ -402,32 +352,6 @@ public class GenerationAppService {
     }
 
     /**
-     * 首建派发意图记账（#542 用户触发面；#602 去计划形重塑）：终点切换重产轮
-     * （{@link MainAgentAppService#requestEndpointShift}）提交时记一笔——平台轮
-     * 收口（系统终点＋PRD 在场）按意图延续派发首个构建（#291 验收⑤：定稿设计稿
-     * 入起跑上下文），非无条件自动路径。进程内态（run 无表口径）：重启丢账＝意图
-     * 丢失，用户再点一次即兜底（卡/门仍在场）。
-     */
-    public void noteFirstBuildIntent(Long projectId) {
-        firstBuildDispatchIntents.add(projectId);
-    }
-
-    /**
-     * 切换重产轮收口的意图延续派发（#542 口径，#602 去计划形重塑）：意图在场即
-     * 再派（同一用户触发链的延续），消费即清；无意图返回 null（自然收口不派——
-     * 点火归用户）。调用方已按平台轮收窄（{@link MainAgentAppService} 收口面），
-     * 本方法只认账不认轮形。
-     *
-     * @return 派发的 run 标识；无意图返回 null
-     */
-    public GenerationRun dispatchAfterEndpointShift(Long projectId, TurnOpinion turnOpinion) {
-        if (!firstBuildDispatchIntents.remove(projectId)) {
-            return null; // 无派发意图（非用户触发链）——点火归用户
-        }
-        return dispatchGenerationOnTurnClose(projectId, turnOpinion);
-    }
-
-    /**
      * 在途意见排队（#360 面，#542 两入口退役后的<b>非快道</b>收口观测）：首个
      * 构建 run 在途期间到达的意见轮——意见入队＋对话面平台明示（生成成功收口后
      * 合并补派更新 run，不静默丢），<b>不派发</b>（自然收口无自动路径——点火归
@@ -498,23 +422,6 @@ public class GenerationAppService {
             }
             return null;
         }
-        // 设计类终点收口（#285 立门、#289 立语义、#291 定稿放行）：设计主线交付
-        // 设计资产包、系统＋设计设计先行——构建只从定稿设计稿长出（ADR-0024）：
-        // 清单全部定稿即门开（定稿触发与计划补产链双路可达，起跑上下文携定稿稿
-        // 引用块）；未定稿完不派（PRD 收口的路由已在上游起设计过程，
-        // MainAgentAppService#dispatchOnTurnClose）。在途口径按调用方分岔（按钮
-        // 拒绝 PRJ_042、收口自动静默跳过——防御位，正常不可达）。
-        if (project.getEndpointType().designInvolved()
-                && !DesignItem.checklistFinalized(
-                        designItems.findByProjectIdOrderByOrdAsc(projectId),
-                        project.getPrdProducedAt())) {
-            if (rejectInFlight) {
-                throw new ApplicationException(ProjectMessage.GENERATION_DESIGN_ENDPOINT);
-            }
-            log.info("[generate] 项目 {} 终点类型为 {} 且设计未全部定稿，系统生成不派（设计线编排）",
-                    projectId, project.getEndpointType().getName());
-            return null;
-        }
         if (hasTurnOpinion) {
             // #360 首 Demo 在途的反馈不静默丢：入队判定与 begin 同临界区（修正轨排队
             // 锁序同款——begin 失败 ⟹ end 未发生 ⟹ 排空 remove 未发生，add 不落在
@@ -542,10 +449,10 @@ public class GenerationAppService {
                     projectId);
             return null;
         }
-        // 起手资产就位（#296）：设计规范物化＋AGENTS.md 平台约定（物化先于
-        // AGENTS.md——设计规范节内容随物化结果）
+        // 起手资产就位（#296）：AGENTS.md 平台约定（带规范项目的设计规范节随
+        // #612 设计线退役一并退场）
         try {
-            writeConventionAssets(workspaceLifecycleAppService, designSpecs, project);
+            writeConventionAssets(workspaceLifecycleAppService, project);
         } catch (RuntimeException e) {
             codingRunTrack.end(projectId);
             throw e;
@@ -755,16 +662,10 @@ public class GenerationAppService {
             log.warn("[generate] 项目 {} 内核轨道起手起服未成（探活仍为收口硬门）：{}",
                     projectId, e.toString());
         }
-        // 定稿设计稿引用块（#291 稿入起跑上下文——内核形态沿用）：设计类终点门开后
-        // 的构建，prompt 前置定稿稿清单；纯系统项目零注入
-        String designContext = finalizedDesignsContext(
-                designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
-                        .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
-                        .toList());
         CodingRunDispatcher.RunResult result = codingRunDispatcher.run(project, firstRunId,
                 kernelSession(projectId, firstRunId),
                 // 单发提示（#604 失败即终态、不自动重试）
-                designContext + KERNEL_FIRST_RUN_PROMPT,
+                KERNEL_FIRST_RUN_PROMPT,
                 (attemptRunId, attemptChanges) -> closeKernelGeneration(project),
                 CodingRunDispatcher.GENERATE_LABEL, true, CodingRunDispatcher.RunSeat.kernel(),
                 RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN);
@@ -866,14 +767,13 @@ public class GenerationAppService {
     /**
      * AGENTS.md 平台约定写入命令（幂等覆写，生成与更新 run 起手共用）：heredoc
      * 单引号定界不做展开，正文为平台常量（无用户可控片段、无内嵌双引号——
-     * Windows argv fail-fast 面；单引号在定界 heredoc 体内为字面量）。带规范项目
-     * 追加设计规范节（#296）；新基座工作区追加本栈写法规则节（#421 栈规则集）。
+     * Windows argv fail-fast 面；单引号在定界 heredoc 体内为字面量）。新基座工作区
+     * 追加本栈写法规则节（#421 栈规则集）。
      */
-    static String agentsMdWriteCommand(boolean withDesignSpec, boolean withStackRules) {
+    static String agentsMdWriteCommand(boolean withStackRules) {
         return "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
                 + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT
                 + (withStackRules ? AGENTS_MD_STACK_RULES_SECTION : "")
-                + (withDesignSpec ? AGENTS_MD_DESIGN_SPEC_SECTION : "")
                 + "\nPLATFORM_EOF";
     }
 
@@ -888,21 +788,18 @@ public class GenerationAppService {
     }
 
     /**
-     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区；
-     * #296 起手序单点——<b>物化先于 AGENTS.md</b>，节内容随物化结果）：设计规范
-     * 派发物化（带规范项目四件落位〔:root 刷值／收窄块／DESIGN.md／lint 配置〕、
-     * 无规范项目零动作零写入）→ AGENTS.md 平台约定写入（带规范项目拼设计规范节；
-     * 新基座工作区拼栈规则集节——健壮件在场探针判据，#421）。退出码非 0 即写入
-     * 失败（环境故障口径如实上抛，run 不起跑——遵守链不静默缺席）。
+     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区）：
+     * AGENTS.md 平台约定写入（新基座工作区拼栈规则集节——健壮件在场探针判据，
+     * #421）。退出码非 0 即写入失败（环境故障口径如实上抛，run 不起跑——遵守链
+     * 不静默缺席）。
      */
     static void writeConventionAssets(WorkspaceLifecycleAppService workspace,
-            DesignSpecAppService designSpecs, Project project) {
-        boolean withDesignSpec = designSpecs.materializeAtDispatch(project);
+            Project project) {
         String workspaceId = Long.toString(project.getWorkspaceId());
         boolean withStackRules = workspace.exec(workspaceId,
                 new WorkspaceExecCommand(robustKitProbeCommand())).exitCode() == 0;
         ExecResultResponse result = workspace.exec(workspaceId,
-                new WorkspaceExecCommand(agentsMdWriteCommand(withDesignSpec, withStackRules)));
+                new WorkspaceExecCommand(agentsMdWriteCommand(withStackRules)));
         if (result.exitCode() != 0) {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "AGENTS.md 平台约定写入失败: " + result.stderr());

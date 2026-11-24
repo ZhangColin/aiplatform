@@ -109,20 +109,17 @@ class CodingRunDispatcher {
      * 收口判定的权威事实（#88 判定行）：PRD 改没改（生成轮恒未动；更新轮 = 交接物
      * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = 平台可观测文件改动
      * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本层
-     * 只拼装不判定。编码轨道另携 {@code designLint} 设计规范扫描事实（#296：
-     * token 合规是机器可判的<b>验证事实</b>不是判定分类——判定出口零改，仅随
-     * 收尾卡如实呈现；带规范项目的编码 run 在场，非规范项目恒 null）。验证统计／
-     * 基座 lint 两档／已知缺陷清单随审查与收口组退役（#605）。
+     * 只拼装不判定。验证统计／基座 lint 两档／已知缺陷清单随审查与收口组退役（#605）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
-            String systemNote, Map<String, Object> designLint) {
+            String systemNote) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本场叙事，进收尾卡
          * summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null);
+            return new ClosingJudgment(false, null, true, note);
         }
 
         /**
@@ -130,12 +127,7 @@ class CodingRunDispatcher {
          */
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null);
-        }
-
-        /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
-        ClosingJudgment withDesignLint(Map<String, Object> lint) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, lint);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote);
         }
     }
 
@@ -598,20 +590,11 @@ class CodingRunDispatcher {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        if (judgment.designLint() != null) {
-            closing.put(CLOSING_LINT_FIELD, judgment.designLint());
-        }
         if (config != null) {
             closing.put(CLOSING_MODEL_CONFIG_FIELD, config.payload());
         }
         return closing;
     }
-
-    /**
-     * 收口扩载的设计规范扫描键（#296：{@code { status, retried?, total?, violations? }}
-     * ——带规范项目编码 run 的「按稿对齐」叙事与 lint 结果；无规范项目不携带）。
-     */
-    static final String CLOSING_LINT_FIELD = "designLint";
 
     /**
      * 收口扩载的模型路由键（#354：收口 run 的路由判定留档——{@code { modelId,

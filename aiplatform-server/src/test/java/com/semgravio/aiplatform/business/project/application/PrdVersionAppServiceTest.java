@@ -300,7 +300,7 @@ class PrdVersionAppServiceTest {
 
     /** 已产出 PRD 的项目＋工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文）。 */
     private Long persistedPrdProject(String prdMarkdown) {
-        Project project = Project.create("PRD 版本项目", null, null, 971800L, OWNER, null);
+        Project project = Project.create("PRD 版本项目", null, 971800L, OWNER, null);
         project.markPrdProduced();
         Long projectId = projectRepository.save(project).getId();
         when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))

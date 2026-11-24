@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 import com.semgravio.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
@@ -16,10 +15,8 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
  * @param name                项目名
  * @param type                项目类型（code）
  * @param typeName            项目类型名
- * @param endpointType        终点类型（code：1=设计 2=系统 3=系统＋设计，#285——
- *                            下单前可变、下单即冻结；PRD 清单章形态的选择键）
- * @param endpointTypeName    终点类型名
- * @param designScope         设计范围（系统＋设计的页面锚定范围；null = 无页面锚定）
+ * @param endpointType        终点类型（code，2=系统；#612 收窄为系统单值）
+ * @param endpointTypeName    终点类型名（「系统」）
  * @param workspaceId         dev 工作区标识
  * @param status              派生项目状态（code）：IN_PROGRESS / ARCHIVED（归档优先）
  * @param statusName          派生状态名
@@ -40,9 +37,6 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
  * @param latestOrder         最近一张订单摘要（任意状态，#30：归档终态项目页的
  *                            「完整记录」取单面——支付归档后 activeOrder 归空、
  *                            订单卡改挂本嵌入；从未下单 = null）
- * @param designItems         设计轨道件清单（#290 计划区只读透出，ord 升序——
- *                            设计物清单逐件；PRD 版本锚一致才有效，锚不一致（PRD
- *                            已演进、旧清单过期）或无件行 = null——不拿旧清单对进度）
  */
 public record ProjectDetailResponse(
         String id,
@@ -51,7 +45,6 @@ public record ProjectDetailResponse(
         String typeName,
         ProjectEndpointType endpointType,
         String endpointTypeName,
-        DesignScopeResponse designScope,
         String workspaceId,
         ProjectStatus status,
         String statusName,
@@ -63,7 +56,6 @@ public record ProjectDetailResponse(
         GenerationState generationState,
         String generationStateName,
         OrderBriefResponse activeOrder,
-        OrderBriefResponse latestOrder,
-        List<DesignItemResponse> designItems
+        OrderBriefResponse latestOrder
 ) {
 }

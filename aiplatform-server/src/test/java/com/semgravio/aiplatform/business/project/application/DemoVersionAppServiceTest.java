@@ -199,7 +199,7 @@ class DemoVersionAppServiceTest {
     // ---------- 辅件 ----------
 
     private Long persistedProject() {
-        Project project = Project.create("Demo 版本项目", null, null, 971900L, OWNER, null);
+        Project project = Project.create("Demo 版本项目", null, 971900L, OWNER, null);
         return projectRepository.save(project).getId();
     }
 

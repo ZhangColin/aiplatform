@@ -26,19 +26,13 @@ import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.business.identity.application.GuestAppService;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
-import com.semgravio.aiplatform.business.project.application.dto.command.SwitchEndpointTypeCommand;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
-import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
@@ -76,8 +70,6 @@ public class ProjectLifecycleAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
     private final ConversationHistoryAppService conversationHistory;
-    private final DesignItemRepository designItems;
-    private final DesignSpecRepository designSpecs;
     private final PrdVersionRepository prdVersions;
     private final DemoVersionRepository demoVersions;
     private final SkillDraftAppService skillDrafts;
@@ -96,8 +88,6 @@ public class ProjectLifecycleAppService {
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
                                       ConversationHistoryAppService conversationHistory,
-                                      DesignItemRepository designItems,
-                                      DesignSpecRepository designSpecs,
                                       PrdVersionRepository prdVersions,
                                       DemoVersionRepository demoVersions,
                                       SkillDraftAppService skillDrafts,
@@ -115,8 +105,6 @@ public class ProjectLifecycleAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
         this.conversationHistory = conversationHistory;
-        this.designItems = designItems;
-        this.designSpecs = designSpecs;
         this.prdVersions = prdVersions;
         this.demoVersions = demoVersions;
         this.skillDrafts = skillDrafts;
@@ -168,7 +156,7 @@ public class ProjectLifecycleAppService {
                 Long ownerGuestId = guestId != null ? guestId
                         : issuedGuest.get() != null ? issuedGuest.get().guestId() : null;
                 return projectRepository.save(Project.create(
-                        Project.PLACEHOLDER_NAME, null, command.endpointType(),
+                        Project.PLACEHOLDER_NAME, null,
                         Long.parseLong(workspace.workspaceId()), accountId, ownerGuestId));
             });
         } catch (RuntimeException e) {
@@ -249,66 +237,6 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 切换终点类型（#285，设置 tab 终点控件＝项目内唯一变更位，ADR-0024/0025）：
-     * 下单前可变——归档关闭（PRJ_013）、未终结订单冻结（ORD_006，取消即解冻）；
-     * 同目标幂等无操作（不派重产轮）。切换落库后派主智能体切换重产轮
-     * （{@link MainAgentAppService#requestEndpointShift}——PRD 清单章随终点类型
-     * 走形重产，访谈期即转向通告）；挂起问答守卫先于落库同步判定（拒绝即零副作用）。
-     * 设计范围（系统→设计类切换受理时选）：仅系统＋设计落库（设计主线的范围由
-     * PRD 设计物清单章承载）；重产指令携范围（勾选标签＝功能清单条目原文）。
-     *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档；ORD_006 订单
-     *                              处理中；PRJ_024 挂起问答待答；PRJ_040 设计范围
-     *                              缺选；PRJ_041 勾选页面空集
-     */
-    public ProjectDetailResponse switchEndpoint(Long projectId, SwitchEndpointTypeCommand command) {
-        Project project = requireProject(projectId);
-        ProjectEndpointType previous = project.getEndpointType();
-        ProjectEndpointType target = command.endpointType();
-        if (target == previous) {
-            return queryAppService.detail(projectId); // 同目标幂等：无操作不派轮（先于守卫——无变更即无冻结/挂起可言）
-        }
-        if (project.getArchivedAt() != null) {
-            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
-        }
-        orderQueryAppService.requireNoActiveOrder(projectId);
-        mainAgentAppService.requireEndpointShiftable(projectId);
-
-        DesignScope inputScope = resolveScope(command,
-                /* required= */ previous == ProjectEndpointType.SYSTEM
-                        && target.designInvolved() && project.getPrdProducedAt() != null);
-        // 指令范围：输入优先；系统＋设计→设计（无输入）沿用已存范围锚定设计物
-        DesignScope directiveScope = inputScope != null ? inputScope
-                : (previous == ProjectEndpointType.SYSTEM_DESIGN ? project.designScope() : null);
-
-        project.switchEndpoint(target, target == ProjectEndpointType.SYSTEM_DESIGN ? inputScope : null);
-        projectRepository.save(project);
-
-        String prompt = MainAgentAppService.endpointShiftPrompt(previous, target, directiveScope,
-                project.getPrdProducedAt() != null);
-        mainAgentAppService.requestEndpointShift(projectId, prompt);
-        return queryAppService.detail(projectId);
-    }
-
-    /**
-     * 设计范围命令解析：作用域缺选按需判 PRJ_040（系统→设计类且功能清单在——
-     * 范围无从锚定才必填，访谈期切换无清单可勾不逼选）；勾选形空集 PRJ_041
-     * （聚合抛出）；全部页面形无标签集。
-     */
-    private DesignScope resolveScope(SwitchEndpointTypeCommand command, boolean required) {
-        if (command.scopeType() == null) {
-            if (required) {
-                throw new ApplicationException(ProjectMessage.ENDPOINT_SCOPE_REQUIRED);
-            }
-            return null;
-        }
-        if (command.scopeType() == DesignScopeType.SELECTED_PAGES) {
-            return DesignScope.selected(command.scopePages());
-        }
-        return DesignScope.allPages();
-    }
-
-    /**
      * 源码包（交付物 = 源码包 + 仓内文档，端点常开）：打包项目 dev 工作区为
      * tar.gz 字节流（排除 .env 机密与 node_modules）；文件名/HTTP 头归 REST 层。
      *
@@ -367,13 +295,10 @@ public class ProjectLifecycleAppService {
                 destroyWorkspaceForReclaim(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
-        // 派生 deleteBy 是「先查后 remove」，需在事务内执行（设计物清单整组替换
-        // 同款形制）——对话史/设计/PRD 版本/Demo 版本行级联收进同一
-        // 短事务（知识清理自带事务的 JDBC 直删，不在此列）
+        // 派生 deleteBy 是「先查后 remove」，需在事务内执行——对话史/PRD 版本/
+        // Demo 版本行级联收进同一短事务（知识清理自带事务的 JDBC 直删，不在此列）
         transactionTemplate.executeWithoutResult(status -> {
             conversationHistory.purgeByProject(projectId);
-            designItems.deleteByProjectId(projectId);
-            designSpecs.deleteByProjectId(projectId);
             prdVersions.deleteByProjectId(projectId);
             demoVersions.deleteByProjectId(projectId);
         });

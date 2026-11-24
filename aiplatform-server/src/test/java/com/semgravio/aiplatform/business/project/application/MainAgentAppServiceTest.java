@@ -255,7 +255,7 @@ class MainAgentAppServiceTest {
 
     /** 已生成形态的项目（迭代期收口派修正的前提事实）。 */
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("迭代访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
+        Project project = projectRepository.save(Project.create("迭代访谈项目", null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
@@ -2207,7 +2207,7 @@ class MainAgentAppServiceTest {
     }
 
     private Long persistedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
+        Project project = projectRepository.save(Project.create("访谈项目", null, Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
     }
 
@@ -2233,7 +2233,7 @@ class MainAgentAppServiceTest {
     /** PRD 已产出、未生成的项目（去门化 #462：收口观测派首个构建 run 的判据＝
      * {@code prdProducedAt}——与版本行无关，版本行见 {@link #seedPrdVersionRow}）。 */
     private Long persistedPrdProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
+        Project project = projectRepository.save(Project.create("访谈项目", null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
@@ -2247,7 +2247,7 @@ class MainAgentAppServiceTest {
     }
 
     private Long persistedArchivedProject(String workspaceId) {
-        Project project = Project.create("归档访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null);
+        Project project = Project.create("归档访谈项目", null, Long.parseLong(workspaceId), OWNER, null);
         project.archive();
         return projectRepository.save(project).getId();
     }

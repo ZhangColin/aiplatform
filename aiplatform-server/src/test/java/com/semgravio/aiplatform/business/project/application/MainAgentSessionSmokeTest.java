@@ -145,7 +145,7 @@ class MainAgentSessionSmokeTest {
             notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(eventsAppService).publishNotification(any(), any());
-        Project project = projectRepository.save(Project.create("冒烟官网", null, null, Long.parseLong(workspaceId), null, null));
+        Project project = projectRepository.save(Project.create("冒烟官网", null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
 
@@ -290,7 +290,7 @@ class MainAgentSessionSmokeTest {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(eventsAppService).publishAgentEvent(any(), any());
-        Project project = projectRepository.save(Project.create("抓取冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        Project project = projectRepository.save(Project.create("抓取冒烟", null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
 
@@ -324,7 +324,7 @@ class MainAgentSessionSmokeTest {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(eventsAppService).publishAgentEvent(any(), any());
-        Project project = projectRepository.save(Project.create("能力边界冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        Project project = projectRepository.save(Project.create("能力边界冒烟", null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
 
@@ -367,7 +367,7 @@ class MainAgentSessionSmokeTest {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(eventsAppService).publishAgentEvent(any(), any());
-        Project project = projectRepository.save(Project.create("调研冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        Project project = projectRepository.save(Project.create("调研冒烟", null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
 

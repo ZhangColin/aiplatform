@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Objects;
 
 import jakarta.persistence.Column;
@@ -11,21 +10,16 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Getter;
 
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.core.stereotype.Aggregate;
 import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
-import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 
 /**
  * 项目聚合根（{@code prj_projects}）：用户一次定制需求的全程载体——业务字段 +
@@ -61,15 +55,6 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
 
     @Column(name = "type", nullable = false, updatable = false)
     private ProjectType type;
-
-    /**
-     * 终点类型（#285，ADR-0024「项目不分型、终点是属性」）：下单前可变（切换
-     * 编排归 {@link #switchEndpoint}，项目内唯一变更位＝设置 tab 控件）、下单即
-     * 冻结（守卫归编排）。入口两档显式选择定初值（#299：做设计＝DESIGN，缺省
-     * 系统）。PRD 清单章形态跟本属性走（技能 prd-writing 双形态选择键）。
-     */
-    @Column(name = "endpoint_type", nullable = false)
-    private ProjectEndpointType endpointType;
 
     @Column(name = "workspace_id", nullable = false, updatable = false)
     private Long workspaceId;
@@ -169,26 +154,10 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "needs_user_supplement", nullable = false)
     private boolean needsUserSupplement;
 
-    /**
-     * 设计范围作用域（#285）：仅系统＋设计项目落值（设计范围＝功能清单页面集的
-     * 锚定口径——全部/勾选）；设计主线（计划对应物＝PRD 设计物清单章）与系统/
-     * 设计主线出身不由页面锚定时为 NULL。
-     */
-    @Column(name = "design_scope_type")
-    private DesignScopeType designScopeType;
-
-    /**
-     * 设计范围勾选页标签（#285）：功能清单条目原文 jsonb（建议性锚——PRD 是模型
-     * 独笔演进的正本，标签不构成稳定标识）；作用域为全部页面或无范围时 NULL。
-     */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "design_scope_pages", columnDefinition = "jsonb")
-    private List<String> designScopePages;
-
     protected Project() {
     }
 
-    private Project(String name, ProjectType type, ProjectEndpointType endpointType,
+    private Project(String name, ProjectType type,
                     Long workspaceId, Long ownerAccountId, Long ownerGuestId) {
         if (name == null || name.isBlank()) {
             throw new DomainException(ProjectMessage.PROJECT_NAME_BLANK);
@@ -199,58 +168,28 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         }
         this.name = name;
         this.type = ProjectType.orDefault(type);
-        this.endpointType = ProjectEndpointType.orDefault(endpointType);
         this.workspaceId = workspaceId;
         this.ownerAccountId = ownerAccountId;
         this.ownerGuestId = ownerGuestId;
     }
 
     /**
-     * 建项目（#326 收编单一形——owner 双列与终点初值全显形；#299 备案触发器「下一
-     * 职责再入聚合时收编删重载」已燃，四参/五参重载删除、调用方逐自声明）：终点
-     * 初值入口两档显式选择（#299，做设计携 {@link ProjectEndpointType#DESIGN}、
-     * 缺省传 null 走系统）；归属 owner 双列至多一方落值（互斥——聚合守卫与库层
-     * CHECK 双保险，账户随会话、访客随凭证惰性创建后挂列，皆可空＝无主占位形）。
+     * 建项目（#326 收编单一形）：归属 owner 双列至多一方落值（互斥——聚合守卫与
+     * 库层 CHECK 双保险，账户随会话、访客随凭证惰性创建后挂列，皆可空＝无主
+     * 占位形）。#612 终点收窄为系统单值——建项目不再接受终点初值（恒系统）。
      */
-    public static Project create(String name, ProjectType type, ProjectEndpointType endpointType,
+    public static Project create(String name, ProjectType type,
                                  Long workspaceId, Long ownerAccountId, Long ownerGuestId) {
-        return new Project(name, type, endpointType, workspaceId, ownerAccountId, ownerGuestId);
+        return new Project(name, type, workspaceId, ownerAccountId, ownerGuestId);
     }
 
     /**
-     * 切换终点类型（#285，设置 tab 控件＝项目内唯一变更位）：纯属性落位——冻结
-     * （未终结订单）/关闭（归档）守卫与「同目标即无操作」判定归编排；设计范围
-     * 只随系统＋设计落库（其余目标清空——设计主线的范围由 PRD 设计物清单章承载，
-     * 不另存正本防两处漂移）。
+     * 终点类型读面（#612 收窄为系统单值）：终点概念收窄后恒为 {@link
+     * ProjectEndpointType#SYSTEM}——列已拆除，本方法只为读面/契约保持「系统」
+     * 这一唯一事实。
      */
-    public void switchEndpoint(ProjectEndpointType target, DesignScope scope) {
-        if (target == null || (scope != null && target != ProjectEndpointType.SYSTEM_DESIGN)) {
-            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
-        }
-        this.endpointType = target;
-        if (target == ProjectEndpointType.SYSTEM_DESIGN && scope != null) {
-            this.designScopeType = scope.type();
-            this.designScopePages = scope.type() == DesignScopeType.SELECTED_PAGES
-                    ? List.copyOf(scope.pages()) : null;
-        }
-        else {
-            this.designScopeType = null;
-            this.designScopePages = null;
-        }
-    }
-
-    /**
-     * 设计范围读面（{@link DesignScope} 组装）：无锚定（非系统＋设计或不由页面
-     * 锚定）返回 null。
-     */
-    public DesignScope designScope() {
-        if (designScopeType == null) {
-            return null;
-        }
-        if (designScopeType == DesignScopeType.ALL_PAGES) {
-            return DesignScope.allPages();
-        }
-        return DesignScope.selected(designScopePages == null ? List.of() : designScopePages);
+    public ProjectEndpointType getEndpointType() {
+        return ProjectEndpointType.SYSTEM;
     }
 
     /**

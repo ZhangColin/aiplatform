@@ -27,10 +27,8 @@ import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -464,148 +462,6 @@ public class MainAgentAppService {
     public record MainAgentRun(String runId) {
     }
 
-    /**
-     * 终点切换前置守卫（#285）：切换重产轮与意见轮同会话同引擎约束——挂起问答
-     * 在即同步 409 指路作答。归位在切换编排落库<b>之前</b>调用（拒绝即零副作用
-     * ——终点属性不动）；{@link #requestEndpointShift} 提交前同守卫兜竞态。
-     *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
-     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
-     */
-    public void requireEndpointShiftable(Long projectId) {
-        Project project = requireUpdatableProject(projectId);
-        requireNoPendingQuestion(project, sessionIdOf(projectId));
-    }
-
-    /**
-     * 终点切换重产轮（#285，设置 tab 终点控件的后置轮）：平台发起的主智能体轮
-     * ——不记用户发言（同补产轮口径：对话面只见主智能体的说明，透明面可见），
-     * prompt 由 {@link #endpointShiftPrompt} 按切换事实拼装（PRD 已产出＝重产指令
-     * ——清单章随终点类型走形/设计硬约束入关键约束；访谈期＝转向通告）。轮收口
-     * 走同一条 {@link #dispatchOnTurnClose}（生成轨道对设计类终点收口，设计过程
-     * 编排归后续票；回到系统形的重产轮收口＝用户触发链的延续——
-     * {@link GenerationAppService#noteFirstBuildIntent} 记意图、收口按意图再派
-     * 首个构建〔#291 验收⑤，#542 非无条件自动路径口径保持〕）。守卫同意见轮（归档/订单
-     * 冻结在切换编排前置判定，挂起问答在此同步 409 指路作答）。
-     *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
-     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
-     */
-    public MainAgentRun requestEndpointShift(Long projectId, String prompt) {
-        Project project = requireUpdatableProject(projectId);
-        String sessionId = sessionIdOf(projectId);
-        requireNoPendingQuestion(project, sessionId);
-        String runId = EventsAppService.newRunId();
-        AgentCommand command = mainCommand(project, runId, prompt);
-        // 首建派发意图（#542 用户触发面，#602 去计划形重塑）：切换重产轮收口
-        // （系统终点＋PRD 在场）按意图延续派发首个构建（如定稿设计稿入起跑上下文），
-        // 非无条件自动路径——收口消费即清，重启丢账用户再点一次即兜底
-        generationAppService.noteFirstBuildIntent(projectId);
-        sessionExecutor.submit(sessionId, () -> {
-            // 同补产轮口径（#602 补产链退役后仅切换轮走本路）：本轮需求侧事实从零
-            // 起算（清残留——上一轮滞留的修订事实不冒充本轮产出）
-            String workspaceId = Long.toString(project.getWorkspaceId());
-            prdRevisions.clear(workspaceId);
-            fastLaneFacts.clear(workspaceId);
-            sedimentProposals.clear(workspaceId);
-            try {
-                ConversationHistoryAppService.TurnRecorder recorder =
-                        conversationHistory.recorder(projectId, eventBridge.sink(project));
-                AgentReply reply = agentClient.converse(command, recorder);
-                settleSuspendedQuestion(sessionId, runId, reply);
-                recorder.settle(runId, reply);
-            }
-            catch (RuntimeException e) {
-                // 失败即清锚（同意见轮口径）：切换已落库（属性是事实）、重产轮失败
-                // 经 error 事件如实呈现——后续任意 PRD 修订按技能形态规则自然收敛
-                opinionExchanges.remove(sessionId);
-                suspendedQuestions.remove(sessionId);
-                throw e;
-            }
-            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ true);
-        });
-        return new MainAgentRun(runId);
-    }
-
-    /**
-     * 切换重产轮 prompt（#285）：按「前终点 → 新终点 × PRD 已否产出」拼装——PRD
-     * 在即重产（清单章走形随终点：设计＝设计物清单、系统/系统＋设计＝功能清单
-     * 〔后者设计硬约束入关键约束〕）；访谈期即
-     * 转向通告（后续梳理按新终点收口，PRD 产出时形态自对齐）。
-     */
-    static String endpointShiftPrompt(ProjectEndpointType previous, ProjectEndpointType target,
-            DesignScope scope, boolean prdProduced) {
-        String targetName = target.getName();
-        if (!prdProduced) {
-            return "平台通知：项目终点类型已定为「" + targetName + "」。请向用户简短说明这一变化（"
-                    + steerSentenceOf(target) + "），随后继续需求梳理；产出 PRD 时清单章按该终点类型走形"
-                    + chapterHintOf(target) + "。";
-        }
-        StringBuilder prompt = new StringBuilder("平台请求：项目终点类型已");
-        if (previous != target) {
-            prompt.append("由「").append(previous.getName()).append("」");
-        }
-        prompt.append("切换为「").append(targetName).append("」（")
-                .append(shiftSentenceOf(previous, target)).append("）。");
-        if (target == ProjectEndpointType.DESIGN) {
-            prompt.append("请把工作区 docs/PRD.md 修订为设计形态：清单章重写为「设计物清单」")
-                    .append("（编号列出各设计物，每件附用途、尺寸、风格要点与验收要点");
-            if (scope != null) {
-                prompt.append("；设计范围从原功能清单的").append(scope.describe()).append("锚定");
-            }
-            prompt.append("），其余章节按「交付设计而非实现系统」的语境相应梳理（系统实现细节退场）。");
-        }
-        else if (previous == ProjectEndpointType.DESIGN) {
-            prompt.append("请把工作区 docs/PRD.md 修订为系统形态：清单章重写为「功能清单」")
-                    .append("（编号列出系统的页面与功能点，每点附验收要点——原设计物清单的设计内容")
-                    .append("转为对应的页面与功能梳理）");
-            if (target == ProjectEndpointType.SYSTEM_DESIGN) {
-                prompt.append("，「关键约束」章写入设计硬约束（系统构建遵循本项目的")
-                        .append("设计方向与已定稿设计）");
-            }
-            prompt.append("。");
-        }
-        else if (target == ProjectEndpointType.SYSTEM_DESIGN) {
-            prompt.append("PRD 保持系统形：功能清单章不动（不另立设计物清单），请把设计硬约束补入")
-                    .append("「关键约束」章——写明设计范围为功能清单的")
-                    .append(scope != null ? scope.describe() : "全部页面")
-                    .append("、设计经平台设计过程产出、系统构建遵循定稿设计。");
-        }
-        else {
-            prompt.append("请把工作区 docs/PRD.md 的「关键约束」章中的设计硬约束移除（功能清单等其余章节不动）。");
-        }
-        prompt.append("先 load_skill_through_path 加载 prd-writing 技能（清单章按项目终点类型走形），")
-                .append("再调用 savePrd 保存修订后的完整 PRD 全文（summary 必传：说明终点切换与本次修订内容）。");
-        prompt.append("保存成功后向用户简短说明本次变化。");
-        return prompt.toString();
-    }
-
-    /** 访谈期转向通告句（按新终点的推进语义）。 */
-    private static String steerSentenceOf(ProjectEndpointType target) {
-        return switch (target) {
-            case DESIGN -> "本次定制交付的是设计资产包，平台不生成系统";
-            case SYSTEM_DESIGN -> "先做设计、设计定稿后系统从设计稿长出";
-            case SYSTEM -> "本次定制交付的是可操作系统";
-        };
-    }
-
-    /** 访谈期 prompt 的清单章形态提示。 */
-    private static String chapterHintOf(ProjectEndpointType target) {
-        return switch (target) {
-            case DESIGN -> "（设计物清单——编号列出各设计物及用途、尺寸、风格要点与验收要点）";
-            case SYSTEM_DESIGN -> "（功能清单，设计硬约束写入关键约束章）";
-            case SYSTEM -> "（功能清单）";
-        };
-    }
-
-    /** 重产指令的切换语义句（PRD 已产出形）。 */
-    private static String shiftSentenceOf(ProjectEndpointType previous, ProjectEndpointType target) {
-        if (previous == ProjectEndpointType.DESIGN && target == ProjectEndpointType.SYSTEM_DESIGN) {
-            return "转系统开发";
-        }
-        return steerSentenceOf(target);
-    }
-
     // ---------- 内部 ----------
 
     private MainAgentRun opinionTurn(Long projectId, String prompt,
@@ -822,17 +678,16 @@ public class MainAgentAppService {
      * ——大改小改分流的机械停派已随确认门退役（#462：范围级新草稿照派，判定权归
      * 主智能体工作协议）；<b>未生成但已产出 PRD</b>——系统终点自动派首个构建 run
      * （首次 savePrd 落盘回调已先行触发，{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}；
-     * 此处收口观测再兜一轮，撞在途静默跳过）。设计类终点保持原触发律（未定稿起
-     * 设计过程、全部定稿起构建，入口已收起）。意见锚与修订事实同「收口即消费」
+     * 此处收口观测再兜一轮，撞在途静默跳过）。意见锚与修订事实同「收口即消费」
      * 清掉——生成读的是工作区 PRD 正本，不进交接物；未产出 PRD 止于对话（访谈期
      * 常态）。主智能体无派发权：模型存没存 PRD、调没调任何工具都不影响派发——链
      * 的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、
      * 不自动重试——用户重提即兜底。
      *
-     * <p><b>平台轮（终点切换重产）</b>：{@code platformRound} 区分平台发起的
-     * 需求侧轮（终点切换重产 {@link #requestEndpointShift}）
-     * 与用户对话轮。去门化后用户轮与平台轮同判据（PRD 已产出即派），平台轮标记仍
-     * 保留——悬空契约与沉淀记账的平台轮豁免沿用它（ADR-0032/ADR-0038 口径不变）。</p>
+     * <p><b>平台轮</b>：{@code platformRound} 区分平台发起的收口轮（收口纠偏／额度
+     * 收口）与用户对话轮。去门化后用户轮与平台轮同判据（PRD 已产出即派），平台轮
+     * 标记仍保留——悬空契约与沉淀记账的平台轮豁免沿用它（ADR-0032/ADR-0038 口径
+     * 不变）。</p>
      *
      * <p><b>访谈轮收口硬契约（ADR-0032，#373；纠偏链 ADR-0036＋#462 统一微指令
      * 修订）</b>：本观测点同位校验不变量——需求梳理期（未出 PRD）用户轮的合法收口
@@ -942,21 +797,6 @@ public class MainAgentAppService {
                                 + "直接派发首次生成 run（{}）", projectId, run.runId());
                     }
                     return;
-                }
-                // 切换重产轮收口的意图延续（#542 用户触发面，#602 去计划形重塑）：
-                // 意图由 {@link #requestEndpointShift} 记账——仅平台轮（切换轮本身）
-                // 收口消费（同一条用户触发链的延续、条件性路径）；自然收口/无意图
-                // 不派（点火归用户，岔路口卡/确认门读面在场）
-                if (platformRound) {
-                    GenerationAppService.GenerationRun resumed =
-                            generationAppService.dispatchAfterEndpointShift(projectId,
-                                    new GenerationAppService.TurnOpinion(
-                                            opinion, prdRevisionSummary, runId));
-                    if (resumed != null) {
-                        log.info("[main-close] 项目 {} 切换重产轮收口，按用户触发链延续派发"
-                                + "首次生成 run（{}）", projectId, resumed.runId());
-                        return;
-                    }
                 }
                 // 自然收口：在途意见照旧排队（#360——首 Demo 在途的反馈不静默丢），
                 // 试用态置岔路口位（幂等——意见修订轮再收口卡照旧在场）

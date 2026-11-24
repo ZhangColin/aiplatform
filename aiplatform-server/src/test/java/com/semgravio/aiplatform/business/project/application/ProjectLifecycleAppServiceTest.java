@@ -172,7 +172,7 @@ class ProjectLifecycleAppServiceTest {
         var creation = RequestContext.runFor(
                 new RequestContext(null, null, null, null, 3897654321098765432L,
                         "归属测试", null, null),
-                () -> appService.create(new CreateProjectCommand("做一个官网", null)));
+                () -> appService.create(new CreateProjectCommand("做一个官网")));
 
         assertThat(projectRepository.findById(Long.parseLong(creation.response().project().id())))
                 .hasValueSatisfying(project -> assertThat(project.getOwnerAccountId())
@@ -185,7 +185,7 @@ class ProjectLifecycleAppServiceTest {
         stubInterviewAccepted("run-1");
 
         var creation = appService.create(
-                new CreateProjectCommand("做一个官网", null));
+                new CreateProjectCommand("做一个官网"));
 
         // 工作区副作用先行：dev 工作区
         verify(workspaceLifecycleAppService).create(new CreateWorkspaceCommand(EnvKind.DEV));
@@ -221,30 +221,13 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
-    void given_design_endpoint_when_create_then_initial_type_persisted() {
-        stubWorkspace("9103", "aiplatform-dev-103");
-        stubInterviewAccepted("run-3");
-
-        // #299 入口两档 mode 进载荷：选「做设计」→ 终点初值随建项目落库（缺省主链路
-        // 仍系统——上一用例隐含），访谈/PRD 清单形跟终点类型走（#285 已接线）
-        var creation = appService.create(
-                new CreateProjectCommand("给我的咖啡店设计一个 logo", ProjectEndpointType.DESIGN));
-
-        Long projectId = Long.parseLong(creation.response().project().id());
-        assertThat(projectRepository.findById(projectId)).hasValueSatisfying(
-                project -> assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.DESIGN));
-        assertThat(creation.response().project().endpointType()).isEqualTo(ProjectEndpointType.DESIGN);
-        assertThat(creation.response().project().endpointTypeName()).isEqualTo("设计");
-    }
-
-    @Test
     void given_blank_requirement_when_create_then_default_kickoff_prompt_and_no_naming() throws Exception {
         stubWorkspace("9101", "aiplatform-dev-101");
         stubInterviewAccepted("run-2");
 
         var creation = RequestContext.runFor(
                 new RequestContext(null, null, null, null, 1L, "空输入测试", null, null),
-                () -> appService.create(new CreateProjectCommand(" ", null)));
+                () -> appService.create(new CreateProjectCommand(" ")));
 
         assertThat(creation.response().project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
         // 空需求描述 → 缺省开场提示（对话展开起点）；取名守卫在命名服务内
@@ -261,7 +244,7 @@ class ProjectLifecycleAppServiceTest {
 
         var creation = RequestContext.runFor(
                 new RequestContext(null, null, null, null, 1L, "空输入测试", null, null),
-                () -> appService.create(new CreateProjectCommand(null, null)));
+                () -> appService.create(new CreateProjectCommand(null)));
 
         // 起跑失败不回滚建项目（项目已成立，runId 缺席表达起跑未成）
         assertThat(creation.response().runId()).isNull();
@@ -622,7 +605,7 @@ class ProjectLifecycleAppServiceTest {
     private Long persistedProject(String workspaceId) {
         Project project =
                 projectRepository.save(Project
-                        .create("删除对象", ProjectType.WEBSITE, null, Long.parseLong(workspaceId), null, null));
+                        .create("删除对象", ProjectType.WEBSITE, Long.parseLong(workspaceId), null, null));
         return project.getId();
     }
 

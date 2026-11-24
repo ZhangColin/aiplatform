@@ -26,8 +26,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -75,12 +73,6 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private ConversationHistoryAppService conversationHistory;
-
-    @Mock
-    private DesignItemRepository designItems;
-
-    @Mock
-    private DesignSpecRepository designSpecs;
 
     @Mock
     private PrdVersionRepository prdVersions;
@@ -202,7 +194,7 @@ class ProjectLifecycleAppServiceTouchTest {
     // ---------- 测试数据 ----------
 
     private Project project(boolean generated) {
-        Project project = Project.create("测试项目", null, null, 900L, 1L, null);
+        Project project = Project.create("测试项目", null, 900L, 1L, null);
         if (generated) {
             project.markGenerated();
         }
@@ -213,8 +205,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, designItems,
-                designSpecs, prdVersions,
+                conversationHistory, prdVersions,
                 demoVersions, skillDrafts, sedimentDrafts, orderQueryAppService, guestAppService,
                 transactionTemplate, new CodingRunTrack());
     }

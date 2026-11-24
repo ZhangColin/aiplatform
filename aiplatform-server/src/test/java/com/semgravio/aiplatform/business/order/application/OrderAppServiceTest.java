@@ -32,7 +32,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.PrdReadiness;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 
@@ -240,10 +239,9 @@ class OrderAppServiceTest {
     // ---------- #611：交付物类型收窄为系统单值（设计线退役-2） ----------
 
     @Test
-    void given_design_endpoint_project_when_place_then_deliverable_type_system() {
-        // 设计线退役后一律冻结系统单：项目终点类型不再映射为设计交付物
-        // （#612 收窄终点类型列前，存量 DESIGN 项目下单也只落系统单值 2）
-        stubProject(ProjectStatus.IN_PROGRESS, PRD, ProjectEndpointType.DESIGN);
+    void given_project_when_place_then_deliverable_type_system() {
+        // 设计线退役后一律冻结系统单：交付物类型只剩系统一种（码值 2）
+        stubProject(ProjectStatus.IN_PROGRESS, PRD);
 
         OrderResponse order = appService.place(PROJECT_ID);
 
@@ -676,16 +674,11 @@ class OrderAppServiceTest {
     }
 
     private void stubProject(ProjectStatus status, String prd) {
-        stubProject(status, prd, ProjectEndpointType.SYSTEM);
-    }
-
-    private void stubProject(ProjectStatus status, String prd, ProjectEndpointType endpointType) {
         when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(ProjectDetailResponseFixture
                 .detailOf(Long.toString(PROJECT_ID), "订单缝测试")
                 .workspaceId("9100")
                 .status(status)
                 .archived(status == ProjectStatus.ARCHIVED)
-                .endpointType(endpointType)
                 .build());
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z"),

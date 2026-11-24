@@ -96,7 +96,7 @@ class PrdReadShortCircuitLiveTest {
         // 置备真工作区＋项目（标志未落＝未产出期，访谈未收口常态）
         workspaceId = workspaceLifecycle.create(new CreateWorkspaceCommand(EnvKind.DEV))
                 .workspaceId();
-        Project project = Project.create("PRD 短路活体项目", null, null,
+        Project project = Project.create("PRD 短路活体项目", null,
                 Long.parseLong(workspaceId), 1L, null);
         projectId = projectRepository.save(project).getId();
         clearInvocations(workspaceLifecycle); // 置备自身的 exec 不计入观察窗

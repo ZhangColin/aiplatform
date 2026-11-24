@@ -114,7 +114,7 @@ class ProjectOwnerInterceptorMvcTest {
 
     private void givenProjectOwnedBy(Long ownerAccountId) {
         when(projectRepository.findById(PROJECT_ID))
-                .thenReturn(Optional.of(Project.create("官网 demo", null, null, 900L, ownerAccountId, null)));
+                .thenReturn(Optional.of(Project.create("官网 demo", null, 900L, ownerAccountId, null)));
     }
 
     // ---------- 单项目寻址：归属守卫（404 不泄露存在性） ----------
@@ -193,7 +193,7 @@ class ProjectOwnerInterceptorMvcTest {
 
     private void givenProjectOwnedByGuest(Long guestId) {
         when(projectRepository.findById(PROJECT_ID))
-                .thenReturn(Optional.of(Project.create("访客项目", null, null, 900L, null, guestId)));
+                .thenReturn(Optional.of(Project.create("访客项目", null, 900L, null, guestId)));
     }
 
     /** 访客上下文直注（同 performAsUser 的 RequestContext 姿势，叠加 GuestContext 维度）。 */

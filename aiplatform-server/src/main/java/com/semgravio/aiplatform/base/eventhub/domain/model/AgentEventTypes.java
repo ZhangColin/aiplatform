@@ -264,6 +264,15 @@ public final class AgentEventTypes {
     public static final String PART_ACTION_LABEL_FIELD = "label";
 
     /**
+     * part-action 的写文件目标路径键（#618 预览跟随）：仅写文件类工具
+     * （write_file／edit_file）可选携带——path 参数原形（相对/锚定两形自选，
+     * 同 closing.files.path 口径）；命令类与读类不携带。前端纯函数据此映射
+     * 应用路由（组件／样式／库／布局等非页面文件不切页），参数在途（started）
+     * 无路径时不携带。
+     */
+    public static final String PART_ACTION_PATH_FIELD = "path";
+
+    /**
      * part-action 的失败留痕键（#229）：仅 state=failed 携带——错误/stderr 首行
      * 截断（与 {@link #PART_ACTION_LABEL_FIELD} 各管各的截断额度）；结果文本为
      * 空 / 首行空白不携带（可缺省）。失败红行＝label＋error，排障不进容器即可

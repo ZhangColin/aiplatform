@@ -69,6 +69,12 @@ export type WorkPart =
        * 初判原因。其余态缺省。
        */
       error?: string;
+      /**
+       * 写文件目标路径（#618 预览跟随）：仅 write_file／edit_file 落定/终态携带
+       * （path 参数原形；参数在途缺省）——纯函数据此映射应用路由，写到哪页切
+       * 哪页；非页面文件由映射函数过滤。组件／呈现不走该字段。
+       */
+      path?: string;
     }
   | {
       /**
@@ -110,6 +116,8 @@ export type WorkPartInput =
       label: string;
       /** 失败留痕（#229）：仅 failed 事件的 payload 携带（错误/stderr 首行截断）。 */
       error?: string;
+      /** 写文件目标路径（#618）：仅写文件类落定/终态事件携带（参数原形）。 */
+      path?: string;
     };
 
 type ProjectWork = {
@@ -208,6 +216,8 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
         state: input.state,
         label: input.label,
         error: input.error,
+        // 路径只在落定/终态事件携带（started 缺省）——跨状态原位更新时保留已见值
+        path: input.path ?? existing.path,
       };
       parts = work.parts.map((part) => (part === existing ? updated : part));
     } else {
@@ -222,6 +232,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
           state: input.state,
           label: input.label,
           error: input.error,
+          path: input.path,
         },
       ];
     }

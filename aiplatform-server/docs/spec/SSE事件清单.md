@@ -79,6 +79,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | type | payload 字段 | 说明 |
 |---|---|---|
 | `part-attachment` | —— | **消息附件部件**（[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地）：圈注锚随用户发言发送的载荷位——指认是对话输入的增强不是替代，<b>不随 run 过程流发射</b>：随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发（渲染进主智能体 prompt 精确读取），并随用户发言落对话史 JSONB（`prj_conversation_entries.attachments`）、刷新回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip（非截图）。schema 见[下节](#消息附件部件锚载荷-schema97) |
+| `part-action` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `toolCallId` `toolName` `state` `label` `error`（可缺省） `path`（可缺省） | **工具动作部件**（动作卡）：开始／进行中／完成／失败全生命周期，同一 `toolCallId` 锚定跨状态原位更新；播报工具封闭表 = `write_file`／`edit_file`／`execute`（读类不播）。`state` ∈ `started`／`running`／`completed`／`failed`（动作层状态；run 层唯一失败终态仍是 run-failed）；`label` 无时态（时态由 state 表达）。`error` 仅 failed 携带（[#229](https://github.com/ZhangColin/aiplatform/issues/229) 错误/stderr 首行截断）。**`path`（[#618](https://github.com/ZhangColin/aiplatform/issues/618) 预览跟随）**：仅写文件类工具在参数落定／终态携带——`write_file`／`edit_file` 的 `path` 参数原形（相对/锚定两形自选，同 closing.files.path 口径）；命令类与读类不携带、参数在途（started）缺省。前端纯函数据此映射应用路由（剥路由组；组件／样式／库／布局／API／动态段／拦截段不切页），写到哪页预览切哪页 |
 
 > **已退役**：`part-hint`（#437 决策时微指令部件，2026-11-12 摘除）——微指令是模型面指引、给用户看只添噪（生产实案：防重灌载体失效致同一提示每迭代重注刷屏），注入本体（DecisionHintMiddleware）已随 #604 run 尝试体旧机制退役，注入一并消失；用户面事件与前端渲染整体退役，存量事件按未知类型忽略。`part-text` / `part-check` / `part-plan`（#608 呈现面清场，2026-11-24 摘除）——ADR-0057 模型文本不直播、过程流＝工具动作流：解说直播、自检播报、步骤清单三件呈现退场，发射源同步删除，存量事件按未知类型忽略。
 

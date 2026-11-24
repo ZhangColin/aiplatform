@@ -724,13 +724,15 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-action",
-      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【订单管理】" },
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【订单管理】",
+        path: "src/app/orders/page.tsx" }, // #618：写文件路径（落定起携带）
       "run1:5",
       at(4),
     ));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-action",
-      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "completed", label: "编写【订单管理】" },
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "completed", label: "编写【订单管理】",
+        path: "src/app/orders/page.tsx" },
       "run1:6",
       at(8),
     ));
@@ -754,6 +756,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
         state: "completed",
         label: "编写【订单管理】", // running 起具体对象，终态复述不闪换
         error: undefined,
+        path: "src/app/orders/page.tsx", // #618 预览跟随的路径来源（跨状态保留）
       },
     ]);
   });

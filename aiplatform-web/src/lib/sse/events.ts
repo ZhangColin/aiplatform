@@ -317,6 +317,12 @@ export type PlatformAgentEvent =
          * 各的截断额度）；失败红行渲染 label＋error，排障不进容器即可初判原因。
          */
         error?: string;
+        /**
+         * 写文件目标路径（#618 预览跟随）：仅 write_file／edit_file 落定/终态携带
+         * ——path 参数原形（相对/锚定两形自选）；命令类与读类不携带，参数在途
+         * （started）无路径则缺省。前端纯函数（lib/preview/follow）映射应用路由。
+         */
+        path?: string;
       };
     };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
+import { ExternalLink, LoaderCircle, Lock, Monitor, Navigation, Pin, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -8,7 +8,8 @@ import {
   useGenerationStore,
   type CoderRunStatus,
 } from "@/lib/store/generation";
-import { useWorkMessageStore } from "@/lib/store/work-message";
+import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
+import { followedPreviewRoute } from "@/lib/preview/follow";
 import {
   encodeAnnotate,
   parseAnchorEvent,
@@ -62,6 +63,12 @@ import { DemoVersionChip } from "./demo-version-chip";
  * goto/新窗口三入口触碰先行（#182）：用户主动（重）加载预览先 refetch 预览查询（经
  * 后端触碰拦截器异步唤醒休眠沙箱）再执行原动作，运行中无感、对话提交与网关零改动。
  * 舞台浅色锁定：预览里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
+ *
+ * <p>预览跟随（#618，ADR-0057）：生成中默认跟着内核正在写的页面走——跟随目标 =
+ * 工作消息里最新一条可映射页面路径的路由（lib/preview/follow 纯函数，组件／样式／
+ * 库／布局／API／动态段不切页），路由变化才导航（同页反复重写不重挂不跳）。浏览器
+ * 条「跟随／固定」开关：固定后不再自动导航；手动地址跳转自动转固定（用户接管）；
+ * 手动刷新保持当前档。降级自担：编译中白屏、无热更，不加检测／等待／重试兜底。</p>
  */
 export function SystemPanel({
   projectId,
@@ -98,7 +105,20 @@ export function SystemPanel({
   // 能正确出地址）。iframe 源取 frameUrl，导航/刷新驱动重挂。
   const [navigatedUrl, setNavigatedUrl] = useState<string | undefined>(undefined);
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
-  const frameUrl = navigatedUrl ?? url ?? "";
+  // 预览跟随（#618，ADR-0057）：默认开；「固定」暂停自动导航，手动地址跳转自动转
+  // 固定（用户接管导航），手动刷新保持当前档。跟随目标 = 工作消息里最新一条可映射
+  // 页面路径的路由（纯函数过滤组件／样式／库／布局／API）——同页反复重写映射结果
+  // 不变，故不重挂不跳。跟随地址是渲染派生值（不写状态）：跟随档下优先于手动地址，
+  // 路由变化才换 URL；固定档回落到手动地址。
+  const [followMode, setFollowMode] = useState(true);
+  const followedRoute = useWorkMessageStore((s) =>
+    followedPreviewRoute(workPartsOf(s, projectId)),
+  );
+  const followUrl =
+    followMode && url && followedRoute !== undefined
+      ? resolvePreviewAddress(url, followedRoute)
+      : undefined;
+  const frameUrl = followUrl ?? navigatedUrl ?? url ?? "";
   // 圈注标注态（#97）：非常驻——activeTool 非空即标注态，对 iframe 发 postMessage
   // 进出；预览跨源（容器暴露端口），回传锚校验 origin = 预览源（防伪锚）
   const [activeTool, setActiveTool] = useState<AnnotationKind | null>(null);
@@ -180,9 +200,47 @@ export function SystemPanel({
     if (!url) return;
     const target = resolvePreviewAddress(url, addressDraft ?? "");
     // 命中 = 一次加载动作：触碰先行（#182）；拒绝不是加载动作，不触碰
-    if (target) touchThenLoad(() => setNavigatedUrl(target));
+    if (target) {
+      touchThenLoad(() => setNavigatedUrl(target));
+      // 手动地址跳转 = 用户接管导航（#618）：自动转为固定模式，后续写入不抢导航
+      setFollowMode(false);
+    }
     setAddressDraft(null); // 命中：navigatedUrl 驱动 frameUrl 回显新地址；拒绝：回显当前地址
   };
+  /**
+   * 跟随／固定开关（#618）：跟随 → 固定时把当前呈现的页定格为手动地址（冻结导航，
+   * 不跳回旧手动页）；固定 → 跟随直接放开，由派生地址接回当前写入页。
+   */
+  const toggleFollow = () => {
+    if (followMode) {
+      const current = followUrl ?? navigatedUrl ?? url;
+      if (current) setNavigatedUrl(current);
+    }
+    setFollowMode(!followMode);
+  };
+  /** 跟随／固定开关（#618）：跟随档 → 点「固定」暂停自动导航；固定档 → 点「跟随」恢复。 */
+  const followButton = (
+    <button
+      type="button"
+      onClick={toggleFollow}
+      aria-label="预览跟随开关"
+      aria-pressed={followMode}
+      title={
+        followMode
+          ? "暂停自动跟随，预览停在当前页"
+          : "恢复自动跟随，写到哪页切哪页"
+      }
+      className={cn(
+        "flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
+        followMode
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {followMode ? <Pin className="size-3" /> : <Navigation className="size-3" />}
+      {followMode ? "固定" : "跟随"}
+    </button>
+  );
 
   const refreshButton = (
     <button
@@ -320,6 +378,7 @@ export function SystemPanel({
             </span>
           ) : null}
         </form>
+        {followButton}
         {variant === "default" ? (
           <>
             <DeviceToggle device={device} onDeviceChange={setDevice} />

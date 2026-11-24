@@ -34,9 +34,11 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed（failed 携 error——错误/stderr 首行截断，#229）</td>
  * </table>
  *
- * <p>思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的呈现位随
- * 需要扩表。工具参数与结果文本增量只累积不出部件（label 在边界点取、error 在
- * 终 failed 提取，#229）。模型文本一律不直播（ADR-0057）：解说切段内核
+ * <p>写文件类动作（write_file／edit_file）在参数落定与终态另携可选 path——path
+ * 参数原形，前端纯函数据此映射应用路由（#618 预览跟随，非页面文件不切页）；命令
+ * 类与读类不携带。思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的
+ * 呈现位随需要扩表。工具参数与结果文本增量只累积不出部件（label 在边界点取、
+ * error 在终 failed 提取，#229）。模型文本一律不直播（ADR-0057）：解说切段内核
  * （{@link NarrationSegments}）只留机器语法守卫半边——人话段不出部件，吞段照出
  * 脱轨信号；步骤分组已退役（#115）；步骤清单快照部件随 update_plan 工具一并退役
  * （#604），事件类型随 #608 呈现面清场退役。</p>
@@ -119,14 +121,16 @@ final class AgentscopePartsMapper {
 
     /** 动作部件（封闭表内工具才有；label 无时态，时态由 state 表达——非终态从累积
      *  参数重算取最新（在途 → 通用对象、落定 → 具体对象），终态取走参数复述同一
-     *  具体对象：动作卡跨状态同一行，不闪换文案）。 */
+     *  具体对象：动作卡跨状态同一行，不闪换文案。写文件类落定/终态另携目标路径
+     *  （#618 预览跟随——path 参数原形，参数在途无路径则缺省）。 */
     private void actionPart(List<AgentEvent> parts, String toolName, String toolCallId,
             String state, boolean consumeArgs, String source) {
-        Optional<String> phrase = actions.objectPhrase(nvl(toolName), nvl(toolCallId), consumeArgs);
-        if (phrase.isEmpty()) {
+        Optional<ToolActionLines.ActionLine> line = actions.actionLine(
+                nvl(toolName), nvl(toolCallId), consumeArgs);
+        if (line.isEmpty()) {
             return;
         }
-        String label = phrase.get();
+        String label = line.get().label();
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
@@ -138,6 +142,9 @@ final class AgentscopePartsMapper {
         payload.put(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, nvl(toolName));
         payload.put(AgentEventTypes.PART_ACTION_STATE_FIELD, state);
         payload.put(AgentEventTypes.PART_ACTION_LABEL_FIELD, label);
+        if (line.get().path() != null) {
+            payload.put(AgentEventTypes.PART_ACTION_PATH_FIELD, line.get().path());
+        }
         // 失败留痕（#229）：仅 failed 携带 error——错误/stderr 首行截断（与 label
         // 各管各的额度）；completed 终态取走丢弃（结果文本生命周期同参数）
         actions.errorPhrase(nvl(toolCallId),

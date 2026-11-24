@@ -379,6 +379,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             state: payload.state,
             label: payload.label,
             error: payload.error, // 失败留痕（#229）：仅 failed 携带，其余态缺省
+            path: payload.path, // 写文件目标路径（#618 预览跟随）：仅写文件类携带
           },
         );
         return;

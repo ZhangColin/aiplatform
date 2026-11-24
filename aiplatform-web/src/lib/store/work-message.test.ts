@@ -20,6 +20,7 @@ function actionInput(overrides: Partial<{
   state: "started" | "running" | "completed" | "failed";
   label: string;
   error?: string;
+  path?: string;
 }> = {}) {
   return {
     kind: "action" as const,
@@ -146,6 +147,24 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
     expect(workPartsOf(useWorkMessageStore.getState(), "p1")[0]).toMatchObject({
       state: "failed",
       error: "exit code 1",
+    });
+  });
+
+  it("写文件目标路径（#618 预览跟随）：落定起携带、跨状态更新保留、无路径事件不清空", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput({ state: "started" }));
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")[0]).toMatchObject({ path: undefined });
+
+    notePart("p1", ref({ eventId: "r1:3" }),
+      actionInput({ state: "running", path: "src/app/about/page.tsx" }));
+    notePart("p1", ref({ eventId: "r1:4" }),
+      actionInput({ state: "completed", label: "编写【page】" }));
+
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")[0]).toMatchObject({
+      state: "completed",
+      path: "src/app/about/page.tsx",
     });
   });
 

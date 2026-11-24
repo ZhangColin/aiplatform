@@ -347,6 +347,73 @@ class AgentscopePartsMapperTest {
     }
 
     /**
+     * 写文件目标路径（#618 预览跟随）：part-action 对写文件类工具可选携带 path
+     * 参数原形——前端纯函数据此映射应用路由（剥分组段、非页面文件不切页）；
+     * 命令类不携带，参数在途（started）无路径不携带。
+     */
+    @Nested
+    class WriteTargetPaths {
+
+        @Test
+        void given_write_file_with_path_when_settled_then_path_on_running_and_terminal() {
+            mapper.map(new ToolCallStartEvent("r", "tc-p1", "write_file"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-p1", "write_file",
+                    "{\"path\":\"src/app/about/page.tsx\",\"content\":\"x\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-p1", "write_file"));
+            List<AgentEvent> completed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-p1", "write_file", ToolResultState.SUCCESS));
+
+            // 落定与终态都带路径：跟随以最新页面为准，终态也须可读
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_PATH_FIELD, "src/app/about/page.tsx");
+            assertThat(completed.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_PATH_FIELD, "src/app/about/page.tsx");
+        }
+
+        @Test
+        void given_edit_file_with_path_when_settled_then_path_carried() {
+            mapper.map(new ToolCallStartEvent("r", "tc-p2", "edit_file"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-p2", "edit_file",
+                    "{\"path\":\"src/app/page.tsx\",\"old\":\"a\",\"new\":\"b\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-p2", "edit_file"));
+
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_PATH_FIELD, "src/app/page.tsx");
+        }
+
+        @Test
+        void given_write_started_without_args_when_mapped_then_no_path() {
+            List<AgentEvent> started = mapper.map(new ToolCallStartEvent("r", "tc-p3", "write_file"));
+
+            // 参数在途（started）：路径可缺省不携带——前端以最新可映射路径为准
+            assertThat(started.get(0).payload()).doesNotContainKey(
+                    AgentEventTypes.PART_ACTION_PATH_FIELD);
+        }
+
+        @Test
+        void given_write_without_path_arg_when_settled_then_no_path() {
+            mapper.map(new ToolCallStartEvent("r", "tc-p4", "write_file"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-p4", "write_file", "{\"content\":\"x\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-p4", "write_file"));
+
+            assertThat(running.get(0).payload()).doesNotContainKey(
+                    AgentEventTypes.PART_ACTION_PATH_FIELD);
+        }
+
+        @Test
+        void given_command_tool_when_settled_then_no_path() {
+            mapper.map(new ToolCallStartEvent("r", "tc-p5", "execute"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-p5", "execute",
+                    "{\"command\":\"pnpm build\",\"path\":\"src/app/page.tsx\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-p5", "execute"));
+
+            // 命令类不携带（即使参数里误有 path 键）——路径只属写文件类
+            assertThat(running.get(0).payload()).doesNotContainKey(
+                    AgentEventTypes.PART_ACTION_PATH_FIELD);
+        }
+    }
+
+    /**
      * 机器语法守卫（#234 叙事段堵漏）：模型以原生工具参数语法（DSML 工具调用标记族）
      * 直接发射、引擎未识别为工具调用的文本增量，识别即丢弃——不转译、不挪位到其他
      * 面，只出脱轨信号（#240）；正常人话文本不出部件（ADR-0057）。canonical 形态与

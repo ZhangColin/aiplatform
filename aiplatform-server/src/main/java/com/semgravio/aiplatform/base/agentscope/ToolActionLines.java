@@ -83,26 +83,36 @@ final class ToolActionLines {
     }
 
     /**
-     * 动作对象短语（无时态）：写文件类「编写【标签】」（args 为空/解析不出 →
+     * 动作行（短语 + 写文件类可选目标路径，#618 预览跟随）：label = 人话对象短语
+     * （无时态——时态由 state 表达）；path = write_file／edit_file 的 path 参数
+     * 原形（未落定/解析不出为 null——可缺省不携带），命令类恒 null。
+     */
+    record ActionLine(String label, String path) {}
+
+    /**
+     * 动作行（无时态）：写文件类「编写【标签】」（args 为空/解析不出 →
      * 通用标签——动作开始点参数未到达即此形态）；命令 = 原文首行（剥壳·截断；
-     * 参数在途/解析不出 → 通用标签）；不播工具返回空。
+     * 参数在途/解析不出 → 通用标签）；不播工具返回空。写文件类同时带目标路径
+     * （#618 预览跟随的路径来源——参数原形，标签仍由文件名派生）。
      *
      * @param consume true = 取走累积参数（终态——动作关闭，参数生命周期结束）；
      *                false = 保留（非终态——参数仍在途或已落定，重算取最新）
      */
-    Optional<String> objectPhrase(String toolName, String toolCallId, boolean consume) {
+    Optional<ActionLine> actionLine(String toolName, String toolCallId, boolean consume) {
         if (!broadcastable(toolName)) {
             return Optional.empty();
         }
         StringBuilder args = takeArgs(toolCallId, consume);
         if (COMMAND_TOOL.equals(toolName)) {
             String label = commandLabel(args);
-            return Optional.of(label != null ? label : GENERIC_COMMAND_LABEL);
+            return Optional.of(new ActionLine(label != null ? label : GENERIC_COMMAND_LABEL, null));
         }
-        return Optional.of("编写【" + pathLabel(args) + "】");
+        JsonNode parsed = parseArgs(args);
+        String path = textField(parsed, "path");
+        return Optional.of(new ActionLine("编写【" + labelOfPath(path) + "】", path));
     }
 
-    /** 累积参数取值（consume 语义见 {@link #objectPhrase}）。 */
+    /** 累积参数取值（consume 语义见 {@link #actionLine}）。 */
     private StringBuilder takeArgs(String toolCallId, boolean consume) {
         return consume ? toolArgs.remove(nvl(toolCallId)) : toolArgs.get(nvl(toolCallId));
     }
@@ -124,21 +134,39 @@ final class ToolActionLines {
 
     /** 累积参数 → 命令标签（原文首行·剥壳·定宽截断；解析不出/空白回落 null → 通用标签）。 */
     private static String commandLabel(StringBuilder args) {
+        String command = textField(parseArgs(args), "command");
+        if (command == null) {
+            return null;
+        }
+        String label = truncate(unwrap(command), COMMAND_LABEL_MAX);
+        return label.isBlank() ? null : label;
+    }
+
+    /** 累积参数 → JSON（空/不完整/非 JSON → null，走通用形态）。 */
+    private static JsonNode parseArgs(StringBuilder args) {
         if (args == null || args.isEmpty()) {
             return null;
         }
         try {
-            JsonNode command = JSON.readTree(args.toString()).path("command");
-            if (!command.isTextual()) {
-                return null;
-            }
-            String label = truncate(unwrap(command.asText()), COMMAND_LABEL_MAX);
-            return label.isBlank() ? null : label;
+            return JSON.readTree(args.toString());
         }
         catch (Exception ignored) {
-            // 参数流不完整/非 JSON：走通用标签
+            // 参数流不完整/非 JSON：走通用形态
             return null;
         }
+    }
+
+    /** JSON 顶层文本字段（非文本/空白 → null）。 */
+    private static String textField(JsonNode parsed, String field) {
+        if (parsed == null) {
+            return null;
+        }
+        JsonNode node = parsed.path(field);
+        if (!node.isTextual()) {
+            return null;
+        }
+        String text = node.asText();
+        return text.isBlank() ? null : text;
     }
 
     /**
@@ -167,21 +195,13 @@ final class ToolActionLines {
         return text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }
 
-    /** 累积参数 → path 标签（文件名去扩展名；解析不出回落通用标签）。 */
-    private static String pathLabel(StringBuilder args) {
-        String label = null;
-        if (args != null && !args.isEmpty()) {
-            try {
-                JsonNode path = JSON.readTree(args.toString()).path("path");
-                if (path.isTextual()) {
-                    label = labelOf(path.asText());
-                }
-            }
-            catch (Exception ignored) {
-                // 参数流不完整/非 JSON：走通用标签
-            }
+    /** path → 标签（文件名去扩展名；无路径回落通用标签）。 */
+    private static String labelOfPath(String path) {
+        if (path == null) {
+            return GENERIC_FILE_LABEL;
         }
-        return label != null && !label.isBlank() ? label : GENERIC_FILE_LABEL;
+        String label = labelOf(path);
+        return label.isBlank() ? GENERIC_FILE_LABEL : label;
     }
 
     /** 路径 → 文件名去扩展名（标签）：取末段、剥最后一个扩展名与点分隐藏前缀。 */

@@ -24,8 +24,8 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
  * （工作区不可达等）＝如实上抛——不吞成判据红，免得把环境故障误呈现为「构建失败」；
  * 探活腿沿用现成探针件的「不可达即 IllegalStateException」语义，本件捕获记为判据红。
  * exec 缝无超时候（DockerEnvironmentBackend.runCapture 语义）——build 时长即命令
- * 时长（Next.js 构建分钟级），判据调用方在生成车道上，挂起由运营护栏
- * （45 分钟腿）兜底。</p>
+ * 时长（Next.js 构建分钟级），判据调用方在产出轨执行线程上（#603 起直接执行——
+ * 生成车道已退场），挂起由运营护栏（45 分钟腿）兜底。</p>
  *
  * <p>形态备注（#593 用户故事 14／#597）：开发服务器由平台起、常驻（
  * {@link KernelServingGuard}），判据不含「服务在跑」以外的常驻断言——「服务常驻」

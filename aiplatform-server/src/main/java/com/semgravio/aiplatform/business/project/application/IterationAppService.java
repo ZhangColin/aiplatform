@@ -718,7 +718,8 @@ public class IterationAppService {
 
     private void submitFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
         // 主轨任务登记停止面（#359）：requestStop 的 cancel(true) 经此中断在途执行
-        // 线程——修正轨停止同样是真断流（不只标志位）
+        // 线程——修正轨停止同样是真断流（不只标志位）。#603 起执行形态＝直接执行
+        // （生成车道排队/错峰/排空已拆），登记面不变
         Future<?> trackTask = sessionExecutor.submitGeneration(CoderRunAttempts.SESSION_PREFIX + project.getId(),
                 () -> {
                     try {

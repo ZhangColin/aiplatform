@@ -82,11 +82,12 @@ public class CodingRunTrack {
     }
 
     /**
-     * 执行任务登记（主轨 stripe 任务＋并行波任务）：停止请求到达时经
-     * {@link Future#cancel(boolean) cancel(true)} 中断执行线程（打断模型流订阅）。
-     * 已置停时登记即取消（提交与停止的竞态——不起跑即停）；completed future 的
-     * cancel 是无害 no-op（passthrough 测试直通执行已完）；null 跳过（测试桩
-     * submit 不回句柄的容错，生产 submit 恒非 null）。
+     * 执行任务登记（#603 起：产出轨整场任务＝生成/修正走直接执行池、设计轨走
+     * 交互车道）：停止请求到达时经 {@link Future#cancel(boolean) cancel(true)}
+     * 中断执行线程（打断模型流订阅）。已置停时登记即取消（提交与停止的竞态——
+     * 不起跑即停）；completed future 的 cancel 是无害 no-op（passthrough 测试
+     * 直通执行已完）；null 跳过（测试桩 submit 不回句柄的容错，生产 submit
+     * 恒非 null）。
      */
     public void registerTask(Long projectId, Future<?> task) {
         if (task == null) {

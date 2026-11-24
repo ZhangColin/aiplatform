@@ -613,8 +613,9 @@ public class GenerationAppService {
     }
 
     /**
-     * 轨道任务提交（派发尾单点）：生成轨道任务提交会话执行器＋停止/关停收口面
-     * 装配——内核轨道正常返回后排空在途意见队列（#360）。
+     * 轨道任务提交（派发尾单点）：生成轨道任务提交会话执行器（#603 起直接执行——
+     * 原生成车道的排队/错峰/排空已拆，即交即跑）＋停止/关停收口面装配——内核
+     * 轨道正常返回后排空在途意见队列（#360）。
      */
     private Future<?> submitTrack(Project project, String firstRunId, Integer prdVersionNo) {
         Long projectId = project.getId();

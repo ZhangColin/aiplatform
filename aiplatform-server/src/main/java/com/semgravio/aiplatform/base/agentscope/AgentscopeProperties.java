@@ -89,26 +89,6 @@ public class AgentscopeProperties {
     private Duration modelStreamMaxDuration = Duration.ofMinutes(15);
 
     /**
-     * 生成车道宽度（worker 数）＝跨项目并发产出轨上界（#475 分池 ADR-0042；#477
-     * 生成道改全局 FIFO＋固定 worker 池，ADR-0043——不按会话落位，有空闲 worker
-     * 即起跑）：生成/迭代复演/设计轨的小时级整场任务独立车道（饿不死交互轮），
-     * 超出即排队（入队/出队滞留日志可见）、起跑按 {@link #generationAdmissionInterval}
-     * 错峰。缺省 8＝共池时代容量平移；按单机容量调低（eu-1 实测 2-3 并发生成轻松、
-     * 6-8 个 ws 容器接近极限）。改动重启生效（执行器是启动期装配的常驻线程组，
-     * 非运营配置热面——单机容量口径定档后随部署改）。
-     */
-    private Integer generationStripes = 8;
-
-    /**
-     * 生成车道错峰准入间隔（#477「发版即满车道」的治）：相邻生成任务起跑至少间隔
-     * 此值——发版重启的自愈续跑洪水 N 场齐发会瞬时占死车道、打满单机容量（11-12
-     * 实录：发版 15 秒内 7 场中断生成齐跑，此后新建项目全在排队）；车道空闲
-     * （间隔窗已过）时任务即取即跑，稳态单任务零新增延迟。缺省 10s；0/负＝关闭
-     * 错峰。改动重启生效（worker 池是启动期装配的常驻线程组）。
-     */
-    private Duration generationAdmissionInterval = Duration.ofSeconds(10);
-
-    /**
      * 生成内核运营护栏·轮次上限（#597 配置化，ADR-0054／#593 用户故事 8）：300 轮——
      * 防挂死与成本失控的兜底数值，非工作语义、不重新标定（定稿配置实测最长 146 轮，
      * 取值远离实测分布）。到顶不掐断：关工具＋如实汇报提示（循环第 2 条，
@@ -139,14 +119,6 @@ public class AgentscopeProperties {
      * 模型/provider 缺省）。改动重启生效（agent 实例启动期装配）。
      */
     private Integer kernelMaxOutputTokens = 32768;
-
-    /**
-     * 会话任务队列滞留告警阈值（#475 队列可观测）：交互车道任务出队时滞留超此
-     * 即 WARN（sessionId＋滞留时长＋车道深度）——「任务排在队列里无痕迹」是
-     * 11-12 事故定位全靠 jstack 的根源。生成车道逐任务 INFO 留痕（低频），
-     * 不受此阈值约束。
-     */
-    private Duration sessionQueueWarnThreshold = Duration.ofSeconds(5);
 
     public String getAgentName() {
         return agentName;
@@ -226,30 +198,6 @@ public class AgentscopeProperties {
 
     public void setModelStreamMaxDuration(Duration modelStreamMaxDuration) {
         this.modelStreamMaxDuration = modelStreamMaxDuration;
-    }
-
-    public Integer getGenerationStripes() {
-        return generationStripes;
-    }
-
-    public void setGenerationStripes(Integer generationStripes) {
-        this.generationStripes = generationStripes;
-    }
-
-    public Duration getGenerationAdmissionInterval() {
-        return generationAdmissionInterval;
-    }
-
-    public void setGenerationAdmissionInterval(Duration generationAdmissionInterval) {
-        this.generationAdmissionInterval = generationAdmissionInterval;
-    }
-
-    public Duration getSessionQueueWarnThreshold() {
-        return sessionQueueWarnThreshold;
-    }
-
-    public void setSessionQueueWarnThreshold(Duration sessionQueueWarnThreshold) {
-        this.sessionQueueWarnThreshold = sessionQueueWarnThreshold;
     }
 
     public Integer getKernelGuardRounds() {

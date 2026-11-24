@@ -502,8 +502,8 @@ public class ProjectQueryAppService {
      * <ol>
      * <li>已生成：{@code generated_at} 落位恒赢——迭代/修正 run 在途不改变生成态
      * （生成面的呈现态，生成完成即定格）；</li>
-     * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已提交未起跑
-     * 的排队段）；</li>
+     * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已登记未起跑
+     * 段——begin 先于提交）；</li>
      * <li>从未生成：其余全部（含原「中断」档场景——重启丢标记、失败终态等，
      * 「继续生成」出口不受投影档位影响）。</li>
      * </ol>

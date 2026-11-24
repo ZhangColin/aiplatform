@@ -167,6 +167,8 @@ class DesignProcessAppServiceTest {
     }
 
     private void givenSessionExecutorRunsInline() {
+        // #603：设计轨并交互车道——轨道任务经 submit 提交；submitGeneration 只剩
+        // 生成/修正产出轨使用（定稿后续分岔的更新 run/首个构建派发走它，照旧内联）
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
@@ -184,10 +186,6 @@ class DesignProcessAppServiceTest {
             submitted.add(invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submit(any(), any());
-        doAnswer(invocation -> {
-            submitted.add(invocation.getArgument(1));
-            return null;
-        }).when(sessionExecutor).submitGeneration(any(), any());
         return submitted;
     }
 

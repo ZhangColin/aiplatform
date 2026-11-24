@@ -367,7 +367,9 @@ public class DesignProcessAppService {
                 || item.getStatus() == DesignItemStatus.FAILED);
         if (runnable) {
             String firstRunId = EventsAppService.newRunId();
-            Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
+            // #603：设计轨并交互车道（生成车道已退场——交互 stripe 池承载主智能体
+            // 对话与设计线；停止面 cancel(true) 中断契约不变）
+            Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
                 try {
                     runDesignTrack(project, firstRunId);
                 }
@@ -399,7 +401,7 @@ public class DesignProcessAppService {
         }
         enqueueRevision(projectId, target, opinion, null);
         String firstRunId = EventsAppService.newRunId();
-        Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
             try {
                 sweepQueuedRevisions(project, null, firstRunId);
             }
@@ -445,7 +447,7 @@ public class DesignProcessAppService {
             return null;
         }
         String firstRunId = EventsAppService.newRunId();
-        Future<?> trackTask = sessionExecutor.submitGeneration(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
             try {
                 runRevision(project, item, feedback, divergence, firstRunId);
                 sweepQueuedRevisions(project, null, null);

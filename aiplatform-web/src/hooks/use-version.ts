@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 
@@ -117,10 +117,13 @@ export function useStopVersionView(projectId: string) {
 
 /** 回滚到此：追加新版本（历史只追加不改写、只回代码不回数据）。 */
 export function useRollbackVersion(projectId: string) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (version: string) =>
       api.post<RolledVersion>(`/projects/${projectId}/versions/${version}/rollback`),
     onSuccess: () => {
+      // 追加出的新版本进时间线：失效项目域（版本列表挂 projects 域）随刷新
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
       toast.success("已回滚到该版本，系统代码已复原");
     },
     onError: (error) => {

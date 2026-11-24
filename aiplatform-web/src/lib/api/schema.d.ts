@@ -4494,10 +4494,14 @@ export interface components {
         VersionResponse: {
             commitHash?: string;
             subject?: string;
+            /** Format: int32 */
+            versionNo?: number;
             runId?: string;
             rollbackFrom?: string;
             /** Format: date-time */
             committedAt?: string;
+            current?: boolean;
+            confirmed?: boolean;
         };
         ApiResponseOrderResponse: {
             /** Format: int32 */

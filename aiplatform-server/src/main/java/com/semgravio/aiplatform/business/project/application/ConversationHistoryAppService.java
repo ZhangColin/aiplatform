@@ -339,6 +339,19 @@ public class ConversationHistoryAppService {
     }
 
     /**
+     * 用户最初那句需求（#626 首建版本标签）：对话史第一条用户发言原文；无发言/
+     * 读取异常返回 null——调用方回落「首次生成」。
+     */
+    public String firstUserUtterance(Long projectId) {
+        return entries.findByProjectIdAndKindOrderByIdAsc(projectId, ConversationEntryKind.USER)
+                .stream()
+                .findFirst()
+                .map(ConversationEntry::getText)
+                .filter(text -> text != null && !text.isBlank())
+                .orElse(null);
+    }
+
+    /**
      * 对话史读口（水合载荷）：项目全量按 id 升序（写入序即对话序）。归档项目照读
      * （对话区只读终态）。#610 设计线整条退役：会话来源标识随设计会话一并拆除。
      *

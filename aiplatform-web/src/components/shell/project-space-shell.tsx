@@ -13,7 +13,7 @@ import {
 
 import { GlobalTopbar } from "./global-topbar";
 import { StageSidebar } from "./stage-sidebar";
-import { VersionRecordDrawer } from "./version-record-drawer";
+import { VersionTimelineSheet } from "./version-timeline-sheet";
 
 /**
  * 项目空间壳装配（#343，spec #320 ⑥）：阶段侧栏＋全局顶栏＋阶段页内容位。
@@ -50,7 +50,7 @@ export function ProjectSpaceShell({
       />
       <GlobalTopbar projectId={projectId} nav={nav} onOpenNav={() => setNavOpen(true)} />
       <main className="pt-16 lg:pl-64">{children}</main>
-      <VersionRecordDrawer projectId={projectId} />
+      <VersionTimelineSheet projectId={projectId} />
     </div>
   );
 }

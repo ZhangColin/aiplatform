@@ -32,7 +32,7 @@ import com.semgravio.aiplatform.support.Tsid;
 @RestController
 @RequestMapping("/api/projects/{projectId}/versions")
 @Validated
-@Tag(name = "Versions", description = "版本：容器内 git log 的列表与详情（#605 起不再自动成版，版本语义归阶段四重建）")
+@Tag(name = "Versions", description = "版本：容器内 git log 的用户面时间线（#626 探活通过即自动成版，单轴新→旧）")
 public class ProjectVersionController {
 
     private final ProjectVersionAppService versionAppService;
@@ -45,10 +45,11 @@ public class ProjectVersionController {
     }
 
     @GetMapping
-    @Operation(summary = "版本列表（新→旧）",
-            description = "git log 即版本序列（无便利表）：带 Rollback-From trailer 的版本 commit "
-                    + "入列（#605 起收口成版提交退役，本阶段不自动成版，版本语义归阶段四重建；"
-                    + "存量 Run-Id 版本不再入列）。零版本 = 空列表非错误。"
+    @Operation(summary = "版本列表（单轴时间线，新→旧）",
+            description = "git log 即版本序列（无便利表）：带 Platform-Version trailer 的用户面版本"
+                    + "入列（#626 探活通过即自动成版，携版本号 vN 与 run 标识），回滚版带 "
+                    + "Rollback-From trailer 亦入列；跑前快照无标记不入列。首条＝当前版"
+                    + "（current=true），confirmed 标记已确认用于签约的版本。零版本 = 空列表非错误。"
                     + "项目不存在 404 PRJ_001；环境故障 WSP_002")
     public ApiResponse<List<VersionResponse>> list(@PathVariable String projectId) {
         return ApiResponse.ok(versionAppService.list(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));

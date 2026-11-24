@@ -7,17 +7,16 @@ import { useVersionRecordStore } from "@/lib/store/version-record";
 
 import { DemoVersionChip } from "./demo-version-chip";
 
-// Demo 版本 chip（#333 最小呈现／#344 点开版本记录抽屉）：数据面 hook mock
-// 掉——呈现形态走 SSR 断言（happy-dom 环境下同样可用），点开抽屉（#344 双挂点
-// 之二，与顶栏「版本记录」同一 store 契约）走交互断言。
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: vi.fn(),
+// 版本 chip（#333 最小呈现／#626 改接单轴时间线）：数据面 hook mock 掉——
+// 呈现形态走 SSR 断言，点开时间线（与顶栏「版本记录」同一 store 契约）走交互断言。
+vi.mock("@/hooks/use-version", () => ({
+  useGitVersions: vi.fn(),
 }));
 
-import { useDemoVersions } from "@/hooks/use-demo-version";
+import { useGitVersions } from "@/hooks/use-version";
 
 function givenVersions(versions: unknown[] | undefined) {
-  vi.mocked(useDemoVersions).mockReturnValue({ data: versions } as never);
+  vi.mocked(useGitVersions).mockReturnValue({ data: versions } as never);
 }
 
 afterEach(() => {
@@ -25,40 +24,29 @@ afterEach(() => {
   useVersionRecordStore.setState({ open: false });
 });
 
-describe("DemoVersionChip · 版本 chip 呈现（#333）", () => {
-  it("最新版在场：出「Demo vN · 基于 PRD vM 快照」（收口自动成版＋起跑时 PRD 锚）", () => {
+describe("VersionChip · 版本 chip 呈现（#626 单轴）", () => {
+  it("最新版在场：出「版本 vN」（列表最新在前——取首行）", () => {
     givenVersions([
-      { versionNo: 2, prdVersionNo: 1, runId: "r-2", createdAt: "2026-10-17T09:00:00" },
-      { versionNo: 1, prdVersionNo: 1, runId: "r-1", createdAt: "2026-10-16T12:00:00" },
+      { commitHash: "c2", versionNo: 2, subject: "把按钮改成蓝色", current: true },
+      { commitHash: "a1", versionNo: 1, subject: "做一个预约系统", current: false },
     ]);
 
     const html = renderToStaticMarkup(<DemoVersionChip projectId="p1" />);
 
-    // 清单最新在前——chip 取首行（Demo v2）
-    expect(html).toContain("Demo v2");
-    expect(html).toContain("基于 PRD v1 快照");
-    expect(html).not.toContain("Demo v1");
-    expect(html).not.toContain("已确认"); // 最新版未确认：无确认缀
+    expect(html).toContain("版本 v2");
+    expect(html).not.toContain("版本 v1");
+    expect(html).not.toContain("已确认"); // 当前版未确认：无确认缀
   });
 
-  it("最新版带确认标记：缀「已确认」（#335 确认态在版本可见处可见）", () => {
+  it("当前版已确认：缀「已确认」", () => {
     givenVersions([
-      { versionNo: 2, prdVersionNo: 1, runId: "r-2", confirmedAt: "2026-10-17T10:00:00Z" },
+      { commitHash: "c2", versionNo: 2, subject: "把按钮改成蓝色", current: true, confirmed: true },
     ]);
 
     const html = renderToStaticMarkup(<DemoVersionChip projectId="p1" />);
 
-    expect(html).toContain("Demo v2");
+    expect(html).toContain("版本 v2");
     expect(html).toContain("已确认");
-  });
-
-  it("无确认版起跑（legacy）：锚空只出版本号，不虚构 PRD 关联", () => {
-    givenVersions([{ versionNo: 1, prdVersionNo: null, runId: "r-1" }]);
-
-    const html = renderToStaticMarkup(<DemoVersionChip projectId="p1" />);
-
-    expect(html).toContain("Demo v1");
-    expect(html).not.toContain("基于 PRD");
   });
 
   it("从未成版（空列表）/列表未到：不出 chip——诚实优先于占位", () => {
@@ -70,14 +58,12 @@ describe("DemoVersionChip · 版本 chip 呈现（#333）", () => {
   });
 });
 
-describe("DemoVersionChip · 点开版本记录抽屉（#344 双挂点之二）", () => {
-  it("点 chip → 开抽屉（同一 store 契约——与顶栏「版本记录」同一抽屉）", () => {
-    givenVersions([
-      { versionNo: 2, prdVersionNo: 1, runId: "r-2", createdAt: "2026-10-17T09:00:00" },
-    ]);
+describe("VersionChip · 点开版本时间线（#626 单轴入口）", () => {
+  it("点 chip → 开时间线（同一 store 契约——与顶栏「版本记录」同一入口）", () => {
+    givenVersions([{ commitHash: "c2", versionNo: 2, subject: "把按钮改成蓝色", current: true }]);
     render(<DemoVersionChip projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Demo v2/ }));
+    fireEvent.click(screen.getByRole("button", { name: /查看版本.*v2/ }));
 
     expect(useVersionRecordStore.getState().open).toBe(true);
   });

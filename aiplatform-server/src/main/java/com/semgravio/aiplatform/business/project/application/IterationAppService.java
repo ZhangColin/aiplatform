@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
@@ -75,6 +76,8 @@ public class IterationAppService {
     private final CodingRunTrack codingRunTrack;
     private final DemoVersionAppService demoVersionAppService;
     private final PrdVersionAppService prdVersionAppService;
+    /** 用户面版本自动成版（#626 单轴时间线：探活通过即记录版本）。 */
+    private final ProjectVersionAppService projectVersionAppService;
     private final DemoSeedAppService demoSeed;
     private final BalanceGateAppService balanceGate;
     /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
@@ -113,6 +116,7 @@ public class IterationAppService {
             CodingRunTrack codingRunTrack,
             DemoVersionAppService demoVersionAppService,
             PrdVersionAppService prdVersionAppService,
+            ProjectVersionAppService projectVersionAppService,
             DemoSeedAppService demoSeed,
             BalanceGateAppService balanceGate,
             KernelClosingCriteria kernelClosingCriteria,
@@ -125,6 +129,7 @@ public class IterationAppService {
         this.codingRunTrack = codingRunTrack;
         this.demoVersionAppService = demoVersionAppService;
         this.prdVersionAppService = prdVersionAppService;
+        this.projectVersionAppService = projectVersionAppService;
         this.demoSeed = demoSeed;
         this.balanceGate = balanceGate;
         this.kernelClosingCriteria = kernelClosingCriteria;
@@ -332,13 +337,16 @@ public class IterationAppService {
                 }
                 Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
                 String prdSnapshot = prdBaseline;
+                // 迭代版本标签（#626）：本轮修改指令的用户原话（多轮合并展示）
+                String versionLabel = modificationVersionLabel(current);
                 CodingRunDispatcher.RunResult result;
                 try {
                     result = codingRunDispatcher.run(project, runId,
                             fixSession(projectId, runId),
                             modificationRunPrompt(current),
                             (attemptRunId, attemptChanges) -> closeKernelFix(project,
-                                    attemptRunId, prdVersionNo, prdSnapshot, attemptChanges),
+                                    attemptRunId, prdVersionNo, prdSnapshot, versionLabel,
+                                    attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
                             /* includePatch= */ true);
@@ -386,6 +394,20 @@ public class IterationAppService {
                 }
             }
         }
+    }
+
+    /**
+     * 迭代版本标签（#626）：本轮修改指令的用户原话——多条（合并待办补派）按到达
+     * 序以「；」合并展示；空/全空白回落「更新系统」。
+     */
+    static String modificationVersionLabel(List<ModificationHandoffFacts.Instruction> instructions) {
+        String merged = instructions.stream()
+                .map(ModificationHandoffFacts.Instruction::userWords)
+                .filter(words -> words != null && !words.isBlank())
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.joining("；"));
+        return ProjectVersionAppService.cleanUserSentence(merged, "更新系统");
     }
 
     /**
@@ -463,7 +485,8 @@ public class IterationAppService {
      * 任务提示整合带来。失败判据先抛——PRD 变化通知只在 run 成功后发。</p>
      */
     private CodingRunDispatcher.ClosingJudgment closeKernelFix(Project project, String attemptRunId,
-            Integer prdVersionNo, String prdBaseline, List<FileChange> attemptChanges) {
+            Integer prdVersionNo, String prdBaseline, String versionLabel,
+            List<FileChange> attemptChanges) {
         KernelClosingCriteria.KernelClosingResult closing =
                 kernelClosingCriteria.assess(project.getWorkspaceId());
         if (!closing.complete()) {
@@ -472,6 +495,9 @@ public class IterationAppService {
                     + (closing.probePassed() ? "有响应" : "无响应")
                     + "——按完成判据继续修复后再收口");
         }
+        // 探活通过＝一次完整交付（#626 自动成版）：run-finish 发出前把工作区记为用户面
+        // 版本 vN（主题＝本轮用户原话）；成版失败降级不反噬收口
+        projectVersionAppService.commitUserVersion(project, attemptRunId, versionLabel);
         boolean systemChanged = attemptChanges != null && !attemptChanges.isEmpty();
         if (systemChanged) {
             try {

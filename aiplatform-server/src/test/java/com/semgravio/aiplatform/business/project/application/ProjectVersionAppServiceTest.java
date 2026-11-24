@@ -254,7 +254,82 @@ class ProjectVersionAppServiceTest {
                 .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
     }
 
+    // ---------- 自动成版与单轴时间线（#626） ----------
+
+    @Test
+    void given_existing_versions_when_commit_user_version_then_next_number_with_platform_and_run_trailers() {
+        // 已有 v1/v2 → 新版本号 v3；提交说明携用户那句话＋Platform-Version＋Run-Id
+        Long projectId = persistedProject("9920");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        stubExec((command, out) -> {
+            if (command.contains("git log --format")) {
+                out.stdout = platformLogLine(HASH_2, 1700000200L, "把按钮改成蓝色", 2, "run-2")
+                        + platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1");
+            } else if (command.contains("git commit")) {
+                out.stdout = "abcdef";
+
+            }
+        });
+
+        Integer versionNo = appService.commitUserVersion(project, "run-3", "加导出功能");
+
+        assertThat(versionNo).isEqualTo(3);
+        String commit = recordedCommands.stream()
+                .filter(command -> command.contains("git commit")).findFirst().orElseThrow();
+        assertThat(commit)
+                .contains("git add -A")
+                .contains("-m '加导出功能'")
+                .contains("Platform-Version: 3")
+                .contains("Run-Id: run-3");
+    }
+
+    @Test
+    void given_commit_exec_fails_when_commit_user_version_then_degraded_null_not_thrown() {
+        // 成版失败降级：提交非零退出只返回 null，绝不反噬生成
+        Long projectId = persistedProject("9921");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        stubExec((command, out) -> {
+            if (command.contains("git log --format")) {
+                out.stdout = platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1");
+            } else if (command.contains("git commit")) {
+                out.exitCode = 128;
+            }
+        });
+
+        assertThat(appService.commitUserVersion(project, "run-2", "加导出功能")).isNull();
+    }
+
+    @Test
+    void given_platform_versions_when_list_then_current_is_first_and_confirmed_maps_pointer() {
+        // 时间线标位：首条＝当前版；confirmed 按项目确认指针映射版本号
+        Long projectId = persistedProject("9922");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.confirmDemoVersion(1);
+        projectRepository.save(project);
+        stubExec((command, out) -> out.stdout =
+                platformLogLine(HASH_2, 1700000200L, "把按钮改成蓝色", 2, "run-2")
+                        + platformLogLine(HASH_1, 1700000100L, "做一个预约系统", 1, "run-1"));
+
+        List<VersionResponse> versions = appService.list(projectId);
+
+        assertThat(versions).hasSize(2);
+        assertThat(versions.get(0).versionNo()).isEqualTo(2);
+        assertThat(versions.get(0).current()).isTrue();
+        assertThat(versions.get(0).confirmed()).isFalse();
+        assertThat(versions.get(0).runId()).isEqualTo("run-2");
+        assertThat(versions.get(1).versionNo()).isEqualTo(1);
+        assertThat(versions.get(1).current()).isFalse();
+        assertThat(versions.get(1).confirmed()).isTrue();
+    }
+
     // ---------- 观测件 ----------
+
+    /** git log 单行的用户面版本变体（Platform-Version ＋ Run-Id trailers，#626）。 */
+    private static String platformLogLine(String hash, long at, String subject, int versionNo,
+            String runId) {
+        return hash + FS + at + FS + subject + FS
+                + "Platform-Version: " + versionNo + "\nRun-Id: " + runId + "\n" + RS;
+    }
 
     private Long persistedProject(String workspaceId) {
         Project project = Project.create("版本项目", null, Long.parseLong(workspaceId), OWNER, null);

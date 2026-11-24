@@ -17,11 +17,12 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * （#93 复位工作树到目标 commit 并追加新版本——Rollback-From trailer 锚定源
  * 版本，历史只追加不改写）。
  *
- * <p><b>收口成版半边已退役（#605，ADR-0055 审查与收口组）</b>：run 收口自动成版
- * （Run-Id trailer 成版提交）随审查与收口组出局——版本语义归阶段四重建（单轴
- * 时间线、探活通过即自动成版）；段起点／段失败回滚／fork 补丁等旧生成栈 git
- * 辅助件随切片与轨道机器（#602）一并清场。版本序列现由 Rollback-From trailer
- * 认定（存量 Run-Id 版本不再入列，历史 commit 原样在库）。</p>
+ * <p><b>版本语义（#605 退役→#626 重建，ADR-0056）</b>：旧 Run-Id trailer 成版随
+ * 审查与收口组出局（#605）；阶段四重建为<b>用户面版本</b>——每轮生成探活通过后
+ * 平台自动成版（{@link #commitVersionCommand}：{@code Platform-Version}＋
+ * {@code Run-Id} trailer），版本序列＝按标记过滤的 git log。回滚版本仍带
+ * {@code Rollback-From} trailer（历史兼容）。段起点／段失败回滚／fork 补丁等旧
+ * 生成栈 git 辅助件随切片与轨道机器（#602）一并清场。</p>
  *
  * <p>git 跟踪面 = 交付物全集——
  * .gitignore 由 {@link WorkspaceLayout#NON_DELIVERABLE_DIRS} + {@link WorkspaceLayout#ENV_FILE}
@@ -34,8 +35,14 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  */
 public final class WorkspaceVersions {
 
-    /** 回滚 commit 的源版本锚定 trailer（#93 回滚到此——版本序列的成员判据）。 */
+    /** 回滚 commit 的源版本锚定 trailer（#93 回滚到此——回滚版本的成员判据）。 */
     public static final String ROLLBACK_TRAILER = "Rollback-From: ";
+
+    /** 用户面版本标记 trailer（#626 自动成版——版本序列的成员判据，值为 vN）。 */
+    public static final String VERSION_TRAILER = "Platform-Version: ";
+
+    /** 成版 run 标识 trailer（#626：版本提交带 run 标识，随版本标记一并携带）。 */
+    public static final String RUN_TRAILER = "Run-Id: ";
 
     /** 「零版本 / 版本不存在」守卫退出码（与真实 git 故障分道）。 */
     public static final int EXIT_NO_VERSION = 3;
@@ -97,6 +104,28 @@ public final class WorkspaceVersions {
                 + " && if ! git rev-parse --verify HEAD >/dev/null 2>&1; then exit "
                 + EXIT_NO_VERSION + "; fi"
                 + " && git log --format='" + LOG_FORMAT + "'";
+    }
+
+    /**
+     * 用户面版本提交（#626 自动成版）：把当时工作区全量提交为一个用户面版本——
+     * 提交主题＝「用户那句话」，正文携平台版本标记（{@code Platform-Version: vN}）
+     * 与成版 run 标识（{@code Run-Id:}）；仓库初始化（幂等）随命令前置，保证提交
+     * 身份在场。stdout = 新版本 commit hash。
+     *
+     * <p>成版失败降级归调用方：提交失败不阻断生成，下一轮成功交付的提交覆盖
+     * 累计后的工作区现状。subject 已由调用方清洗为单行（换行会污染提交主题）。</p>
+     *
+     * @param versionNo 版本号（v1/v2/v3 递增——调用方按已有版本最大值 +1 计算）
+     * @param runId     成版 run 标识（用户面 runId）
+     * @param subject   提交主题＝「用户那句话」（单行、已清洗）
+     */
+    public static String commitVersionCommand(int versionNo, String runId, String subject) {
+        return ensureRepoCommand()
+                + " && git add -A"
+                + " && git commit -q --allow-empty -m '" + escapeSingleQuote(subject) + "'"
+                + " -m '" + VERSION_TRAILER + versionNo + "'"
+                + " -m '" + RUN_TRAILER + escapeSingleQuote(runId == null ? "" : runId) + "'"
+                + " && git rev-parse HEAD";
     }
 
     /**
@@ -162,9 +191,11 @@ public final class WorkspaceVersions {
     }
 
     /**
-     * 解析 git log 输出为版本序列（原生序新→旧保持）。只收带 Rollback-From
-     * trailer 的成版 commit（野 commit 不是版本）；畸形记录跳过不炸整列。
-     * Run-Id 成版成员判据随收口成版提交退役（#605）——存量 Run-Id commit 不入列。
+     * 解析 git log 输出为版本序列（原生序新→旧保持）。成员判据两种：带
+     * {@code Platform-Version} trailer 的用户面版本（#626 自动成版，携版本号与
+     * run 标识）、带 {@code Rollback-From} trailer 的回滚版本（#93 历史兼容）。
+     * 跑前快照与智能体 shell 面的野 commit 无 trailer——不入列。畸形记录跳过不炸
+     * 整列。
      */
     public static List<WorkspaceVersion> parseLog(String stdout) {
         List<WorkspaceVersion> versions = new ArrayList<>();
@@ -173,18 +204,38 @@ public final class WorkspaceVersions {
             if (fields.length != 4) {
                 continue;
             }
+            String versionRaw = extractTrailer(fields[3], VERSION_TRAILER);
             String rollbackFrom = extractTrailer(fields[3], ROLLBACK_TRAILER);
-            if (rollbackFrom == null) {
+            if (versionRaw == null && rollbackFrom == null) {
                 continue;
             }
+            Integer versionNo = parseVersionNo(versionRaw);
+            if (versionRaw != null && versionNo == null) {
+                continue; // 版本标记非数字 = 畸形记录
+            }
+            String runId = extractTrailer(fields[3], RUN_TRAILER);
             try {
                 versions.add(new WorkspaceVersion(fields[0],
-                        Long.parseLong(fields[1]), fields[2], null, rollbackFrom));
+                        Long.parseLong(fields[1]), fields[2], versionNo,
+                        runId == null || runId.isBlank() ? null : runId, rollbackFrom));
             } catch (NumberFormatException malformed) {
                 // 时刻段不是数字 = 畸形记录，跳过
             }
         }
         return versions;
+    }
+
+    /** 版本标记值解析（"3" → 3；空/非数字 → null）。 */
+    private static Integer parseVersionNo(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        }
+        catch (NumberFormatException malformed) {
+            return null;
+        }
     }
 
     /** 提交尾（回滚成版）：提交携 Rollback-From trailer → 回读 HEAD hash。 */

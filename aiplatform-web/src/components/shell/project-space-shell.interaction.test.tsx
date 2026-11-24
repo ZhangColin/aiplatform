@@ -33,14 +33,18 @@ vi.mock("@/hooks/use-prd", () => ({
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: () => ({ data: [] }),
 }));
-// 抽屉 Demo 条目「查看当时」动作面（#344）——壳测试不点条目，桩空
+// 单轴版本时间线数据/动作面（#626）——壳测试只断言挂载与开合，桩空
 vi.mock("@/hooks/use-version", () => ({
   useGitVersions: () => ({ data: [], isPending: false, isError: false }),
+  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
   useVersionViewSession: () => ({
     startView: { mutate: vi.fn(), reset: vi.fn(), data: undefined, isPending: false, isError: false },
     start: vi.fn(),
     finish: vi.fn(),
   }),
+}));
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
@@ -124,20 +128,21 @@ describe("ProjectSpaceShell · 五行导航与侧栏重复面（原型如此）"
   });
 });
 
-describe("ProjectSpaceShell · 版本记录抽屉挂载与顶栏挂点（#344）", () => {
-  it("顶栏出「版本记录」；点击开抽屉（store 契约＝Demo chip 双挂点共用）", () => {
+describe("ProjectSpaceShell · 版本时间线挂载与顶栏挂点（#626 单轴）", () => {
+  it("顶栏出「版本记录」；点击开时间线（store 契约＝版本 chip 同挂点共用）", () => {
     mountShell();
     fireEvent.click(screen.getByRole("button", { name: "版本记录" }));
     expect(useVersionRecordStore.getState().open).toBe(true);
   });
 
-  it("壳挂载抽屉本体：store 开后两组在场（PRD/Demo）", () => {
+  it("壳挂载时间线本体：store 开后出「版本」标题与空态；旧双轴 PRD/Demo 组不再呈现", () => {
     mountShell();
     fireEvent.click(screen.getByRole("button", { name: "版本记录" }));
     // 抽屉标题（heading 位）——顶栏按钮同名不误伤
-    expect(screen.getByRole("heading", { name: "版本记录" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "PRD 版本" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Demo 版本" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "版本" })).toBeTruthy();
+    expect(screen.getByText(/尚无版本/)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "PRD 版本" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Demo 版本" })).toBeNull();
   });
 });
 

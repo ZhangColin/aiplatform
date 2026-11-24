@@ -35,14 +35,18 @@ vi.mock("@/hooks/use-prd", () => ({
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: () => ({ data: [] }),
 }));
-// 抽屉 Demo 条目「查看当时」动作面（#344）——壳装配只测分流，桩空
+// 单轴版本时间线数据/动作面（#626）——壳装配只测分流，桩空
 vi.mock("@/hooks/use-version", () => ({
   useGitVersions: () => ({ data: [], isPending: false, isError: false }),
+  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
   useVersionViewSession: () => ({
     startView: { mutate: vi.fn(), reset: vi.fn(), data: undefined, isPending: false, isError: false },
     start: vi.fn(),
     finish: vi.fn(),
   }),
+}));
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 
 describe("SiteShell（#76 侧栏定稿形态装配 / #345 首页去侧栏）", () => {

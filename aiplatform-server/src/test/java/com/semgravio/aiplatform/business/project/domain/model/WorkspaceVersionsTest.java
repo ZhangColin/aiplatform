@@ -129,6 +129,30 @@ class WorkspaceVersionsTest {
     }
 
     @Test
+    void given_version_when_commit_version_command_then_full_commit_with_platform_and_run_trailers() {
+        // #626 自动成版：全量提交 + 用户那句话主题 + Platform-Version/Run-Id trailer
+        // → 回读 HEAD hash；仓库初始化（身份自愈）随命令前置
+        String command = WorkspaceVersions.commitVersionCommand(3, "run-abc", "把按钮改成蓝色");
+
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git init"); // 幂等仓库初始化前置（提交身份在场）
+        assertThat(command).contains("git add -A");
+        assertThat(command).contains("git commit -q --allow-empty");
+        assertThat(command).contains("-m '把按钮改成蓝色'");
+        assertThat(command).contains("-m '" + WorkspaceVersions.VERSION_TRAILER + "3'");
+        assertThat(command).contains("-m '" + WorkspaceVersions.RUN_TRAILER + "run-abc'");
+        assertThat(command).contains("git rev-parse HEAD");
+    }
+
+    @Test
+    void given_subject_with_quote_when_commit_version_command_then_escaped_not_injected() {
+        // 用户那句话是用户可控入参：单引号转义进 shell，不破命令
+        String command = WorkspaceVersions.commitVersionCommand(1, "r1", "it's done");
+
+        assertThat(command).contains("-m 'it'\\''s done'");
+    }
+
+    @Test
     void given_workspace_when_status_command_then_porcelain_full() {
         String command = WorkspaceVersions.statusCommand();
 
@@ -192,6 +216,42 @@ class WorkspaceVersionsTest {
 
         assertThat(versions).hasSize(1);
         assertThat(versions.get(0).rollbackFrom()).isEqualTo("deadbeef");
+    }
+
+    @Test
+    void given_platform_version_commits_when_parse_then_version_no_run_id_and_label_newest_first() {
+        // #626 自动成版：Platform-Version trailer 即成员判据——版本号/run 标识/主题
+        // （用户那句话）逐条解析，git log 原生序新→旧保持
+        String stdout = "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" + FS + "1700000200" + FS
+                + "把按钮改成蓝色" + FS + "Platform-Version: 2\nRun-Id: run-2\n" + RS
+                + "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" + FS + "1700000100" + FS
+                + "做一个预约系统" + FS + "Platform-Version: 1\nRun-Id: run-1\n" + RS;
+
+        List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
+
+        assertThat(versions).hasSize(2);
+        assertThat(versions.get(0).commitHash()).startsWith("c2c2");
+        assertThat(versions.get(0).versionNo()).isEqualTo(2);
+        assertThat(versions.get(0).runId()).isEqualTo("run-2");
+        assertThat(versions.get(0).subject()).isEqualTo("把按钮改成蓝色");
+        assertThat(versions.get(0).rollbackFrom()).isNull();
+        assertThat(versions.get(1).versionNo()).isEqualTo(1);
+        assertThat(versions.get(1).runId()).isEqualTo("run-1");
+        assertThat(versions.get(1).subject()).isEqualTo("做一个预约系统");
+    }
+
+    @Test
+    void given_snapshot_commit_without_trailer_when_parse_then_excluded_from_timeline() {
+        // 跑前快照（#619）不带任何 trailer——不是用户面版本，不进时间线
+        String stdout = "f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5" + FS + "1700000400" + FS
+                + "snapshot 12345" + FS + RS
+                + "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" + FS + "1700000200" + FS
+                + "把按钮改成蓝色" + FS + "Platform-Version: 2\nRun-Id: run-2\n" + RS;
+
+        List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
+
+        assertThat(versions).hasSize(1);
+        assertThat(versions.get(0).versionNo()).isEqualTo(2);
     }
 
     @Test

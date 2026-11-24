@@ -139,6 +139,10 @@ public class GenerationAppService {
     private final BuildDispatchPolicy buildDispatchPolicy;
     private final DemoVersionAppService demoVersionAppService;
     private final PrdVersionAppService prdVersionAppService;
+    /** 用户面版本自动成版（#626 单轴时间线：探活通过即记录版本）。 */
+    private final ProjectVersionAppService projectVersionAppService;
+    /** 首建版本标签来源（对话史第一条用户发言）。 */
+    private final ConversationHistoryAppService conversationHistory;
     private final DemoSeedAppService demoSeed;
 
     /** 迭代派发口（#623）：首建成功收口后排空对话面交指令待办。 */
@@ -168,6 +172,8 @@ public class GenerationAppService {
             BuildDispatchPolicy buildDispatchPolicy,
             DemoVersionAppService demoVersionAppService,
             PrdVersionAppService prdVersionAppService,
+            ProjectVersionAppService projectVersionAppService,
+            ConversationHistoryAppService conversationHistory,
             DemoSeedAppService demoSeed,
             IterationAppService iterationAppService,
             BalanceGateAppService balanceGate,
@@ -184,6 +190,8 @@ public class GenerationAppService {
         this.buildDispatchPolicy = buildDispatchPolicy;
         this.demoVersionAppService = demoVersionAppService;
         this.prdVersionAppService = prdVersionAppService;
+        this.projectVersionAppService = projectVersionAppService;
+        this.conversationHistory = conversationHistory;
         this.demoSeed = demoSeed;
         this.iterationAppService = iterationAppService;
         this.balanceGate = balanceGate;
@@ -317,9 +325,25 @@ public class GenerationAppService {
         // 跑完收口绑本锚（此后新版记行不漂移旧版关联）；无版本记行（legacy/记行失败）
         // 为 null
         Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
-        Future<?> trackTask = submitTrack(project, firstRunId, prdVersionNo);
+        // 首建版本标签（#626）：对话史第一条用户发言（取不到「首次生成」）；成版在
+        // 探活通过收口时发生，标签先算定（对话史此后不再改这句）
+        String versionLabel = firstRequestLabel(projectId);
+        Future<?> trackTask = submitTrack(project, firstRunId, prdVersionNo, versionLabel);
         codingRunTrack.registerTask(projectId, trackTask);
         return new GenerationRun(firstRunId);
+    }
+
+    /** 首建版本主题＝用户最初那句需求（#626；取不到/读取异常回落「首次生成」）。 */
+    private String firstRequestLabel(Long projectId) {
+        try {
+            return ProjectVersionAppService.cleanUserSentence(
+                    conversationHistory.firstUserUtterance(projectId), "首次生成");
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 读取最初需求失败（版本标签回落「首次生成」）：{}",
+                    projectId, e.toString());
+            return "首次生成";
+        }
     }
 
     /**
@@ -327,14 +351,15 @@ public class GenerationAppService {
      * 原生成车道的排队/错峰/排空已拆，即交即跑）＋停止/关停收口面装配——内核
      * 轨道正常返回后排空对话面交指令待办（#623）。
      */
-    private Future<?> submitTrack(Project project, String firstRunId, Integer prdVersionNo) {
+    private Future<?> submitTrack(Project project, String firstRunId, Integer prdVersionNo,
+            String versionLabel) {
         Long projectId = project.getId();
         return sessionExecutor.submitGeneration(
                 CodingRunDispatcher.SESSION_PREFIX + projectId,
                 () -> {
                     boolean trackReturned = false;
                     try {
-                        runKernelTrack(project, firstRunId, prdVersionNo);
+                        runKernelTrack(project, firstRunId, prdVersionNo, versionLabel);
                         trackReturned = true;
                     }
                     catch (RunStoppedException e) {
@@ -428,7 +453,8 @@ public class GenerationAppService {
      * 按钮复现——用户在点火入口重跑即恢复，#604 失败新语义＝明确展示＋重跑即续，
      * ADR-0055 #580-13：不自动重跑、不携错误现场）。
      */
-    private void runKernelTrack(Project project, String firstRunId, Integer prdVersionNo) {
+    private void runKernelTrack(Project project, String firstRunId, Integer prdVersionNo,
+            String versionLabel) {
         Long projectId = project.getId();
         // 起手起服（#597 起服守卫，尽力而为）：开发服务器平台起、常驻——内核工具面
         // 恰四件、无杀/起服务路径，探活收口前起服须在
@@ -443,7 +469,8 @@ public class GenerationAppService {
                 kernelSession(projectId, firstRunId),
                 // 单发提示（#604 失败即终态、不自动重试）
                 KERNEL_FIRST_RUN_PROMPT,
-                (attemptRunId, attemptChanges) -> closeKernelGeneration(project),
+                (attemptRunId, attemptChanges) ->
+                        closeKernelGeneration(project, attemptRunId, versionLabel),
                 CodingRunDispatcher.GENERATE_LABEL, true, CodingRunDispatcher.RunSeat.kernel(),
                 RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN,
                 /* includePatch= */ false); // 首建清单只出真实行数（目录汇总归 #620）
@@ -465,7 +492,8 @@ public class GenerationAppService {
      * 终态（#604 单发：不自动重跑，用户在点火入口重跑即恢复）。逐件结果（#617）
      * 随收口判据回给派发器，进收尾卡「判据结果」。
      */
-    private CodingRunDispatcher.ClosingJudgment closeKernelGeneration(Project project) {
+    private CodingRunDispatcher.ClosingJudgment closeKernelGeneration(Project project,
+            String runId, String versionLabel) {
         KernelClosingCriteria.KernelClosingResult closing =
                 kernelClosingCriteria.assess(project.getWorkspaceId());
         if (!closing.complete()) {
@@ -474,6 +502,9 @@ public class GenerationAppService {
                     + (closing.probePassed() ? "有响应" : "无响应")
                     + "——按完成判据继续修复后再收口");
         }
+        // 探活通过＝一次完整交付（#626 自动成版）：在 run-finish 发出前把工作区记为
+        // 用户面版本 vN，前端随收口失效即能拉到新版本；成版失败降级不反噬收口
+        projectVersionAppService.commitUserVersion(project, runId, versionLabel);
         return new CodingRunDispatcher.ClosingJudgment(
                 closing.buildPassed(), closing.probePassed());
     }

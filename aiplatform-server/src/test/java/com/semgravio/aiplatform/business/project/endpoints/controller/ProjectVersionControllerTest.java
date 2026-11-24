@@ -63,15 +63,20 @@ class ProjectVersionControllerTest {
     @Test
     void given_two_versions_when_list_then_newest_first_wrapped() throws Exception {
         when(versionAppService.list(any())).thenReturn(List.of(
-                new VersionResponse("c2c2c2c2", "更新了系统", "222", null, LocalDateTime.of(2026, 9, 5, 12, 0)),
-                new VersionResponse("a1a1a1a1", "首次生成了系统", "111", null, LocalDateTime.of(2026, 9, 5, 11, 0))));
+                new VersionResponse("c2c2c2c2", "把按钮改成蓝色", 2, "222", null,
+                        LocalDateTime.of(2026, 9, 5, 12, 0), true, false),
+                new VersionResponse("a1a1a1a1", "首次生成了系统", 1, "111", null,
+                        LocalDateTime.of(2026, 9, 5, 11, 0), false, true)));
 
         performAsUser(get("/api/projects/100/versions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data[0].commitHash").value("c2c2c2c2"))
+                .andExpect(jsonPath("$.data[0].versionNo").value(2))
+                .andExpect(jsonPath("$.data[0].current").value(true))
                 .andExpect(jsonPath("$.data[0].runId").value("222"))
-                .andExpect(jsonPath("$.data[1].commitHash").value("a1a1a1a1"));
+                .andExpect(jsonPath("$.data[1].commitHash").value("a1a1a1a1"))
+                .andExpect(jsonPath("$.data[1].confirmed").value(true));
     }
 
     @Test
@@ -154,8 +159,8 @@ class ProjectVersionControllerTest {
     @Test
     void given_valid_ref_when_rollback_then_new_version_wrapped() throws Exception {
         when(versionAppService.rollback(any(), anyString())).thenReturn(
-                new VersionResponse("d3d3d3d3", "回滚到「更新了系统」", null, "a1a1a1a1",
-                        LocalDateTime.of(2026, 9, 5, 13, 0)));
+                new VersionResponse("d3d3d3d3", "回滚到「更新了系统」", null, null, "a1a1a1a1",
+                        LocalDateTime.of(2026, 9, 5, 13, 0), false, false));
 
         performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
                 .andExpect(status().isOk())

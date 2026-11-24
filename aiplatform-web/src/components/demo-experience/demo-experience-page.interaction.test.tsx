@@ -65,6 +65,16 @@ vi.mock("@/hooks/use-prd", () => ({
   usePrdVersions: () => ({ data: seed.prdVersions }),
 }));
 
+// 版本 chip（#626 单轴时间线）：最新用户面版本（Demo 页横幅 chip 改接版本 vN）
+vi.mock("@/hooks/use-version", () => ({
+  useGitVersions: () => ({
+    data: [{ commitHash: "c1", versionNo: 1, subject: "做一个预约系统", current: true }],
+    isPending: false,
+    isError: false,
+  }),
+  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@/hooks/use-build-gate", () => ({
   useBuildGate: () => ({ data: null }),
   useConfirmPrdGeneration: () => ({ mutate: () => {}, isPending: false }),
@@ -128,8 +138,7 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
 
     expect(screen.getByText("PROJECT")).toBeTruthy();
     expect(screen.getByText("智能企业客户预约系统")).toBeTruthy();
-    expect(screen.getByText("Demo v1")).toBeTruthy();
-    expect(screen.getByText("(基于 PRD v2 快照)")).toBeTruthy();
+    expect(screen.getByText("版本 v1")).toBeTruthy();
     expect(screen.getByText("预览运行中 (Ready)")).toBeTruthy();
     expect(screen.getByRole("button", { name: "阶段存盘" })).toBeTruthy();
 
@@ -166,10 +175,10 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
     expect(seed.confirmMutate).toHaveBeenNthCalledWith(2, 1, expect.anything());
   });
 
-  it("横幅 Demo 版本 chip 打开项目壳共用的版本记录抽屉", () => {
+  it("横幅版本 chip 打开项目壳共用的版本时间线（#626 单轴入口）", () => {
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: /查看版本记录/ }));
+    fireEvent.click(screen.getByRole("button", { name: /查看版本/ }));
 
     expect(useVersionRecordStore.getState().open).toBe(true);
   });
@@ -181,7 +190,7 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
 
     expect(screen.getByText("Demo 生成中 (Generating)")).toBeTruthy();
     expect(screen.getByText("GENERATING")).toBeTruthy();
-    expect(screen.queryByText("Demo v2")).toBeNull();
+    expect(screen.queryByText("版本 v2")).toBeNull();
     expect(screen.getByRole("button", { name: "确认当前版本 · 进入签约流程" }).hasAttribute("disabled")).toBe(true);
   });
 

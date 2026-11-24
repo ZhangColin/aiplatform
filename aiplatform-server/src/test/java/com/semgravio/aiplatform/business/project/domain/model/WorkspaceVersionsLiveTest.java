@@ -148,6 +148,41 @@ class WorkspaceVersionsLiveTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_snapshot_then_user_version_commit_when_list_then_snapshot_excluded_version_included() {
+        // #626 自动成版＋单轴时间线：真 git 仓库里跑「跑前快照 → 生成改文件 →
+        // 用户面版本提交 → 列表」——快照提交（无平台版本标记）不入时间线，版本
+        // 提交（Platform-Version＋Run-Id）入列且携版本号/主题，新→旧
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+
+        // 跑前快照（#619）：幂等仓库 + 全量提交，hash 作 diff 基线；不是用户版本
+        ExecResult snapshot = exec(WorkspaceChanges.snapshotCommand("run-1"));
+        assertThat(snapshot.exitCode()).as("跑前快照应成功：%s", snapshot.stderr()).isZero();
+        String snapshotHash = snapshot.stdout().trim();
+        assertThat(snapshotHash).isNotEmpty();
+
+        // 内核改动工作区后，平台提交用户面版本 v1
+        exec("echo '<html>v1</html>' > /workspace/index.html");
+        ExecResult committed =
+                exec(WorkspaceVersions.commitVersionCommand(1, "run-1", "做一个预约系统"));
+        assertThat(committed.exitCode()).as("成版应成功：%s", committed.stderr()).isZero();
+        String versionHash = committed.stdout().trim();
+        assertThat(versionHash).isNotEmpty();
+
+        // 列表（git log 过滤）：只收带版本标记的提交——快照不入列，版本入列且字段齐
+        ExecResult log = exec(WorkspaceVersions.listCommand());
+        assertThat(log.exitCode()).isZero();
+        var versions = WorkspaceVersions.parseLog(log.stdout());
+        assertThat(versions).hasSize(1);
+        assertThat(versions.get(0).commitHash()).isEqualTo(versionHash);
+        assertThat(versions.get(0).versionNo()).isEqualTo(1);
+        assertThat(versions.get(0).runId()).isEqualTo("run-1");
+        assertThat(versions.get(0).subject()).isEqualTo("做一个预约系统");
+        assertThat(versions).noneMatch(version -> version.commitHash().equals(snapshotHash));
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_dirty_worktree_when_status_then_untracked_ignored_tracked_detected() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);

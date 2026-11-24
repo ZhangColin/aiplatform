@@ -1,5 +1,6 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -21,20 +22,20 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 版本用例（#91 版本层地基 + #93 回滚）：版本正本 = git log，无便利表；版本
- * 列表/详情读面 + 回滚到此（追加版本、只回代码不回数据）。
+ * 版本用例（#91 版本层地基 + #93 回滚 + #626 自动成版／单轴时间线）：版本正本 =
+ * git log，无便利表；版本列表/详情读面 + 回滚到此（追加版本、只回代码不回数据）
+ * + 用户面版本自动成版写口。
  *
- * <p><b>成版写口已随审查与收口组退役（#605）</b>：run 收口自动成版（Run-Id
- * trailer）与设计定稿成版提交一并出局——版本语义归阶段四重建（单轴时间线、
- * 探活通过即自动成版）；本类保留读面与回滚写口（存量 Rollback-From 版本仍可
- * 回），不新增版本。</p>
+ * <p><b>自动成版（#626，ADR-0056）</b>：每轮成功生成（首建/迭代）探活通过后，界面
+ * 侧经 {@link #commitUserVersion} 把当时工作区提交为用户面版本（{@code Platform-Version}
+ * ＋{@code Run-Id} trailer，主题＝用户那句话）；版本序列＝按标记过滤的 git log，
+ * 无新表。成版失败降级（日志留痕、不反噬生成）——下一轮成功交付覆盖累计现状。</p>
  *
  * <p><b>回滚写口</b>：{@link #rollback} 由用户显式触发，失败如实上抛（用户面
  * 动作，不 quietly 吞），走环境故障 WSP_002。</p>
  *
  * <p><b>读面</b>：git log 实时读取（exec 不经业务事务，同 {@code ProjectQueryAppService}
- * 形制）；详情锚定收尾卡（版本 runId 联接对话史 closing 条目——#605 后新版本
- * 无 run，closing 为空）。</p>
+ * 形制）；列表首条＝当前版，confirmed 按旧确认指针映射（商业面改接归 #629）。</p>
  */
 @Service
 @Slf4j
@@ -53,13 +54,69 @@ public class ProjectVersionAppService {
     }
 
     /**
-     * 版本序列（git log 原生序：新→旧）。零版本 = 空列表非错误。
+     * 版本序列（git log 原生序：新→旧）。零版本 = 空列表非错误。时间线标位：
+     * 首条＝当前版（最新交付）；confirmed 按项目旧确认指针映射版本号（transition
+     * ——商业面改接归 #629）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
      */
     public List<VersionResponse> list(Long projectId) {
         Project project = loadProject(projectId);
+        List<WorkspaceVersion> versions = readVersions(project);
+        List<VersionResponse> responses = new ArrayList<>(versions.size());
+        for (int index = 0; index < versions.size(); index++) {
+            WorkspaceVersion version = versions.get(index);
+            responses.add(VersionResponse.of(version, index == 0, confirmedOf(project, version)));
+        }
+        return responses;
+    }
+
+    /**
+     * 用户面版本自动成版（#626，ADR-0056）：跑前快照（#619）不是用户版本——每轮
+     * 生成探活通过后，平台把当时工作区提交为用户面版本（版本号＝已有版本最大值+1，
+     * 主题＝用户那句话，正文携版本标记与 run 标识）。<b>成版失败降级</b>：任何
+     * exec 失败/回执非 hash 只记日志返回 null，绝不反噬生成——下一轮成功交付的
+     * 提交覆盖累计后的工作区现状，时间线可能少一格但不丢代码。
+     *
+     * @param project 成版项目（工作区锚）
+     * @param runId   成版 run 标识（用户面 runId）
+     * @param label   版本主题＝用户那句话（调用方已清洗为单行）
+     * @return 新版本号（成功）；失败/降级为 null
+     */
+    public Integer commitUserVersion(Project project, String runId, String label) {
+        try {
+            List<WorkspaceVersion> existing = readVersions(project);
+            int nextVersionNo = existing.stream()
+                    .map(WorkspaceVersion::versionNo)
+                    .filter(versionNo -> versionNo != null)
+                    .max(Integer::compareTo)
+                    .orElse(0) + 1;
+            ExecResultResponse result = exec(project,
+                    WorkspaceVersions.commitVersionCommand(nextVersionNo, runId, label));
+            if (result == null || result.exitCode() != 0) {
+                log.warn("[version] 项目 {} run {} 用户面版本提交失败（生成照常，下一次成功交付"
+                                + "覆盖累计现状）：{}", project.getId(), runId,
+                        result == null ? "exec 无结果" : result.stderr());
+                return null;
+            }
+            log.info("[version] 项目 {} run {} 记录用户面版本 v{}（{}）", project.getId(), runId,
+                    nextVersionNo, label);
+            return nextVersionNo;
+        }
+        catch (RuntimeException e) {
+            log.warn("[version] 项目 {} 用户面版本提交执行异常（生成照常，下一次成功交付覆盖累计"
+                    + "现状）：{}", project.getId(), e.toString());
+            return null;
+        }
+    }
+
+    /** git log 读取（零版本 = 空列表；其它非零 = WSP_002 环境故障）。 */
+    private List<WorkspaceVersion> readVersions(Project project) {
         ExecResultResponse result = exec(project, WorkspaceVersions.listCommand());
+        if (result == null) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "版本列表读取失败: exec 无结果");
+        }
         if (result.exitCode() == WorkspaceVersions.EXIT_NO_VERSION) {
             return List.of();
         }
@@ -67,9 +124,25 @@ public class ProjectVersionAppService {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "版本列表读取失败: " + result.stderr());
         }
-        return WorkspaceVersions.parseLog(result.stdout()).stream()
-                .map(VersionResponse::of)
-                .toList();
+        return WorkspaceVersions.parseLog(result.stdout());
+    }
+
+    /** 确认标记映射（#626 过渡）：旧 Demo 确认指针的版本号＝本用户面版本号即已确认。 */
+    private static boolean confirmedOf(Project project, WorkspaceVersion version) {
+        return version.versionNo() != null
+                && version.versionNo().equals(project.getConfirmedDemoVersionNo());
+    }
+
+    /**
+     * 版本主题清洗（#626）：用户那句话可能含换行/多空白——折成单行再作提交主题；
+     * 空即回落（首建「首次生成」/ 迭代「更新系统」）。
+     */
+    public static String cleanUserSentence(String raw, String fallback) {
+        if (raw == null) {
+            return fallback;
+        }
+        String cleaned = raw.replaceAll("\\s+", " ").trim();
+        return cleaned.isEmpty() ? fallback : cleaned;
     }
 
     /**

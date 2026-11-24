@@ -250,7 +250,7 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data[0].id").value("builtin:prd-writing"))
                 .andExpect(jsonPath("$.data[0].name").value("prd-writing"))
                 .andExpect(jsonPath("$.data[0].description").value(
-                        "撰写或修订 PRD 时使用——固定章节模板与平实写法规范（系统形八章节含推迟清单；清单章按项目终点类型走形）。"))
+                        "撰写或修订 PRD 时使用——固定章节模板与平实写法规范（系统形八章节含推迟清单）。"))
                 .andExpect(jsonPath("$.data[0].source").value(1))
                 .andExpect(jsonPath("$.data[0].sourceName").value("内置"))
                 .andExpect(jsonPath("$.data[0].sourcePackage").value(nullValue()))
@@ -310,7 +310,7 @@ class BackofficeSkillSeamTest {
                 // frontmatter 全量：解析态键值（含 name/description）
                 .andExpect(jsonPath("$.data.frontmatter.name").value("prd-writing"))
                 .andExpect(jsonPath("$.data.frontmatter.description").value(
-                        "撰写或修订 PRD 时使用——固定章节模板与平实写法规范（系统形八章节含推迟清单；清单章按项目终点类型走形）。"))
+                        "撰写或修订 PRD 时使用——固定章节模板与平实写法规范（系统形八章节含推迟清单）。"))
                 // 正文＝frontmatter 剥离后全文（不以 --- 围栏开头，直落标题）
                 .andExpect(jsonPath("$.data.content").value(startsWith("# PRD 写作技能")))
                 .andExpect(jsonPath("$.data.content").value(containsString("推迟清单")));

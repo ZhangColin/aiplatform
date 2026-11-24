@@ -132,9 +132,6 @@ class DesignProcessAppServiceTest {
     }
 
     @Autowired
-    private BuildPlanFacts buildPlanFacts;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @MockitoBean
@@ -224,9 +221,8 @@ class DesignProcessAppServiceTest {
     }
 
     /** 脚本化智能体边界（定稿后续分岔用）：designer 会话落稿、coder 更新 run 以
-     * finish_edit 收口（changed=true）、主智能体补产轮产出切片计划（saveBuildPlan
-     * 事实登记——计划补产链的脚本侧）。 */
-    private void givenScriptedDesignAndFixAndPlanSessions(String draftPath) {
+     * finish_edit 收口（changed=true）。 */
+    private void givenScriptedDesignAndFixSessions(String draftPath) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command == null) {
@@ -237,11 +233,6 @@ class DesignProcessAppServiceTest {
                 finishFixFacts.record(command.workspaceId(), true, "已按定稿稿对齐");
                 verifyRan(command); // #424 常开硬门：修正/生成 run 收口须验证在场
                 return new AgentReply(command.runId(), "已对齐", null, List.of());
-            }
-            if (command.sessionId().startsWith("main-")
-                    && command.prompt().contains("还没有切片计划")) {
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能使用全部功能")));
             }
             sink.accept(AgentEventScripts.scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -1231,7 +1222,7 @@ class DesignProcessAppServiceTest {
                 ## 待定项
                 暂无
                 """);
-        givenScriptedDesignAndFixAndPlanSessions("/design/home-1.html");
+        givenScriptedDesignAndFixSessions("/design/home-1.html");
         appService.dispatchDesignOnTurnClose(projectId, null);
 
         clearInvocations(agentClient);
@@ -1270,7 +1261,7 @@ class DesignProcessAppServiceTest {
                 ## 待定项
                 暂无
                 """);
-        givenScriptedDesignAndFixAndPlanSessions("/design/home-1.html");
+        givenScriptedDesignAndFixSessions("/design/home-1.html");
         appService.dispatchDesignOnTurnClose(projectId, null); // 单件收口
 
         clearInvocations(agentClient, eventsAppService);

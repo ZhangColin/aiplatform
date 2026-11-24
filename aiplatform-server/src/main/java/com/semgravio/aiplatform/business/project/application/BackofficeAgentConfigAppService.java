@@ -56,12 +56,12 @@ import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHin
 public class BackofficeAgentConfigAppService {
 
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
-     * ＋路由结构性信号两开关关〔#454 缺省〕＋收口三闸关〔#435 翻转缺省〕＋单会话
-     * 开＋并行关＋决策时注入开＋基座 lint 阻断关〔#541 让路缺省〕」）。 */
+     * ＋路由结构性信号两开关关〔#454 缺省〕＋收口三闸关〔#435 翻转缺省〕＋决策时
+     * 注入开＋基座 lint 阻断关〔#541 让路缺省〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null);
+                    null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空配置覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -122,9 +122,6 @@ public class BackofficeAgentConfigAppService {
                 safe.verificationPresenceGateEnabled() != null && safe.verificationPresenceGateEnabled(),
                 safe.proofOfOutputGateEnabled() != null && safe.proofOfOutputGateEnabled(),
                 safe.finalVerificationGateEnabled() != null && safe.finalVerificationGateEnabled(),
-                // #436 缺省口径：单会话开关 null＝开（翻转缺省 true），并行机器 null＝关
-                safe.singleSessionGenerationEnabled() == null || safe.singleSessionGenerationEnabled(),
-                safe.parallelSliceMachineEnabled() != null && safe.parallelSliceMachineEnabled(),
                 // #437 缺省口径：注入总开关 null＝开（落地态 true），阈值/上限 null＝
                 // 清空回落代码缺省（校验在后），禁用集 null＝清空全启用
                 safe.decisionHintsEnabled() == null || safe.decisionHintsEnabled(),
@@ -203,7 +200,6 @@ public class BackofficeAgentConfigAppService {
                 current.finalVerifyFixBudget(),
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
                 current.finalVerificationGateEnabled(),
-                current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
                 current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
                 current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
@@ -252,7 +248,7 @@ public class BackofficeAgentConfigAppService {
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelConfigKey()),
                 true, true, true, null, null, null, false, false, null, null, null, true, true, true,
-                true, false, true, null, null, null, true, false, true,
+                true, null, null, null, true, false, true,
                 operator.id(), operator.name(), null);
         requireBindableConfig(next.modelConfigKey()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
@@ -313,7 +309,6 @@ public class BackofficeAgentConfigAppService {
                 current.finalVerifyFixBudget(),
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
                 current.finalVerificationGateEnabled(),
-                current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
                 current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
                 current.decisionHintStackCap(), current.decisionHintDisabled(),
                 current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
@@ -326,7 +321,6 @@ public class BackofficeAgentConfigAppService {
                 next.verifyModelConfigKey(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
                 next.verificationPresenceGateEnabled(), next.proofOfOutputGateEnabled(),
                 next.finalVerificationGateEnabled(),
-                next.singleSessionGenerationEnabled(), next.parallelSliceMachineEnabled(),
                 next.decisionHintsEnabled(), next.decisionHintErrorStreak(),
                 next.decisionHintStackCap(), next.decisionHintDisabled(),
                 next.verifySelfDecisionEnabled(), next.robustLintBlockingEnabled(),
@@ -360,8 +354,6 @@ public class BackofficeAgentConfigAppService {
                 || current.verificationPresenceGateEnabled() != next.verificationPresenceGateEnabled()
                 || current.proofOfOutputGateEnabled() != next.proofOfOutputGateEnabled()
                 || current.finalVerificationGateEnabled() != next.finalVerificationGateEnabled()
-                || current.singleSessionGenerationEnabled() != next.singleSessionGenerationEnabled()
-                || current.parallelSliceMachineEnabled() != next.parallelSliceMachineEnabled()
                 || current.decisionHintsEnabled() != next.decisionHintsEnabled()
                 || !Objects.equals(current.decisionHintErrorStreak(), next.decisionHintErrorStreak())
                 || !Objects.equals(current.decisionHintStackCap(), next.decisionHintStackCap())

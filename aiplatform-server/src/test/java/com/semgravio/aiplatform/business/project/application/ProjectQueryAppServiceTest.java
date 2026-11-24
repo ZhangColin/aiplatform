@@ -36,7 +36,6 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
-import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
@@ -88,7 +87,6 @@ class ProjectQueryAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
-        jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -215,64 +213,6 @@ class ProjectQueryAppServiceTest {
 
     // ---------- 详情 ----------
 
-    @Test
-    void given_segment_rows_when_detail_then_plan_list_returned_in_ord_order() {
-        // #225 计划区只读读模型：库中片行 → 片清单（序号/描述/状态 + *Name），
-        // ord 升序（0 = 阶段 0，1..N = 切片）——「最近一次尝试的结局」原样透出
-        Project project = persistedProject(8301L, "轨道项目");
-        project.markPrdProduced();
-        project = projectRepository.save(project);
-        Long projectId = project.getId();
-        insertSegment(projectId, 0, "系统初始化", 2, "run-a", project.getPrdProducedAt());
-        insertSegment(projectId, 2, "用户能下单支付", 1, null, project.getPrdProducedAt());
-        insertSegment(projectId, 1, "用户能注册登录", 3, "run-b", project.getPrdProducedAt());
-
-        var segments = appService.detail(projectId).segments();
-
-        assertThat(segments).extracting(seg -> seg.ord())
-                .containsExactly(0, 1, 2); // ord 升序（插入乱序不漂移）
-        assertThat(segments).extracting(seg -> seg.description())
-                .containsExactly("系统初始化", "用户能注册登录", "用户能下单支付");
-        assertThat(segments).extracting(seg -> seg.status())
-                .containsExactly(GenerationSegmentStatus.CLOSED, GenerationSegmentStatus.FAILED,
-                        GenerationSegmentStatus.PENDING);
-        assertThat(segments).extracting(seg -> seg.statusName())
-                .containsExactly("已收口", "失败", "待跑");
-    }
-
-    @Test
-    void given_stale_plan_anchor_when_detail_then_segments_null() {
-        // PRD 已演进（锚不一致 = 旧计划过期）→ 不透出：不拿旧计划对进度
-        // （锚门口径与 GenerationAppService#resolvePlan 一致）
-        Project project = persistedProject(8302L, "锚漂项目");
-        project.markPrdProduced();
-        project = projectRepository.save(project);
-        // 片行锚固定早 5 秒（确定性漂移）：现行 PRD 锚晚于计划锚 = 计划过期
-        insertSegment(project.getId(), 0, "系统初始化", 2, "run-a",
-                project.getPrdProducedAt().minusSeconds(5));
-
-        assertThat(appService.detail(project.getId()).segments()).isNull();
-    }
-
-    @Test
-    void given_no_segment_rows_when_detail_then_segments_null() {
-        // 无片行（PRD 未产出/计划未落库）= 无计划：null——前端不渲染计划区
-        Long projectId = persistedProject(8303L, "无轨道项目").getId();
-
-        assertThat(appService.detail(projectId).segments()).isNull();
-    }
-
-    /** 直插轨道片行（#220 表事实，绕开计划落库编排）。 */
-    private void insertSegment(Long projectId, int ord, String description, int status,
-            String runId, LocalDateTime prdProducedAt) {
-        jdbcTemplate.update(
-                "INSERT INTO prj_generation_segments (id, project_id, ord, description, status, "
-                        + "run_id, prd_produced_at, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                9_400_000_000_000_000L + projectId % 1_000_000L * 10 + ord, projectId, ord,
-                description, status, runId, Timestamp.valueOf(prdProducedAt));
-    }
-
     // ---------- #335：下单冻结面（latestVersionRefs——双确认引用集） ----------
 
     @Test
@@ -357,7 +297,7 @@ class ProjectQueryAppServiceTest {
 
     @Test
     void given_stale_design_checklist_anchor_when_detail_then_design_items_null() {
-        // PRD 已演进（锚不一致 = 旧清单过期）→ 不透出：不拿旧清单对进度（对偶 segments）
+        // PRD 已演进（锚不一致 = 旧清单过期）→ 不透出：不拿旧清单对进度
         Project project = persistedProject(8402L, "锚漂设计项目");
         project.markPrdProduced();
         project = projectRepository.save(project);

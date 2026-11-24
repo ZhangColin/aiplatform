@@ -49,7 +49,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Conver
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
@@ -70,7 +69,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Design
 import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
-import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -321,7 +319,7 @@ class ProjectControllerTest {
 
     @Test
     void given_detail_with_design_items_when_get_then_item_list_returned() throws Exception {
-        // #290 设计轨道件清单读模型（对偶 segments 契约）：ord/标题/状态 code + *Name，
+        // #290 设计轨道件清单读模型：ord/标题/状态 code + *Name，
         // null（无现行清单/锚漂）不序列化——前端不渲染计划区
         when(queryAppService.detail(100L)).thenReturn(ProjectDetailResponseFixture
                 .detailOf("100", "官网 demo")
@@ -1418,59 +1416,22 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.generationStateName").value("已生成"));
     }
 
-    @Test
-    void given_segments_when_detail_then_plan_list_returned() throws Exception {
-        // 生成轨道片清单透出（#225 计划区只读读模型）：ord/描述/状态 code + *Name
-        // 按库序透出；缺计划 = 字段缺席（前端不渲染计划区、不伪造计划）
-        when(queryAppService.detail(100L)).thenReturn(detailOf("100", ProjectStatus.IN_PROGRESS,
-                false, LocalDateTime.of(2026, 9, 20, 9, 0), GenerationState.GENERATING,
-                List.of(
-                        new GenerationSegmentResponse(0, "系统初始化", GenerationSegmentStatus.CLOSED,
-                                GenerationSegmentStatus.CLOSED.getName()),
-                        new GenerationSegmentResponse(1, "用户能注册登录", GenerationSegmentStatus.PENDING,
-                                GenerationSegmentStatus.PENDING.getName()))));
-        performAsUser(get("/api/projects/100"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.segments.length()").value(2))
-                .andExpect(jsonPath("$.data.segments[0].ord").value(0))
-                .andExpect(jsonPath("$.data.segments[0].description").value("系统初始化"))
-                .andExpect(jsonPath("$.data.segments[0].status").value(2))
-                .andExpect(jsonPath("$.data.segments[0].statusName").value("已收口"))
-                .andExpect(jsonPath("$.data.segments[1].status").value(1))
-                .andExpect(jsonPath("$.data.segments[1].statusName").value("待跑"));
-
-        when(queryAppService.detail(101L)).thenReturn(
-                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
-                        GenerationState.NEVER_GENERATED));
-        performAsUser(get("/api/projects/101"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.segments").value((Object) null));
-    }
-
     // ---------- 夹具 ----------
 
-    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成、片清单缺省无）。 */
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
         return detailOf(id, status, archived, null, GenerationState.NEVER_GENERATED);
     }
 
-    /** 详情夹具（携片清单——#225 计划区透出面）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
-            LocalDateTime prdProducedAt, GenerationState generationState,
-            List<GenerationSegmentResponse> segments) {
+            LocalDateTime prdProducedAt, GenerationState generationState) {
         return ProjectDetailResponseFixture.detailOf(id, "官网 demo")
                 .workspaceId("900")
                 .status(status)
                 .archived(archived)
                 .prdProducedAt(prdProducedAt)
                 .generationState(generationState)
-                .segments(segments)
                 .build();
-    }
-
-    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
-            LocalDateTime prdProducedAt, GenerationState generationState) {
-        return detailOf(id, status, archived, prdProducedAt, generationState, null);
     }
 
     /**

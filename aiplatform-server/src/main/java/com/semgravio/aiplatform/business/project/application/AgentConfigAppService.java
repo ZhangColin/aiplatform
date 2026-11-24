@@ -89,9 +89,7 @@ public class AgentConfigAppService {
      * 轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
      * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
      * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
-     * 生成会话形态两开关 #436 同批——单会话连续编码（缺省 true）与切片并行机器
-     * （缺省 false），生成轨道派发处读取（{@code GenerationAppService}），仅 run
-     * 执行体行消费；基座 lint 强制档阻断开关 #541 同批——缺省 false＝让路
+     * 基座 lint 强制档阻断开关 #541 同批——缺省 false＝让路
      * （强制档违规收口照扫、只随收尾卡标注，不喂修轮不触发失败链；true＝恢复
      * #425 原阻断形态＝回滚保险），尝试环收口判定处随每次尝试读取
      * （{@code CoderRunAttempts}），仅 run 执行体行消费；构建轨出图工具开关 #545
@@ -108,7 +106,6 @@ public class AgentConfigAppService {
             String verifyModelConfigKey, int verifyRoundBudget, int finalVerifyFixBudget,
             boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
             boolean finalVerificationGateEnabled,
-            boolean singleSessionGenerationEnabled, boolean parallelSliceMachineEnabled,
             boolean robustLintBlockingEnabled,
             boolean generateImageEnabled) {
 
@@ -143,8 +140,6 @@ public class AgentConfigAppService {
                 config.verificationPresenceGateEnabled(),
                 config.proofOfOutputGateEnabled(),
                 config.finalVerificationGateEnabled(),
-                config.singleSessionGenerationEnabled(),
-                config.parallelSliceMachineEnabled(),
                 config.robustLintBlockingEnabled(),
                 config.generateImageEnabled());
     }

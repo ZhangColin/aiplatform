@@ -28,9 +28,6 @@ import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanDeferralRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanJourneyRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -78,15 +75,6 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private ConversationHistoryAppService conversationHistory;
-
-    @Mock
-    private GenerationSegmentRepository generationSegments;
-
-    @Mock
-    private GenerationPlanJourneyRepository generationPlanJourneys;
-
-    @Mock
-    private GenerationPlanDeferralRepository generationPlanDeferrals;
 
     @Mock
     private DesignItemRepository designItems;
@@ -225,8 +213,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, generationSegments, generationPlanJourneys,
-                generationPlanDeferrals, designItems,
+                conversationHistory, designItems,
                 designSpecs, prdVersions,
                 demoVersions, skillDrafts, sedimentDrafts, orderQueryAppService, guestAppService,
                 transactionTemplate, new CodingRunTrack());

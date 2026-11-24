@@ -36,7 +36,7 @@ class ConfigEdgeModelSupplierTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, false, false, null, 3, 2, true, true, true,
-                        true, false, false, true));
+                        false, true));
 
         assertThat(supplier.subagentModel()).isNull();
     }
@@ -47,7 +47,7 @@ class ConfigEdgeModelSupplierTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, false, false, "pro", 5, 2, true, true, true,
-                        true, false, false, true));
+                        false, true));
         when(modelConfigs.resolveQueue("pro")).thenReturn(new ModelCandidateQueue("pro",
                 List.of(new ModelCandidate("volcengine", "deepseek-v4-pro-ga-260731",
                         new ModelChannel("https://ark.example/api/v3", "sk-a", false)))));

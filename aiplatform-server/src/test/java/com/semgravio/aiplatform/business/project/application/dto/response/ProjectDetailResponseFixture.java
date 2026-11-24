@@ -39,7 +39,6 @@ public final class ProjectDetailResponseFixture {
         private GenerationState generationState = GenerationState.NEVER_GENERATED;
         private OrderBriefResponse activeOrder;
         private OrderBriefResponse latestOrder;
-        private List<GenerationSegmentResponse> segments;
         private List<DesignItemResponse> designItems;
 
         private Builder(String id, String name) {
@@ -82,11 +81,6 @@ public final class ProjectDetailResponseFixture {
             return this;
         }
 
-        public Builder segments(List<GenerationSegmentResponse> segments) {
-            this.segments = segments;
-            return this;
-        }
-
         public Builder designItems(List<DesignItemResponse> designItems) {
             this.designItems = designItems;
             return this;
@@ -97,7 +91,7 @@ public final class ProjectDetailResponseFixture {
                     endpointType, endpointType.getName(), designScope, workspaceId,
                     status, status.getName(), archived, createdAt, null, prdProducedAt,
                     null, generationState, generationState.getName(), activeOrder,
-                    latestOrder, segments, designItems);
+                    latestOrder, designItems);
         }
     }
 }

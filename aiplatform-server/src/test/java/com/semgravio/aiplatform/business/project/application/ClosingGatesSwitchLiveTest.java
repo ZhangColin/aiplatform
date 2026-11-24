@@ -38,13 +38,12 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
  * <li><b>产出证明闸·闸关</b>（executor 行 {@code proof_of_output_gate_enabled}=
  *     false，运营面直写）——同现场零 diff 直放行（不抛、无拒绝史标注）；</li>
  * <li><b>验证在场闸·两态</b>：闸开无登记抛拒绝回执、有登记放行；闸关无登记也
- *     放行——同一容器工作区键上判定；</li>
- * <li><b>整轨终验闸·闸关</b>：journeys 在场也返回跳过形（不起终验 run、不拦
- *     「生成完成」）。闸开态＝现行为由 GenerationAppServiceTest 编排缝锚定
- *     （起终验 run 需真智能体边界，live 车道不重复承载）。</li>
+ *     放行——同一容器工作区键上判定。</li>
  * </ul>
  *
  * 开关读点动态查库（不发版）：本类直写库行即切态，跑完清理（不留运营态）。
+ * 整轨终验闸 subject 已随 #602 拆除（TrackFinalVerificationAppService 出局，
+ * 闸关跳过形断言随 subject 一并移除——#602 前终验面已名存实亡）。
  */
 @IntegrationTest
 @Tag("live")
@@ -63,12 +62,6 @@ class ClosingGatesSwitchLiveTest {
 
     @Autowired
     private VerificationFacts verificationFacts;
-
-    @Autowired
-    private TrackFinalVerificationAppService finalVerification;
-
-    @Autowired
-    private com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository projectRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -152,24 +145,6 @@ class ClosingGatesSwitchLiveTest {
                 .as("闸关·零 diff：放行（空转片不再被拒）").isNull();
         assertThatCode(() -> presenceGate.requirePresence(workspaceKey))
                 .as("闸关·无登记：放行").doesNotThrowAnyException();
-
-        // 整轨终验闸·显式闸关（final_verification_gate_enabled #435 起列缺省 FALSE——
-        // 本节仍直写终验列= false 显式锚跳过形语义）： journeys
-        // 在场也不起终验 run、不拦「生成完成」——返回跳过形（无 verifyRunId、
-        // 无 run 终态失败）。闸开态＝现行为面由 GenerationAppServiceTest 编排缝
-        // 锚定（起终验 run 需真智能体边界，live 车道不重复承载）
-        jdbcTemplate.update("""
-                UPDATE prj_agent_configs SET final_verification_gate_enabled = FALSE
-                WHERE agent_key = 'executor'
-                """);
-        var project = com.semgravio.aiplatform.business.project.domain.aggregate.Project
-                .create("闸关终验活体项目", null, null, Long.parseLong(workspaceId), 1L, null);
-        TrackFinalVerificationAppService.Result result =
-                finalVerification.verifyTrack(projectRepository.save(project),
-                        List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→下单支付")));
-        assertThat(result.passed()).as("闸关·终验跳过形：passed").isTrue();
-        assertThat(result.runTerminallyFailed()).as("闸关·终验跳过形：无 run 终态失败").isFalse();
-        assertThat(result.verifyRunId()).as("闸关·终验跳过形：不起终验 run（无锚）").isNull();
     }
 
     /** 运营面开关直写（live 面不发版切态的唯一通道；#435 起无行＝缺省闸关）。 */

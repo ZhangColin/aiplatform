@@ -25,7 +25,6 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.BinaryEx
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -38,7 +37,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.DesignScopeResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
-import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
@@ -52,7 +50,6 @@ import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
@@ -84,7 +81,6 @@ public class ProjectQueryAppService {
     private final UsageQueryPort usageQueryPort;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final OrderQueryAppService orderQueryAppService;
-    private final GenerationSegmentRepository generationSegments;
     private final DesignItemRepository designItems;
     private final CodingRunTrack codingRunTrack;
     private final PrdVersionRepository prdVersionRepository;
@@ -93,7 +89,6 @@ public class ProjectQueryAppService {
                                   UsageQueryPort usageQueryPort,
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                   OrderQueryAppService orderQueryAppService,
-                                  GenerationSegmentRepository generationSegments,
                                   DesignItemRepository designItems,
                                   CodingRunTrack codingRunTrack,
                                   PrdVersionRepository prdVersionRepository) {
@@ -101,7 +96,6 @@ public class ProjectQueryAppService {
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.orderQueryAppService = orderQueryAppService;
-        this.generationSegments = generationSegments;
         this.designItems = designItems;
         this.codingRunTrack = codingRunTrack;
         this.prdVersionRepository = prdVersionRepository;
@@ -471,7 +465,6 @@ public class ProjectQueryAppService {
                 project.getGeneratedAt(), generationState, generationState.getName(),
                 base.activeOrder(),
                 orderQueryAppService.latestOrderOf(project.getId()).orElse(null),
-                segmentsOf(project),
                 designItemsOf(project));
     }
 
@@ -486,25 +479,7 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 生成轨道片清单读模型（#225 计划区只读透出）：轨道表当前片集按 ord 升序映射
-     * ——现行计划（PRD 版本锚门 {@link GenerationSegment#planMatchesPrd} 单点）才
-     * 透出；锚不一致（PRD 已演进、旧计划是过期结构）或无片行返回 null（过期计划
-     * 的进度不是现行事实，不拿旧计划对进度）。
-     */
-    private List<GenerationSegmentResponse> segmentsOf(Project project) {
-        List<GenerationSegment> segments =
-                generationSegments.findByProjectIdOrderByOrdAsc(project.getId());
-        if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
-            return null;
-        }
-        return segments.stream()
-                .map(segment -> new GenerationSegmentResponse(segment.getOrd(),
-                        segment.getDescription(), segment.getStatus(), segment.getStatus().getName()))
-                .toList();
-    }
-
-    /**
-     * 设计轨道件清单读模型（#290 计划区只读透出，对偶 {@link #segmentsOf}）：轨道表
+     * 设计轨道件清单读模型（#290 计划区只读透出）：轨道表
      * 当前件集按 ord 升序映射——现行清单（PRD 版本锚门 {@link DesignItem#
      * checklistMatchesPrd} 单点）才透出；锚不一致（PRD 已演进、旧清单是过期结构）
      * 或无件行返回 null（过期清单的进度不是现行事实，不拿旧清单对进度）。
@@ -521,16 +496,16 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 生成态四态投影（#222，ADR-0020 裁决四——派生序即优先序）：
+     * 生成态投影（#222 四态口径的事实源之一〔轨道片表〕已随 #602 拆除——
+     * 「生成中断」档失去判据，整体四态口径的退役/重设归 #604，本处暂并为
+     * 三档：已生成／生成中／从未生成）：
      * <ol>
      * <li>已生成：{@code generated_at} 落位恒赢——迭代/修正 run 在途不改变生成态
-     * （四态是生成面的呈现态，生成完成即定格）；</li>
+     * （生成面的呈现态，生成完成即定格）；</li>
      * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已提交未起跑
-     * 的排队段）——重启丢标记即落到中断档，正是「中断不判死」的投影面；</li>
-     * <li>生成中断：轨道表有片行而未生成不在途——失败终态、进程重启、PRD 演进致
-     * 旧计划过期同档，「继续生成」出口挂本档；</li>
-     * <li>从未生成：无片行不在途（含存量中断项目——轨道表之前的在途项目，恢复走
-     * 计划重派，「继续生成」同一出口）。</li>
+     * 的排队段）；</li>
+     * <li>从未生成：其余全部（含原「中断」档场景——重启丢标记、失败终态等，
+     * 「继续生成」出口不受投影档位影响）。</li>
      * </ol>
      */
     private GenerationState generationStateOf(Project project) {
@@ -540,9 +515,7 @@ public class ProjectQueryAppService {
         if (codingRunTrack.isInFlight(project.getId())) {
             return GenerationState.GENERATING;
         }
-        return generationSegments.existsByProjectId(project.getId())
-                ? GenerationState.INTERRUPTED
-                : GenerationState.NEVER_GENERATED;
+        return GenerationState.NEVER_GENERATED;
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）+ 终点类型（列表卡弱标识）+ 未终结订单摘要

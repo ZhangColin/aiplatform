@@ -48,14 +48,9 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * 收口路径），主智能体/设计执行体行同列恒无消费。闸判定处动态查库不缓存——
  * 运营面改完下一次闸判定即生效，不发版、进行中 run 不定格。</p>
  *
- * <p><b>生成会话形态两开关列（#436，#432 Step 2 切片机器退役）</b>：
- * 单会话连续编码开关（缺省 true＝阶段 0＋全部切片在同一执行会话槽位内连续
- * 追加——每段新对话＋交接传递，段级自愈＝同会话返工提示不传段级回滚钩；
- * false＝旧「每片新会话」形态）与切片并行机器开关（缺省 false＝fork 隔离
- * 工作区/波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波 fork 并行
- * 旧行为——仅单会话关闭后有消费面）。仅 run 执行体行消费（判定发生在生成
- * 轨道派发处），轨道起跑时动态查库不缓存。落地依据 #434 T2 排练决策
- * （2-3 段大块形态与槽位续用机制同构，实测压缩/交接/止损全要素成立）。</p>
+ * <p><b>生成会话形态两开关列（#436）已随 #602 拆除</b>：单会话连续编码开关
+ * 与切片并行机器开关随切片/轨道机器整体退役（prj_agent_configs 两列＋留痕四面
+ * 经 V82 迁移拆除）——判定消费面（生成轨道派发处）已不存在。</p>
  *
  * <p><b>决策时微指令注入四列（#437，#432 Step 3）</b>：注入总开关
  * （缺省 true＝判定注入生效；false＝全停原样透传）、失败止损阈值
@@ -100,13 +95,6 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *                                   以来零 diff 且无确认被拒仅在该闸被运营打开时生效）
  * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝
  *                                   闸关——终验不起 run、不拦完成叙事）
- * @param singleSessionGenerationEnabled 单会话连续编码开关（#436；缺省 true＝阶段 0＋全部
- *                                   切片在同一执行会话槽位内连续追加〔每段新对话＋交接
- *                                   传递，段级自愈＝同会话返工提示〕；false＝旧「每片新
- *                                   会话」形态。仅 run 执行体行消费）
- * @param parallelSliceMachineEnabled 切片并行机器开关（#436；缺省 false＝fork 隔离工作区/
- *                                   波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波
- *                                   fork 并行旧行为〔#351〕。仅 run 执行体行消费）
  * @param decisionHintsEnabled        决策时注入总开关（#437；缺省 true＝判定注入生效；
  *                                   false＝全停原样透传。仅 run 执行体行消费）
  * @param decisionHintErrorStreak     失败止损阈值（#437；同类错误连续失败 ≥ 此值注入换
@@ -158,8 +146,6 @@ public record AgentOperationalConfig(
         boolean verificationPresenceGateEnabled,
         boolean proofOfOutputGateEnabled,
         boolean finalVerificationGateEnabled,
-        boolean singleSessionGenerationEnabled,
-        boolean parallelSliceMachineEnabled,
         boolean decisionHintsEnabled,
         Integer decisionHintErrorStreak,
         Integer decisionHintStackCap,
@@ -174,17 +160,16 @@ public record AgentOperationalConfig(
     /**
      * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
      * 路由结构性信号两开关关（#454 缺省——文件面/规模标签不参与升档判定）、
-     * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、单会话开＋并行
-     * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、决策时注入开＋阈值/
-     * 上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、verify 自决开
+     * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、决策时注入开＋
+     * 阈值/上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、verify 自决开
      * （#442 缺省）、基座 lint 强制档阻断关（#541 让路缺省——违规只标注）、
      * 构建轨出图工具开（#545 下放缺省——新能力随发版挂载）、
      * 无写者——装配解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, false, false, null, null, null, false, false, false, true, false, true,
-                null, null, null, true, false, true, null, null, null);
+                null, false, false, null, null, null, false, false, false, true, null, null,
+                null, true, false, true, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

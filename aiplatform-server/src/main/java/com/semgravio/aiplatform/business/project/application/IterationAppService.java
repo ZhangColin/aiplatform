@@ -102,7 +102,6 @@ public class IterationAppService {
      * lint 修轮窄修 prompt（#472 更新轨同盖——#425 收口携 lint 面，修轮在本轨
      * 真实触发）：窄修四要素经 {@link CoderRunAttempts#lintFixPromptCore} 单源，
      * 修正轨收口尾句＝finish_edit 事实（同 {@link #fixRetryPrompt} 口径）。
-     * 终验修复轮（TrackFinalVerification）复用本模板——其收口同携 lint 面。
      */
     static String lintFixRetryPrompt(String lintRetryScene) {
         return CoderRunAttempts.lintFixPromptCore("本轮修正", lintRetryScene)
@@ -178,7 +177,6 @@ public class IterationAppService {
     private final ProofOfOutputGate proofGate;
     private final VerificationPresenceGate verificationPresence;
     private final RobustKitLintAppService robustKitLint;
-    private final TrackFinalVerificationAppService finalVerification;
     private final BalanceGateAppService balanceGate;
     /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
     private final KernelClosingCriteria kernelClosingCriteria;
@@ -212,7 +210,6 @@ public class IterationAppService {
             ProofOfOutputGate proofGate,
             VerificationPresenceGate verificationPresence,
             RobustKitLintAppService robustKitLint,
-            TrackFinalVerificationAppService finalVerification,
             BalanceGateAppService balanceGate,
             KernelClosingCriteria kernelClosingCriteria) {
         this.projectRepository = projectRepository;
@@ -229,7 +226,6 @@ public class IterationAppService {
         this.proofGate = proofGate;
         this.verificationPresence = verificationPresence;
         this.robustKitLint = robustKitLint;
-        this.finalVerification = finalVerification;
         this.balanceGate = balanceGate;
         this.kernelClosingCriteria = kernelClosingCriteria;
     }

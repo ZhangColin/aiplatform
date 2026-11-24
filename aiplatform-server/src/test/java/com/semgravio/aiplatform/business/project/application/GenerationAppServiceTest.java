@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -36,8 +35,6 @@ import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import org.slf4j.LoggerFactory;
 
 import org.junit.jupiter.api.AfterEach;
@@ -50,7 +47,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
@@ -74,11 +70,9 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
-import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
-import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -108,13 +102,6 @@ class GenerationAppServiceTest {
     /** 退役名（#82）：静默重试守卫的断言面——重试信号不出用户面事件流。 */
     private static final String RETIRED_RETRYING = "run-retrying";
 
-    /**
-     * 单片计划（#220 minimalFallback 已删——计划缺失走补产兜底，不再兜假计划；
-     * 本常量只是等形测试数据，替位原 fallback 断言面）。
-     */
-    private static final BuildPlan SINGLE_SLICE_PLAN =
-            new BuildPlan(List.of("用户能使用 PRD 描述的全部功能"));
-
     @Autowired
     private GenerationAppService appService;
 
@@ -135,17 +122,9 @@ class GenerationAppServiceTest {
     @Autowired
     private ConversationHistoryAppService conversationHistory;
 
-    /** saveBuildPlan 事实登记口（#220 补产轮脚本：模拟主智能体轮内工具调用事实）。 */
-    @Autowired
-    private BuildPlanFacts buildPlanFacts;
-
     /** PRD 落盘登记适配器（#542 两入口退役断言——真 savePrd 回调侧零派发）。 */
     @Autowired
     private com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter prdArtifacts;
-
-    /** 轨道表写口（计划在场预置——退役前首产回调「计划在场即派」形的复刻）。 */
-    @Autowired
-    private com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository generationSegments;
 
     /** 验证事实登记口（#352 收口卡验证统计脚本：模拟 verify 子智能体轮内工具登记）。 */
     @Autowired
@@ -199,9 +178,6 @@ class GenerationAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_design_items");
-        jdbcTemplate.update("DELETE FROM prj_generation_segments");
-        jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
-        jdbcTemplate.update("DELETE FROM prj_generation_plan_deferrals");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
@@ -313,38 +289,7 @@ class GenerationAppServiceTest {
                 java.sql.Timestamp.class, projectId);
     }
 
-    /** 轨道表片行读口（#220 断言面：ord / description / status（1=待跑 2=已收口 3=失败）/ run_id）。 */
-    private List<Map<String, Object>> segmentRows(Long projectId) {
-        return jdbcTemplate.queryForList(
-                "SELECT ord, description, status, run_id FROM prj_generation_segments"
-                        + " WHERE project_id = ? ORDER BY ord",
-                projectId);
-    }
-
-    /** 计划旅程行读口（#423 断言面：role / entry / key_actions / prd_produced_at）。 */
-    private List<Map<String, Object>> journeyRows(Long projectId) {
-        return jdbcTemplate.queryForList(
-                "SELECT role, entry, key_actions, prd_produced_at"
-                        + " FROM prj_generation_plan_journeys WHERE project_id = ? ORDER BY ord",
-                projectId);
-    }
-
-    /** 计划推迟行读口（ADR-0050 断言面：item / prd_produced_at）。 */
-    private List<Map<String, Object>> deferralRows(Long projectId) {
-        return jdbcTemplate.queryForList(
-                "SELECT item, prd_produced_at"
-                        + " FROM prj_generation_plan_deferrals WHERE project_id = ? ORDER BY ord",
-                projectId);
-    }
-
-    /** 项目 PRD 版本锚读口（锚一致性断言的独立事实源）。 */
-    private java.sql.Timestamp projectPrdAnchor(Long projectId) {
-        return jdbcTemplate.queryForObject(
-                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
-                java.sql.Timestamp.class, projectId);
-    }
-
-    // ---------- 生成轨道（#104：阶段 0 先起服 + 纵向切片逐段） ----------
+    // ---------- 内核 run 生命周期（#601 接线；切片/轨道机器 #602 已拆） ----------
 
     @Test
     void given_shutdown_interrupts_inflight_call_when_attempt_fails_then_no_retry_no_terminal_failure() {
@@ -371,15 +316,12 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         try {
             // 一次尝试即关停收场——事故形态（升档秒败×3 烧满转终态）不复现
             assertThat(converseCalls.get()).isEqualTo(1);
-            // 中断可续跑：阶段 0 保持待跑（不落 FAILED）、切片 1/2 不派、无 run-failed
-            assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
-                    .containsExactly(1, 1, 1);
+            // 中断可续跑：无 run-failed 失败终态、不落完成位（内核单 run——续跑即重发）
             verify(eventsAppService, never())
                     .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
             assertThat(generatedAt(projectId)).isNull();
@@ -407,8 +349,7 @@ class GenerationAppServiceTest {
             givenConverseChain(channelFail, channelFail, channelFail,
                     new AgentReply("r", "完成"));
 
-            appService.dispatchGenerationOnTurnClose(projectId,
-                    new BuildPlan(List.of("用户能注册登录")));
+            appService.dispatchGenerationOnTurnClose(projectId);
 
             ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
             verify(agentClient, atLeast(4)).converse(commands.capture(), any());
@@ -437,56 +378,13 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::heading)
                 .containsExactly(RunHeading.titled(GenerationAppService.STAGE0_TITLE));
     }
-
-    @Test
-    void given_generation_prompts_when_narration_convention_then_anchor_present() {
-        // #225 叙说密度放宽（原 #119「每工作段先解说后动手」）：阶段 0 与切片 run
-        // prompt 及执行体 systemPrompt 同向约定「关键节点才解说」（开工、重大转向、
-        // 失败、收口）——事件流不再被自述刷满，折叠不是遮羞布
-        assertThat(GenerationAppService.STAGE0_RUN_PROMPT)
-                .contains("关键节点");
-        assertThat(GenerationAppService.sliceRunPrompt(1, 2, "用户能注册登录"))
-                .contains("关键节点");
-        assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("关键节点才解说");
-    }
-
-    // ---------- 并行波可观测档案（#419：fork 文件集落档＋宽度遥测——结构化日志留档） ----------
-
-    /** fork diff 桩（改/增两件——合并档案文件集的断言面）。 */
-    private static final String FORK_DIFF_STUB =
-            "diff --git a/src/app/page.tsx b/src/app/page.tsx\n"
-                    + "index 1111111..2222222 100644\n"
-                    + "--- a/src/app/page.tsx\n+++ b/src/app/page.tsx\n"
-                    + "@@ -1 +1 @@\n-old\n+new\n"
-                    + "diff --git a/src/lib/auth.ts b/src/lib/auth.ts\n"
-                    + "new file mode 100644\n"
-                    + "--- /dev/null\n+++ b/src/lib/auth.ts\n"
-                    + "@@ -0,0 +1 @@\n+export const x = 1;\n";
-
-    /** 留档捕获辅件：按标签过滤捕获事件并解析 JSON 正文（回放口径）。 */
-    private static List<Map<String, Object>> archivedPayloads(
-            ListAppender<ILoggingEvent> appender, String tag, ObjectMapper json) throws Exception {
-        List<Map<String, Object>> payloads = new ArrayList<>();
-        for (ILoggingEvent event : appender.list) {
-            if (!event.getFormattedMessage().startsWith(tag)) {
-                continue;
-            }
-            payloads.add(json.readValue(event.getFormattedMessage().substring(tag.length()),
-                    Map.class));
-        }
-        return payloads;
-    }
-
-    // ---------- 生成取消（#359：在途 run 可停止——停止＝中断口径，不重试不回滚） ----------
 
     @Test
     void given_stop_requested_mid_slice_when_generate_then_no_retry_stopped_terminal_and_resumable() {
@@ -508,8 +406,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
-        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId, plan);
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
 
         // 停止不重试：首试一次 converse 即收场（重试环被停止旁路）
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
@@ -518,46 +415,14 @@ class GenerationAppServiceTest {
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
                 run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
                         && Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
-        // 在途 run 不落完成位、片行保持待跑（PENDING 非 FAILED）
-        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
-                .containsExactly(1, 1, 1);
+        // 在途 run 不落完成位（「继续生成」出口不受投影档位影响）
         assertThat(generatedAt(projectId)).isNull();
-        // 四态投影如实：在途标记已释放 → 生成中断（不显假「生成中」）
         assertThat(queryAppService.detail(projectId).generationState())
-                .isEqualTo(GenerationState.INTERRUPTED);
+                .isNotIn(GenerationState.GENERATING, GenerationState.GENERATED);
         // 「继续生成」重发续跑：新内核 run 照跑收口判据
         appService.startGeneration(projectId);
         verify(agentClient, times(2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
-    }
-
-    @Test
-    void given_legacy_null_depends_when_plan_of_then_sequential_not_parallel() {
-        // 存量旧片行（V41 前，depends_on 未设 = NULL）还原为全串行——不误判为「全无
-        // 依赖可并行」（旧计划语义 = 每片依赖前一片）
-        Long projectId = persistedProject("9842");
-        LocalDateTime prdAnchor = projectRepository.findById(projectId).orElseThrow().getPrdProducedAt();
-        long ts = System.nanoTime();
-        jdbcTemplate.update("INSERT INTO prj_generation_segments "
-                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
-                + "VALUES (?, ?, 0, '系统初始化', 1, ?, NULL)", ts, projectId, prdAnchor);
-        jdbcTemplate.update("INSERT INTO prj_generation_segments "
-                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
-                + "VALUES (?, ?, 1, '首片', 1, ?, NULL)", ts + 1, projectId, prdAnchor);
-        jdbcTemplate.update("INSERT INTO prj_generation_segments "
-                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
-                + "VALUES (?, ?, 2, '第二片', 1, ?, NULL)", ts + 2, projectId, prdAnchor);
-        jdbcTemplate.update("INSERT INTO prj_generation_segments "
-                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
-                + "VALUES (?, ?, 3, '第三片', 1, ?, NULL)", ts + 3, projectId, prdAnchor);
-
-        BuildPlan plan = appService.planOf(projectId);
-
-        assertThat(plan.dependsOn(0)).isEmpty();
-        assertThat(plan.dependsOn(1)).isEqualTo(Set.of(1));
-        assertThat(plan.dependsOn(2)).isEqualTo(Set.of(2));
-        assertThat(SliceSchedule.parallelWaves(plan))
-                .containsExactly(List.of(2), List.of(3));
     }
 
     @Test
@@ -583,8 +448,7 @@ class GenerationAppServiceTest {
         givenConverseSucceeds("完成");
         givenKnowledgeHits();
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 内核单 run：检索一次、首跑 prompt 前置知识块
         verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
@@ -595,16 +459,15 @@ class GenerationAppServiceTest {
 
     @Test
     void given_slices_when_generate_then_demo_seed_applied_once_at_last_closing() {
-        // #340 演示种子预置：生成轨道只有末段收口（Demo 将可见前一刻、表已由 run 长出）
-        // 施用种子——中段收口不种（不扰动后续片的模型自检），全场一次；施用先于
-        // 末次 preview-ready（用户首屏即有内容可看）
+        // #340 演示种子预置（#601 内核形态顺延）：内核单 run 单收口——收口即施用
+        // 种子（Demo 将可见前一刻、表已由 run 长出），先于 preview-ready（用户首屏
+        // 即有内容可看）
         Long projectId = persistedProject("9833");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<WorkspaceExecCommand> execs = ArgumentCaptor.forClass(WorkspaceExecCommand.class);
         verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9833"), execs.capture());
@@ -612,9 +475,8 @@ class GenerationAppServiceTest {
                 .map(WorkspaceExecCommand::command)
                 .filter(cmd -> cmd.contains("/opt/seed/apply.sh"))
                 .toList();
-        // 阶段 0 + 2 片 = 3 次收口，只在末段种一次
         assertThat(seedExecs).hasSize(1);
-        // 施用先于末次 preview-ready（seed → exposePreview 的相对序）
+        // 施用先于 preview-ready（seed → exposePreview 的相对序）
         InOrder order = inOrder(workspaceLifecycleAppService);
         order.verify(workspaceLifecycleAppService).exec(eq("9833"),
                 argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh")));
@@ -623,7 +485,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_seed_exec_fails_when_generate_then_last_closing_not_blocked() {
-        // #340 失败不阻断：种子施用抛错也不影响收口（片全收口、首版落位照常）
+        // #340 失败不阻断：种子施用抛错也不影响收口（首版落位照常）
         Long projectId = persistedProject("9834");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -632,8 +494,7 @@ class GenerationAppServiceTest {
                 argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh"))))
                 .thenThrow(new IllegalStateException("容器 exec 失败"));
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         assertThat(generatedAt(projectId)).isNotNull();
         // 内核收口推一次 preview-ready（种子施用后的终态首屏）
@@ -650,8 +511,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 内核收口推一次 preview-ready
         verify(eventsAppService, times(1)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
@@ -662,7 +522,6 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_attempts_exhausted_when_generate_then_failure_face_persisted_same_payload_as_sse() {
-        givenPerSliceSessions();
         // #418 灵魂用例（观测地基批）：重试耗尽转终态——失败面（逐尝试墙钟/配置/失败
         // 原因/本场累计）随 run-failed SSE 扩载与对话史落库同载荷（同收尾卡「SSE 扩载
         // 与落库同载荷」先例）——失败作废可归因（#313「33% 失败作废」从此可测），
@@ -672,8 +531,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
 
-        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId,
-                SINGLE_SLICE_PLAN);
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
 
         // SSE 扩载：run-failed 载荷携 failure 面——逐尝试条数 = 烧满重试次数（每条带
         // 轮次/配置/墙钟/桶）、error = 末次错误现场原文、durationMs = 本场累计墙钟
@@ -724,7 +582,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
@@ -753,259 +611,25 @@ class GenerationAppServiceTest {
 
     @Test
     void given_success_when_generate_then_generated_at_persisted_on_last_slice() {
-        // #104 generated_at 落最后一片收口（口径不变）：阶段 0 + 切片全程成功即落位
+        // #104 generated_at 落位（口径顺延）：内核 run 全程成功即落位
         Long projectId = persistedProject("9804");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
-    // ---------- 生成轨道表（#220：切片计划与片状态落库，计划跟 PRD 版本走） ----------
+    // ---------- 生成态投影（#222；「生成中断」档事实源已随 #602 拆除——四态口径退役归 #604） ----------
 
     @Test
-    void given_dispatch_when_track_runs_then_plan_and_slice_status_persisted() {
-        // 灵魂用例（#220 AC①，#601 内核形态顺延）：PRD 产出后切片计划旁路落库（阶段
-        // 0 + 逐片——表与呈现面读面维持事实连续，内核不消费）；计划与片进度的事实
-        // 源是表——进程内无副本，「模拟重启」后仍可查即「直接查表」（run 无表口径
-        // 的精确例外）
-        Long projectId = persistedProject("9840");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenConverseSucceeds("完成");
-
-        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
-        appService.dispatchGenerationOnTurnClose(projectId, plan);
-
-        verify(agentClient, times(1)).converse(any(), any());
-        // 片集：阶段 0 固定题 + 两片切片句，PRD 版本锚 = 项目 prd_produced_at
-        List<Map<String, Object>> rows = segmentRows(projectId);
-        assertThat(rows).extracting(row -> row.get("description")).containsExactly(
-                GenerationAppService.STAGE0_TITLE, "用户能注册登录", "用户能下单支付");
-        // 内核不逐片收口——片行保持待跑（计划记录面，收口状态随旧口径留空）
-        assertThat(rows).extracting(row -> row.get("status"))
-                .containsExactly(1, 1, 1); // 全部待跑
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT prd_produced_at FROM prj_generation_segments WHERE project_id = ? AND ord = 0",
-                java.sql.Timestamp.class, projectId))
-                .isEqualTo(jdbcTemplate.queryForObject(
-                        "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
-                        java.sql.Timestamp.class, projectId));
-        // 断点 = 表中最深收口片（#221 口径遗留）：无收口片 → -1
-        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(-1);
-        // 计划读回（轨道表还原 BuildPlan，PRD 锚一致）
-        assertThat(appService.planOf(projectId)).isEqualTo(plan);
-    }
-
-    @Test
-    void given_prd_revised_when_dispatch_with_new_plan_then_table_replaced_no_residue() {
-        givenPerSliceSessions();
-        // #220 AC③ 计划生命周期跟 PRD 版本走：PRD 修订（锚换新）后重产计划——表内
-        // 整组替换（旧片不残留续用）、状态随新计划重置；轨道按新计划执行（prompt
-        // 轨迹含新切片、不含旧切片）
-        Long projectId = persistedProject("9841");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
-
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("旧切片一", "旧切片二")));
-        revisePrd(projectId);
-
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("新切片一", "新切片二", "新切片三")));
-
-        // 新计划落表替换（内核不消费计划——执行结构由提示词权威版本＋PRD 正本承载；
-        // 两轮各烧满重试——表替换与跑次解耦）
-        verify(agentClient, atLeast(properties.getMaxAttempts() + 1)).converse(any(), any());
-        // 表内整组替换：三片新句（旧句无残留）、锚 = 修订后的 PRD 版本
-        assertThat(segmentRows(projectId)).extracting(row -> row.get("description")).containsExactly(
-                GenerationAppService.STAGE0_TITLE, "新切片一", "新切片二", "新切片三");
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT prd_produced_at FROM prj_generation_segments WHERE project_id = ? AND ord = 0",
-                java.sql.Timestamp.class, projectId))
-                .isEqualTo(jdbcTemplate.queryForObject(
-                        "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
-                        java.sql.Timestamp.class, projectId));
-    }
-
-    @Test
-    void given_plan_with_journeys_and_sizes_when_recorded_then_both_persisted_with_prd_anchor() {
-        // #423 AC② 两件落库随 PRD 版本走：核心旅程行落计划旅程表（锚 = 项目
-        // prd_produced_at）、每片规模标签落片行 size_label（阶段 0 恒无标签）；
-        // planOf 读回全量四件（表即事实源——进程重启不丢）
-        Long projectId = persistedProject("9843");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
-
-        BuildPlan plan = new BuildPlan(
-                List.of("用户能注册登录", "用户能下单支付"),
-                BuildPlan.sequentialDependencies(List.of("用户能注册登录", "用户能下单支付")),
-                List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付")),
-                List.of(SliceSizeLabel.SMALL, SliceSizeLabel.LARGE));
-        appService.dispatchGenerationOnTurnClose(projectId, plan);
-
-        // 片行规模标签：逐片落 code（1=小 2=中 3=大），阶段 0 无标签
-        assertThat(jdbcTemplate.queryForList(
-                "SELECT size_label FROM prj_generation_segments WHERE project_id = ? ORDER BY ord",
-                projectId))
-                .extracting(row -> row.get("size_label"))
-                .containsExactly(null, 1, 3);
-        // 旅程行：三要素逐条落、锚 = 项目 PRD 版本锚（同片行锚）
-        List<Map<String, Object>> journeys = journeyRows(projectId);
-        assertThat(journeys).hasSize(1);
-        assertThat(journeys.get(0)).containsEntry("role", "买家")
-                .containsEntry("entry", "首页")
-                .containsEntry("key_actions", "注册登录→浏览商品→下单支付");
-        assertThat((java.sql.Timestamp) journeys.get(0).get("prd_produced_at"))
-                .isEqualTo(projectPrdAnchor(projectId));
-        // 读回（轨道表还原 BuildPlan 全量四件）
-        assertThat(appService.planOf(projectId)).isEqualTo(plan);
-    }
-
-    @Test
-    void given_prd_revised_when_replan_then_journeys_and_sizes_replaced_no_residue() {
-        // #423 AC② 演进重产：PRD 演进（锚换新）后重产计划——旅程行整组替换（旧旅程
-        // 无残留）、片行标签随片行整组替换重落（旧标签无残留）、锚 = 修订后 PRD 版本
-        Long projectId = persistedProject("9844");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
-
-        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(
-                List.of("旧切片一", "旧切片二"),
-                BuildPlan.sequentialDependencies(List.of("旧切片一", "旧切片二")),
-                List.of(new BuildPlan.CoreJourney("旧角色", "旧首页", "旧动作串")),
-                List.of(SliceSizeLabel.SMALL, SliceSizeLabel.SMALL)));
-        revisePrd(projectId);
-
-        BuildPlan replan = new BuildPlan(
-                List.of("新切片一", "新切片二", "新切片三"),
-                BuildPlan.sequentialDependencies(List.of("新切片一", "新切片二", "新切片三")),
-                List.of(new BuildPlan.CoreJourney("新角色", "新首页", "新动作串"),
-                        new BuildPlan.CoreJourney("新角色二", "新后台", "新动作串二")),
-                List.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE, SliceSizeLabel.LARGE));
-        appService.dispatchGenerationOnTurnClose(projectId, replan);
-
-        // 旅程行整组替换：只含新计划旅程（旧旅程无残留）、锚 = 修订后 PRD 版本锚
-        List<Map<String, Object>> journeys = journeyRows(projectId);
-        assertThat(journeys).extracting(journey -> journey.get("role"))
-                .containsExactly("新角色", "新角色二");
-        assertThat((java.sql.Timestamp) journeys.get(0).get("prd_produced_at"))
-                .isEqualTo(projectPrdAnchor(projectId));
-        // 片行标签随整组替换重落（旧标签无残留；阶段 0 恒无标签；code 口径）
-        assertThat(jdbcTemplate.queryForList(
-                "SELECT size_label FROM prj_generation_segments WHERE project_id = ? ORDER BY ord",
-                projectId))
-                .extracting(row -> row.get("size_label"))
-                .containsExactly(null, 2, 3, 3);
-        // 读回 = 新计划全量（旧两件不沿用）
-        assertThat(appService.planOf(projectId)).isEqualTo(replan);
-    }
-
-    @Test
-    void given_plan_with_deferred_items_when_recorded_then_deferrals_persisted_with_prd_anchor() {
-        // ADR-0050 推迟段落库随 PRD 版本走：推迟行落计划推迟表（锚 = 项目
-        // prd_produced_at）；planOf 读回全量五件（表即事实源——进程重启不丢）
-        Long projectId = persistedProject("9845");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
-
-        BuildPlan plan = new BuildPlan(
-                List.of("用户能注册登录"),
-                BuildPlan.sequentialDependencies(List.of("用户能注册登录")),
-                List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付")),
-                List.of(SliceSizeLabel.SMALL),
-                List.of("支付：下单结算界面走通，停在不真扣款", "通知：站内呈现，不发真实推送"));
-        appService.dispatchGenerationOnTurnClose(projectId, plan);
-
-        List<Map<String, Object>> deferrals = deferralRows(projectId);
-        assertThat(deferrals).extracting(row -> row.get("item"))
-                .containsExactly("支付：下单结算界面走通，停在不真扣款", "通知：站内呈现，不发真实推送");
-        assertThat((java.sql.Timestamp) deferrals.get(0).get("prd_produced_at"))
-                .isEqualTo(projectPrdAnchor(projectId));
-        // 读回（轨道表还原 BuildPlan 全量五件）
-        assertThat(appService.planOf(projectId)).isEqualTo(plan);
-    }
-
-    @Test
-    void given_prd_revised_when_replan_then_deferrals_replaced_no_residue() {
-        // ADR-0050 演进重产：PRD 演进（锚换新）后重产计划——推迟行整组替换（旧推迟
-        // 项无残留）、锚 = 修订后 PRD 版本
-        Long projectId = persistedProject("9846");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
-
-        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(
-                List.of("旧切片一"),
-                BuildPlan.sequentialDependencies(List.of("旧切片一")),
-                List.of(new BuildPlan.CoreJourney("旧角色", "旧首页", "旧动作串")),
-                List.of(SliceSizeLabel.SMALL),
-                List.of("旧推迟项")));
-        revisePrd(projectId);
-
-        BuildPlan replan = new BuildPlan(
-                List.of("新切片一"),
-                BuildPlan.sequentialDependencies(List.of("新切片一")),
-                List.of(new BuildPlan.CoreJourney("新角色", "新首页", "新动作串")),
-                List.of(SliceSizeLabel.MEDIUM),
-                List.of("新推迟项一", "新推迟项二"));
-        appService.dispatchGenerationOnTurnClose(projectId, replan);
-
-        List<Map<String, Object>> deferrals = deferralRows(projectId);
-        assertThat(deferrals).extracting(row -> row.get("item"))
-                .containsExactly("新推迟项一", "新推迟项二");
-        assertThat((java.sql.Timestamp) deferrals.get(0).get("prd_produced_at"))
-                .isEqualTo(projectPrdAnchor(projectId));
-        // 读回 = 新计划全量（旧推迟项不沿用）
-        assertThat(appService.planOf(projectId)).isEqualTo(replan);
-    }
-
-    // ---------- 断点续跑（#221：继续生成从断点接续，已收口片不重做） ----------
-
-    // ---------- 失败回滚本段起点（#353：重试耗尽→留账+回滚段起点+新会话重跑一轮） ----------
-
-    /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
-    private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
-
-    /**
-     * 段起点捕获可得的 git 桩（#353 生产形态）：rev-parse / 锚 commit 回假 hash
-     * （段起跑恒能捕获段起点），其余 exec 全通；产出证明探针（#420 --name-only）
-     * 缺省回有产出（正常干活——空转场景由 {@link #givenWorkspaceGitReadyWithProofScript}
-     * 的脚本位改写）。缺省桩（{@link #givenAgentsMdWriteSucceeds} 的空 stdout）走
-     * 「捕获不到段起点」的降级路径（不重跑、闸跳过、直接终态）——既有失败测试即
-     * 该路径的断言面。
-     */
-    private void givenWorkspaceGitReady() {
-        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
-            WorkspaceExecCommand cmd = invocation.getArgument(1);
-            if (cmd.command().contains("git rev-parse")) {
-                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
-            }
-            if (cmd.command().contains("git diff --name-only")) {
-                return new ExecResultResponse("src/app/page.tsx\n", "", 0);
-            }
-            return new ExecResultResponse("", "", 0);
-        });
-        when(workspaceLifecycleAppService.exposePreview(anyString()))
-                .thenReturn(URI.create("http://localhost:30080"));
-    }
-
-    // ---------- 存量恢复（#223：无表项目对照收尾卡标已完片、只补缺口） ----------
-
-    // ---------- 生成态四态投影（#222：REST 配置与「继续生成」出口的推导输入） ----------
-
-    @Test
-    void given_generation_lifecycle_when_detail_then_four_state_projection() {
-        // 灵魂用例（#222 AC①）：从未生成 →（派发起跑，含排队段）生成中 →（失败
-        // 终态）生成中断 →（「继续生成」续跑起跑）生成中 →（收口）已生成——投影由
-        // 轨道表＋generated_at＋在途标记派生，读口 = REST 详情（与 SSE 会话态无关）
+    void given_generation_lifecycle_when_detail_then_state_projection() {
+        // 灵魂用例（#222 AC① 顺延）：从未生成 →（派发起跑，含排队段）生成中 →（失败
+        // 终态，「中断」档事实源已随 #602 拆除——暂归从未生成档，四态口径退役归
+        // #604）→（「继续生成」续跑起跑）生成中 →（收口）已生成——投影由
+        // generated_at＋在途标记派生，读口 = REST 详情（与 SSE 会话态无关）
         Long projectId = persistedProject("9855");
         givenAgentsMdWriteSucceeds();
         assertThat(queryAppService.detail(projectId).generationState())
@@ -1021,23 +645,23 @@ class GenerationAppServiceTest {
             submitted.add((Runnable) invocation.getArgument(1));
             return null;
         }).when(sessionExecutor).submitGeneration(any(), any());
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.GENERATING);
 
-        // 起跑后重试耗尽转终态失败 → 生成中断（「继续生成」出口的配置；进程重启丢
-        // 在途标记同落此档——有轨道片行而未生成不在途）
+        // 起跑后重试耗尽转终态失败 → 未生成不在途（「继续生成」出口不受档位影响；
+        // 进程重启丢在途标记同落此档）
         when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("阶段0起服失败"))
-                .thenThrow(new IllegalStateException("阶段0起服失败"))
-                .thenThrow(new IllegalStateException("阶段0起服失败"));
+                .thenThrow(new IllegalStateException("起服失败"))
+                .thenThrow(new IllegalStateException("起服失败"))
+                .thenThrow(new IllegalStateException("起服失败"));
         submitted.remove(0).run();
         assertThat(queryAppService.detail(projectId).generationState())
-                .isEqualTo(GenerationState.INTERRUPTED);
+                .isEqualTo(GenerationState.NEVER_GENERATED);
 
         // 「继续生成」（REST 出口）→ 再次生成中；收口 → 已生成（generated_at 落位
         // 恒赢——此后迭代/修正在途不再改变生成态）
-        givenConverseChain(new AgentReply("r0", "阶段0完成"), new AgentReply("r1", "切片1完成"));
+        givenConverseChain(new AgentReply("r0", "完成"), new AgentReply("r1", "完成"));
         appService.startGeneration(projectId);
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.GENERATING);
@@ -1047,43 +671,18 @@ class GenerationAppServiceTest {
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
-    @Test
-    void given_failed_segment_without_scene_when_inventory_then_reason_degrades() {
-        // #221 现状盘点纯函数·降级口径：跨进程终态失败现场丢失（进程内账不在）——
-        // 失败叙事仍在（轨道表状态是事实源）、不携「最近错误现场」；断点在阶段 0
-        // （无收口片）时进度行渲染「尚无」而非空列表
-        LocalDateTime anchor = LocalDateTime.now();
-        GenerationSegment stage0 = GenerationSegment.pending(1L, 0,
-                GenerationAppService.STAGE0_TITLE, anchor);
-        stage0.fail("run-x");
-
-        String inventory = GenerationAppService.resumeInventoryBlock(0, List.of(stage0), null,
-                /* failedSegmentRolledBack= */ true);
-
-        assertThat(inventory)
-                .contains("自动重试耗尽后失败")
-                .doesNotContain("最近错误现场")
-                .contains("已收口进度：尚无")
-                // #353 失败段干净重做口径：失败现场已回滚本段起点——从头完成而非脏续
-                .contains("回滚到本段起点")
-                .contains("从头完成本段任务")
-                .doesNotContain("保留已对的工作");
-    }
-
     // ---------- 命令与资产 ----------
 
     @Test
     void given_project_when_generate_then_kernel_command_bound_to_kernel_session() {
-        givenPerSliceSessions();
-        // 编码命令全要素（阶段 0 首 run 代表）：coder 会话稳定绑定 + owner 寻址 +
-        // EXECUTOR 配置 + 长任务超时 + 计量 dims + 项目工作区 + 流关联
+        // 编码命令全要素（内核首 run）：kernel 会话稳定绑定 + owner 寻址 +
+        // 模型配置解析 + 长任务超时 + 计量 dims + 项目工作区 + 流关联
         Long projectId = persistedProject("9805");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("已生成");
 
-        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId,
-                SINGLE_SLICE_PLAN);
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(command.capture(), any());
@@ -1159,7 +758,7 @@ class GenerationAppServiceTest {
                 VALUES ('executor', ?, 'pro')
                 """, "执行体覆盖协议：开工先列步骤。");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(command.capture(), any());
@@ -1180,7 +779,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("已生成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         InOrder order = inOrder(workspaceLifecycleAppService, agentClient);
         order.verify(workspaceLifecycleAppService).exec(eq("9806"),
@@ -1213,7 +812,7 @@ class GenerationAppServiceTest {
         givenConverseSucceeds("已生成");
         givenKnowledgeHits();
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         verify(knowledgePort).retrieve(
                 eq(GenerationAppService.KERNEL_FIRST_RUN_PROMPT), eq(5));
@@ -1237,7 +836,7 @@ class GenerationAppServiceTest {
         doThrow(new RuntimeException("pgvector 抖动")).when(knowledgePort)
                 .retrieve(anyString(), anyInt());
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(command.capture(), any());
@@ -1257,8 +856,7 @@ class GenerationAppServiceTest {
         givenConverseChain(new IllegalStateException("首次尝试中断"),
                 new AgentReply("run-2", "系统已生成"));
 
-        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId,
-                SINGLE_SLICE_PLAN);
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
@@ -1284,10 +882,9 @@ class GenerationAppServiceTest {
 
     @Test
     void given_converse_ok_but_service_unreachable_when_generate_then_no_generated_at_and_reinitiate_exit() {
-        givenPerSliceSessions();
-        // 假完成（#35）：阶段 0 converse 正常结束但 8081 不可达——核验不过不落
-        // generated_at，走既有重试/终态失败路径（阶段 0 失败不派切片），「继续生成」出口
-        // 仍在；重发（REST 路径无交接物）沿用表内现行计划（#220 PRD 锚一致即有效）
+        // 假完成（#35）：converse 正常结束但 8081 不可达——核验不过不落
+        // generated_at，走既有重试/终态失败路径，「继续生成」出口仍在；重发（REST
+        // 路径无交接物）即新内核 run 照跑收口判据
         Long projectId = persistedProject("9810");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds(); // AGENTS.md 写入（无 curl 字样）成功
@@ -1296,7 +893,7 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "Connection refused", 7));
         givenConverseChain(new AgentReply("run-fake", "很抱歉，目前系统尚未真正实现出来"));
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 阶段 0 假完成 → 静默重试到超限转终态：converse 满 maxAttempts 次、不派切片
         verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
@@ -1342,7 +939,7 @@ class GenerationAppServiceTest {
      * 基座 lint 强制档阻断开关切回旧行为（#541 缺省＝让路——阻断形态用例显式切回）：
      * 直写 executor 行 robust_lint_blocking_enabled=TRUE（强制档违规喂修轮修一轮＋
      * 修不完收口结构性拒绝＝#425 原阻断形态——回滚保险承载面）。与
-     * {@link #givenClosingGatesOpen}/{@link #givenPerSliceSessions} 可叠加（列各写各的）。
+     * {@link #givenClosingGatesOpen} 可叠加（列各写各的）。
      * 让路缺省面由 given_bare_client_..._default_... 系新用例锚定。
      */
     private void givenRobustLintBlocking() {
@@ -1356,99 +953,13 @@ class GenerationAppServiceTest {
                 """);
     }
 
-    /**
-     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——旧行为用例显式切回）：
-     * 直写 executor 行 single_session_generation_enabled=FALSE（每片新会话，
-     * {@code coder-{projectId}-slice-n}）＋ parallel_slice_machine_enabled=TRUE
-     * （宽波 fork 并行）。与 {@link #givenClosingGatesOpen} 可叠加（列各写各的）。
-     * 单会话缺省面由 given_single_session_... 系新用例锚定。
-     */
-    private void givenPerSliceSessions() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     single_session_generation_enabled, parallel_slice_machine_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    single_session_generation_enabled
-                        = EXCLUDED.single_session_generation_enabled,
-                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
-                """);
-    }
-
-    /**
-     * 切片机器半开（#436 三态之「每片新会话＋并行机器关」）：直写 executor 行
-     * single_session_generation_enabled=FALSE＋parallel_slice_machine_enabled=FALSE
-     * ——每片新会话保留（coder-{projectId}-slice-n），但 fork/波/并行/合并全关，
-     * 宽波逐片主工作区串行。
-     */
-    private void givenPerSliceSessionsSerialOnly() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     single_session_generation_enabled, parallel_slice_machine_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, FALSE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    single_session_generation_enabled
-                        = EXCLUDED.single_session_generation_enabled,
-                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
-                """);
-    }
-
-    /**
-     * 产出证明探针脚本位（#420）：key＝工作区（并行波下 fork 副本各跑各的闸——
-     * 按工作区隔离不串扰）、true＝零 diff 空转、缺省 false＝有产出。
-     */
-    private final Map<String, AtomicBoolean> idleProofs = new ConcurrentHashMap<>();
-
-    private AtomicBoolean idleProof(String workspace) {
-        return idleProofs.computeIfAbsent(workspace, key -> new AtomicBoolean(false));
-    }
-
-    /**
-     * 产出证明闸桩（#420）：git 就绪（段起点可捕获）＋diff 探针读脚本位
-     * {@link #idleProofs}（探针命令带 --name-only，与留账的 --cached diff 区分）。
-     */
-    private void givenWorkspaceGitReadyWithProofScript() {
-        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
-            WorkspaceExecCommand cmd = invocation.getArgument(1);
-            if (cmd == null) {
-                return new ExecResultResponse("", "", 0);
-            }
-            if (cmd.command().contains("git rev-parse")) {
-                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
-            }
-            if (cmd.command().contains("git diff --name-only")) {
-                boolean idle = idleProof((String) invocation.getArgument(0)).get();
-                return new ExecResultResponse(
-                        idle ? "" : "src/app/page.tsx\n", "", 0);
-            }
-            return new ExecResultResponse("", "", 0);
-        });
-        when(workspaceLifecycleAppService.exposePreview(anyString()))
-                .thenReturn(URI.create("http://localhost:30080"));
-    }
-
     // ---------- 验证在场硬门（#424；#433 开关化、#435 缺省闸关——闸开用例显式切回） ----------
-
-    // ---------- 整轨终验＋fix 循环＋已知缺陷叙事（#427） ----------
-
-    /** 单旅程计划（#427 整轨终验的载荷轴——旅程清单随计划同批）。 */
-    private static final BuildPlan JOURNEY_PLAN = new BuildPlan(
-            List.of("用户能注册登录", "用户能下单支付"),
-            BuildPlan.sequentialDependencies(List.of("用户能注册登录", "用户能下单支付")),
-            List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付")),
-            List.of(SliceSizeLabel.SMALL, SliceSizeLabel.MEDIUM));
 
     @Test
     void given_protocol_constants_when_inspect_then_ui_first_and_entry_completeness_anchored() {
-        // #339 协议面（经运营配置面可调）：主智能体切片计划约定与补产提示词同向
-        // 承载首片界面先行；执行体协议承载入口文件写全约定
-        assertThat(AgentProfile.MAIN.systemPrompt())
-                .contains("先做出可点的界面")
-                .contains("界面骨架")
-                .contains("预览立即可点");
-        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT).contains("先做出可点的界面");
+        // #339 协议面（经运营配置面可调）：执行体协议承载入口文件写全约定与
+        // 首屏界面先行（#602：主智能体侧切片计划/首片界面先行的旧协议句随
+        // 13 条执行协议清场一并退役——内核系统提示是生成侧协议正本）
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("入口文件")
                 .contains(ProjectFiles.BASELINE_ENTRY)
@@ -1483,7 +994,7 @@ class GenerationAppServiceTest {
                     new FileChange("/src/pages/Home.jsx", 60, 0)));
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(List.of("用户能注册登录")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 内核单 run 单收口；断言收尾卡
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
@@ -1531,7 +1042,7 @@ class GenerationAppServiceTest {
                             Map.of("install", 3L), Map.of("verify", 1L)));
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(List.of("用户能注册登录")));
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 内核单 run 单收口；断言收尾卡
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
@@ -1621,7 +1132,7 @@ class GenerationAppServiceTest {
                     return new AgentReply(command.runId(), "切片完成");
                 });
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 内核首试中段崩 → 重试成功收口：收尾卡 attempts 恰两条
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
@@ -1697,7 +1208,7 @@ class GenerationAppServiceTest {
                             new StageDurations(7, Map.of(), Map.of(), Map.of()));
                 });
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         // 重试 prompt 携进展现场（#323）：错误现场＋已干多久/干到哪的平台可观测事实
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
@@ -1738,36 +1249,6 @@ class GenerationAppServiceTest {
         assertThat((List<Map<String, Object>>) closing.get("files"))
                 .extracting(file -> file.get("path"))
                 .containsExactlyInAnyOrder("src/failed.tsx", "src/lib.js");
-    }
-
-    // ---------- 基座 lint 两档（#425：强制档拦裸写/预置档拦自写不拦不用） ----------
-
-    /** 基座 lint 脚本位（key＝工作区）：强制档/预置档 grep 的 stdout（缺省空＝零命中）。 */
-    private final Map<String, String> robustLintMandatory = new ConcurrentHashMap<>();
-    private final Map<String, String> robustLintPreset = new ConcurrentHashMap<>();
-
-    /**
-     * 基座 lint 桩（#425）：两档 grep 按命令分流读脚本位（空 stdout＝退出码 1 零命中）
-     * ——须在 {@link #givenWorkspaceGitReadyWithProofScript} 之后打（窄桩后注册优先；
-     * 探针与既有命令走既有宽桩 exit 0＝健壮件在场）。
-     */
-    private void givenRobustKitPresentWithLintScript() {
-        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
-                cmd != null && cmd.command().contains("grep -rnE")
-                        && cmd.command().contains("createClient"))))
-                .thenAnswer(invocation -> {
-                    String stdout = robustLintMandatory.getOrDefault(
-                            (String) invocation.getArgument(0), "");
-                    return new ExecResultResponse(stdout, "", stdout.isEmpty() ? 1 : 0);
-                });
-        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
-                cmd != null && cmd.command().contains("grep -rnE")
-                        && cmd.command().contains("pbkdf2"))))
-                .thenAnswer(invocation -> {
-                    String stdout = robustLintPreset.getOrDefault(
-                            (String) invocation.getArgument(0), "");
-                    return new ExecResultResponse(stdout, "", stdout.isEmpty() ? 1 : 0);
-                });
     }
 
     // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------
@@ -1820,7 +1301,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("已生成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<WorkspaceExecCommand> execs =
                 ArgumentCaptor.forClass(WorkspaceExecCommand.class);
@@ -1843,7 +1324,7 @@ class GenerationAppServiceTest {
         givenPlatformWriteSucceeds();
         givenConverseSucceeds("已生成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<WorkspaceExecCommand> execs =
                 ArgumentCaptor.forClass(WorkspaceExecCommand.class);
@@ -1878,7 +1359,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds(); // exec 全退 0 ⇒ 探针在场 ⇒ 节拼入
         givenConverseSucceeds("已生成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<WorkspaceExecCommand> execs =
                 ArgumentCaptor.forClass(WorkspaceExecCommand.class);
@@ -1903,7 +1384,7 @@ class GenerationAppServiceTest {
         givenRobustKitAbsent();
         givenConverseSucceeds("已生成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<WorkspaceExecCommand> execs =
                 ArgumentCaptor.forClass(WorkspaceExecCommand.class);
@@ -1918,8 +1399,7 @@ class GenerationAppServiceTest {
     @Test
     void given_generation_in_flight_when_trigger_again_then_prj_017() {
         // 在途守卫（含已提交未起跑）：异步轨道占位期间重复触发拒绝——重发走 REST
-        // 入口（无交接物），计划解析自轨道表（#220：派发即落库，在途期间表内已有
-        // 现行计划），解析通过后撞在途占位
+        // 入口（内核不消费计划/交接物），dispatch 直撞在途占位
         Long projectId = persistedProject("9813");
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("已生成");
@@ -1933,7 +1413,7 @@ class GenerationAppServiceTest {
             return null;
         }).when(sessionExecutor).submitGeneration(any(), any());
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         assertThatThrownBy(() -> appService.startGeneration(projectId))
                 .isInstanceOf(ApplicationException.class)
@@ -1980,13 +1460,13 @@ class GenerationAppServiceTest {
 
     @Test
     void given_agents_md_write_fails_when_generate_then_no_run_and_guard_released() {
-        // 资产就位失败如实上抛（环境故障口径），不起跑 run、在途守卫释放；计划未落库
-        //（落库后于资产就位），重发仍带交接物再派
+        // 资产就位失败如实上抛（环境故障口径），不起跑 run、在途守卫释放；重发即新
+        // 内核 run 再派
         Long projectId = persistedProject("9817");
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "disk full", 1));
 
-        assertThatThrownBy(() -> appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN))
+        assertThatThrownBy(() -> appService.dispatchGenerationOnTurnClose(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
         verify(agentClient, never()).converse(any(), any());
@@ -1994,7 +1474,7 @@ class GenerationAppServiceTest {
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseChain(new AgentReply("run-y", "系统已生成"));
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
         // 重发 = 新内核 run 一次 converse
         verify(agentClient, times(1)).converse(any(), any());
     }
@@ -2002,10 +1482,10 @@ class GenerationAppServiceTest {
     // ---------- 首建派发门（#542 访谈②：两入口退役——首产回调与轮收口兜一轮删、快道/按钮点火） ----------
 
     @Test
-    void given_no_plan_when_turn_close_dispatch_with_handover_then_full_chain() {
-        // 灵魂例（#462 收口精化的存活半边，#542 语义顺延）：快道收口观测派发
-        // （dispatchGenerationOnTurnClose 只在快道事实/设计定稿在场时被调用）携
-        // buildPlanFacts 交接物——直派全链：计划落轨＋阶段 0＋逐片
+    void given_turn_close_dispatch_then_kernel_chain_and_first_build_requested() {
+        // 灵魂例（#462 收口精化的存活半边，#542/#602 语义顺延）：快道收口观测派发
+        // （dispatchGenerationOnTurnClose 只在快道事实/设计定稿在场时被调用）——
+        // 直派内核全链（切片/轨道机器已拆，无计划落轨面）
         Long projectId = persistedProject("9880");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -2017,12 +1497,9 @@ class GenerationAppServiceTest {
         });
 
         GenerationAppService.GenerationRun run =
-                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+                appService.dispatchGenerationOnTurnClose(projectId);
 
         assertThat(run).isNotNull();
-        assertThat(appService.planOf(projectId)).isEqualTo(SINGLE_SLICE_PLAN);
-        // 内核不逐片收口——无收口片，断点口径遗留为 -1
-        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(-1);
         assertThat(generatedAt(projectId)).isNotNull();
         // 首建点火时点落位（#542 派发门——卡/门「未派发」读点的事实源）
         assertThat(jdbcTemplate.queryForMap(
@@ -2033,18 +1510,12 @@ class GenerationAppServiceTest {
     @Test
     void given_prd_produced_without_user_trigger_then_no_auto_dispatch() throws Exception {
         // 灵魂例（#542 AC③：两入口退役断言）——PRD 产出不再自动起跑：首产回调
-        // （dispatchFirstDemoOnPrdProduced 已删）只剩事实登记，计划在场也不派——
-        // 轨道表预置计划后经真适配器回调产出 PRD，零编码 run、点火不落位（全域无
-        // 无条件自动路径；点火＝岔路口「立即生成」/付费确认/快道，另见
-        // MainAgentAppServiceTest 自然收口用例）
+        // （dispatchFirstDemoOnPrdProduced 已删）只剩事实登记——经真适配器回调产出
+        // PRD，零编码 run、点火不落位（全域无无条件自动路径；点火＝岔路口「立即
+        // 生成」/付费确认/快道，另见 MainAgentAppServiceTest 自然收口用例）
         Long projectId = persistedProject("9881");
         seedConfirmedVersion(projectId);
-        // 计划在场（退役前首产回调「计划在场即派」的少数形——现在也不派）
         Project project = projectRepository.findById(projectId).orElseThrow();
-        generationSegments.save(GenerationSegment.pending(projectId, 0,
-                GenerationAppService.STAGE0_TITLE, project.getPrdProducedAt()));
-        generationSegments.save(GenerationSegment.pending(projectId, 1,
-                "用户能注册登录", project.getPrdProducedAt()));
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
 
@@ -2064,9 +1535,8 @@ class GenerationAppServiceTest {
     @Test
     void given_first_demo_failed_when_retrigger_then_redispatch_from_track() {
         // 失败重发同口径（#542：重试面＝「继续生成」按钮，不重复确认/不再出卡）：
-        // 首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」——「继续生成」
-        // （startGeneration）再触发即断点续跑（计划已在轨道表，不重产计划）。
-        // 首派走快道收口观测（产 PRD 同转计划交接物在场），重发走按钮路径
+        // 首派失败（起服耗尽转终态）后项目仍「未生成」——「继续生成」（startGeneration）
+        // 再触发即重发新内核 run（收口判据照跑）。首派走收口观测入口，重发走按钮路径
         Long projectId = persistedProject("9883");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -2081,11 +1551,11 @@ class GenerationAppServiceTest {
         });
 
         GenerationAppService.GenerationRun first =
-                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+                appService.dispatchGenerationOnTurnClose(projectId);
 
         assertThat(first).isNotNull();
         assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
-        // 重发（「继续生成」按钮路径，计划在轨道表）：续跑即完成（重打桩的 matcher
+        // 重发（「继续生成」按钮路径）：新内核 run 续跑即完成（重打桩的 matcher
         // 空参调用触发旧 answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -2116,7 +1586,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         verify(agentClient, times(1)).converse(commands.capture(), any());
         Map<String, Object> version = jdbcTemplate.queryForMap(
@@ -2155,7 +1625,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         Map<String, Object> version = jdbcTemplate.queryForMap(
                 "SELECT version_no, prd_version_no FROM prj_demo_versions WHERE project_id = ?",
@@ -2172,7 +1642,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         Map<String, Object> version = jdbcTemplate.queryForMap(
                 "SELECT version_no, prd_version_no FROM prj_demo_versions WHERE project_id = ?",
@@ -2200,7 +1670,6 @@ class GenerationAppServiceTest {
     @Test
     void given_first_demo_in_flight_when_turn_opinions_arrive_then_notified_and_merged_fix_after_close()
             throws InterruptedException {
-        givenPerSliceSessions();
         // 灵魂用例（#360 AC①）：首 Demo 在途时意见轮收口的派发不再静默丢——意见入队
         // + 对话面平台明示（guide-reply 复用，prompt 缺省不再重建用户气泡）；生成
         // 收口成功后排空队列，多条意见合并为一场更新 run 补派（修正轨排队合并同构）
@@ -2226,16 +1695,15 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        BuildPlan plan = new BuildPlan(List.of("用户能注册登录"));
-        appService.dispatchGenerationOnTurnClose(projectId, plan);
+        appService.dispatchGenerationOnTurnClose(projectId);
         Thread generationWorker = new Thread(tracks.remove(0));
         generationWorker.start();
         assertThat(generating.await(5, TimeUnit.SECONDS)).isTrue();
 
         // 在途窗口内两条意见轮收口：不再静默跳过——入队不派（无新 converse）+ 平台明示
-        assertThat(appService.dispatchGenerationOnTurnClose(projectId, null,
+        assertThat(appService.dispatchGenerationOnTurnClose(projectId,
                 new GenerationAppService.TurnOpinion("列表加筛选", null, "turn-1"))).isNull();
-        assertThat(appService.dispatchGenerationOnTurnClose(projectId, null,
+        assertThat(appService.dispatchGenerationOnTurnClose(projectId,
                 new GenerationAppService.TurnOpinion("加导出功能", "PRD 已加导出节", "turn-2")))
                 .isNull();
         verify(agentClient, times(1)).converse(any(), any());
@@ -2275,7 +1743,6 @@ class GenerationAppServiceTest {
     @Test
     void given_stopped_first_demo_when_turn_opinion_queued_then_resume_digests_without_deadlock()
             throws InterruptedException {
-        givenPerSliceSessions();
         // #360 AC②：停止收口不排空（队列保留）、「继续生成」续跑成功收口时消化——
         // 与恢复出口不冲突（不自锁、不重复派）；生成成功后「继续生成」出口按已生成
         // 口径拒绝（PRJ_017），不与补派的更新 run 抢轨道
@@ -2304,14 +1771,13 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        BuildPlan plan = new BuildPlan(List.of("用户能注册登录"));
-        appService.dispatchGenerationOnTurnClose(projectId, plan);
+        appService.dispatchGenerationOnTurnClose(projectId);
         Thread generationWorker = new Thread(tracks.remove(0));
         generationWorker.start();
         assertThat(generating.await(5, TimeUnit.SECONDS)).isTrue();
 
         // 在途窗口入队一条意见后用户停止首 Demo
-        assertThat(appService.dispatchGenerationOnTurnClose(projectId, null,
+        assertThat(appService.dispatchGenerationOnTurnClose(projectId,
                 new GenerationAppService.TurnOpinion("列表加筛选", null, "turn-1"))).isNull();
         assertThat(codingRunTrack.requestStop(projectId)).isTrue();
         generationWorker.join(5000);
@@ -2385,13 +1851,6 @@ class GenerationAppServiceTest {
                 """, System.nanoTime(), projectId, project.getPrdProducedAt());
     }
 
-    /** 模拟 PRD 修订落定（savePrd 写出后的库事实）：刷新 prd_produced_at——版本锚换新值。 */
-    private void revisePrd(Long projectId) {
-        Project project = projectRepository.findById(projectId).orElseThrow();
-        project.markPrdProduced();
-        projectRepository.save(project);
-    }
-
     private Long persistedArchivedProject(String workspaceId) {
         Project project = Project.create("归档生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.archive();
@@ -2432,7 +1891,7 @@ class GenerationAppServiceTest {
         });
 
         GenerationAppService.GenerationRun run =
-                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+                appService.dispatchGenerationOnTurnClose(projectId);
 
         assertThat(run).isNotNull();
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
@@ -2469,7 +1928,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseFailsThenSucceeds("起服失败");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());
@@ -2530,7 +1989,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(commands.capture(), any());
@@ -2565,7 +2024,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseFailsThenSucceeds("起服失败");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());
@@ -2597,7 +2056,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         givenConverseFailsThenSucceeds("起服失败");
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());
@@ -2631,7 +2090,7 @@ class GenerationAppServiceTest {
                 .thenAnswer(invocation -> new AgentReply(
                         invocation.getArgument(0, AgentCommand.class).runId(), "完成"));
 
-        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());

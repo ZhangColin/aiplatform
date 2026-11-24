@@ -47,12 +47,6 @@ import java.time.LocalDateTime;
  * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
  * @param newProofOfOutputGateEnabled   变更后空转产出证明闸开关（#433；同上）
  * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
- * @param oldSingleSessionGenerationEnabled 变更前单会话连续编码开关（#436；恒有值——
- *                                       缺省态恒 true＝单会话开）
- * @param oldParallelSliceMachineEnabled 变更前切片并行机器开关（#436；恒有值——缺省
- *                                       态恒 false＝并行机器关）
- * @param newSingleSessionGenerationEnabled 变更后单会话连续编码开关（#436；恒有值）
- * @param newParallelSliceMachineEnabled 变更后切片并行机器开关（#436；恒有值）
  * @param oldDecisionHintsEnabled     变更前决策时注入总开关（#437；恒有值——缺省态恒
  *                                true＝注入开）
  * @param oldDecisionHintErrorStreak 变更前失败止损阈值（#437；null＝代码缺省）
@@ -93,8 +87,6 @@ public record AgentConfigTrace(
         boolean oldVerificationPresenceGateEnabled,
         boolean oldProofOfOutputGateEnabled,
         boolean oldFinalVerificationGateEnabled,
-        boolean oldSingleSessionGenerationEnabled,
-        boolean oldParallelSliceMachineEnabled,
         boolean oldDecisionHintsEnabled,
         Integer oldDecisionHintErrorStreak,
         Integer oldDecisionHintStackCap,
@@ -118,8 +110,6 @@ public record AgentConfigTrace(
         boolean newVerificationPresenceGateEnabled,
         boolean newProofOfOutputGateEnabled,
         boolean newFinalVerificationGateEnabled,
-        boolean newSingleSessionGenerationEnabled,
-        boolean newParallelSliceMachineEnabled,
         boolean newDecisionHintsEnabled,
         Integer newDecisionHintErrorStreak,
         Integer newDecisionHintStackCap,

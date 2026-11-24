@@ -39,9 +39,6 @@ import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanDeferralRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanJourneyRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
@@ -79,9 +76,6 @@ public class ProjectLifecycleAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
     private final ConversationHistoryAppService conversationHistory;
-    private final GenerationSegmentRepository generationSegments;
-    private final GenerationPlanJourneyRepository generationPlanJourneys;
-    private final GenerationPlanDeferralRepository generationPlanDeferrals;
     private final DesignItemRepository designItems;
     private final DesignSpecRepository designSpecs;
     private final PrdVersionRepository prdVersions;
@@ -102,9 +96,6 @@ public class ProjectLifecycleAppService {
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
                                       ConversationHistoryAppService conversationHistory,
-                                      GenerationSegmentRepository generationSegments,
-                                      GenerationPlanJourneyRepository generationPlanJourneys,
-                                      GenerationPlanDeferralRepository generationPlanDeferrals,
                                       DesignItemRepository designItems,
                                       DesignSpecRepository designSpecs,
                                       PrdVersionRepository prdVersions,
@@ -124,9 +115,6 @@ public class ProjectLifecycleAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
         this.conversationHistory = conversationHistory;
-        this.generationSegments = generationSegments;
-        this.generationPlanJourneys = generationPlanJourneys;
-        this.generationPlanDeferrals = generationPlanDeferrals;
         this.designItems = designItems;
         this.designSpecs = designSpecs;
         this.prdVersions = prdVersions;
@@ -380,13 +368,10 @@ public class ProjectLifecycleAppService {
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
         // 派生 deleteBy 是「先查后 remove」，需在事务内执行（DesignProcessAppService
-        // 整组替换同款形制）——对话史/轨道/设计/PRD 版本/Demo 版本行级联收进同一
+        // 整组替换同款形制）——对话史/设计/PRD 版本/Demo 版本行级联收进同一
         // 短事务（知识清理自带事务的 JDBC 直删，不在此列）
         transactionTemplate.executeWithoutResult(status -> {
             conversationHistory.purgeByProject(projectId);
-            generationSegments.deleteByProjectId(projectId);
-            generationPlanJourneys.deleteByProjectId(projectId);
-            generationPlanDeferrals.deleteByProjectId(projectId);
             designItems.deleteByProjectId(projectId);
             designSpecs.deleteByProjectId(projectId);
             prdVersions.deleteByProjectId(projectId);

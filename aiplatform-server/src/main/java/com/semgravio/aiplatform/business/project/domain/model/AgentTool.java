@@ -29,8 +29,6 @@ public enum AgentTool implements BaseEnum<AgentTool> {
             "每轮一问的澄清工具（问答挂起的唯一起源——编排链路）"),
     SAVE_PRD(2, "savePrd", "main", AgentToolKind.SKELETON,
             "PRD 产出/修订落盘＋业务登记（需求侧判定的观测面——编排链路）"),
-    SAVE_BUILD_PLAN(3, "saveBuildPlan", "main", AgentToolKind.SKELETON,
-            "切片计划事实登记（生成编排的切片输入——编排链路）"),
     LIST_WORKSPACE_FILES(4, "list_workspace_files", "main", AgentToolKind.SKELETON,
             "工作区文件清单（答询查证只读件）"),
     READ_WORKSPACE_FILE(5, "read_workspace_file", "main", AgentToolKind.SKELETON,

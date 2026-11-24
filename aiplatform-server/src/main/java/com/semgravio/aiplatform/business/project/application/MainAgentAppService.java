@@ -117,7 +117,6 @@ public class MainAgentAppService {
     private final GenerationAppService generationAppService;
     private final DesignProcessAppService designProcessAppService;
     private final PrdRevisionFacts prdRevisions;
-    private final BuildPlanFacts buildPlanFacts;
     private final ConversationHistoryAppService conversationHistory;
     private final MainAgentProperties mainAgentProperties;
     private final SedimentProposalFacts sedimentProposals;
@@ -234,8 +233,7 @@ public class MainAgentAppService {
                     + "哪些缺口按推荐补全）；PRD「关键约束」章的风格方向行按随附「风格方向"
                     + "库·目录」选与项目领域气质最匹配的方向——缺省套仅当其余方向无一贴近"
                     + "时才兜底，不得因收口赶工省事选缺省（2026-11-18 收口赶工落缺省套实案"
-                    + "修复，ADR-0052 补记）；系统终点随后按第 5 条调用 saveBuildPlan 产出"
-                    + "切片计划。保存成功后向用户输出简短总结（PRD 已产出＋核心要点＋按推荐"
+                    + "修复，ADR-0052 补记）。保存成功后向用户输出简短总结（PRD 已产出＋核心要点＋按推荐"
                     + "补全了哪些缺口）。除此之外本轮不要再提问。";
 
     /** 入口分类调用的计量锚（#537 段收口接线）：projectId → 本次派发的分类 runId——
@@ -262,7 +260,7 @@ public class MainAgentAppService {
             OrderQueryAppService orderQueryAppService,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             DesignProcessAppService designProcessAppService,
-            PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
+            PrdRevisionFacts prdRevisions,
             ConversationHistoryAppService conversationHistory,
             MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
             SegmentSettlementAppService segmentSettlement,
@@ -280,7 +278,6 @@ public class MainAgentAppService {
         this.generationAppService = generationAppService;
         this.designProcessAppService = designProcessAppService;
         this.prdRevisions = prdRevisions;
-        this.buildPlanFacts = buildPlanFacts;
         this.conversationHistory = conversationHistory;
         this.mainAgentProperties = mainAgentProperties;
         this.sedimentProposals = sedimentProposals;
@@ -472,112 +469,6 @@ public class MainAgentAppService {
     }
 
     /**
-     * 切片计划补产轮（#220 计划缺失兜底＝重派主智能体按 PRD 产计划，替位已删的
-     * minimalFallback）：平台发起的主智能体轮——按现行 PRD 补产切片计划并调用
-     * saveBuildPlan。不记用户发言（平台发起非用户话语——对话面只见主智能体的补产
-     * 回复，透明面可见）；轮收口走同一条 {@link #dispatchOnTurnClose}（saveBuildPlan
-     * 事实 → 自动派生成）。补产无果不递归再补——由 {@code GenerationAppService} 的
-     * 补产账止住（同一 PRD 版本只补产一次，用户重提意见即兜底）。
-     *
-     * <p><b>存量恢复（#223）</b>：往次生成早于轨道表的项目（无持久化计划但已有
-     * 收口成果）补产时携已收口成果清单（收尾卡叙事）——已完片按原文一字不改照录
-     * 进计划，平台落库时对照收尾卡精确匹配标已完片、只补缺口续跑。清单空（无存量
-     * 成果，或表内有旧片行的换锚重产——从头来是既定口径）即常规全量补产。</p>
-     *
-     * @param completedOutcomes 已收口成果清单（收尾卡 summary，按先后；空 = 常规补产）
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）；
-     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
-     *                              （补产轮可追问——挂起即止，答复后续跑收口同链必达）
-     */
-    public MainAgentRun requestBuildPlan(Long projectId, List<String> completedOutcomes) {
-        Project project = requireUpdatableProject(projectId);
-        String sessionId = sessionIdOf(projectId);
-        requireNoPendingQuestion(project, sessionId);
-        String runId = EventsAppService.newRunId();
-        AgentCommand command = mainCommand(project, runId,
-                buildPlanRequestPrompt(completedOutcomes));
-        sessionExecutor.submit(sessionId, () -> {
-            // 同意见轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的计划事实
-            // 不冒充本轮补产产出）
-            String workspaceId = Long.toString(project.getWorkspaceId());
-            prdRevisions.clear(workspaceId);
-            buildPlanFacts.clear(workspaceId);
-            fastLaneFacts.clear(workspaceId);
-            sedimentProposals.clear(workspaceId);
-            try {
-                ConversationHistoryAppService.TurnRecorder recorder =
-                        conversationHistory.recorder(projectId, eventBridge.sink(project));
-                AgentReply reply = agentClient.converse(command, recorder);
-                settleSuspendedQuestion(sessionId, runId, reply);
-                recorder.settle(runId, reply);
-            }
-            catch (RuntimeException e) {
-                // 失败即清锚（同意见轮口径）：不派发，用户重提即兜底；error 事件已由
-                // converse 内发出（异常上抛由会话执行器吞）
-                opinionExchanges.remove(sessionId);
-                suspendedQuestions.remove(sessionId);
-                throw e;
-            }
-            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ true);
-        });
-        return new MainAgentRun(runId);
-    }
-
-    /**
-     * 补产轮 prompt（#220）：平台请求主智能体按现行 PRD 补产切片计划——只补产计划、
-     * 不动 PRD（PRD 修订走用户的意见链，不因补产顺手改需求）。#423 起同批必产两件
-     * 结构化产出（核心旅程清单＋每片规模标签）——补产兜底同要两件；ADR-0050 起
-     * 同批携带推迟清单 deferredItems（与 PRD「推迟清单」章同内容，无显式推迟项可
-     * 省略）——补产兜底同口径。
-     */
-    static final String BUILD_PLAN_REQUEST_PROMPT =
-            "平台请求：本项目还没有切片计划。请阅读工作区 docs/PRD.md（需求正本），"
-                    + "把系统拆成有序的纵向切片——第一片固定为界面先行：先做出可点的界面"
-                    + "（把主要页面与导航的界面骨架一次搭出来、可交互、预览立即可点），此片"
-                    + "先不接数据与后端逻辑；自第二片起每片一句用户语言「用户能 X」，从用户"
-                    + "操作到后端落库端到端走通。按实现的自然顺序排列，宁粗勿碎。切片之间"
-                    + "若有依赖（某片必须等另一片先做完——共享同一页面、数据结构、登录态等），"
-                    + "在 saveBuildPlan 的 dependsOn 里写明该片依赖的前面哪几片（1-based 片序，"
-                    + "第一片 = 1）；无依赖的独立切片不写依赖（平台会并行生成它们）。同时必产"
-                    + "两件结构化产出：coreJourneys 传核心旅程清单——几条真实用户使用系统的"
-                    + "端到端旅程（挑用户验收时最该走得通的几条，通常 2-5 条，覆盖不同角色与"
-                    + "主流程），每条三要素：role（角色：谁在用）、entry（入口：从哪个页面进来）、"
-                    + "keyActions（关键动作串：一路按顺序做什么，用「→」连接）；sliceSizes 传"
-                    + "与 slices 等长的每片规模标签，取值只能是「小」「中」「大」之一（按该片"
-                    + "的实现面积估：小＝单点小改、中＝常规功能片、大＝多页面多接口的重功能片）；"
-                    + "deferredItems 传推迟清单（与 PRD「推迟清单」章同内容）——本期不做的"
-                    + "功能面：业务向默认集＝支付停在不真扣款/通知站内呈现不发真实推送/多角色"
-                    + "降单角色，外部集成 PRD 明确涉及时按需列入，信息量不足的功能也进清单，"
-                    + "没有显式推迟项可省略——并调用 saveBuildPlan 工具保存切片计划。不要修改 PRD（本请求只补产"
-                    + "计划）。保存成功后，向用户简短说明已按 PRD 拟好实施计划、系统即将开始"
-                    + "生成。";
-
-    /**
-     * 补产轮 prompt 拼装（#223 存量变体）：清单空 = 常规补产原文；有存量成果时
-     * 追加对照约定——已完片按原文一字不改照录进计划前部（平台落库按收尾卡叙事
-     * 精确匹配标已完片，措辞漂移即对照不上、按待跑重做——降级方向安全）。
-     */
-    static String buildPlanRequestPrompt(List<String> completedOutcomes) {
-        if (completedOutcomes.isEmpty()) {
-            return BUILD_PLAN_REQUEST_PROMPT;
-        }
-        StringBuilder prompt = new StringBuilder(BUILD_PLAN_REQUEST_PROMPT)
-                .append("\n\n补充事实：本项目工作区已有往次生成收口的成果（平台收尾卡")
-                .append("记录，按先后顺序）：\n");
-        for (String outcome : completedOutcomes) {
-            prompt.append("- ").append(outcome).append('\n');
-        }
-        return prompt
-                .append("拟计划时请对照这份清单：已完成的切片（上述「")
-                .append(GenerationAppService.SLICE_CLOSING_PREFIX)
-                .append("」各项）")
-                .append("在新计划中按原文一字不改照录、排在计划前部并保持上述先后顺序；")
-                .append("PRD 中尚未完成的其余部分作为待做切片排在后面——")
-                .append("平台会跳过已完成的切片、只生成待做部分。")
-                .toString();
-    }
-
-    /**
      * 终点切换前置守卫（#285）：切换重产轮与意见轮同会话同引擎约束——挂起问答
      * 在即同步 409 指路作答。归位在切换编排落库<b>之前</b>调用（拒绝即零副作用
      * ——终点属性不动）；{@link #requestEndpointShift} 提交前同守卫兜竞态。
@@ -596,7 +487,9 @@ public class MainAgentAppService {
      * prompt 由 {@link #endpointShiftPrompt} 按切换事实拼装（PRD 已产出＝重产指令
      * ——清单章随终点类型走形/设计硬约束入关键约束；访谈期＝转向通告）。轮收口
      * 走同一条 {@link #dispatchOnTurnClose}（生成轨道对设计类终点收口，设计过程
-     * 编排归后续票；回到系统形可经补产链自动起生成）。守卫同意见轮（归档/订单
+     * 编排归后续票；回到系统形的重产轮收口＝用户触发链的延续——
+     * {@link GenerationAppService#noteFirstBuildIntent} 记意图、收口按意图再派
+     * 首个构建〔#291 验收⑤，#542 非无条件自动路径口径保持〕）。守卫同意见轮（归档/订单
      * 冻结在切换编排前置判定，挂起问答在此同步 409 指路作答）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
@@ -608,15 +501,15 @@ public class MainAgentAppService {
         requireNoPendingQuestion(project, sessionId);
         String runId = EventsAppService.newRunId();
         AgentCommand command = mainCommand(project, runId, prompt);
-        // 首建派发意图（#542）：切换是用户触发面——重产轮收口（系统终点＋PRD/计划
-        // 在场）按意图延续派发首个构建（如定稿设计稿入起跑上下文），非无条件路径
+        // 首建派发意图（#542 用户触发面，#602 去计划形重塑）：切换重产轮收口
+        // （系统终点＋PRD 在场）按意图延续派发首个构建（如定稿设计稿入起跑上下文），
+        // 非无条件自动路径——收口消费即清，重启丢账用户再点一次即兜底
         generationAppService.noteFirstBuildIntent(projectId);
         sessionExecutor.submit(sessionId, () -> {
-            // 同补产轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的修订/
-            // 计划事实不冒充本轮产出）
+            // 同补产轮口径（#602 补产链退役后仅切换轮走本路）：本轮需求侧事实从零
+            // 起算（清残留——上一轮滞留的修订事实不冒充本轮产出）
             String workspaceId = Long.toString(project.getWorkspaceId());
             prdRevisions.clear(workspaceId);
-            buildPlanFacts.clear(workspaceId);
             fastLaneFacts.clear(workspaceId);
             sedimentProposals.clear(workspaceId);
             try {
@@ -641,7 +534,7 @@ public class MainAgentAppService {
     /**
      * 切换重产轮 prompt（#285）：按「前终点 → 新终点 × PRD 已否产出」拼装——PRD
      * 在即重产（清单章走形随终点：设计＝设计物清单、系统/系统＋设计＝功能清单
-     * 〔后者设计硬约束入关键约束〕；回到系统形带切片计划同首产序）；访谈期即
+     * 〔后者设计硬约束入关键约束〕）；访谈期即
      * 转向通告（后续梳理按新终点收口，PRD 产出时形态自对齐）。
      */
     static String endpointShiftPrompt(ProjectEndpointType previous, ProjectEndpointType target,
@@ -687,10 +580,6 @@ public class MainAgentAppService {
         }
         prompt.append("先 load_skill_through_path 加载 prd-writing 技能（清单章按项目终点类型走形），")
                 .append("再调用 savePrd 保存修订后的完整 PRD 全文（summary 必传：说明终点切换与本次修订内容）。");
-        if (previous == ProjectEndpointType.DESIGN && target == ProjectEndpointType.SYSTEM) {
-            prompt.append("保存成功后调用 saveBuildPlan 产出切片计划（同首次产出 PRD 后的口径），")
-                    .append("系统随后自动开始生成。");
-        }
         prompt.append("保存成功后向用户简短说明本次变化。");
         return prompt.toString();
     }
@@ -754,7 +643,6 @@ public class MainAgentAppService {
             // 不会被本轮起跑插队 wipe）：炸轮滞留/访谈期的 savePrd 事实残留不进
             // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
-            buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
             fastLaneFacts.clear(Long.toString(project.getWorkspaceId()));
             sedimentProposals.clear(Long.toString(project.getWorkspaceId()));
             try {
@@ -946,8 +834,8 @@ public class MainAgentAppService {
      * 的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、
      * 不自动重试——用户重提即兜底。
      *
-     * <p><b>平台轮（补产/终点切换重产）</b>：{@code platformRound} 区分平台发起的
-     * 需求侧轮（补产 {@link #requestBuildPlan} / 终点切换重产 {@link #requestEndpointShift}）
+     * <p><b>平台轮（终点切换重产）</b>：{@code platformRound} 区分平台发起的
+     * 需求侧轮（终点切换重产 {@link #requestEndpointShift}）
      * 与用户对话轮。去门化后用户轮与平台轮同判据（PRD 已产出即派），平台轮标记仍
      * 保留——悬空契约与沉淀记账的平台轮豁免沿用它（ADR-0032/ADR-0038 口径不变）。</p>
      *
@@ -1006,12 +894,8 @@ public class MainAgentAppService {
             if (project.getGeneratedAt() == null) {
                 // 未生成：PRD 已产出即平台自动派首次产出轨（轨内无门——终点类型定轨：
                 // 系统终点派生成 #101、设计类终点起设计过程 #289 同律）；未产出
-                // PRD 静默止于对话（访谈期常态：生成前意见链终点）。切片计划（saveBuildPlan
-                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话；设计轨
-                // 清单源＝PRD 清单章直读，无交接物）；无计划交接物时由
-                // GenerationAppService 按轨道表解析现行计划，仍缺失则重派
-                // 本服务补产（#220，不兜假计划）
-                BuildPlan plan = buildPlanFacts.consume(workspaceId);
+                // PRD 静默止于对话（访谈期常态：生成前意见链终点）。#602 起切片
+                // 计划机器整体退役——生成无计划交接物，PRD 正本即全部输入
                 // 意见锚取出（#291）：设计类终点的设计派发消费意见原文（在途排队/
                 // 改稿受理）；生成路径不需要（生成读工作区 PRD 正本）——其余锚照
                 // 「收口即消费」清掉
@@ -1073,7 +957,7 @@ public class MainAgentAppService {
                 // （上方设计轨分岔已收口，设计定稿构建归 DesignProcessAppService）。
                 if (fastLaneFacts.consume(workspaceId)) {
                     GenerationAppService.GenerationRun run =
-                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
+                            generationAppService.dispatchGenerationOnTurnClose(projectId,
                                     new GenerationAppService.TurnOpinion(
                                             opinion, prdRevisionSummary, runId));
                     if (run != null) {
@@ -1082,15 +966,20 @@ public class MainAgentAppService {
                     }
                     return;
                 }
-                // 计划补产轮收口的意图延续（#542）：补产链由用户触发面发起（「立即
-                // 生成」/确认/快道/设计定稿）——计划在场且意图在场即再派（同一触发
-                // 链的延续、条件性路径）；无意图不派（返回 null）
-                GenerationAppService.GenerationRun resumed =
-                        generationAppService.dispatchAfterPlanProduction(projectId, plan);
-                if (resumed != null) {
-                    log.info("[main-close] 项目 {} 计划补产完成，按用户触发链延续派发"
-                            + "首次生成 run（{}）", projectId, resumed.runId());
-                    return;
+                // 切换重产轮收口的意图延续（#542 用户触发面，#602 去计划形重塑）：
+                // 意图由 {@link #requestEndpointShift} 记账——仅平台轮（切换轮本身）
+                // 收口消费（同一条用户触发链的延续、条件性路径）；自然收口/无意图
+                // 不派（点火归用户，岔路口卡/确认门读面在场）
+                if (platformRound) {
+                    GenerationAppService.GenerationRun resumed =
+                            generationAppService.dispatchAfterEndpointShift(projectId,
+                                    new GenerationAppService.TurnOpinion(
+                                            opinion, prdRevisionSummary, runId));
+                    if (resumed != null) {
+                        log.info("[main-close] 项目 {} 切换重产轮收口，按用户触发链延续派发"
+                                + "首次生成 run（{}）", projectId, resumed.runId());
+                        return;
+                    }
                 }
                 // 自然收口：在途意见照旧排队（#360——首 Demo 在途的反馈不静默丢），
                 // 试用态置岔路口位（幂等——意见修订轮再收口卡照旧在场）
@@ -1384,7 +1273,6 @@ public class MainAgentAppService {
     private void clearTurnAnchors(String sessionId, String workspaceId) {
         opinionExchanges.remove(sessionId);
         prdRevisions.clear(workspaceId);
-        buildPlanFacts.clear(workspaceId);
         fastLaneFacts.clear(workspaceId);
     }
 

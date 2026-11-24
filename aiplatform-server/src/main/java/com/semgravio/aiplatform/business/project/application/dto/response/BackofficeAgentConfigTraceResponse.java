@@ -49,12 +49,6 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
  * @param newProofOfOutputGateEnabled 变更后空转产出证明闸开关（#433；同上）
  * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
- * @param oldSingleSessionGenerationEnabled 变更前单会话连续编码开关（#436；恒有值——
- *                          缺省态恒 true＝单会话开）
- * @param oldParallelSliceMachineEnabled 变更前切片并行机器开关（#436；恒有值——缺省
- *                          态恒 false＝并行机器关）
- * @param newSingleSessionGenerationEnabled 变更后单会话连续编码开关（#436；恒有值）
- * @param newParallelSliceMachineEnabled 变更后切片并行机器开关（#436；恒有值）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -95,10 +89,6 @@ public record BackofficeAgentConfigTraceResponse(
         boolean oldProofOfOutputGateEnabled,
         @Schema(description = "变更前整轨终验拦「生成完成」开关（#433；恒有值）")
         boolean oldFinalVerificationGateEnabled,
-        @Schema(description = "变更前单会话连续编码开关（#436；恒有值——缺省态恒 true＝单会话开）")
-        boolean oldSingleSessionGenerationEnabled,
-        @Schema(description = "变更前切片并行机器开关（#436；恒有值——缺省态恒 false＝并行机器关）")
-        boolean oldParallelSliceMachineEnabled,
         @Schema(description = "变更前决策时注入总开关（#437；恒有值——缺省态恒 true＝注入开）")
         boolean oldDecisionHintsEnabled,
         @Schema(description = "变更前失败止损阈值（#437；null＝此前即代码缺省）")
@@ -146,10 +136,6 @@ public record BackofficeAgentConfigTraceResponse(
         boolean newProofOfOutputGateEnabled,
         @Schema(description = "变更后整轨终验拦「生成完成」开关（#433；恒有值）")
         boolean newFinalVerificationGateEnabled,
-        @Schema(description = "变更后单会话连续编码开关（#436；恒有值）")
-        boolean newSingleSessionGenerationEnabled,
-        @Schema(description = "变更后切片并行机器开关（#436；恒有值）")
-        boolean newParallelSliceMachineEnabled,
         @Schema(description = "变更后决策时注入总开关（#437；恒有值）")
         boolean newDecisionHintsEnabled,
         @Schema(description = "变更后失败止损阈值（#437；null＝本次清空回落代码缺省）")
@@ -183,7 +169,6 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldFinalVerifyFixBudget(),
                 trace.oldVerificationPresenceGateEnabled(), trace.oldProofOfOutputGateEnabled(),
                 trace.oldFinalVerificationGateEnabled(),
-                trace.oldSingleSessionGenerationEnabled(), trace.oldParallelSliceMachineEnabled(),
                 trace.oldDecisionHintsEnabled(), trace.oldDecisionHintErrorStreak(),
                 trace.oldDecisionHintStackCap(), trace.oldDecisionHintDisabled(),
                 trace.oldVerifySelfDecisionEnabled(), trace.oldRobustLintBlockingEnabled(),
@@ -197,7 +182,6 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.newFinalVerifyFixBudget(),
                 trace.newVerificationPresenceGateEnabled(), trace.newProofOfOutputGateEnabled(),
                 trace.newFinalVerificationGateEnabled(),
-                trace.newSingleSessionGenerationEnabled(), trace.newParallelSliceMachineEnabled(),
                 trace.newDecisionHintsEnabled(), trace.newDecisionHintErrorStreak(),
                 trace.newDecisionHintStackCap(), trace.newDecisionHintDisabled(),
                 trace.newVerifySelfDecisionEnabled(), trace.newRobustLintBlockingEnabled(),

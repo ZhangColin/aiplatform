@@ -132,15 +132,9 @@ class MainAgentAppServiceTest {
     @Autowired
     private PoolTopupAppService poolTopupAppService;
 
-    @Autowired
-    private BuildPlanFacts buildPlanFacts;
-
     /** 沉淀自荐事实登记口（#460 兜底盘问豁免判定：模拟轮内 propose_sediment 工具执行）。 */
     @Autowired
     private SedimentProposalFacts sedimentProposals;
-
-    @Autowired
-    private GenerationAppService generationAppService;
 
     @Autowired
     private CodingRunTrack codingRunTrack;
@@ -1044,33 +1038,6 @@ class MainAgentAppServiceTest {
         assertThat(mainCommands.get(1).systemPrompt()).doesNotContain("平台轻提醒");
     }
 
-    @Test
-    void given_platform_round_close_when_next_turn_then_no_nudge() {
-        // 平台轮（切片计划补产）收口消费事实但不记账——「该提未提」口径只适用用户轮
-        Long projectId = persistedGeneratedProject("9723");
-        givenSessionExecutorRunsInline();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("main-")) {
-                return new AgentReply(command.runId(), "好的");
-            }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
-            return new AgentReply(command.runId(), "修正完成");
-        });
-
-        appService.requestBuildPlan(projectId, List.of());
-        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(2)).converse(command.capture(), any());
-        List<AgentCommand> mainCommands = command.getAllValues().stream()
-                .filter(c -> c.sessionId().equals("main-" + projectId))
-                .toList();
-        assertThat(mainCommands).hasSize(2);
-        assertThat(mainCommands.get(1).systemPrompt()).doesNotContain("平台轻提醒");
-    }
-
     // ---------- 受理动作卡（#87：受理轮过程呈现——迭代期意见轮开场受理事件） ----------
 
     @Test
@@ -1332,10 +1299,6 @@ class MainAgentAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("main-")) {
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
-            }
             return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
         });
 
@@ -1366,8 +1329,6 @@ class MainAgentAppServiceTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
                 fastLaneFacts.record(command.workspaceId());
             }
             return new AgentReply(command.runId(), "已按收敛令直接产出 PRD 与切片计划");
@@ -1389,9 +1350,9 @@ class MainAgentAppServiceTest {
     void given_prd_produced_with_version_rows_when_opinion_turn_closes_then_first_generation_dispatched() {
         // 首场编码 run 的会话寻址与配置形状（#104 生成轨道首 run）：
         // PRD 已产出（判据＝prdProducedAt，去门化 #462 后与版本行无关——版本行在场
-        // 只是 legacy 记行形态，不构成任何门）；切片计划随派发交接（planOf 可取到）。
+        // 只是 legacy 记行形态，不构成任何门）。
         // #601 内核接线：首建直派新内核（权威提示＋generation-kernel 装配键＋
-        // kernelForm＋无工具规格）
+        // kernelForm＋无工具规格）；#602：切片计划交接面随切片机器整体出局
         Long projectId = persistedPrdProject("9731");
         seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
@@ -1403,8 +1364,6 @@ class MainAgentAppServiceTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
                 fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
             }
             return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
@@ -1427,43 +1386,11 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_main_produces_build_plan_when_turn_closes_then_plan_handed_to_generation() {
-        // 灵魂用例（#103 交接物来源；前置事实＝PRD 已产出——去门化 #462 后与版本行
-        // 无关，seedPrdVersionRow 仅 legacy 记行形态夹具）：
-        // 主智能体产出 PRD 后顺带产出切片计划（saveBuildPlan 事实）——收口派发把切片
-        // 计划随生成交接给 GenerationAppService（planOf 可取到），判定以工具调用事实
-        // 为准、不解析自由文本
-        Long projectId = persistedPrdProject("9729");
-        seedPrdVersionRow(projectId);
-        givenSessionExecutorRunsInline();
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("", "", 0));
-        // #543 风格物化写面（首个构建派发四件落位——本用例不断言其内容，缺省成功）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("main-")) {
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
-                fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
-                return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
-            }
-            return new AgentReply(command.runId(), "系统已生成");
-        });
-
-        appService.runOpinionTurn(projectId, "直接做");
-
-        assertThat(generationAppService.planOf(projectId))
-                .isEqualTo(new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
-    }
-
-    @Test
     void given_main_no_build_plan_when_turn_closes_then_no_auto_redispatch_fork_stays() {
         // 无计划路径（#220 删 minimalFallback；#542 两入口退役改判）：主智能体产出
         // PRD 但未产出切片计划——自然收口不再自动补产（补产链随轮收口兜一轮退役）：
-        // 岔路口卡照旧在场（PRD 可看），「立即生成」触发时才走补产（startGeneration
-        // 计划缺失重派主智能体补产，见 GenerationAppServiceTest）——不兜假计划
+        // 岔路口卡照旧在场（PRD 可看），「立即生成」触发时才点火——不兜假计划。
+        // #602：切片计划机器整体出局，「计划缺失」概念随之退役（内核路径无计划判据）
         Long projectId = persistedPrdProject("9730");
         seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
@@ -1479,38 +1406,9 @@ class MainAgentAppServiceTest {
         verify(agentClient, times(1)).converse(command.capture(), any());
         assertThat(command.getAllValues())
                 .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
-        assertThat(generationAppService.planOf(projectId)).isNull(); // 不出现假计划
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
                 .get("fork_state")).isEqualTo(ForkState.PENDING.getCode());
-    }
-
-    @Test
-    void given_build_plan_request_prompt_when_inspect_then_structured_extension_required() {
-        // #423 AC③ 计划补产兜底同要两件：补产指令面与主智能体工作协议（第 5 条
-        // saveBuildPlan 契约）对 coreJourneys／sliceSizes 一并要求——工具契约是
-        // 硬门（缺件即拒），prompt 是模型知道要产出的指令面
-        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT)
-                .contains("coreJourneys")
-                .contains("sliceSizes");
-        assertThat(AgentProfile.MAIN.systemPrompt())
-                .contains("coreJourneys")
-                .contains("sliceSizes");
-    }
-
-    @Test
-    void given_build_plan_request_prompt_when_inspect_then_deferral_segment_required() {
-        // ADR-0050 计划补产兜底同口径：补产指令面与主智能体工作协议（第 5 条）对
-        // deferredItems 推迟清单一并要求（业务向默认集口径、与 PRD「推迟清单」章
-        // 同内容、无显式推迟项可省略）
-        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT)
-                .contains("deferredItems")
-                .contains("支付停在不真扣款")
-                .contains("没有显式推迟项可省略");
-        assertThat(AgentProfile.MAIN.systemPrompt())
-                .contains("deferredItems")
-                .contains("推迟清单")
-                .contains("典型 3-5 片");
     }
 
     @Test
@@ -1635,8 +1533,6 @@ class MainAgentAppServiceTest {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
                 prdRevisions.record(command.workspaceId(), "交付范围扩大");
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
                 fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
                 return new AgentReply(command.runId(), "已按意见修订 PRD");
             }
@@ -2014,12 +1910,10 @@ class MainAgentAppServiceTest {
         });
         when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
             AgentResume resume = invocation.getArgument(0);
-            // 代答续跑：模型按收口指令产出 PRD（事实面置位）＋切片计划交接
+            // 代答续跑：模型按收口指令产出 PRD（事实面置位）
             Project project = projectRepository.findById(projectId).orElseThrow();
             project.markPrdProduced();
             projectRepository.save(project);
-            buildPlanFacts.record(resume.workspaceId(),
-                    new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
             return new AgentReply(resume.runId(), "好的，按推荐补全并保存 PRD");
         });
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
@@ -2060,8 +1954,6 @@ class MainAgentAppServiceTest {
                 Project project = projectRepository.findById(projectId).orElseThrow();
                 project.markPrdProduced();
                 projectRepository.save(project);
-                buildPlanFacts.record(command.workspaceId(),
-                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
                 return new AgentReply(command.runId(), "已按推荐补全并保存 PRD");
             }
             return new AgentReply(command.runId(), "我还没整理好");

@@ -99,9 +99,10 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[1].slot").value("executor"))
                 .andExpect(jsonPath("$.data[2].slot").value("designer"))
                 .andExpect(jsonPath("$.data[3].slot").value("subagent"))
-                // main：平台十件（骨架八恒挂载——含 propose_skill #263 与
-                // propose_sediment #460 自荐三槽位齐开＋增强两件按生效开关缺省开）
-                .andExpect(jsonPath("$.data[0].tools", hasSize(10)))
+                // main：平台九件（#602 saveBuildPlan 随切片机器出局；骨架七恒挂载——
+                // 含 propose_skill #263 与 propose_sediment #460 自荐三槽位齐开＋
+                // 增强两件按生效开关缺省开）
+                .andExpect(jsonPath("$.data[0].tools", hasSize(9)))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_sediment')].kind")
@@ -187,7 +188,7 @@ class BackofficeAgentToolSeamTest {
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), spec.toolSpec());
         assertThat(toolkit.getToolNames()).doesNotContain("web_search");
         assertThat(toolkit.getToolNames()).contains("fetch_url", "ask_user", "savePrd",
-                "saveBuildPlan", "list_workspace_files", "read_workspace_file",
+                "list_workspace_files", "read_workspace_file",
                 "query_project_facts");
 
         // 开：回归（装配含回）
@@ -306,7 +307,7 @@ class BackofficeAgentToolSeamTest {
             throws Exception {
         // 骨架（编排链路件——main 与 executor 各抽查）与 harness 内建（呈现口径件）
         // 一律 403 PRJ_036：ADR-0021 编排权不下放配置，结构性锁死
-        for (String toolName : new String[]{"ask_user", "savePrd", "saveBuildPlan",
+        for (String toolName : new String[]{"ask_user", "savePrd",
                 "query_project_facts", "finish_edit", "update_plan", "read_file", "execute"}) {
             signedPut(toolName, "{\"enabled\": false}")
                     .andExpect(status().isForbidden())

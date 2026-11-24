@@ -8,7 +8,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -39,12 +38,10 @@ import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService
 import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
 import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
 import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
-import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -65,9 +62,6 @@ class BuildGateAppServiceTest {
 
     @Autowired
     private ProjectRepository projectRepository;
-
-    @Autowired
-    private GenerationSegmentRepository generationSegments;
 
     @Autowired
     private BillingAppService billingAppService;
@@ -129,7 +123,6 @@ class BuildGateAppServiceTest {
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
@@ -154,16 +147,6 @@ class BuildGateAppServiceTest {
         topupService.topup(null, projectId, 10_000, null, null);
         billingAppService.flipToPaid(projectId, FlipGate.FORK);
         return projectId;
-    }
-
-    /** 轨道表现行计划种子（确认派发读表内计划——不走补产链）。 */
-    private void seedPlan(Long projectId) {
-        Project project = projectRepository.findById(projectId).orElseThrow();
-        LocalDateTime anchor = project.getPrdProducedAt();
-        generationSegments.save(GenerationSegment.pending(projectId, 0,
-                GenerationAppService.STAGE0_TITLE, anchor));
-        generationSegments.save(GenerationSegment.pending(projectId, 1,
-                "用户能注册登录", anchor));
     }
 
     // ---------- 岔路口状态位（自然收口置位、持久可回） ----------
@@ -255,7 +238,6 @@ class BuildGateAppServiceTest {
         // 灵魂例（AC②）：确认即派发首建（点火时点落位）＋版本机制零改动——确认
         // 不写版本行，起跑记行单点照旧（v1＝构建基准序首行）
         Long projectId = persistedPaidPrdProject("9907");
-        seedPlan(projectId);
 
         GenerationAppService.GenerationRun run = gateService.confirmFirstBuild(projectId);
 
@@ -284,7 +266,6 @@ class BuildGateAppServiceTest {
         //（权威系统提示＋内核装配键 generation-kernel＋kernelForm＋无工具规格/
         // 无 executor 旧中间件挂点），与岔路口「立即生成」共用同一派发编排
         Long projectId = persistedPaidPrdProject("9912");
-        seedPlan(projectId);
 
         GenerationAppService.GenerationRun run = gateService.confirmFirstBuild(projectId);
 
@@ -346,7 +327,6 @@ class BuildGateAppServiceTest {
     void given_generation_in_flight_when_confirm_then_prj_017() {
         // 点火竞态兜底：轨道在途（点火落位前的并发窗口）——startGeneration 在途守卫
         Long projectId = persistedPaidPrdProject("9911");
-        seedPlan(projectId);
         codingRunTrack.begin(projectId);
         try {
             assertThatThrownBy(() -> gateService.confirmFirstBuild(projectId))

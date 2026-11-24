@@ -24,7 +24,8 @@ import com.cartisan.data.jpa.id.TsidGenerator;
  *
  * <p><b>不可变＝只插不改</b>：全列 {@code updatable=false}、聚合零变更方法——历史行无任何
  * UPDATE 路径。「快照不可变」的行为面等价物＝改草稿再读历史版本，原文不动。版本表模式
- * 先例＝切片计划落库（{@link GenerationSegment} V14）：{@code prdProducedAt} 记成行时
+ * 先例＝切片计划落库（V14 轨道表——#602 已随切片机器退役，先例仅作沿革）：
+ * {@code prdProducedAt} 记成行时
  * 的 PRD 产出锚（谱系观测，非成行判定——锚随每次 savePrd 刷新，同文重存锚漂不成新行）。
  * {@code confirmedAt}（列名沿用 V32——迁移只增不改）语义随去门化顺延为「成行时点」。
  * {@code runId}＝来源 run（V60 起；确认制时代存量行为 NULL）。删除真删级联随项目

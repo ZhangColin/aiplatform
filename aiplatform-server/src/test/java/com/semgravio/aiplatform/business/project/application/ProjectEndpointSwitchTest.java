@@ -74,9 +74,6 @@ class ProjectEndpointSwitchTest {
     private GenerationAppService generationAppService;
 
     @Autowired
-    private BuildPlanFacts buildPlanFacts;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @MockitoBean
@@ -112,7 +109,6 @@ class ProjectEndpointSwitchTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
-        jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -202,11 +198,12 @@ class ProjectEndpointSwitchTest {
         appService.switchEndpoint(projectId,
                 new SwitchEndpointTypeCommand(ProjectEndpointType.SYSTEM, null, null));
 
-        // 转回系统形：清单章重写为功能清单；同首产序（savePrd＋切片计划→生成轨）
+        // 转回系统形：清单章重写为功能清单；随后同首产序直派新内核（#601/#602——
+        // 切片计划工具与补产链已出局，重产指令只点 savePrd）
         assertThat(shiftPromptOf(projectId))
                 .contains("由「设计」切换为「系统」")
                 .contains("功能清单")
-                .contains("saveBuildPlan");
+                .contains("savePrd");
     }
 
     @Test
@@ -333,15 +330,11 @@ class ProjectEndpointSwitchTest {
         // #543 风格物化写面（首个构建派发四件落位——本用例不断言其内容，缺省成功）
         when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
                 .thenReturn(new ExecResultResponse("123", "", 0));
-        // 切换重产轮脚本：主智能体重写 PRD＋产计划（saveBuildPlan 事实登记）
+        // 切换重产轮脚本：主智能体重写 PRD（#602：切片计划事实登记已随切片机器出局）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command != null) {
                 converseCommands.add(command);
-                if (command.prompt().contains("修订为系统形态")) {
-                    buildPlanFacts.record(command.workspaceId(),
-                            new BuildPlan(List.of("用户能使用全部功能")));
-                }
             }
             return command != null ? new AgentReply(command.runId(), "已转系统开发") : null;
         });

@@ -21,7 +21,6 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWai
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
-import com.semgravio.aiplatform.business.project.application.BuildPlanFacts;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
@@ -45,8 +44,8 @@ import reactor.core.publisher.Mono;
 
 /**
  * 按配置的工具集装配（#86 角色预设收敛为配置——职能是配置不是结构）：
- * 主智能体 = {ask_user, savePrd, saveBuildPlan}（追问挂起源 + PRD 落盘/修订事实
- * 登记——需求侧判定的观测面 + 切片计划事实登记——生成编排的切片输入）+ 只读五件
+ * 主智能体 = {ask_user, savePrd}（追问挂起源 + PRD 落盘/修订事实登记——
+ * 需求侧判定的观测面）+ 只读五件
  * {list_workspace_files, read_workspace_file, query_project_facts, fetch_url,
  * web_search}（答询查证 + 自主调研），
  * 仅随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关，写面结构性不存在——
@@ -54,6 +53,9 @@ import reactor.core.publisher.Mono;
  * run 执行体 = {finish_edit}（更新收口结束工具——「要不要动系统」的判定面；
  * 其余编码工具——含内核 shell——由 harness 内核自带）；无配置语境 / 本地兜底
  * 工作区 = 空集。
+ *
+ * <p>#602：切片计划工具（saveBuildPlan）随切片机器整体出局——主智能体工具面
+ * 不再有计划登记件，内核路径不需要切片输入。</p>
  *
  * <p>#252 增强工具开关：fetch_url / web_search 按 {@code toolSpec} 规格串装配——
  * 关＝不注册（退出装配面）、开＝注册（回归）、null/坏规格＝缺省全开（一次性判定
@@ -67,7 +69,6 @@ class ProfileToolkitSupplierTest {
     private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
-    private final BuildPlanFacts buildPlanFacts = new BuildPlanFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
             mock(WorkspaceLifecycleAppService.class);
@@ -87,28 +88,28 @@ class ProfileToolkitSupplierTest {
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
-                fastLaneFacts, buildPlanFacts,
+                fastLaneFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
                 landedFiles, designSpecs, verificationFacts, agentConfigs, readinessWaiter);
     }
 
     @Test
-    void given_main_on_read_only_workspace_when_toolkit_then_dialog_prd_buildplan_and_read_trio() {
-        // #86 并轨后的主智能体资产：访谈/判定工具 + 切片计划（saveBuildPlan）+
+    void given_main_on_read_only_workspace_when_toolkit_then_dialog_prd_and_read_trio() {
+        // #86 并轨后的主智能体资产：访谈/判定工具 +
         // 答询查证只读五件同面（单会话连续——追问、答询、受理意见不换工具面）+
         // 技能自荐（#263 三槽位齐开——需求侧经验不绑时刻，软指引在协议）；
         // savePrd 锚定项目（经 PrdArtifactAdapter 落盘登记）；无派发工具（链必达收口
-        // 在平台代码）
+        // 在平台代码）；#602：saveBuildPlan 随切片机器出局
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null);
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
-                AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
+                AskUserTool.NAME, SavePrdTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
                 FetchUrlTool.NAME, WebSearchTool.NAME, ProposeSkillTool.NAME,
                 ProposeSedimentTool.NAME);
         for (String name : toolkit.getToolNames()) {
-            // 只读五件与 saveBuildPlan 全 readOnly；ask_user 是挂起源（无写面）；
+            // 只读五件全 readOnly；ask_user 是挂起源（无写面）；
             // 平台侧写面三件：savePrd（PRD 产出是访谈协议的预期终点）、propose_skill
             // 与 propose_sediment（草稿写库——不写工作区文件，#86 只读姿态不被破坏）
             if (!SavePrdTool.NAME.equals(name) && !ProposeSkillTool.NAME.equals(name)
@@ -285,7 +286,7 @@ class ProfileToolkitSupplierTest {
         RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
-                fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+                fastLaneFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
                 readinessWaiter);
@@ -317,7 +318,7 @@ class ProfileToolkitSupplierTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, false, false, null, 3, 2,
-                        true, true, true, true, false, false, true));
+                        true, true, true, false, true));
         var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         Map<String, Object> input = Map.of("checks",
@@ -358,7 +359,7 @@ class ProfileToolkitSupplierTest {
         RecordingProposeAdapter recorder = new RecordingProposeAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
-                fastLaneFacts, buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+                fastLaneFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
                 imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
                 readinessWaiter);
@@ -432,7 +433,7 @@ class ProfileToolkitSupplierTest {
         assertThat(toolkit.getToolNames()).doesNotContain(WebSearchTool.NAME);
         assertThat(toolkit.getToolNames()).contains(FetchUrlTool.NAME);
         assertThat(toolkit.getToolNames()).contains(AskUserTool.NAME, SavePrdTool.NAME,
-                SaveBuildPlanTool.NAME, ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME,
+                ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME,
                 ProjectFactsTool.NAME);
     }
 
@@ -442,7 +443,7 @@ class ProfileToolkitSupplierTest {
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "ws=false,fu=false");
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
-                AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
+                AskUserTool.NAME, SavePrdTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
                 ProposeSkillTool.NAME, ProposeSedimentTool.NAME);
     }
@@ -482,7 +483,7 @@ class ProfileToolkitSupplierTest {
                     String spec = new AgentConfigAppService.EffectiveConfig(
                             "prompt", "model", ws, fu,
                             false, true, null, null, null, false, false, null, 3, 2, true,
-                            true, true, true, false, false, gi).toolSpec();
+                            true, true, false, gi).toolSpec();
                     assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
                     assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
                     assertThat(AgentConfigAppService.toolEnabled(spec, "gi")).as(spec).isEqualTo(gi);

@@ -156,7 +156,6 @@ class IterationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
-        jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         // 计费闸用例行清理（bil_ 弱引用直落，随测试项目一并清）
@@ -879,51 +878,6 @@ class IterationAppServiceTest {
         assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
     }
 
-    // ---------- 产出证明闸（#420 空转片防呆：更新轨同盖——迭代/fix run 不重新引入空转收口） ----------
-
-    /**
-     * 三闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行三开关
-     * true＝#424/#420/#427 现行为（更新轨拒绝—补做链路与复走终验的既有用例承载面）。
-     */
-    private void givenClosingGatesOpen() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     verification_presence_gate_enabled, proof_of_output_gate_enabled,
-                     final_verification_gate_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    verification_presence_gate_enabled
-                        = EXCLUDED.verification_presence_gate_enabled,
-                    proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled,
-                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
-                """);
-    }
-
-    /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
-    private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
-
-    /** 产出证明探针脚本位（true＝零 diff 空转；缺省 false＝有产出）。 */
-    private final AtomicBoolean idleProof = new AtomicBoolean(false);
-
-    /** 产出证明闸桩（#420）：git 就绪＋diff 探针读脚本位（--name-only 与留账 diff 区分）。 */
-    private void givenWorkspaceGitReadyWithProofScript() {
-        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
-            WorkspaceExecCommand cmd = invocation.getArgument(1);
-            if (cmd == null) {
-                return new ExecResultResponse("", "", 0);
-            }
-            if (cmd.command().contains("git rev-parse")) {
-                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
-            }
-            if (cmd.command().contains("git diff --name-only")) {
-                return new ExecResultResponse(
-                        idleProof.get() ? "" : "src/app/page.tsx\n", "", 0);
-            }
-            return new ExecResultResponse("", "", 0);
-        });
-    }
-
     // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------
 
     @Test
@@ -1381,63 +1335,4 @@ class IterationAppServiceTest {
                 .doesNotContain("本轮需求基准");
     }
 
-    // ---------- 更新轨收口后复走整轨终验（#427：防修 A 坏 B） ----------
-
-    /** 现行旅程清单就位（PRD 锚对齐——复走终验的载荷轴；journey 表 + 项目锚）。 */
-    private void givenCurrentJourneys(Long projectId, String role, String entry, String keyActions) {
-        jdbcTemplate.update("UPDATE prj_projects SET prd_produced_at = NOW() WHERE id = ?",
-                projectId);
-        java.sql.Timestamp anchor = jdbcTemplate.queryForObject(
-                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
-                java.sql.Timestamp.class, projectId);
-        jdbcTemplate.update("""
-                INSERT INTO prj_generation_plan_journeys
-                    (id, project_id, ord, role, entry, key_actions, prd_produced_at)
-                VALUES (?, ?, 1, ?, ?, ?, ?)
-                """, System.nanoTime(), projectId, role, entry, keyActions, anchor);
-    }
-
-    @Test
-    void given_no_journeys_when_update_run_closes_then_no_reverification() {
-        // #427 存量口径（更新轨腿）：无核心旅程轴（旧计划不回补）——更新 run 收口后
-        // 不复走终验，既有更新轨行为不变
-        Long projectId = persistedGeneratedProject("9971");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
-        tracks.remove(0).run();
-
-        verify(agentClient, times(1)).converse(any(), any()); // 只更新 run，无终验 run
-    }
-
-    @Test
-    void given_final_verification_gate_closed_when_update_run_closes_then_no_reverification() {
-        // #433 开关化行为矩阵（更新轨腿·闸关态）： journeys 在场也不复走终验——
-        // 更新 run 收工即轨道收工（闸开＝现行为面由
-        // given_update_breaks_journey_when_track_closes_then_reverified_fixed_and_reverified
-        // 锚定）
-        Long projectId = persistedGeneratedProject("9972");
-        givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     final_verification_gate_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, FALSE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
-                """);
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
-        tracks.remove(0).run();
-
-        // 只更新 run——无终验 run、无终验修复 run（闸关）
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(0).sessionId())
-                .contains("-fix-")
-                .doesNotContain(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
-    }
 }

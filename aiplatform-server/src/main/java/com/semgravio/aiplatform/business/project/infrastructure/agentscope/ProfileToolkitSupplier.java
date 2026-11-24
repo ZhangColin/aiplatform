@@ -9,7 +9,6 @@ import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
-import com.semgravio.aiplatform.business.project.application.BuildPlanFacts;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
 import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
@@ -31,8 +30,7 @@ import io.agentscope.core.tool.Toolkit;
  * 按智能体配置的工具集装配（智能体资产归业务侧；#86 角色预设收敛为配置——
  * 职能是配置不是结构）：{@link AgentProfile#MAIN 主智能体} = ask_user（每轮一问
  * 的挂起源）+ savePrd（PRD 落盘 + 业务登记 + 修订事实登记，#52——需求侧判定的
- * 观测面）+ saveBuildPlan（切片计划事实登记，ADR 0009——生成编排的切片输入）+
- * 只读五件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url + 联网搜索
+ * 观测面）+ 只读五件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url + 联网搜索
  * web_search，答询查证与自主调研用）+ propose_skill（#263 自荐三槽位齐开——
  * 需求侧梳理经验自荐，软指引不绑时刻）+ propose_sediment（#460 数据飞轮采集层
  * 三槽位齐开——需求案例/功能模块/业务规则自荐，软指引＋轮收口轻兜底盘问），
@@ -81,7 +79,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final FinishEditFacts finishFacts;
     private final PrdRevisionFacts prdRevisions;
     private final FastLaneFacts fastLaneFacts;
-    private final BuildPlanFacts buildPlanFacts;
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final ExternalContentFetcher externalContentFetcher;
@@ -98,7 +95,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts,
             InterviewToolGate interviewToolGate, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
-            BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
@@ -111,7 +107,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
         this.fastLaneFacts = fastLaneFacts;
-        this.buildPlanFacts = buildPlanFacts;
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.externalContentFetcher = externalContentFetcher;
@@ -135,7 +130,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             toolkit.registerAgentTool(new SavePrdTool(prdArtifacts.workspacePath(),
                     ro.workspaceId(), ro.containerName(), readinessWaiter, prdArtifacts,
                     interviewToolGate, prdRevisions, fastLaneFacts));
-            toolkit.registerAgentTool(new SaveBuildPlanTool(ro.workspaceId(), buildPlanFacts));
             toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.workspaceId(),
                     ro.containerName(), readinessWaiter));
             toolkit.registerAgentTool(new ReadWorkspaceFileTool(ro.workspaceId(),

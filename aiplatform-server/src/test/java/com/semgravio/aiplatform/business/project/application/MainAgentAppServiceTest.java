@@ -117,10 +117,6 @@ class MainAgentAppServiceTest {
     @Autowired
     private PoolTopupAppService poolTopupAppService;
 
-    /** 沉淀自荐事实登记口（#460 兜底盘问豁免判定：模拟轮内 propose_sediment 工具执行）。 */
-    @Autowired
-    private SedimentProposalFacts sedimentProposals;
-
     @Autowired
     private CodingRunTrack codingRunTrack;
 
@@ -823,8 +819,6 @@ class MainAgentAppServiceTest {
     }
 
     // ---------- 链必达收口（#43：主智能体无派发权，平台意见轮收口观测自动派修正） ----------
-
-    // ---------- 沉淀兜底盘问（#460：该提未提的轻兜底——次轮 system prompt 尾附提醒） ----------
 
     // ---------- 受理动作卡（#87：受理轮过程呈现——迭代期意见轮开场受理事件） ----------
 

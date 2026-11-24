@@ -24,7 +24,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalCo
  */
 public record BackofficeEdgeModelConfigResponse(
         @Schema(description = "边缘点稳定键（naming=项目取名 / compaction=上下文压缩 / "
-                + "classification=入口分类 / precheck=技能预检）", example = "naming")
+                + "classification=入口分类）", example = "naming")
         String agentKey,
         @Schema(description = "展示名", example = "项目取名")
         String agentName,

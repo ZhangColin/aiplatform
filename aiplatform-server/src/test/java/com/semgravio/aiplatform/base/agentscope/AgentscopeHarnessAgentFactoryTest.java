@@ -50,7 +50,6 @@ class AgentscopeHarnessAgentFactoryTest {
     private static final AgentSkillRepositorySupplier SKILL_REPOS =
             (agentKey, workspace) -> List.of();
 
-
     /** 恒空平台中间件（中间件装配另有缝测，工厂测试只验内核接线）。 */
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES =
             (agentKey, workspace) -> List.of();
@@ -69,10 +68,6 @@ class AgentscopeHarnessAgentFactoryTest {
             return new EdgeModel("deepseek:deepseek-v4-flash", null);
         }
 
-        @Override
-        public EdgeModel precheckModel() {
-            return new EdgeModel("deepseek:deepseek-v4-flash", null);
-        }
     };
 
     /**
@@ -104,10 +99,6 @@ class AgentscopeHarnessAgentFactoryTest {
                 return flash;
             }
 
-            @Override
-            public EdgeModelSupplier.EdgeModel precheckModel() {
-                return flash;
-            }
         };
     }
 
@@ -340,7 +331,6 @@ class AgentscopeHarnessAgentFactoryTest {
         }
     }
 
-
     /** 命名 AgentTool 桩（allowlist 过滤断言用——callAsync 不真被调）。 */
     private static final class AgentToolStub implements io.agentscope.core.tool.AgentTool {
 
@@ -438,10 +428,6 @@ class AgentscopeHarnessAgentFactoryTest {
                         return compaction.get();
                     }
 
-                    @Override
-                    public EdgeModel precheckModel() {
-                        return new EdgeModel("deepseek:deepseek-v4-flash", null);
-                    }
                 });
         ModelChannel main = new ModelChannel("https://ark.example/api/v3", "sk-a", false);
 
@@ -546,7 +532,6 @@ class AgentscopeHarnessAgentFactoryTest {
         verify(raw, times(2)).stream(any(), any(), any());
         assertThat(received.getUsage().getTotalTokens()).isEqualTo(140);
     }
-
 
     // ---------- #252 构建后工具面校正（框架 WebTools 恒注入 vs 平台供数方） ----------
 

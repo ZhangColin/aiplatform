@@ -174,10 +174,6 @@ class KernelAgentLoopTest {
                 return edge;
             }
 
-            @Override
-            public EdgeModel precheckModel() {
-                return edge;
-            }
         };
     }
 

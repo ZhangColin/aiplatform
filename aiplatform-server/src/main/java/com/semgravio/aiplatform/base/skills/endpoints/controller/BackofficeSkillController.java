@@ -20,16 +20,10 @@ import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
 import com.semgravio.aiplatform.base.skills.application.BackofficeSkillAppService;
-import com.semgravio.aiplatform.base.skills.application.BackofficeSkillPrecheckAppService;
-import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
-import com.semgravio.aiplatform.base.skills.application.dto.command.SkillDraftRejectCommand;
 import com.semgravio.aiplatform.base.skills.application.dto.command.SkillInstallCommand;
 import com.semgravio.aiplatform.base.skills.application.dto.command.SkillSlotAssignCommand;
 import com.semgravio.aiplatform.base.skills.application.dto.command.SkillUpdateCommand;
 import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillDetailResponse;
-import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillDraftDetailResponse;
-import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillDraftSummaryResponse;
-import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillPrecheckResponse;
 import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillSummaryResponse;
 import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillUpdateResponse;
 import com.semgravio.aiplatform.base.skills.application.dto.response.BackofficeSkillUpdateTraceResponse;
@@ -39,58 +33,50 @@ import com.semgravio.aiplatform.base.skills.domain.model.Operator;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249＋T4/#250＋#255＋#259
- * 草稿面＋#262 晋升/拒绝写口，机机签名——五头 HMAC 强制闸，见
+ * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249＋T4/#250，
+ * 机机签名——五头 HMAC 强制闸，见
  * {@link com.semgravio.aiplatform.config.WebMvcConfig}）：清单 / 详情（审核面）
- * ＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载 / 槽位指派读写（三职能
- * 槽位整包替换）/ 指派双头预检（#255 非阻断提示，只读）/ 显式更新＋版本留痕读面
- * ＋技能草稿清单/详情/晋升/拒绝（#259/#262 自产线——自荐草稿的人审分诊面与
- * 审结写口）。内置（classpath 合成）与库中安装/自产技能同权呈现（#262 起库行
- * 按 source 列分来源）；技能柄为 opaque 串两形制（内置 {@code builtin:<技能名>}
+ * ＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载 / 槽位指派读写（职能
+ * 槽位整包替换）/ 显式更新＋版本留痕读面。内置（classpath 合成）与库中安装技能
+ * 同权呈现（库行按 source 列分来源；来源「自产」为历史读值，随 #638 阶段六技能
+ * 清场不再产生新行）。技能柄为 opaque 串两形制（内置 {@code builtin:<技能名>}
  * ／库行 TSID 十进制串）。清单行带「有新版」标记（定期只读检查远端 HEAD，更新
- * 永远显式点——永不自动跟新，ADR-0021）。错误码前缀 SKL_（SKL_001～SKL_018）。
+ * 永远显式点——永不自动跟新，ADR-0021）。错误码前缀 SKL_（SKL_001～SKL_014）。
  * 操作者透传头 {@code X-User-Id}/{@code X-User-Name} 全程落痕（安装/启停/指派/
- * 更新/审结必留痕，缺头 SKL_009；预检只读不留痕、卸载无行可留不留痕——admin
- * 侧自有操作日志）。
+ * 更新必留痕，缺头 SKL_009；卸载无行可留不留痕——admin 侧自有操作日志）。
+ *
+ * <p><b>#638 阶段六技能清场</b>：指派双头预检端点（{@code POST /assignments/{slot}
+ * /precheck}）与技能草稿清单/详情/晋升/拒绝四端点整体退场（预检从未运行、草稿
+ * 晋升从未被采纳）；槽位收窄为 main／executor 两把（subagent 拆掉）。</p>
  */
 @RestController
 @RequestMapping("/api/backoffice/skills")
 @RequireSignature
-@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载 / 槽位指派读写 / 指派双头预检 / 显式更新＋版本留痕 / 技能草稿审结（晋升/拒绝）（机机签名）")
+@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载 / 槽位指派读写 / 显式更新＋版本留痕（机机签名）")
 public class BackofficeSkillController {
 
     private final BackofficeSkillAppService appService;
 
-    private final BackofficeSkillPrecheckAppService precheckAppService;
-
-    private final SkillDraftAppService draftAppService;
-
-    public BackofficeSkillController(BackofficeSkillAppService appService,
-            BackofficeSkillPrecheckAppService precheckAppService,
-            SkillDraftAppService draftAppService) {
+    public BackofficeSkillController(BackofficeSkillAppService appService) {
         this.appService = appService;
-        this.precheckAppService = precheckAppService;
-        this.draftAppService = draftAppService;
     }
 
     @GetMapping
-    @Operation(summary = "技能清单（内置＋安装＋自产同权，不分页）",
+    @Operation(summary = "技能清单（内置＋安装同权，不分页）",
             description = "平台全部技能：内置（classpath 合成，来源=1）与库中安装"
-                    + "（来源=2）/自产（来源=3——草稿晋升写入，来源包/版本＝固定"
-                    + "虚拟值 self）同权呈现，空库时仍呈现内置技能。条目字段：名称、"
-                    + "description、来源 code（1=内置 2=安装 3=自产）与来源名、来源包"
-                    + "（内置 null、自产 self）、版本标识（装时 commit，自产 self、"
-                    + "内置 null）、状态"
-                    + "（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、"
-                    + "启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable"
-                    + "（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——"
-                    + "更新走显式 POST /update，平台永不自动跟新；null＝未检查过，"
-                    + "内置恒 null）、使用计数两列 loadCount/lastLoadedAt（观测面："
-                    + "智能体 load 工具真实加载该技能一次即 +1——口径＝load 实际"
-                    + "发生，指派/启停/清单重建不计数；安装与自产一并覆盖；0/null＝"
+                    + "（来源=2）同权呈现，空库时仍呈现内置技能。来源=3（自产）为"
+                    + "历史读值——#638 起不再产生新行（技能草稿与晋升端点已退场）。"
+                    + "条目字段：名称、description、来源 code（1=内置 2=安装 3=自产"
+                    + "历史值）与来源名、来源包（内置 null）、版本标识（装时 commit、"
+                    + "内置 null）、状态（1=启用 2=停用，内置恒 1）、最近管理动作"
+                    + "操作者（安装＝装者、启停＝最近动作者，内置 null）、远端有新版"
+                    + "标记 updateAvailable（来源包级：定期只读检查远端 HEAD 与装时"
+                    + "版本不同即 true——更新走显式 POST /update，平台永不自动跟新；"
+                    + "null＝未检查过，内置恒 null）、使用计数两列 loadCount/"
+                    + "lastLoadedAt（观测面：智能体 load 工具真实加载该技能一次即"
+                    + "+1——口径＝load 实际发生，指派/启停/清单重建不计数；0/null＝"
                     + "从未被加载过，内置恒 null 不适用）。排序服务端定死：内置在前"
-                    + "（名称序）、库行在后（来源包、名称序——安装与自产同列混排）。"
-                    + "技能库是有界目录"
+                    + "（名称序）、库行在后（来源包、名称序）。技能库是有界目录"
                     + "（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制"
                     + "（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。"
                     + "需要机机签名（五头 HMAC），无签名 401")
@@ -105,7 +91,7 @@ public class BackofficeSkillController {
                     + "skill-audit-guide.md——注入面＋方法论重叠面＋description"
                     + " 三要素）：元数据（与清单行同形）＋ frontmatter 全量"
                     + "（解析态键值，含 name/description）＋正文全文（frontmatter"
-                    + " 剥离后的 SKILL.md body）＋ scripts/ 全文——所见即运行时"
+                    + "剥离后的 SKILL.md body）＋ scripts/ 全文——所见即运行时"
                     + "注入面，另带使用计数两列 loadCount/lastLoadedAt（语义同"
                     + "清单行——load 实际发生才计数，治理决策的数据面）。id 取清单行原值"
                     + "（opaque 串两形制）。技能不存在"
@@ -177,15 +163,15 @@ public class BackofficeSkillController {
     }
 
     @GetMapping("/assignments/{slot}")
-    @Operation(summary = "槽位指派读面（三职能槽位各自独立）",
+    @Operation(summary = "槽位指派读面（职能槽位各自独立）",
             description = "该职能槽位当前指派的技能清单（与技能清单行共形、含停用行"
                     + "——启停是可逆开关指派关系随行保留，运营可见「指派了但已停用」"
-                    + "实态；停用行不参与装配合成）。槽位三把：main=主智能体 / "
-                    + "executor=run 执行体 / subagent=子智能体，未知槽位 404 SKL_010。"
-                    + "装配生效语义（ADR-0021）：装配合成＝内置∪该槽位已指派且启用，"
-                    + "动态查库——指派/启停变更后智能体下一轮自然生效、进行中 run "
-                    + "不定格不打断。回执与 PUT 同形。需要机机签名（五头 HMAC），"
-                    + "无签名 401")
+                    + "实态；停用行不参与装配合成）。槽位两把：main=主智能体 / "
+                    + "executor=run 执行体（#638 技能清场后 subagent 槽已拆——未知"
+                    + "槽位 404 SKL_010）。装配生效语义（ADR-0021）：装配合成＝内置∪"
+                    + "该槽位已指派且启用，动态查库——指派/启停变更后智能体下一轮自然"
+                    + "生效、进行中 run 不定格不打断。回执与 PUT 同形。需要机机签名"
+                    + "（五头 HMAC），无签名 401")
     @ErrorCodes({"SKL_010"})
     public ApiResponse<BackofficeSlotAssignmentResponse> slotAssignments(@PathVariable String slot) {
         return ApiResponse.ok(appService.slotAssignments(slot));
@@ -209,31 +195,6 @@ public class BackofficeSkillController {
         return ApiResponse.ok(appService.assignSlot(slot, command, currentOperator()));
     }
 
-    @PostMapping("/assignments/{slot}/precheck")
-    @Operation(summary = "指派双头预检（非阻断提示，只读）",
-            description = "指派确认前对候选集做方法论重叠判定（#255，ADR-0021 分层"
-                    + "纪律的执行面）：对照双头——该槽位生效工作协议（智能体运营"
-                    + "配置生效值：库值优先、缺省回落）＋该槽位已指派启用技能＋候选"
-                    + "集内其他技能，由模型判定方法论重叠并返回<b>非阻断提示</b>"
-                    + "（提示是输入不是门，判定权留管理员）。请求体与 PUT 指派同形"
-                    + "（skillIds＝候选清单，寻址同源：内置柄 400 SKL_011、未寻址/"
-                    + "畸形 TSID 404 SKL_001、未知槽位 404 SKL_010）。回执两件："
-                    + "executed（true＝判定已执行；false＝未执行——判定失败/超时/"
-                    + "输出不可解析，如实标注不伪装成「确认无重叠」，预检组件故障"
-                    + "不阻塞运营、指派照常可完成）＋ hints（重叠提示列表，每条："
-                    + "skills 涉及的候选技能、counterpart 对照侧〔「工作协议」或"
-                    + "对侧技能名〕、overlap 重叠内容、resolution 消解方向；空列表"
-                    + "＋executed=true＝确认无重叠）。subagent 槽无运营配置正本："
-                    + "对照＝已指派＋候选集（无协议面），机制同一不特判。判定引擎＝"
-                    + "平台智能体内核一次性会话（flash 档专用配置键、专用计量标记"
-                    + "skillcheck），全程只读——不落库、不留痕、不改指派、不拦后续"
-                    + "指派调用。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"SKL_001", "SKL_010", "SKL_011"})
-    public ApiResponse<BackofficeSkillPrecheckResponse> precheckSlot(@PathVariable String slot,
-            @RequestBody SkillSlotAssignCommand command) {
-        return ApiResponse.ok(precheckAppService.precheck(slot, command));
-    }
-
     @PostMapping("/update")
     @Operation(summary = "显式更新技能包（重拉快照＋版本留痕）",
             description = "按来源包整体重拉快照入库（ADR-0021：更新永远显式点，"
@@ -253,77 +214,6 @@ public class BackofficeSkillController {
     @ErrorCodes({"SKL_004", "SKL_005", "SKL_007", "SKL_009", "SKL_012", "SKL_013", "SKL_014"})
     public ApiResponse<BackofficeSkillUpdateResponse> update(@RequestBody SkillUpdateCommand command) {
         return ApiResponse.ok(appService.update(command, currentOperator()));
-    }
-
-    @GetMapping("/drafts")
-    @Operation(summary = "技能草稿清单（活跃面＝在途，人审队列）",
-            description = "智能体自荐的技能草稿（#259 自产线，ADR-0022 库制草稿）："
-                    + "跨项目全部<b>在途</b>草稿按自荐时间倒序（最近先）——终态"
-                    + "（已晋升/已拒绝）不列活跃面、详情仍可按 id 查。行字段：名称、"
-                    + "简介、血统三件（来源项目 id／来源 run 标识／来源槽位键"
-                    + " main/executor/subagent）、写入前静态扫描判定（SAFE/CAUTION——"
-                    + "DANGEROUS 已在写入口拒收不落库）、状态（恒 1=在途）与自荐"
-                    + "时刻。草稿不参与任何装配（未审内容不影响任何 run）。不分页"
-                    + "（人审是天然瓶颈，对齐技能清单有界目录先例）。id 为 TSID "
-                    + "十进制串。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"UNAUTHORIZED"})
-    public ApiResponse<List<BackofficeSkillDraftSummaryResponse>> drafts() {
-        return ApiResponse.ok(draftAppService.drafts());
-    }
-
-    @GetMapping("/drafts/{id}")
-    @Operation(summary = "技能草稿详情（正文＋扫描回执＋血统，审核面）",
-            description = "草稿全文按自产审核口径判读（docs/agents/skill-audit-"
-                    + "guide.md——真伪／重叠／description 三要素／血统可溯：来源 run "
-                    + "的外部资料接触史必查）：清单行同形字段＋正文全文（自荐只有"
-                    + "正文——a-only 无 scripts）＋扫描 findings 逐条留档"
-                    + "（patternId/severity/category/file/line/matchText/description，"
-                    + "空列表＝无发现）＋终态留痕字段（审核操作者/时刻/拒绝理由——"
-                    + "已晋升/已拒绝草稿回填，在途恒 null）。任意状态可查（终态留档）。"
-                    + "id 取清单行原值（TSID 十进制串）；草稿不存在（含未寻址/畸形 "
-                    + "TSID）404 SKL_015。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"SKL_015"})
-    public ApiResponse<BackofficeSkillDraftDetailResponse> draftDetail(@PathVariable String id) {
-        return ApiResponse.ok(draftAppService.draft(
-                Tsid.resolve(id, SkillMessage.SKILL_DRAFT_NOT_FOUND)));
-    }
-
-    @PostMapping("/drafts/{id}/promote")
-    @Operation(summary = "晋升草稿（一键入技能库，单级晋升）",
-            description = "人审采纳（#262 自产线 T2，ADR-0022 单级晋升）：事务＝"
-                    + "撞名复查（审核期间技能库新增同名即拒——409 SKL_016）＋插入"
-                    + "启用库行（来源＝3 自产、来源包/版本＝固定虚拟值 self、内容"
-                    + "原样——审核者不改稿）＋草稿标已晋升＋操作者两处留痕（库行＝"
-                    + "晋升者、草稿＝审结者），任一环失败整体回滚。晋升即入池同权："
-                    + "与安装技能同列同套（启停/指派/预检/卸载/使用计数），<b>不自动"
-                    + "指派</b>——生效仍走人工指派＋skillcheck 预检（入池与生效分离）。"
-                    + "自产技能结构性无 scripts（工具无此参数＋晋升原样）。草稿须在途"
-                    + "（已审结 409 SKL_017——终态不可再审，重提为新草稿）；草稿不"
-                    + "存在 404 SKL_015；缺操作者 400 SKL_009（X-User-Id/X-User-Name"
-                    + "透传头）。回执＝新库行清单行（含技能 id——后续指派寻址柄）。"
-                    + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"SKL_009", "SKL_015", "SKL_016", "SKL_017"})
-    public ApiResponse<BackofficeSkillSummaryResponse> promoteDraft(@PathVariable String id) {
-        return ApiResponse.ok(draftAppService.promote(
-                Tsid.resolve(id, SkillMessage.SKILL_DRAFT_NOT_FOUND), currentOperator()));
-    }
-
-    @PostMapping("/drafts/{id}/reject")
-    @Operation(summary = "拒绝草稿（终态留档，理由必填）",
-            description = "人审不采纳（#262 自产线 T2）：理由必填（空白 400 "
-                    + "SKL_018——终态留档拒绝须有据）＋草稿标已拒绝＋操作者留痕"
-                    + "（操作者/时刻/理由随行留档）。拒绝即终态：不再列活跃面"
-                    + "（在途清单）、详情仍可查（留档）；不改稿不复活——重提只能靠"
-                    + "未来会话产生新草稿（已拒绝不占名）。草稿须在途（已审结 409 "
-                    + "SKL_017）；草稿不存在 404 SKL_015；缺操作者 400 SKL_009。"
-                    + "回执＝终态草稿详情（留痕形状直读）。需要机机签名（五头 HMAC），"
-                    + "无签名 401")
-    @ErrorCodes({"SKL_009", "SKL_015", "SKL_017", "SKL_018"})
-    public ApiResponse<BackofficeSkillDraftDetailResponse> rejectDraft(@PathVariable String id,
-            @RequestBody SkillDraftRejectCommand command) {
-        return ApiResponse.ok(draftAppService.reject(
-                Tsid.resolve(id, SkillMessage.SKILL_DRAFT_NOT_FOUND),
-                command == null ? null : command.reason(), currentOperator()));
     }
 
     @GetMapping("/update-traces")

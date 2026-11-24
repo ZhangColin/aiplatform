@@ -267,10 +267,6 @@ class AgentscopeWaitBarrierSchemaTest {
                         return flash;
                     }
 
-                    @Override
-                    public EdgeModel precheckModel() {
-                        return flash;
-                    }
                 }, new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-wait", "sys",

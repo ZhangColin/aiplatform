@@ -369,12 +369,12 @@ class BackofficeAgentConfigSeamTest {
         assertThat(traceRowCount()).isZero();
     }
 
-    // ---------- 边缘四点（#366：仅模型配置入配置面，同表同机制） ----------
+    // ---------- 边缘三点（#366：仅模型配置入配置面，同表同机制；#638 起 precheck 退场） ----------
 
     @Test
     void given_no_edge_override_when_signed_get_edge_then_effective_falls_back_to_default_tier()
             throws Exception {
-        // 四点读面缺省：生效档＝代码缺省配置键（flash）、覆盖标记 false、默认预览
+        // 三点读面缺省：生效档＝代码缺省配置键（flash）、覆盖标记 false、默认预览
         // 同值、写者 null；装配读面同值且经配置解析真链路产通道模型串（V44 种子）
         ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         for (AgentEdgePoint point : AgentEdgePoint.values()) {
@@ -400,7 +400,7 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // AC：后台 PUT 边缘键改配置即时生效——四键逐一 PUT pro：GET 生效值＝库值＋
         // 覆盖标记 true，装配读面取库值、经解析单点产 pro 档模型串（下一轮命令
-        // 构建即生效的取值半边）；四点各自独立（动 naming 不动 precheck）
+        // 构建即生效的取值半边）；三点各自独立（动 naming 不动 classification）
         ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         for (AgentEdgePoint point : AgentEdgePoint.values()) {
             signedPutEdge(point.key(), OPERATOR_ID, OPERATOR_NAME, "{\"modelConfigKey\": \"pro\"}")
@@ -420,7 +420,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.modelConfigKey").value("flash"))
                 .andExpect(jsonPath("$.data.modelConfigKeyOverridden").value(false));
         assertThat(agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.NAMING)).isEqualTo("flash");
-        // 其余三点不受清空牵连（各自独立行）
+        // 其余两点不受清空牵连（各自独立行）
         assertThat(agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.COMPACTION))
                 .isEqualTo("pro");
     }

@@ -30,9 +30,10 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * <li>无配置语境＝空集（无技能挂载即框架不注入 {@code <available_skills>}）。</li>
  * </ul>
  *
- * <p><b>subagent 槽位视图随 #604 退役</b>：验证子智能体装配（#260）随委派机制
- * 一并拆除，subagent 库技能视图的运行时消费面归零——本供应商不再发放
- * subagent 槽视图（SkillSlot.SUBAGENT 枚举与存量指派数据归阶段六技能清场处理）。</p>
+ * <p><b>subagent 槽位视图随 #604 退役、#638 技能清场落地</b>：验证子智能体装配
+ * （#260）随委派机制一并拆除，subagent 库技能视图的运行时消费面归零——本供应商
+ * 不再发放 subagent 槽视图（SkillSlot.SUBAGENT 枚举与存量指派数据已由 #638 阶段六
+ * 技能清场删除）。</p>
  *
  * <p>各槽位视图实例长生命周期（无状态查库），随容器同生灭。</p>
  */

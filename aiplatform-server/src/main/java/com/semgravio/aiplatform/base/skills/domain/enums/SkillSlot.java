@@ -6,14 +6,14 @@ import java.util.Optional;
 import com.cartisan.core.domain.BaseEnum;
 
 /**
- * 职能槽位（#249 指派模型，ADR-0021；#610 设计线退役后三槽）：技能指派的全局配置单元
- * ——平台智能体的职能面（主智能体 / run 执行体 / 子智能体），各自独立多选、不分项目。槽位
- * 是<b>键不是身份</b>：智能体身份仍以 business 侧 {@code AgentProfile} 枚举为
- * 正本（ADR-0006 身份与配置分治），本枚举只固化指派面的稳定键——business
- * 装配缝按配置键对齐到此（main/executor 与 AgentProfile 键同串、
- * subagent 是子智能体槽的键，verify 是其当前唯一职能实例）。code 是框架约定码
- * （BaseEnum 自动转换面；槽位落库与 REST 寻址均用字符串键，code 不经任何面）。
- * 设计执行体槽（designer）随 #610 设计线整条退役拆除。
+ * 职能槽位（#249 指派模型，ADR-0021）：技能指派的全局配置单元——平台智能体的
+ * 职能面（{@link #MAIN 主智能体} / {@link #EXECUTOR run 执行体}），各自独立多选、
+ * 不分项目。槽位是<b>键不是身份</b>：智能体身份仍以 business 侧
+ * {@code AgentProfile} 枚举为正本（ADR-0006 身份与配置分治），本枚举只固化指派面
+ * 的稳定键——business 装配缝按配置键对齐到此（main/executor 与 AgentProfile 键
+ * 同串）。code 是框架约定码（BaseEnum 自动转换面；槽位落库与 REST 寻址均用字符串
+ * 键，code 不经任何面）。设计执行体槽（designer）随 #610 设计线整条退役；子智能体槽
+ * （subagent）随 #604 委派机制退役、存量指派行由 #638 阶段六技能清场迁移删除。</p>
  *
  * <p>新增职能槽位＝新增枚举值＋迁移扩键面（REST 槽位路径段即本键，未知键
  * 404 SKL_010），并按该槽位运行时有无 shell 拍板 {@link #hasShell()} 位。</p>
@@ -22,30 +22,25 @@ import com.cartisan.core.domain.BaseEnum;
  * 槽位</b>——{@link #hasShell()} 为真的槽位装配面才附 scripts 资源（框架
  * {@code AgentSkill.resources} 通路）；主智能体 ProjectReadOnly 禁 shell——
  * 结构性 a-only（装配出的技能 resources 恒空，load 工具枚举无 scripts 入口）。
- * executor 容器内 shell、subagent（verify）白名单含跑验证命令的 shell——
- * 两槽开放。</p>
+ * executor 容器内 shell——开放。</p>
  */
 public enum SkillSlot implements BaseEnum<SkillSlot> {
 
     /** 主智能体（需求侧：访谈梳理＋PRD 撰写——技能面挂内置 PRD 写作；禁 shell）。 */
-    MAIN(1, "main", false, "主智能体——需求侧：访谈梳理、PRD 撰写修订、答询，不读写沙箱代码"),
+    MAIN(1, "main", false),
 
-    /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位；有 shell）。 */
-    EXECUTOR(2, "executor", true, "run 执行体——实现侧：沙箱工作区内读写代码、运行命令"),
-
-    /** 子智能体槽（当前唯一实例 verify——白名单含跑验证命令的 shell，开放）。 */
-    SUBAGENT(3, "subagent", true, "子智能体——run 内委派的专项职能（当前唯一实例：三面验证）");
+    /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位；有 shell）。
+     * #638 起生成内核结构性不挂技能，本槽暂不接通，保留给以后按准入标准接通。 */
+    EXECUTOR(2, "executor", true);
 
     private final Integer code;
     private final String key;
     private final boolean shell;
-    private final String role;
 
-    SkillSlot(Integer code, String key, boolean shell, String role) {
+    SkillSlot(Integer code, String key, boolean shell) {
         this.code = code;
         this.key = key;
         this.shell = shell;
-        this.role = role;
     }
 
     /** 框架约定码（BaseEnum 自动转换面；不落库不经 REST——寻址用字符串键）。 */
@@ -71,14 +66,6 @@ public enum SkillSlot implements BaseEnum<SkillSlot> {
      */
     public boolean hasShell() {
         return shell;
-    }
-
-    /**
-     * 槽位职能一句话（#255 指派预检对照材料语境用）：判定模型对照工作协议与技能
-     * 重叠时需知道该槽位是干什么的——职能是槽位身份的一部分，正本随枚举。
-     */
-    public String role() {
-        return role;
     }
 
     /**

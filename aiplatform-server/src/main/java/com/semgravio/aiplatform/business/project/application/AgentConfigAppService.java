@@ -20,9 +20,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
  * 下一轮命令构建自然反映（对话轮本身是秒级 LLM 调用，读取代价可忽略）；智能体
  * 实例层不必感知——工厂缓存键已含 sysPrompt 与解析后的模型串＋通道指纹
  * （{@code AgentscopeAgentClient#prepareFor}），新值即新实例，进行中 run 不定格。
- * 边缘调用点（取名/压缩/分类/预检）的<b>模型配置</b>同走本面
- * （{@link #effectiveEdgeModelConfigKey}，#366 同表同机制）；其提示词仍不属配置面
- * （一次性判定的编排内建）。</p>
+ * 边缘调用点（取名/压缩/分类）的<b>模型配置</b>同走本面
+ * （{@link #effectiveEdgeModelConfigKey}，#366 同表同机制；#638 技能预检边缘点
+ * 已退场）；其提示词仍不属配置面（一次性判定的编排内建）。</p>
  *
  * <p><b>工具面规格（#252；#545 gi 件随 #604 拆除）</b>：增强工具开关
  * （web_search/fetch_url）同取生效值，

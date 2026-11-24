@@ -102,10 +102,6 @@ class KernelMiddlewareAssemblyTest {
                 return edge;
             }
 
-            @Override
-            public EdgeModel precheckModel() {
-                return edge;
-            }
         };
     }
 

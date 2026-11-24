@@ -29,8 +29,9 @@ import com.semgravio.aiplatform.business.project.domain.model.Operator;
  * {@link com.semgravio.aiplatform.config.WebMvcConfig}）：两座智能体（main/
  * executor）的 systemPrompt／模型配置后台可维护＋变更留痕可查（ADR-0021
  * 身份与配置分治——AgentProfile 枚举仍是身份与缺省正本，装配库值优先、缺省
- * 回落）；边缘调用点四件（naming/compaction/classification/precheck，#366）的
- * 模型配置同面维护（/edge/{edgeKey} 三端点——值面仅配置，提示词不属配置面）。
+ * 回落）；边缘调用点三件（naming/compaction/classification，#366）的
+ * 模型配置同面维护（/edge/{edgeKey} 三端点——值面仅配置，提示词不属配置面；
+ * #638 技能预检边缘点已退场）。
  * 错误码 PRJ_033（智能体不存在）/ PRJ_034（操作者缺）/ PRJ_064（边缘点不存在）。
  * 操作者透传头 {@code X-User-Id}/{@code X-User-Name} 写操作必留痕。
  */
@@ -109,9 +110,9 @@ public class BackofficeAgentConfigController {
     @Operation(summary = "边缘调用点配置读面（生效值＋覆盖标记＋默认预览）",
             description = "边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或"
                     + "代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/"
-                    + "工具开关）。寻址稳定键四把：naming=项目取名 / "
-                    + "compaction=上下文压缩 / classification=入口分类 / "
-                    + "precheck=技能预检。改配置下一轮命令构建即生效（装配动态查库，"
+                    + "工具开关）。寻址稳定键三把：naming=项目取名 / "
+                    + "compaction=上下文压缩 / classification=入口分类（#638 技能预检"
+                    + "边缘点已退场）。改配置下一轮命令构建即生效（装配动态查库，"
                     + "进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"PRJ_064"})
     public ApiResponse<BackofficeEdgeModelConfigResponse> edgeConfig(@PathVariable String edgeKey) {

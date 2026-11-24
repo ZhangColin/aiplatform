@@ -92,7 +92,7 @@ import io.agentscope.core.skill.AgentSkill;
  *
  * <p>#249 槽位指派与装配合成六面钉死：</p>
  * <ul>
- * <li><b>指派读写</b>：GET/PUT 三槽各自独立（整包替换——清单即终态，空清单＝
+ * <li><b>指派读写</b>：GET/PUT 两槽各自独立（#638 起 subagent 拆掉；整包替换——清单即终态，空清单＝
  * 清空）＋回执与 GET 同形（含停用行实态）；</li>
  * <li><b>负例族</b>：未知槽位 404 SKL_010＋内置柄不可指派 400 SKL_011＋未寻址
  * TSID 404 SKL_001＋缺操作者 400 SKL_009；</li>
@@ -560,7 +560,7 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data.skills[0].name").value("code-review"))
                 .andExpect(jsonPath("$.data.skills[1].name").value("tdd"));
 
-        // GET 三槽各自独立（未动过的 subagent 槽为空）
+        // GET 两槽各自独立；#638 技能清场后 subagent 槽已拆——未知槽位 404 SKL_010
         signedGet("/api/backoffice/skills/assignments/main")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.slot").value("main"))
@@ -569,8 +569,8 @@ class BackofficeSkillSeamTest {
         signedGet("/api/backoffice/skills/assignments/executor")
                 .andExpect(jsonPath("$.data.skills", hasSize(2)));
         signedGet("/api/backoffice/skills/assignments/subagent")
-                .andExpect(jsonPath("$.data.slot").value("subagent"))
-                .andExpect(jsonPath("$.data.skills", hasSize(0)));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_SLOT_NOT_FOUND_CODE));
 
         // 整包替换＝清单即终态：main 重指 [code-review]，tdd 即解绑；重复柄去重
         signedPutAssignments("main", OPERATOR_ID_2, OPERATOR_NAME_2, reviewId, reviewId)
@@ -643,7 +643,7 @@ class BackofficeSkillSeamTest {
         String reviewId = fixtureIds.get("code-review");
         AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
 
-        // 初始装配面：main＝内置（prd-writing），executor/subagent＝空（无 <available_skills> 注入面）
+        // 初始装配面：main＝内置（prd-writing），executor＝空（无 <available_skills> 注入面；subagent 槽已拆）
         assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
                 .containsExactly("prd-writing");
         assertThat(assemblyFace(AgentProfile.EXECUTOR.key(), dev)).isEmpty();

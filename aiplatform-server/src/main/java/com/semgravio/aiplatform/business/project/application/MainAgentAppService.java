@@ -111,7 +111,6 @@ public class MainAgentAppService {
     private final PrdRevisionFacts prdRevisions;
     private final ConversationHistoryAppService conversationHistory;
     private final MainAgentProperties mainAgentProperties;
-    private final SedimentProposalFacts sedimentProposals;
     private final SegmentSettlementAppService segmentSettlement;
     private final InterviewQuotaAppService interviewQuota;
     private final BillingAppService billingAppService;
@@ -153,23 +152,6 @@ public class MainAgentAppService {
      * 收口（PRD 产出）/悬空播报即清。进程内态，重启丢账（重试上限重置为已接受边角）。
      */
     private final Map<String, Integer> quotaCorrectiveRounds = new ConcurrentHashMap<>();
-
-    /**
-     * 沉淀兜底盘问记账（#460 数据飞轮采集层）：用户轮合法收口（挂起问答在场 / PRD
-     * 产出）且本轮主智能体无 propose_sediment 调用事实时置位（
-     * 「该提未提」——平台不判该不该提，只记提没提）；下一主智能体对话轮命令构建时
-     * 消费（system prompt 尾附轻提醒，{@link #mainCommand}），提醒非硬门——不设
-     * 拦、不播报、用户无感知。进程内态，重启丢记账（协议软指引仍在，不影响）。
-     */
-    private final Set<String> sedimentNudges = ConcurrentHashMap.newKeySet();
-
-    /** 沉淀兜底盘问尾注（#460）：随主智能体 system prompt 尾附——提醒模型回顾
-     * 未记录的沉淀物；软提醒不绑时刻，模型可忽略。 */
-    static final String SEDIMENT_NUDGE_TAIL =
-            "\n\n（平台轻提醒，无需向用户提及：回顾此前的对话，若有值得跨项目复用的"
-                    + "需求案例（CASE）/功能模块（MODULE）/业务规则（RULE）而尚未记录，"
-                    + "可随时调 propose_sediment 写入采集层草稿；没有就忽略本提醒，"
-                    + "继续本轮工作。）";
 
     /** 访谈协议段·试用轨（#538，ADR-0048 协议分轨；2026-11-17 用户裁决改为五问
      * 承诺——5 不只是上限，也是常态题量，除非用户明确不要）：不数数（额度由平台
@@ -235,7 +217,7 @@ public class MainAgentAppService {
             GenerationAppService generationAppService,
             PrdRevisionFacts prdRevisions,
             ConversationHistoryAppService conversationHistory,
-            MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
+            MainAgentProperties mainAgentProperties,
             SegmentSettlementAppService segmentSettlement,
             InterviewQuotaAppService interviewQuota, BillingAppService billingAppService,
             FastLaneFacts fastLaneFacts, BuildGateAppService buildGateService,
@@ -252,7 +234,6 @@ public class MainAgentAppService {
         this.prdRevisions = prdRevisions;
         this.conversationHistory = conversationHistory;
         this.mainAgentProperties = mainAgentProperties;
-        this.sedimentProposals = sedimentProposals;
         this.segmentSettlement = segmentSettlement;
         this.interviewQuota = interviewQuota;
         this.billingAppService = billingAppService;
@@ -477,7 +458,6 @@ public class MainAgentAppService {
             // 补救分形
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             fastLaneFacts.clear(Long.toString(project.getWorkspaceId()));
-            sedimentProposals.clear(Long.toString(project.getWorkspaceId()));
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
                         conversationHistory.recorder(projectId, eventBridge.sink(project));
@@ -513,14 +493,8 @@ public class MainAgentAppService {
     /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。 */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        // #460 兜底盘问投递：收口记账的会话下一轮 system prompt 尾附轻提醒（消费即清）
-        return mainCommandWith(project, runId, prompt, main, modelConfigs.resolveQueue(main.modelConfigKey()),
-                sedimentNudgeTailOf(project.getId()));
-    }
-
-    /** 兜底盘问尾注取口（消费即清）：记账在场附尾注，不在场附空串。 */
-    private String sedimentNudgeTailOf(Long projectId) {
-        return sedimentNudges.remove(sessionIdOf(projectId)) ? SEDIMENT_NUDGE_TAIL : "";
+        return mainCommandWith(project, runId, prompt, main,
+                modelConfigs.resolveQueue(main.modelConfigKey()));
     }
 
     /**
@@ -538,10 +512,7 @@ public class MainAgentAppService {
     private AgentCommand correctiveCommandWith(Project project, String runId,
             AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model,
             String correctivePrompt) {
-        // 纠偏轮不带沉淀兜底盘问尾注（mainCommandWith 尾注腿传空串）：纠偏是格式失格的
-        // 确定性纠正，不混入沉淀提醒（记账不被消费，下轮正常投递）
-        return mainCommandWith(project, runId, correctivePrompt,
-                main, model, /* sedimentNudgeTail= */ "");
+        return mainCommandWith(project, runId, correctivePrompt, main, model);
     }
 
     /**
@@ -592,15 +563,14 @@ public class MainAgentAppService {
      * {@link MainAgentProperties}（#371：携增强工具的慢轮不被总墙钟掐死）。
      */
     private AgentCommand mainCommandWith(Project project, String runId, String prompt,
-            AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model,
-            String sedimentNudgeTail) {
+            AgentConfigAppService.EffectiveConfig main, ModelCandidateQueue model) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
         return new AgentCommand(
                 runId,
                 prompt,
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + sedimentNudgeTail + interviewTailsOf(project),
+                        + interviewTailsOf(project),
                 model.modelString(),
                 model.channel(),
                 sessionId,
@@ -673,11 +643,8 @@ public class MainAgentAppService {
      * 契约。轮失败（判死等异常上抛）不经本观测与纠偏链——悬空补救在轮任务的
      * catch 侧（{@link #remedyFailedInterviewTurn}，即时点名播报）。</p>
      *
-     * <p><b>沉淀兜底盘问记账（#460，ADR-0038）</b>：用户轮合法收口（挂起问答在场／
-     * PRD 产出两形）且本轮主智能体无 propose_sediment 调用事实（
-     * {@link SedimentProposalFacts}）即置 {@link #sedimentNudges} 记账——下一对话轮
-     * system prompt 尾附软提醒（{@link #mainCommand} 消费即清）。不设硬门：不拦
-     * 收口、不播报、用户无感知；悬空收口与平台轮不记账。</p>
+     * <p><b>#638 技能清场</b>：原 #460 沉淀自荐「该提未提」兜底盘问随 propose_sediment
+     * 工具与自荐事实登记退场，收口观测不再记账与追加提醒。</p>
      */
     private void dispatchOnTurnClose(Long projectId, String sessionId, String runId,
             boolean platformRound) {
@@ -693,7 +660,6 @@ public class MainAgentAppService {
                 // 合法收口形一（ADR-0032）：挂起问答在场＝本轮未收口——悬空标记随
                 // 解除（访谈重获推进抓手，入口恢复分类）
                 danglingInterviews.remove(sessionId);
-                sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
                 return; // 挂起即段未收口：不结算（答复续跑同 runId 用量随真收口入账）
             }
             if (suspensionPending) {
@@ -751,7 +717,6 @@ public class MainAgentAppService {
             // 合法收口形二（ADR-0032）：PRD 产出（含修订）——悬空标记随解除
             danglingInterviews.remove(sessionId);
             quotaCorrectiveRounds.remove(sessionId); // #538：收口即清纠偏推进账
-            sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
             // 首建派发门（#542 访谈②，ADR-0048/0049——自动派发两入口整体退役）：
             // PRD 已产出的收口按<b>快道事实</b>分岔——快道（savePrd 的
             // fastLane 工具调用事实：用户明确收敛令〔试用态未问满五问唯一合法的
@@ -991,25 +956,6 @@ public class MainAgentAppService {
     private void clearTurnAnchors(String workspaceId) {
         prdRevisions.clear(workspaceId);
         fastLaneFacts.clear(workspaceId);
-    }
-
-    /**
-     * 沉淀兜底盘问记账（#460）：先消费本轮自荐调用事实——主智能体槽本轮提过
-     * （受理与拒因同口径）即撤掉此前可能存在的记账（问答续跑里补提的情形）；
-     * 未提且为用户轮合法收口则置记账（次轮 system prompt 尾附轻提醒）。平台轮
-     * 消费事实不置记账（补产/通告轮不入「该提未提」口径）。悬空收口不记账——
-     * 纠偏轮正在救格式失格，不混入沉淀提醒。
-     */
-    private void sedimentNudgeOnClose(String sessionId, String workspaceId,
-            boolean platformRound) {
-        boolean mainProposed = sedimentProposals.consumeMainProposed(workspaceId);
-        if (mainProposed) {
-            sedimentNudges.remove(sessionId);
-            return;
-        }
-        if (!platformRound) {
-            sedimentNudges.add(sessionId);
-        }
     }
 
     /**

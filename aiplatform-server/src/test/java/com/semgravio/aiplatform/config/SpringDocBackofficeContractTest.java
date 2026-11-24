@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       excludeDirs 路径段排除语义自描述；清单行 operatorId 留痕口径（装者/最近
  *       动作者、type=string）。</li>
  *   <li>技能域槽位指派面（#249）：SkillSlotAssignCommand.skillIds 整包替换语义
- *       （清单即终态）；BackofficeSlotAssignmentResponse.slot 三把槽位键自描述。</li>
+ *       （清单即终态）；BackofficeSlotAssignmentResponse.slot 两把槽位键自描述（#638 起 subagent 拆掉）。</li>
  *   <li>技能域更新面（#250）：清单行 updateAvailable 标记语义（有新版/未检查/
  *       永不自动跟新）；SkillUpdateCommand.sourcePackage 取值口径（清单行原值）；
  *       更新回执 from/to 版本与留痕读面自描述。</li>
@@ -47,7 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>智能体运营配置面（#251，project 分组）：覆盖态终态语义（null/缺省＝清空
  *       回落枚举默认）、覆盖标记与默认预览、留痕 old/new 快照对自描述。</li>
  *   <li>工具面清单与开关（#252，project 分组）：kind 三值对照（开关判定正本）、
- *       enabled 挂载语义（false＝在册但退出装配面）、槽位三键、开关命令 enabled
+ *       enabled 挂载语义（false＝在册但退出装配面）、槽位两键、开关命令 enabled
  *       必填语义自描述。</li>
  *   <li>设计对接件（#298）：订单清单/详情 deliverableType（BaseEnum 房规＋取件
  *       端点指路）、对话条目 sessionSource（2=设计会话判据与 null=主会话缺省
@@ -299,7 +299,7 @@ class SpringDocBackofficeContractTest {
     @Test
     void given_slot_assignment_schemas_when_read_group_then_replacement_semantics_self_described() throws Exception {
         // #249：槽位指派读写面——命令是整包替换语义（清单即终态）、柄是 TSID 串
-        //（type=string 防数值假设，与清单行 id 口径同源）、读面 slot 键自描述三槽
+        //（type=string 防数值假设，与清单行 id 口径同源）、读面 slot 键自描述两槽（#638 起 subagent 拆掉）
         JsonNode skills = fetchGroup("skills");
         JsonNode skillIds = property(skills, "SkillSlotAssignCommand", "skillIds");
         assertThat(skillIds.path("type").asText(null))
@@ -314,10 +314,9 @@ class SpringDocBackofficeContractTest {
                 .as("slot 应渲染 type=string（槽位稳定键）")
                 .isEqualTo("string");
         assertThat(slot.path("description").asText(""))
-                .as("slot 应自描述三把槽位键")
+                .as("slot 应自描述两把槽位键（#638 起 subagent 拆掉）")
                 .contains("main")
-                .contains("executor")
-                .contains("subagent");
+                .contains("executor");
     }
 
     @Test
@@ -416,7 +415,7 @@ class SpringDocBackofficeContractTest {
             throws Exception {
         // #252：工具面清单与开关——kind 三值对照（开关判定正本：仅 ENHANCEMENT 可开关、
         // SKELETON/HARNESS_BUILTIN 结构性锁死）、enabled 语义（false＝在册但退出装配面）、
-        // 槽位三键自描述、命令 enabled 必填（无缺省翻转语义）
+        // 槽位两键自描述、命令 enabled 必填（无缺省翻转语义）
         JsonNode project = fetchGroup("project");
         JsonNode kind = property(project, "BackofficeAgentToolResponse", "kind");
         assertThat(kind.path("type").asText(null))
@@ -444,10 +443,9 @@ class SpringDocBackofficeContractTest {
                 .as("slot 应渲染 type=string")
                 .isEqualTo("string");
         assertThat(slot.path("description").asText(""))
-                .as("slot 应自描述三槽位键（与技能槽位同键）")
+                .as("slot 应自描述两槽位键（与技能槽位同键；#638 起 subagent 拆掉）")
                 .contains("main")
-                .contains("executor")
-                .contains("subagent");
+                .contains("executor");
         JsonNode toggleEnabled = property(project, "AgentToolToggleCommand", "enabled");
         assertThat(toggleEnabled.path("type").asText(null))
                 .as("开关命令 enabled 应渲染 type=boolean")

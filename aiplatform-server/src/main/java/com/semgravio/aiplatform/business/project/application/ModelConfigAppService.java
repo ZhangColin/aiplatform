@@ -115,7 +115,7 @@ public class ModelConfigAppService {
             throw new ApplicationException(ProjectMessage.MODEL_CONFIG_NO_ENABLED_CANDIDATES, configKey);
         }
         ResolvedModel first = queue.get(0);
-        // 装配可证（#366）：配置键 → 实际模型串的单点日志——三座与边缘四点的每次
+        // 装配可证（#366）：配置键 → 实际模型串的单点日志——三座与边缘三点的每次
         // 命令构建/装配经此留迹，后台改配置后的生效链路 grep 可查（key 不入日志）；
         // #556 起带队列深度（首候选即主选，主备＝队列前两名）
         log.info("[model-config] 配置解析 {} → {}（通道 {}，thinking={}，候选 {}/{}）", configKey,

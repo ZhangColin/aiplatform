@@ -117,7 +117,6 @@ class MainAgentSessionSmokeTest {
         }
         if (projectId != null) {
             knowledgeAppService.purgeByProject(projectId);
-            jdbcTemplate.update("DELETE FROM skl_skill_drafts WHERE project_id = ?", projectId);
             jdbcTemplate.update("DELETE FROM prj_projects WHERE id = ?", projectId);
         }
         if (workspaceId != null) {

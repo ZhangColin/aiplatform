@@ -14,7 +14,8 @@ import com.cartisan.core.domain.BaseEnum;
  * run 尝试体旧机制</b>：executor 槽（finish_edit/update_plan/自荐两件/构建轨
  * 出图 gi 件）与 subagent 槽（report_verification）随旧执行协议与子智能体
  * 委派一并退役；<b>#610 设计线整条退役</b>：designer 槽与 generate_image 件
- * 一并拆除——现存槽位＝main（主智能体）。
+ * 一并拆除；<b>#638 技能清场</b>：main 槽自荐两件（propose_skill/propose_sediment）
+ * 退场——现存槽位＝main（主智能体），工具面＝问答＋PRD 落库＋只读五件。
  *
  * <p><b>骨架 / 增强</b>（ADR-0021：编排权不下放配置）：骨架＝编排链路工具
  * （问答、PRD 落库）＋项目事实只读件——结构性锁死不开放关停（接口层拒绝，
@@ -40,11 +41,7 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     FETCH_URL(7, "fetch_url", "main", AgentToolKind.ENHANCEMENT,
             "读用户贴的 http/https 地址内容（外部资料，取数口安全底线兜底——增强可关）"),
     WEB_SEARCH(8, "web_search", "main", AgentToolKind.ENHANCEMENT,
-            "自主搜索调研补缺口（增强可关——成本与滥用可控）"),
-    PROPOSE_SKILL_MAIN(12, "propose_skill", "main", AgentToolKind.SKELETON,
-            "技能草稿自荐（需求侧梳理经验沉淀待审——过程知识沉淀链，#263 三槽位齐开）"),
-    PROPOSE_SEDIMENT_MAIN(15, "propose_sediment", "main", AgentToolKind.SKELETON,
-            "沉淀物草稿自荐（需求案例/功能模块/业务规则沉淀待审——数据飞轮采集层，#460）");
+            "自主搜索调研补缺口（增强可关——成本与滥用可控）");
 
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */

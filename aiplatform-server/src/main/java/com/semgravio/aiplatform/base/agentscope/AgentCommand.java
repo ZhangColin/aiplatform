@@ -11,7 +11,7 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * <p>{@code runId} 为本轮调用的平台标识（计量幂等键与事件锚定都基于它）；
  * {@code systemPrompt} 可空——为空时取配置默认；{@code modelString}
  * <b>必填</b>（ADR-0031/#366 起全部调用面经配置解析携「前缀:实际模型名」串
- * ——三座与边缘四点统一装配链，配置缺省串回落已随边缘点收编退役）；
+ * ——三座与边缘三点统一装配链，配置缺省串回落已随边缘点收编退役）；
  * {@code modelChannel} 可空——模型通道注入件（业务侧配置解析的
  * baseUrl/apiKey/enableThinking，经创建上下文注入 SDK、进实例缓存键指纹）；
  * 主链调用与 {@code modelString} 恒结伴非空；为空＝无通道语境（测试形），
@@ -26,7 +26,7 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目工作区
  * （智能体读写项目文件的基础）；{@code streamCorrelation} 可空——流关联字段
  * （如 projectId，底座不解释，逐事件注入智能体事件 payload）；{@code timeout}
- * 可空——本轮对话超时（一次性总墙钟），为空取内核配置默认（判定轮/取名/预检等
+ * 可空——本轮对话超时（一次性总墙钟），为空取内核配置默认（判定轮/取名等
  * 无工具轻调用 2 分钟量级）；
  * {@code silenceTimeout} 可空——<b>活超时判定</b>（#322 生成轨，#371 起对话轨
  * 同口径）：事件流静默超过此值即判死——还在干活就不掐（持续产出事件/工具动作的

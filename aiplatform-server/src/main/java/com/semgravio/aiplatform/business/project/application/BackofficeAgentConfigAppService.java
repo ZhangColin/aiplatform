@@ -31,8 +31,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelS
 /**
  * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：两座智能体（main/
  * executor——{@link AgentProfile#byKey} 单点寻址）的覆盖态读／全量写／
- * 变更留痕读，＋边缘调用点四件（取名/压缩/分类/预检，#366 同表收编——值面仅
- * 模型配置，{@link AgentEdgePoint#byKey} 寻址）的配置读／写／留痕读。装配读腿
+ * 变更留痕读，＋边缘调用点三件（取名/压缩/分类，#366 同表收编——值面仅
+ * 模型配置，{@link AgentEdgePoint#byKey} 寻址；#638 技能预检边缘点已退场）的
+ * 配置读／写／留痕读。装配读腿
  * （库值优先、缺省回落）在 {@link AgentConfigAppService}（运行面），本服务只做
  * 后台管理面。
  *
@@ -169,7 +170,7 @@ public class BackofficeAgentConfigAppService {
      * 边缘调用点配置读面（GET）：生效值（库值或代码缺省配置键）＋覆盖标记＋缺省
      * 预览＋最近写者。无覆盖行＝回落代码缺省（覆盖标记 false、写者 null）。
      *
-     * @throws ApplicationException PRJ_064 边缘调用点不存在（配置面只有四点）
+     * @throws ApplicationException PRJ_064 边缘调用点不存在（配置面只有三点）
      */
     @Transactional(readOnly = true)
     public BackofficeEdgeModelConfigResponse edgeConfig(String edgeKey) {

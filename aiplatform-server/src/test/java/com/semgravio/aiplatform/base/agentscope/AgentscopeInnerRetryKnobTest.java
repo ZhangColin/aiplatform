@@ -158,11 +158,6 @@ class AgentscopeInnerRetryKnobTest {
                 return new EdgeModel("volcengine:deepseek-v4-flash", channel());
             }
 
-            @Override
-            public EdgeModel precheckModel() {
-                return new EdgeModel("volcengine:deepseek-v4-flash", channel());
-            }
-
         };
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), (agentKey, workspace, toolSpec) -> new Toolkit(),

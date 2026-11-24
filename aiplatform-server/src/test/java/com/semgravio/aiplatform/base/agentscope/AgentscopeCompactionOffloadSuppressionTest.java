@@ -87,10 +87,6 @@ class AgentscopeCompactionOffloadSuppressionTest {
             return new EdgeModel(PROBE_MODEL, null);
         }
 
-        @Override
-        public EdgeModel precheckModel() {
-            return new EdgeModel(PROBE_MODEL, null);
-        }
     };
 
     /** 恒定长文本响应桩（每次调用同一形状——主循环应答与压缩摘要调用无差别服务）。 */

@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * AgentScope 内核配置（前缀 app.agentscope）：默认人格 / agent 名 / 工作区根 /
- * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走配置解析：三座与边缘四点的
+ * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走配置解析：三座与边缘三点的
  * 模型串＋通道注入由业务侧 {@code ModelConfigAppService} 解析随命令/装配透传——
  * 旧 yml 模型键 default-model/compaction-model 已随边缘点收编退役）。workspace
  * 是本地兜底工作区（命令未带 workspaceId 时用，如取名轻调用），为空时用
@@ -28,8 +28,8 @@ public class AgentscopeProperties {
     private Path workspace;
 
     /**
-     * 单轮对话超时（一次性总墙钟）：未携活超时阈值的调用面的兜底——判定轮/取名/
-     * 预检等无工具轻调用（对话轮与生成轨已接活超时，见 app.main-agent /
+     * 单轮对话超时（一次性总墙钟）：未携活超时阈值的调用面的兜底——判定轮/取名等
+     * 无工具轻调用（对话轮与生成轨已接活超时，见 app.main-agent /
      * app.generation 的 silence-timeout，#371/#322）。
      */
     private Duration timeout = Duration.ofMinutes(2);

@@ -20,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
  * ADR-0055 #580-4）：两条腿——
  *
  * <p><b>交互车道＝stripe 池</b>（sessionId 固定落单线程 stripe，单线程 FIFO）：
- * 承载秒级轮——主智能体对话/判定/取名/预检等。同一 (userId, sessionId)
+ * 承载秒级轮——主智能体对话/判定/取名等。同一 (userId, sessionId)
  * 状态槽位一次只跑一轮——新轮与续跑
  * 并发会互踩 AgentState；碰撞代价＝秒级排队，无害。跨会话并行度上界＝stripe 数
  * （{@link #STRIPES}）。出队滞留超 {@link #QUEUE_WARN_THRESHOLD} 即 WARN——

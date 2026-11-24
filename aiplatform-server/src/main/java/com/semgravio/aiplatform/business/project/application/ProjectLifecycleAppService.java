@@ -22,7 +22,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
-import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.business.identity.application.GuestAppService;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
@@ -50,8 +49,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>事务形态（照片1b workspace 的形态）：Docker 副作用在业务事务外先行，库记录
  * 收进短事务；落库失败回收已落定的工作区不留孤儿容器。删除真删级联（A3 §4）：
  * 工作区物理销毁（尽力而为，失败不阻断记录删除）→ prj_* 行级联（FK CASCADE）
- * → 软引用表显式清（知识/对话史/生成段＋未终结技能草稿——#264 T6 终态与库行
- * 不随删）→ SSE workspace-destroyed（编排层发射制：副作用真实落定后，ADR-0001）。
+ * → 软引用表显式清（知识/对话史/生成段＋未终结沉淀草稿）→ SSE
+ * workspace-destroyed（编排层发射制：副作用真实落定后，ADR-0001）。
  * 归档与源码包下载归本服务（动作与交付物）；读拼装（详情/列表/用量）归
  * {@link ProjectQueryAppService}。</p>
  */
@@ -68,7 +67,6 @@ public class ProjectLifecycleAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
     private final ConversationHistoryAppService conversationHistory;
-    private final SkillDraftAppService skillDrafts;
     private final SedimentDraftAppService sedimentDrafts;
     private final OrderQueryAppService orderQueryAppService;
     private final GuestAppService guestAppService;
@@ -84,7 +82,6 @@ public class ProjectLifecycleAppService {
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
                                       ConversationHistoryAppService conversationHistory,
-                                      SkillDraftAppService skillDrafts,
                                       SedimentDraftAppService sedimentDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       GuestAppService guestAppService,
@@ -99,7 +96,6 @@ public class ProjectLifecycleAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
         this.conversationHistory = conversationHistory;
-        this.skillDrafts = skillDrafts;
         this.sedimentDrafts = sedimentDrafts;
         this.orderQueryAppService = orderQueryAppService;
         this.guestAppService = guestAppService;
@@ -270,7 +266,7 @@ public class ProjectLifecycleAppService {
      * 与后台 reclaim 共用，非另写一套）：在飞 run 先级联停止（承 #477 停止面）
      * → 工作区销毁（#485 终态一致内核尽力级联＋互斥面内三清校验，事实交回）
      * → prj_* 行删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用
-     * 显式清，尽力而为）→ 未终结技能草稿（#264 T6）与未终结沉淀草稿（#460）清理
+     * 显式清，尽力而为）→ 未终结沉淀草稿（#460）清理（技能草稿随 #638 退场）
      * → SSE workspace-destroyed → 项目行对账（四面之一）。
      *
      * @return 回收事实（在飞停止与否＋三清事实＋项目行清否＋工作区锚）——
@@ -292,7 +288,6 @@ public class ProjectLifecycleAppService {
         // #630 退场，无版本行需清。
         transactionTemplate.executeWithoutResult(status ->
                 conversationHistory.purgeByProject(projectId));
-        skillDrafts.purgeByProject(projectId);
         // #460 采集层不留僵尸行：未终结沉淀草稿随项目清（只在途——终态留档、已激活
         // 知识素材与来源项目脱钩），对齐技能草稿清理先例
         sedimentDrafts.purgeByProject(projectId);

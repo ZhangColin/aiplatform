@@ -14,7 +14,6 @@ import com.cartisan.event.ApplicationEventPublisher;
 
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
-import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.business.identity.application.GuestAppService;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.base.workspace.application.ConvergenceFace;
@@ -71,9 +70,6 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private ConversationHistoryAppService conversationHistory;
-
-    @Mock
-    private SkillDraftAppService skillDrafts;
 
     @Mock
     private SedimentDraftAppService sedimentDrafts;
@@ -197,7 +193,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, skillDrafts, sedimentDrafts, orderQueryAppService,
+                conversationHistory, sedimentDrafts, orderQueryAppService,
                 guestAppService, transactionTemplate, new CodingRunTrack());
     }
 }

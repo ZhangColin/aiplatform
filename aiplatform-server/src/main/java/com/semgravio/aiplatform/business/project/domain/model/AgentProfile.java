@@ -19,8 +19,9 @@ import com.cartisan.core.domain.BaseEnum;
  * 仍是智能体身份（有哪些智能体、职能、寻址键）与<b>缺省</b>正本；systemPrompt/
  * 模型配置的运营覆盖态落库（{@code prj_agent_configs}）后台可维护——装配「库值
  * 优先、缺省回落枚举默认」（解析单点 {@code AgentConfigAppService}），变更留痕
- * 可回滚。边缘调用点（取名/压缩/分类/预检）非智能体身份面，配置经
- * {@link AgentEdgePoint} 同表收编（#366，值面仅配置）；其提示词仍不属配置面。</p>
+ * 可回滚。边缘调用点（取名/压缩/分类）非智能体身份面，配置经
+ * {@link AgentEdgePoint} 同表收编（#366，值面仅配置；#638 起预检退场）；其提示词
+ * 仍不属配置面。</p>
  *
  * <p>{@link #key()} 是两处寻址腿的稳定键：工具集装配（ProfileToolkitSupplier 按
  * 配置发放）与 SSE run-start 载荷的 {@code agent} 字段（前端对话面/工作消息的
@@ -35,7 +36,8 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     // 是对用户明示的承诺（chip「已答 N/5」可见），零必答不提前收口、未问满且无
     // 收敛令的 savePrd 由工具闸拒绝；付费态保留零必答首轮直产。分轨细则随每轮
     // system prompt 动态装配段附带，本体内只留分轨指引）+ 答询（#47 只读答疑并入）+ 迭代受理（#43/#46 需求侧判定）
-    // + 经验沉淀（#263 自荐软指引，不绑时刻）——单会话连续进行（#86 并轨）；
+    // ——单会话连续进行（#86 并轨）；#638 技能清场后自荐两件（propose_skill／
+    // propose_sediment）连同软指引退场；
     // 能力边界正本（#216：纪律条款 + 终态能力清单，与工具装配一致）终结无验证
     // 自述；savePrd 的 summary 必传（产出/修订说明——平台从工具调用事实观测，
     // 不新增自报面）
@@ -147,9 +149,7 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "不猜测、不编造。\n"
                     + "18. 能力清单（正本，与工具装配一致）：需求侧 ask_user"
                     + "（每轮一问澄清）、savePrd（PRD 产出/修订落盘）、"
-                    + "load_skill_through_path（加载 prd-writing 技能产出规范 PRD）、propose_skill"
-                    + "（需求侧经验自荐草稿）、propose_sediment（沉淀物自荐草稿——需求案例 CASE/"
-                    + "功能模块 MODULE/业务规则 RULE）；答询 "
+                    + "load_skill_through_path（加载 prd-writing 技能产出规范 PRD）；答询 "
                     + "query_project_facts（项目事实含系统访问地址）、list_workspace_files（工作区"
                     + "文件清单）、read_workspace_file（读具体文件）；外部资料 fetch_url（读用户贴"
                     + "的 http/https 地址内容）、web_search（自主搜索调研，可配合 fetch_url 搜→读→"
@@ -158,16 +158,6 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "不派发更新——系统的构建与更新由平台在需求侧收口后自动安排（全部发生在 run 内）。"
                     + "用户要「读地址」指 fetch_url、「查资料」指 web_search、「查项目事实」指 "
                     + "query_project_facts；不在此列的能力一律如实说没有对应工具并给出替代路径。\n"
-                    + "19. 经验沉淀（软指引非必做）：会话中若沉淀出可复用的需求侧经验（某行业/"
-                    + "场景的访谈要点、梳理方法等），可随时用 propose_skill 工具把它写成技能草稿"
-                    + "（name/description/body 三参数），供后续项目复用——后台审核采纳后才全局"
-                    + "生效，未审核不影响任何项目。没有可沉淀的经验就不调用，不为凑数硬写。\n"
-                    + "20. 沉淀物自荐（软指引非必做）：对话中遇到值得跨项目复用的内容——"
-                    + "需求案例（CASE：某类用户/场景的真实需求形态）、功能模块（MODULE：可复用的"
-                    + "功能形态）、业务规则（RULE：某类业务公认的规则口径）——可随时用 "
-                    + "propose_sediment 工具记录成沉淀草稿（kind/title/summary/content 四参数），"
-                    + "供平台知识沉淀：后台「数据标注」人工审核激活后才入知识库，未审核草稿不参与"
-                    + "任何检索、不影响任何项目。没有值得沉淀的就不调用，不为凑数硬写。\n"
                     + "全程使用中文。"),
 
     // #604 拆 run 尝试体旧机制：EXECUTOR 座 13 条执行协议正文整体退役——生成/更新

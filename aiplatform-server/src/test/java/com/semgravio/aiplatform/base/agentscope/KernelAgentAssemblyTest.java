@@ -105,11 +105,6 @@ class KernelAgentAssemblyTest {
                 return edge;
             }
 
-            @Override
-            public EdgeModel precheckModel() {
-                return edge;
-            }
-
         };
     }
 

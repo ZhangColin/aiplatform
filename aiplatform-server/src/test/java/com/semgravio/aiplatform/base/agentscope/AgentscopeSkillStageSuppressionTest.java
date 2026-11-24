@@ -70,11 +70,6 @@ class AgentscopeSkillStageSuppressionTest {
             return new EdgeModel(PROBE_MODEL, null);
         }
 
-        @Override
-        public EdgeModel precheckModel() {
-            return new EdgeModel(PROBE_MODEL, null);
-        }
-
     };
 
     /** 单技能桩仓库（a-only 形——resources 空；物化面照样无条件 createDirectories）。 */

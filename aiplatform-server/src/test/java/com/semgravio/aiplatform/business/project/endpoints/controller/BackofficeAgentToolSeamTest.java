@@ -31,9 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>五面钉死（#252 验收面；#604 起槽位只余两槽——executor 槽随 run 尝试体旧机制
  * 退役、subagent 槽随委派机制退役）：</p>
  * <ul>
- * <li><b>清单可观测</b>：唯一槽位 main（#610 起 designer 槽随设计线整条退役）——
- * 平台九件
- * （骨架七＋增强两，含 propose_skill #263 与 propose_sediment #460 自荐）；
+ * <li><b>清单可观测</b>：唯一槽位 main（#610 起 designer 槽随设计线整条退役；
+ * #638 技能清场后自荐两件退场）——平台七件（骨架五＋增强两）；
  * 增强 enabled 按生效开关、骨架/内建恒 true；</li>
  * <li><b>开关生效装配断言</b>：PUT 关 web_search → 清单 enabled=false ＋ 真装配链
  * （{@link AgentConfigAppService#effectiveOf} 取生效规格 →
@@ -94,14 +93,12 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[0].slot").value("main"))
                 .andExpect(jsonPath("$.data[?(@.slot == 'executor')]").isEmpty())
                 .andExpect(jsonPath("$.data[?(@.slot == 'designer')]").isEmpty())
-                // main：平台九件（#602 saveBuildPlan 随切片机器出局；骨架七恒挂载——
-                // 含 propose_skill #263 与 propose_sediment #460 自荐两槽位齐开＋
-                // 增强两件按生效开关缺省开）
-                .andExpect(jsonPath("$.data[0].tools", hasSize(9)))
-                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_sediment')].kind")
-                        .value("SKELETON"))
+                // main：平台七件（#602 saveBuildPlan 随切片机器出局；#638 自荐两件退场；
+                // 骨架五恒挂载＋增强两件按生效开关缺省开）
+                .andExpect(jsonPath("$.data[0].tools", hasSize(7)))
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')]").doesNotExist())
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_sediment')]")
+                        .doesNotExist())
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].kind")
                         .value("ENHANCEMENT"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].enabled")

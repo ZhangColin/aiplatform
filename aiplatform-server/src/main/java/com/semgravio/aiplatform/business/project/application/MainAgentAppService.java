@@ -29,7 +29,6 @@ import com.semgravio.aiplatform.business.project.application.dto.command.Message
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -209,14 +208,6 @@ public class MainAgentAppService {
                     + "题量软目标 5 个以内（典型约 5 个）——是软目标不是硬上限，可超过、"
                     + "题量不固定、理想趋零；不预告剩余题数、不设硬顶。";
 
-    /**
-     * 风格方向库目录尾注（#543，ADR-0052 切片①——「目录经每轮 systemPrompt 动态装配
-     * 注入、正本单源在平台常量」）：每轮主智能体命令尾附目录视图（方向名＋领域
-     * 气质清单＋选取协议句），与两轨访谈协议段同缝共存不冲突；访谈期供写 PRD 时
-     * 代选、迭代期供「想换风格」意见走对话修订——全程不加轮次、不占五问额度。
-     */
-    static final String STYLE_DIRECTION_CATALOG_TAIL = StyleDirections.catalogMarkdown();
-
     /** 收口指令（#538，ADR-0048「第 5 问答完由编排层注入收口指令」）：额度用尽后
      * 随主智能体轮 system prompt 尾附——停止提问、剩余必答缺口按推荐补全、立即
      * 梳理产出 PRD。 */
@@ -227,10 +218,7 @@ public class MainAgentAppService {
                     + "操作的自洽负推理责任，不是机械填推荐）；随后立即 load_skill_through_path "
                     + "加载 prd-writing 技能（path 传 SKILL.md）并调用 savePrd 保存完整 PRD"
                     + "（content 传完整 PRD markdown 全文，summary 必传：说明覆盖了什么、"
-                    + "哪些缺口按推荐补全）；PRD「关键约束」章的风格方向行按随附「风格方向"
-                    + "库·目录」选与项目领域气质最匹配的方向——缺省套仅当其余方向无一贴近"
-                    + "时才兜底，不得因收口赶工省事选缺省（2026-11-18 收口赶工落缺省套实案"
-                    + "修复，ADR-0052 补记）。保存成功后向用户输出简短总结（PRD 已产出＋核心要点＋按推荐"
+                    + "哪些缺口按推荐补全）。保存成功后向用户输出简短总结（PRD 已产出＋核心要点＋按推荐"
                     + "补全了哪些缺口）。除此之外本轮不要再提问。";
 
     /** 入口分类调用的计量锚（#537 段收口接线）：projectId → 本次派发的分类 runId——
@@ -425,7 +413,7 @@ public class MainAgentAppService {
                 model.channel(),
                 model, // #557 续跑与首轮同队列（failover 装配面）
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + interviewTailsOf(project) + STYLE_DIRECTION_CATALOG_TAIL,
+                        + interviewTailsOf(project),
                 replyId,
                 pendingToolCalls.stream()
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(toolCall, answerText))
@@ -596,9 +584,7 @@ public class MainAgentAppService {
      * 代答该问题并续跑同一 run（答复经 resume 工具结果通道给模型；不落成用户作答行）。 */
     static final String CLOSURE_PLATFORM_ANSWER =
             "收口作答：访谈提问额度已用尽，本问题不再展开——请严格执行平台收口指令："
-                    + "剩余必答缺口按推荐补全，立即梳理并调用 savePrd 保存 PRD（PRD「关键约束」"
-                    + "章风格方向行按随附目录选与领域气质最匹配的方向，缺省套仅兜底、"
-                    + "不得因收口赶工省事选缺省）。";
+                    + "剩余必答缺口按推荐补全，立即梳理并调用 savePrd 保存 PRD。";
 
     /** 悬空补救文案（#538）：额度收口双失格形——恒带「继续」指路。 */
     static final String DANGLING_REMEDY_QUOTA_EXHAUSTED =
@@ -621,8 +607,7 @@ public class MainAgentAppService {
                 runId,
                 prompt,
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + sedimentNudgeTail + interviewTailsOf(project)
-                        + STYLE_DIRECTION_CATALOG_TAIL,
+                        + sedimentNudgeTail + interviewTailsOf(project),
                 model.modelString(),
                 model.channel(),
                 sessionId,
@@ -926,7 +911,7 @@ public class MainAgentAppService {
                 model.channel(),
                 model, // #557 续跑与首轮同队列（failover 装配面）
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
-                        + interviewTailsOf(project) + STYLE_DIRECTION_CATALOG_TAIL, // 收口指令在场（额度用尽态）＋风格目录尾注
+                        + interviewTailsOf(project), // 收口指令在场（额度用尽态）
                 pending.suspension().engineRef(),
                 pending.suspension().toolCalls().stream()
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(

@@ -50,13 +50,6 @@ public final class ProjectFiles {
     public record Entry(String path, long size) {
     }
 
-    /**
-     * 基座健壮件·数据访问层（#421 首批四件套的取件锚，工作区根相对形）：栈规则集
-     * AGENTS.md 节的就位判据——四件套随基座模板同批就位，此文件在场＝新基座
-     * （栈规则集拼入）；不在场＝存量工作区（不回补，节不拼入）。
-     */
-    public static final String BASELINE_ROBUST_DATA_ACCESS = "src/lib/robust/data-access.ts";
-
     private ProjectFiles() {
     }
 

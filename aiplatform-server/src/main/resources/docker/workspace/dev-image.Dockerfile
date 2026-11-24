@@ -79,14 +79,15 @@ ENV RENDER_CHROMIUM=/opt/chrome/chrome-linux/chrome
 # #421 厚模板补三层：基座健壮件首批四件套（src/lib/robust 数据访问层＋fetch 封装＋
 # 会话存储件、src/components/robust 三态 UX 件＋页面级错误边界——机制/呈现分离：
 # 行为契约在件、长相吃项目设计 token、文案可覆盖）＋测试跑道（vitest 配置＋自测
-# 骨架，模板内零 setup 可跑）＋栈规则集（工作区 AGENTS.md 由平台在派发时按健壮件
-# 在场拼入，见 GenerationAppService）。构建期 pnpm test 跑四件套行为契约测试——
-# 模板自己吃狗粮，红＝镜像构建失败（随镜像构建验证，spec #416 测试决议）；故
-# 基座模板内容变更一律随 DEV_IMAGE tag 换版（单源），存量项目不回补。
+# 骨架，模板内零 setup 可跑）＋栈规则集（#607 起平台不再向工作区写 AGENTS.md 规则节，
+# 生产约束并入内核提示词）。构建期 pnpm test 跑四件套行为契约测试——模板自己吃
+# 狗粮，红＝镜像构建失败（随镜像构建验证，spec #416 测试决议）；故基座模板内容
+# 变更一律随 DEV_IMAGE tag 换版（单源），存量项目不回补。
 # #540 首批模式件两件（src/components/patterns：ValidatedForm 表单＋校验＋提交态、
 # FilterableList 列表＋筛选＋分页——ADR-0051 行为骨架预置、呈现全参数化只吃语义
 # token、零配置可用、定制三通道封顶）：行为契约测试＋静态纪律测试（禁裸色/任意
-# 值/inline style＋tree-shake 纯度）同吃狗粮门；用法与纪律进栈规则集常量节。
+# 值/inline style＋tree-shake 纯度）同吃狗粮门；#607 起用法告知面（栈规则集常量节）
+# 随风格与设计资产组退场。
 # store-dir 钉在 /workspace/.pnpm-store：/workspace 是独立卷（独立文件系统），
 # pnpm 在卷上会自动改用项目内 store；若构建期走默认全局 store（/root/.local），
 # 复制就位后 node_modules 的 storeDir 记录与运行时不一致，执行体 pnpm add（长尾

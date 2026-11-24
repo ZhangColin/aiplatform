@@ -36,7 +36,7 @@ import org.springframework.stereotype.Component;
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（memory：源码包
- * 是交付物，记忆文件不进包）——工作区上下文（AGENTS.md 等）与
+ * 是交付物，记忆文件不进包）——工作区上下文（存量工作区的 AGENTS.md 等）与
  * workspace/tools.json 读取照常，经容器文件面即项目事实；
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
  * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具

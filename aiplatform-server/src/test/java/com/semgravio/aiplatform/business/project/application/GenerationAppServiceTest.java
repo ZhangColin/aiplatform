@@ -67,7 +67,6 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleApp
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
-import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
@@ -158,11 +157,6 @@ class GenerationAppServiceTest {
         // 真解析链护卫（ADR-0031）：命令构建经 ModelConfigAppService 解析种子配置行（V79 收敛后＝deepseek 官方），
         // 测试环境无 key 注入——幂等补测试 key
         ModelConfigSeed.ensureChannelKey(jdbcTemplate);
-        // #543 风格物化写面缺省桩（首个构建派发＝平台确定性写基座四件）：通用成功，
-        // 用例专属注入（合并冲突/磁盘满等）在测试体内后注册，按 Mockito 后桩优先
-        // 覆盖本位；断言「零写入」的用例走 verify(never())（桩不产生调用）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
     }
 
     @AfterEach
@@ -217,13 +211,11 @@ class GenerationAppServiceTest {
         }).when(agentClient).converse(any(), any());
     }
 
-    private void givenAgentsMdWriteSucceeds() {
+    /** 工作区 exec 全成功（收口判据双件＋预览 URL 的统一桩）。 */
+    private void givenWorkspaceExecSucceeds() {
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
-        // #543 风格物化写面（首个构建派发四件落位——本类不断言其内容，缺省成功）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        // 切片收口推 URL（#105）：探活通过后取预览 URL（成功路径的统一桩）
+        // 收口推 URL（#105）：探活通过后取预览 URL（成功路径的统一桩）
         when(workspaceLifecycleAppService.exposePreview(anyString()))
                 .thenReturn(URI.create("http://localhost:30080"));
     }
@@ -259,7 +251,7 @@ class GenerationAppServiceTest {
         // 待跑、无 run-failed），后续片不再派发（关停宽限窗内不拉起排队轮）
         Long projectId = persistedProject("9817");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -296,7 +288,7 @@ class GenerationAppServiceTest {
         //（无进度——非切片），run-start 的 slice 字段呈现源
         Long projectId = persistedProject("9821");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
 
         appService.dispatchGenerationOnTurnClose(projectId);
@@ -314,7 +306,7 @@ class GenerationAppServiceTest {
         // 如实收口）；「继续生成」照常可续——重发即新内核 run（收口判据照跑）
         Long projectId = persistedProject("9845");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
@@ -346,23 +338,12 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_agents_md_materialization_when_inspect_then_external_repo_convention_anchored() {
-        // #214 外部仓库流程指令的工作区腿（#604 执行体协议清场后正本＝AGENTS.md
-        // 物化文本）：external/ 目录约定随布局资产就位幂等覆写——起手浅克隆进
-        // external/、只读参考、不合并进系统
-        assertThat(GenerationAppService.AGENTS_MD_CONTENT)
-                .contains("external/ 是外部仓库资料目录")
-                .contains("浅克隆进 external/")
-                .contains("只读参考其 README/文档/源码结构、不合并进系统");
-    }
-
-    @Test
     void given_knowledge_hits_when_generate_slices_then_knowledge_injected_only_stage0() {
         // #114 一次切入一次注入（#601 内核形态顺延）：知识命中前置注入只在首跑，
         // 不逐轮重检索重注入（注入口径不膨胀）
         Long projectId = persistedProject("9831");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
         givenKnowledgeHits();
 
@@ -382,7 +363,7 @@ class GenerationAppServiceTest {
         // 即有内容可看）
         Long projectId = persistedProject("9833");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
 
         appService.dispatchGenerationOnTurnClose(projectId);
@@ -406,7 +387,7 @@ class GenerationAppServiceTest {
         // #340 失败不阻断：种子施用抛错也不影响收口（首版落位照常）
         Long projectId = persistedProject("9834");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
         when(workspaceLifecycleAppService.exec(any(),
                 argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh"))))
@@ -426,7 +407,7 @@ class GenerationAppServiceTest {
         // preview-ready(URL)——前端 bridge 写预览查询缓存，免 3s 轮询拿 URL
         Long projectId = persistedProject("9820");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
 
         appService.dispatchGenerationOnTurnClose(projectId);
@@ -447,7 +428,7 @@ class GenerationAppServiceTest {
         // （同 durationBreakdown）。失败语义＝明确展示＋重跑即恢复（不自动重试）。
         Long projectId = persistedProject("9860");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
 
         GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
@@ -486,7 +467,7 @@ class GenerationAppServiceTest {
         // ——停止是用户动作无失败原因（不携 error）；同载荷落库
         Long projectId = persistedProject("9861");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             if (converseCalls.incrementAndGet() == 1) {
@@ -529,7 +510,7 @@ class GenerationAppServiceTest {
         // #104 generated_at 落位（口径顺延）：内核 run 全程成功即落位
         Long projectId = persistedProject("9804");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
 
         appService.dispatchGenerationOnTurnClose(projectId);
@@ -546,7 +527,7 @@ class GenerationAppServiceTest {
         // 重跑起跑）生成中 →（收口）已生成——投影由 generated_at＋在途标记派生，
         // 读口 = REST 详情（与 SSE 会话态无关）
         Long projectId = persistedProject("9855");
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.NEVER_GENERATED);
 
@@ -592,7 +573,7 @@ class GenerationAppServiceTest {
         // 模型配置解析 + 长任务超时 + 计量 dims + 项目工作区 + 流关联
         Long projectId = persistedProject("9805");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
 
         GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
@@ -631,7 +612,7 @@ class GenerationAppServiceTest {
         // kernelForm＋无工具规格），与付费确认/收口自动共用同一派发编排
         Long projectId = persistedProject("9806");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
 
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
@@ -664,7 +645,7 @@ class GenerationAppServiceTest {
         // 不携工具规格（工具恰四件经装配结构性兑现）
         Long projectId = persistedProject("9870");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key)
@@ -684,36 +665,6 @@ class GenerationAppServiceTest {
         assertThat(kernel.toolSpec()).isNull();
     }
 
-    @Test
-    void given_generate_when_start_then_agents_md_written_before_first_converse() {
-        // 工作区布局资产就位先于首试下发：AGENTS.md 平台约定写入工作区根（幂等覆写）
-        Long projectId = persistedProject("9806");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenConverseSucceeds("已生成");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        InOrder order = inOrder(workspaceLifecycleAppService, agentClient);
-        order.verify(workspaceLifecycleAppService).exec(eq("9806"),
-                argThat((WorkspaceExecCommand cmd) ->
-                        cmd.command().contains("/workspace/AGENTS.md")
-                                && cmd.command().contains("工作区平台约定")
-                                && cmd.command().contains("8081")
-                                // #44 起服节奏约定进工作区正本（尽早起、增量长）
-                                && cmd.command().contains("一开工就跑起来")
-                                && cmd.command().contains("增量长出页面与功能")
-                                // #113 基座技术栈节进工作区正本（不换栈、不重选型）
-                                && cmd.command().contains("基座技术栈")
-                                && cmd.command().contains("不换栈、不重选型")
-                                // #214 外部仓库物理规则进工作区正本（external/ 资料目录浅克隆、
-                                // 克隆带目标目录 external/<仓库名>、不进交付/版本）
-                                && cmd.command().contains("external/")
-                                && cmd.command().contains("external/<仓库名>")
-                                && cmd.command().contains("浅克隆")
-                                && cmd.command().contains("不进交付源码包")));
-        order.verify(agentClient).converse(any(), any());
-    }
 
     @Test
     void given_knowledge_hits_when_generate_then_prefix_injected_before_stage0_prompt() {
@@ -721,7 +672,7 @@ class GenerationAppServiceTest {
         // 拼在任务 prompt 前
         Long projectId = persistedProject("9807");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
         givenKnowledgeHits();
 
@@ -744,7 +695,7 @@ class GenerationAppServiceTest {
         // 检索失败降级空注入：任务 prompt 原样下发，run 不被知识面阻断
         Long projectId = persistedProject("9808");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
         doThrow(new RuntimeException("pgvector 抖动")).when(knowledgePort)
                 .retrieve(anyString(), anyInt());
@@ -766,7 +717,7 @@ class GenerationAppServiceTest {
         //（点火入口/「继续生成」同口）即新内核 run 照跑收口判据
         Long projectId = persistedProject("9810");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds(); // AGENTS.md 写入（无 curl 字样）成功
+        givenWorkspaceExecSucceeds(); // 工作区 exec 全成功
         when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
                 cmd.command().contains("curl"))))
                 .thenReturn(new ExecResultResponse("", "Connection refused", 7));
@@ -803,7 +754,7 @@ class GenerationAppServiceTest {
         // 清单 = 工具调用观察、时长在场
         Long projectId = persistedProject("9811");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
@@ -845,7 +796,7 @@ class GenerationAppServiceTest {
         // verifyMs 随验证机器退役（#605）
         Long projectId = persistedProject("9818");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
@@ -924,59 +875,6 @@ class GenerationAppServiceTest {
                 .containsEntry("wait_async_results", 11);
     }
 
-    /** 健壮件缺席桩（后注册优先）：探针命令（test -f 基座健壮件）退非 0——存量工作区形。 */
-    private void givenRobustKitAbsent() {
-        when(workspaceLifecycleAppService.exec(anyString(),
-                argThat(command -> command != null
-                        && command.command().equals(GenerationAppService.robustKitProbeCommand()))))
-                .thenReturn(new ExecResultResponse("", "not found", 1));
-    }
-
-    @Test
-    void given_robust_kit_present_when_dispatch_then_agents_md_carries_stack_rules_section() {
-        // #421 验收①（栈规则集腿）：新基座工作区（探针在场）派发——AGENTS.md 拼入
-        // 本栈写法规则节（件用法示例＋用预置件规则），且写入命令不携内嵌双引号
-        // （Windows argv fail-fast 面，①族纪律——节内容改坏即红）
-        Long projectId = persistedProject("9830");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds(); // exec 全退 0 ⇒ 探针在场 ⇒ 节拼入
-        givenConverseSucceeds("已生成");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<WorkspaceExecCommand> execs =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(2)).exec(eq("9830"), execs.capture());
-        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command).contains("test -f"))
-                .anySatisfy(command -> assertThat(command)
-                        .contains("AGENTS.md")
-                        .contains("本栈写法规则")
-                        .contains("src/lib/robust/data-access")
-                        .contains("不自己手写"))
-                .allSatisfy(command -> assertThat(command).doesNotContain("\""));
-    }
-
-    @Test
-    void given_legacy_workspace_when_dispatch_then_stack_rules_section_not_backfilled() {
-        // #421 存量不回补：健壮件不在场（探针退 1）——AGENTS.md 不拼栈规则集节
-        // （存量工作区没有件，节内容指路不存在文件即误导；不回补口径结构性落地）
-        Long projectId = persistedProject("9831");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenRobustKitAbsent();
-        givenConverseSucceeds("已生成");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<WorkspaceExecCommand> execs =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9831"), execs.capture());
-        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command).contains("AGENTS.md"))
-                .noneSatisfy(command -> assertThat(command).contains("本栈写法规则"));
-    }
-
     // ---------- 守卫 ----------
 
     @Test
@@ -984,7 +882,7 @@ class GenerationAppServiceTest {
         // 在途守卫（含已提交未起跑）：异步轨道占位期间重复触发拒绝——重发走 REST
         // 入口（内核不消费计划/交接物），dispatch 直撞在途占位
         Long projectId = persistedProject("9813");
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
         List<Runnable> queued = new ArrayList<>();
         doAnswer(invocation -> {
@@ -1041,27 +939,6 @@ class GenerationAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
-    @Test
-    void given_agents_md_write_fails_when_generate_then_no_run_and_guard_released() {
-        // 资产就位失败如实上抛（环境故障口径），不起跑 run、在途守卫释放；重发即新
-        // 内核 run 再派
-        Long projectId = persistedProject("9817");
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("", "disk full", 1));
-
-        assertThatThrownBy(() -> appService.dispatchGenerationOnTurnClose(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
-        verify(agentClient, never()).converse(any(), any());
-
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenConverseChain(new AgentReply("run-y", "系统已生成"));
-        appService.dispatchGenerationOnTurnClose(projectId);
-        // 重发 = 新内核 run 一次 converse
-        verify(agentClient, times(1)).converse(any(), any());
-    }
-
     // ---------- 首建派发门（#542 访谈②：两入口退役——首产回调与轮收口兜一轮删、快道/按钮点火） ----------
 
     @Test
@@ -1072,7 +949,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9880");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             return new AgentReply(command.runId(), "完成");
@@ -1099,7 +976,7 @@ class GenerationAppServiceTest {
         seedConfirmedVersion(projectId);
         Project project = projectRepository.findById(projectId).orElseThrow();
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
 
         // 真 savePrd 落盘回调（适配器 bean 直调——状态位置位＋document-updated，
         // 零派发）
@@ -1123,7 +1000,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9883");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command == null) {
@@ -1158,7 +1035,7 @@ class GenerationAppServiceTest {
         // given_turn_close_dispatch_then_kernel_chain_and_first_build_requested）
         Long projectId = persistedProject("9884");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
 
         appService.dispatchGenerationOnTurnClose(projectId);
@@ -1173,7 +1050,7 @@ class GenerationAppServiceTest {
         // 停止同口径（#359 用户停止＝中断非判死）：清点火位，重跑入口照常在场
         Long projectId = persistedProject("9885");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             codingRunTrack.requestStop(projectId);
             throw new IllegalStateException("java.lang.InterruptedException");
@@ -1196,7 +1073,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9884");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -1226,7 +1103,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9885");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             // 在途插确认：PRD v2 在生成 run 进行中落库（幂等——阶段 0/切片各跑一
@@ -1255,7 +1132,7 @@ class GenerationAppServiceTest {
         // 无确认版起跑（设计类终点承接/legacy）：成版锚空——不虚构 PRD 关联
         Long projectId = persistedProject("9886");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         givenConverseSucceeds("完成");
 
         appService.dispatchGenerationOnTurnClose(projectId);
@@ -1290,7 +1167,7 @@ class GenerationAppServiceTest {
         // + 对话面平台明示（guide-reply 复用，prompt 缺省不再重建用户气泡）；生成
         // 收口成功后排空队列，多条意见合并为一场更新 run 补派（修正轨排队合并同构）
         Long projectId = persistedProject("9860");
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         List<Runnable> tracks = givenTrackCollected();
         CountDownLatch generating = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -1362,7 +1239,7 @@ class GenerationAppServiceTest {
         // 与恢复出口不冲突（不自锁、不重复派）；生成成功后「继续生成」出口按已生成
         // 口径拒绝（PRJ_017），不与补派的更新 run 抢轨道
         Long projectId = persistedProject("9861");
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         List<Runnable> tracks = givenTrackCollected();
         CountDownLatch generating = new CountDownLatch(1);
         CountDownLatch fixDone = new CountDownLatch(1);
@@ -1484,7 +1361,7 @@ class GenerationAppServiceTest {
                 VALUES ('executor', 'pro')
                 """);
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
@@ -1518,7 +1395,7 @@ class GenerationAppServiceTest {
         // 无覆盖：枚举缺省快档（flash）——单发一次 run 一支配置
         Long projectId = persistedProject("9855");
         givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
+        givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);

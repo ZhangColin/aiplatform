@@ -47,7 +47,7 @@ class WorkspaceLayoutTest {
 
     @Test
     void given_skeleton_when_inspect_then_covers_pinned_directories_only() {
-        // init 落位骨架 = 布局中的全部目录（应用代码占根无目录、AGENTS.md 内容归生成环；
+        // init 落位骨架 = 布局中的全部目录（应用代码占根无目录、AGENTS.md 为文件非目录、#607 起平台不再写入；
         // #283 设计线三目录进骨架——物料/设计产物/导出物，ADR-0027 存储地基）
         assertThat(WorkspaceLayout.SKELETON_DIRS).containsExactlyInAnyOrder(
                 WorkspaceLayout.DOCS_DIR, WorkspaceLayout.PG_DATA_DIR,

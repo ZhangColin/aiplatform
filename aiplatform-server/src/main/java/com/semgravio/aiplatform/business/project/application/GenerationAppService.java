@@ -20,10 +20,6 @@ import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
-import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
-import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
-import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
-import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
 import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
@@ -31,7 +27,6 @@ import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -94,9 +89,9 @@ import lombok.extern.slf4j.Slf4j;
  * 指令）；检索失败降级空注入、run 照旧下发。一场 run 一次注入（#114 生成链首片
  * 口径沿用到内核跑）——重跑是新的一场 run，照常重新切入注入。</p>
  *
- * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
- * （幂等覆写，内容平台所有）——run 执行体经 harness 工作区上下文自读；
- * PRD（docs/PRD.md）由主智能体先前写出，同样是智能体自读，平台不搬运。</p>
+ * <p><b>起手文件资产</b>：PRD（docs/PRD.md）由主智能体先前写出，run 执行体自读、
+ * 平台不搬运；#607 起平台不再向工作区写 AGENTS.md 平台约定（仍成立的生产约束
+ * 并入内核提示词单一权威，见 {@link KernelSystemPrompt#WORKSPACE_CONSTRAINTS}）。</p>
  */
 @Service
 @Slf4j
@@ -133,57 +128,6 @@ public class GenerationAppService {
     static final String NARRATION_CONVENTION =
             "过程解说只在关键节点（开工、重大转向、失败、收口）用一两句平实中文说明，"
                     + "不必每组动作都配解说。";
-
-    /**
-     * AGENTS.md 平台约定正文（工作区布局资产，#22 就位）：工作区物理约定的正本
-     * ——harness 工作区上下文自动注入 run 执行体，也是后续迭代 run / 引擎资产的
-     * 演进载体。内容平台所有（无用户可控片段），幂等覆写。
-     */
-    static final String AGENTS_MD_CONTENT = """
-            # 工作区平台约定
-
-            本工作区是平台的单容器沙箱：Node.js 运行时与 PostgreSQL、Redis 同容器，/workspace 是唯一持久卷——容器可随时销毁重建，卷内数据不丢、卷外皆可弃。
-
-            ## 基座技术栈
-
-            工作区开箱即是一个可运行的基座工程（镜像内置、依赖已预装），技术栈固定：TypeScript / Next.js / React 19 / pnpm / shadcn（Tailwind 4）/ PostgreSQL / Redis。在基座上增量长出系统——不换栈、不重选型、不重新搭骨架；基座覆盖不了的依赖才在工作区现场安装（pnpm add），不要引入替代性框架。
-
-            - 应用代码放工作区根目录；docs/ 放文档（docs/PRD.md 是需求正本，只读）。
-            - external/ 是外部仓库资料目录：PRD 引用外部仓库时，把仓库浅克隆进 external/（git clone --depth 1 <仓库地址> external/<仓库名>），只读参考其 README/文档/源码结构、不合并进系统；此目录不进交付源码包、不在文件树显示、不进版本正本（随封存保全，非缓存）。
-            - 数据库连接串读 .env 的 DATABASE_URL（平台生成、唯一注入通道，勿手改）；需要缓存用 .env 的 REDIS_URL。
-            - 应用自用的文件数据必须落 data/ 目录（卷内才持久）。
-            - 应用服务必须监听 0.0.0.0:8081——平台预览从该端口取流量。
-            - 应用服务一开工就跑起来：先把可运行形态（最小骨架或空壳页面即可）跑上 8081 后台常驻，此后增量长出页面与功能、随改随生效——不要写完全部代码才起服务。
-            - 基座依赖已在镜像预装；新增依赖才在工作区现场安装（node_modules 属可重建物，打包交付时排除）。
-            - .platform/ 是平台产物目录，不要写入；本文件（AGENTS.md）由平台维护，不要修改。
-            - 每轮生成或修正收尾前，确认 8081 端口的服务在后台常驻运行——预览呈现的是活的服务。
-            """;
-
-    /**
-     * AGENTS.md 本栈写法规则节（#421 栈规则集；#540 扩容＝基座能力清单唯一
-     * 正本，ADR-0051）：基座预置件（横切健壮件＋通用模式件）的件清单、用法
-     * 示例与复用纪律——平台维护、随基座 tag 换版（节内容描述的件与
-     * {@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS} 判据锚同批就位，模式件
-     * 同镜像同批）。只在新增容工作区拼入（件在场）；存量项目不回补、节不拼入。
-     * 纪律句＝基座件不改约（预置件内部不得编辑、定制三通道封顶）＋应用壳不
-     * 预置整壳（三类惯用法只教做法不给件——单一化防线画在结构之下）。正文纪律
-     * 与平台约定正文同：无用户可控片段、无内嵌双引号（Windows argv fail-fast
-     * 面），单引号经 heredoc 单引号定界为字面量、安全。
-     */
-    static final String AGENTS_MD_STACK_RULES_SECTION = """
-
-            ## 本栈写法规则（栈规则集）
-
-            基座预置件两族——横切健壮件与通用模式件（src/components/patterns）：行为契约内置、长相吃项目设计 token、文案可覆盖。这些能力直接用预置件，不自己手写；登录页面/流程/角色模型是功能域，自己写。基座件不改约：src/lib/robust、src/components/robust、src/components/patterns 下的预置件文件不得编辑或删除——定制只走三通道（参数 props、文案覆盖 props、外层 wrapper 包一层），三通道满足不了就另写新件，不动基座件内部。
-
-            - 数据访问（pg/redis）一律走 src/lib/robust/data-access：query（超时＋瞬时错误重试）、cacheGet / cacheSet（redis 恒降级——读挂了返回 null、写挂了返回 false，不抛不挂死）。不 new Pool、createClient 裸用客户端。入口 src/lib/db.ts 已预置（本件单例的 re-export——import 即用），不要自建数据访问文件。示例：const rows = await query('SELECT * FROM orders WHERE user_id = $1', [userId])。
-            - 任何 HTTP 调用（含页面/组件调自家 /api 路由）一律走 src/lib/robust/http 的 httpFetch / httpJson：默认超时＋错误归一为 HttpError（kind: timeout / network / http / parse，按 kind 分流），GET 缺省重试一次、副作用方法不重试。不用裸 fetch——调自家 /api 也是 HTTP 调用、页面与组件代码里同样不出现裸 fetch。入口 src/lib/http.ts 已预置（本件的 re-export——import 即用），不要自建请求封装文件。
-            - 页面加载/空/错三态用 src/components/robust/AsyncSection（status: loading / empty / error / ready，onRetry 挂重试），页面外层包 src/components/robust/ErrorBoundary（渲染崩溃兜底、resetKey 换路由自动复位）。文案默认可覆盖（loadingText / emptyText / errorTitle / retryText 等 props），样式只引用语义 token 类。
-            - 会话与密码用 src/lib/robust/session：createSession（route handler / server action 语境）、getSession（redis 挂了降级 null——受保护页照常判未登录）、destroySession、hashPassword / verifyPassword（scrypt）。不手写 cookie 会话、不裸存密码。入口 src/lib/auth.ts 已预置（本件的 re-export——import 即用），不要自建会话存取文件。
-            - 表单（登录/注册/下单/设置等一切提交形界面）用 src/components/patterns/ValidatedForm：fields 传字段定义（name/label/type/required/validate），校验流程（必填＋自定义校验、有错即拦并聚焦首个错字段）与提交态（提交中防连点、失败提示、成功反馈）骨架内置，onSubmit 收字段值对象（值全字符串）。文案可覆盖（submitText / errorText / requiredMessage 等 props），样式只吃语义 token 类。示例：<ValidatedForm fields={[{ name: 'phone', label: '手机号', required: true }]} onSubmit={save} />。
-            - 列表（订单/商品/内容等列表页）用 src/components/patterns/FilterableList：筛选状态管理与分页数据流内置——全量数据传 items 即客户端筛选分页（文本搜索默认命中条目全部字符串字段、select 按同名字段等值匹配，筛选变更自动回第 1 页）；服务端分页传 total＋onQueryChange（翻页/筛选上抛、调用方回填当页 items）。条目渲染 renderItem，表格等整块标记用 children 函数接管。示例：<FilterableList items={rows} filters={[{ name: 'status', label: '状态', type: 'select', options }]} renderItem={rowCard} />。
-            - 应用壳不预置整件（布局/导航结构随 PRD，防千篇一律）：用 shadcn 原语自行组装，三类惯用法——仪表盘壳＝侧栏导航（shadcn add sidebar，或 aside＋nav 组合）＋顶栏＋内容卡片区；营销页＝顶部导航条＋hero 大字区＋特性网格＋页脚；内容站＝顶栏＋列表区（FilterableList 可复用）＋详情页排版。布局搭一次放 layout.tsx 与组件目录，页面只填内容。
-            - 测试：测试跑道已预置（vitest），测试文件与源码同目录放 *.test.ts(x)，pnpm test 直跑——给业务功能补行为契约测试（成功路径与失败/降级路径都测）。""";
 
     /**
      * 收口判据核验探针（#35；#602 起本服务内无消费面，正本留此供
@@ -281,7 +225,7 @@ public class GenerationAppService {
     /**
      * 生成点火入口（POST /generate——岔路口「立即生成」与前端「继续生成」恢复出口
      * 共用；#604 起重发即在既有工作区重跑：服务端续跑机器已退役，不带断点、不携
-     * 错误现场）：守卫 → AGENTS.md 资产就位 → 异步提交编码 run（runId 随响应回，
+     * 错误现场）：守卫 → 异步提交编码 run（runId 随响应回，
      * 过程事件经 SSE）。失败不自动重试——终态经 run-failed 明确展示，由用户重跑。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
@@ -448,14 +392,6 @@ public class GenerationAppService {
             log.info("[generate] 项目 {} 生成在途，收口自动派发静默跳过（无意见载荷调用面）",
                     projectId);
             return null;
-        }
-        // 起手资产就位（#296）：AGENTS.md 平台约定（带规范项目的设计规范节随
-        // #612 设计线退役一并退场）
-        try {
-            writeConventionAssets(workspaceLifecycleAppService, project);
-        } catch (RuntimeException e) {
-            codingRunTrack.end(projectId);
-            throw e;
         }
 
         // 额度/收费通用缝（#332）：构建任务派发前「规则说明位＋执行前确认位」两挂点
@@ -761,48 +697,6 @@ public class GenerationAppService {
         catch (RuntimeException e) {
             log.warn("[generate] 项目 {} generated_at/Demo 首版落位失败：{}", projectId,
                     e.toString());
-        }
-    }
-
-    /**
-     * AGENTS.md 平台约定写入命令（幂等覆写，生成与更新 run 起手共用）：heredoc
-     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无内嵌双引号——
-     * Windows argv fail-fast 面；单引号在定界 heredoc 体内为字面量）。新基座工作区
-     * 追加本栈写法规则节（#421 栈规则集）。
-     */
-    static String agentsMdWriteCommand(boolean withStackRules) {
-        return "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
-                + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT
-                + (withStackRules ? AGENTS_MD_STACK_RULES_SECTION : "")
-                + "\nPLATFORM_EOF";
-    }
-
-    /**
-     * 基座健壮件在场探针（#421）：{@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS}
-     * 在场＝新基座工作区（健壮件四件套与模式件两件同镜像同批就位，#540），栈规则集
-     * 拼入；不在场＝存量工作区（不回补，节不拼入）。命令全常量、单引号形态（①族
-     * 纪律）。
-     */
-    static String robustKitProbeCommand() {
-        return "test -f '" + WorkspaceLayout.absolute(ProjectFiles.BASELINE_ROBUST_DATA_ACCESS) + "'";
-    }
-
-    /**
-     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区）：
-     * AGENTS.md 平台约定写入（新基座工作区拼栈规则集节——健壮件在场探针判据，
-     * #421）。退出码非 0 即写入失败（环境故障口径如实上抛，run 不起跑——遵守链
-     * 不静默缺席）。
-     */
-    static void writeConventionAssets(WorkspaceLifecycleAppService workspace,
-            Project project) {
-        String workspaceId = Long.toString(project.getWorkspaceId());
-        boolean withStackRules = workspace.exec(workspaceId,
-                new WorkspaceExecCommand(robustKitProbeCommand())).exitCode() == 0;
-        ExecResultResponse result = workspace.exec(workspaceId,
-                new WorkspaceExecCommand(agentsMdWriteCommand(withStackRules)));
-        if (result.exitCode() != 0) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "AGENTS.md 平台约定写入失败: " + result.stderr());
         }
     }
 

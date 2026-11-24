@@ -15,7 +15,6 @@ import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.FileChange;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
-import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
 import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
@@ -134,7 +133,6 @@ public class IterationAppService {
     private final CodingRunDispatcher codingRunDispatcher;
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
-    private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final DemoVersionAppService demoVersionAppService;
     private final PrdVersionAppService prdVersionAppService;
     private final DemoSeedAppService demoSeed;
@@ -163,7 +161,6 @@ public class IterationAppService {
             AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
             AgentEventBridge eventBridge,
             CodingRunTrack codingRunTrack,
-            WorkspaceLifecycleAppService workspaceLifecycleAppService,
             DemoVersionAppService demoVersionAppService,
             PrdVersionAppService prdVersionAppService,
             DemoSeedAppService demoSeed,
@@ -174,7 +171,6 @@ public class IterationAppService {
         this.codingRunDispatcher = codingRunDispatcher;
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
-        this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.demoVersionAppService = demoVersionAppService;
         this.prdVersionAppService = prdVersionAppService;
         this.demoSeed = demoSeed;
@@ -542,21 +538,10 @@ public class IterationAppService {
     }
 
     /**
-     * 修正轨道起手（AGENTS.md 资产就位 + 异步提交，{@link #dispatch}
-     * 与 {@link #restartFixRun} 共用）：AGENTS.md 平台约定幂等覆写（#214 既有工作区
-     * 自动刷新新物理规则，无需重建工作区），失败即环境故障口径如实上抛并释放在途
-     * 标记（run 不起跑）。
+     * 修正轨道起手（异步提交，{@link #dispatch} 与 {@link #restartFixRun} 共用）：
+     * #607 起不再写工作区 AGENTS.md（平台约定退场、生产约束并入内核提示词）。
      */
     private void beginFixTrack(Project project, String firstRunId, FixHandoff handoff) {
-        Long projectId = project.getId();
-        try {
-            GenerationAppService.writeConventionAssets(workspaceLifecycleAppService, project);
-        } catch (RuntimeException e) {
-            synchronized (codingRunTrack) {
-                codingRunTrack.end(projectId);
-            }
-            throw e;
-        }
         submitFixTrack(project, firstRunId, handoff);
     }
 

@@ -34,8 +34,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
 
 /**
  * 外部仓库惯例真模型冒烟（#214；VOLCENGINE_API_KEY 未设或 docker daemon 不在整类
- * 跳过）：PRD 引用外部 GitHub 仓库（cartisan-boot）时，真 run 执行体按执行体协议
- * 第 9 条「起手先 clone 再读」把仓库浅克隆进工作区 external/ 资料目录——只读参考、
+ * 跳过）：PRD 引用外部 GitHub 仓库（cartisan-boot）时，真 run 执行体按内核提示词
+ * 工作区约定（{@code KernelSystemPrompt.WORKSPACE_CONSTRAINTS}）把仓库浅克隆进
+ * 工作区 external/ 资料目录——只读参考、
  * 不合并进交付系统。仅 SSE 发射边 mock 收口观测。
  *
  * <p>机械判据一条：run 收口后 external/ 下存在 clone 痕迹（{@code .git} 目录）。
@@ -187,7 +188,7 @@ class ExternalRepoConventionSmokeTest {
         awaitUntil(GEN_DEADLINE, () -> frames.stream()
                 .anyMatch(f -> AgentEventTypes.RUN_FINISH.equals(f.type())));
 
-        // 3) 活体判据：external/ 下存在 clone 痕迹（.git 目录）——协议第 9 条被遵守。
+        // 3) 活体判据：external/ 下存在 clone 痕迹（.git 目录）——内核提示词工作区约定被遵守。
         //    失败时附诊断：会话 git/clone 痕迹（区分「模型没 clone」与「clone 失败」）
         //    + external 实况 + 事件序
         ExecResultResponse gitDirs = exec("find /workspace/external -maxdepth 3 -name '.git' -type d 2>/dev/null");

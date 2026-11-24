@@ -21,8 +21,8 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * classpath 正本（与镜像 build context 同源文件）的结构性在场——文件面缺失即
  * 红在本车道、不必等镜像构建。行为契约（超时/重试/降级/不挂死/文案可覆盖）由
  * 模板自带的 Vitest 测试承担，构建期随 {@code pnpm test} 验证（dev-image.Dockerfile
- * 基座层狗粮门——本类另断言该门在场）。栈规则集层（AGENTS.md 节）是平台侧拼入、
- * 归 {@code GenerationAppServiceTest} 用例族。
+ * 基座层狗粮门——本类另断言该门在场）。栈规则集层（AGENTS.md 节）已随 #607
+ * 退场（平台不再向工作区写平台约定），本类不再有对应拼入用例。
  */
 class BaselineRobustKitTemplateTest {
 
@@ -102,7 +102,7 @@ class BaselineRobustKitTemplateTest {
         // #541 基座件不改约的机械清单锚定：WorkspaceLayout.BASELINE_PRESET_DIRS
         //（写保护判据面，DockerExecFilesystem）的每个目录在基座模板正本都有预置
         // 件文件——预置目录增减而清单未同步（或反之）即红（写保护拦错面/漏面），
-        // 漂移守卫归本缝单点（告知面正本＝栈规则集，不在本测范围）
+        // 漂移守卫归本缝单点（#607 起栈规则集告知面已退场，不在本测范围）
         URL root = BaselineRobustKitTemplateTest.class.getClassLoader()
                 .getResource("docker/workspace/baseline");
         assertThat(root).as("基座模板根应在 classpath").isNotNull();

@@ -497,7 +497,8 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     private static final String PRESET_WRITE_GUIDANCE =
             "定制只走三通道（参数 props、文案覆盖 props、外层 wrapper 包一层），"
                     + "三通道满足不了就另写新件、放基座件目录之外。本次写入未执行"
-                    + "（件清单与用法见工作区 AGENTS.md 本栈写法规则节）。";
+                    + "（基座预置件位于 " + String.join("、", WorkspaceLayout.BASELINE_PRESET_DIRS)
+                    + " 下）。";
 
     /**
      * 基座件不改约写保护判定（#541，ADR-0051）：工作区锚定相对路径是否落在预置
@@ -505,8 +506,8 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
      * 模式件）下。路径段精确匹配（{@link #isOrUnder}——src/lib/robustish 不误拦）
      * ；读面（read/ls/grep/glob）不拦——件可读可学，拦的是写（编辑/删除/搬入
      * 搬出）。已知边界：shell 面（execute）绕文件缝的写（sed -i 等）不在此拦
-     * ——纪律句由栈规则集教、违规归生产返修缺陷面归纳（同 lint「任意改名直用」
-     * 演进口径）。
+     * ——#607 起工作区不再写栈规则集告知面，违规归生产返修缺陷面归纳（同 lint
+     * 「任意改名直用」演进口径）。
      */
     private static boolean isBaselinePresetPath(String rel) {
         for (String dir : WorkspaceLayout.BASELINE_PRESET_DIRS) {

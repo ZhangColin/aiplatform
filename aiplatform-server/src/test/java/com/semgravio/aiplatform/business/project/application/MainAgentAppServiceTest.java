@@ -66,7 +66,6 @@ import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
-import com.semgravio.aiplatform.business.project.domain.model.StyleDirections;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
@@ -180,13 +179,6 @@ class MainAgentAppServiceTest {
             AgentResume resume = invocation.getArgument(0);
             return resume != null ? new AgentReply(resume.runId(), "好的") : null;
         });
-        // AGENTS.md 资产就位（#214 生成/修正 run 起手幂等覆写）默认成功：只桩资产
-        // 写入命令（含 AGENTS.md）与健壮件在场探针（#421 test -f——默认在场＝新基座
-        // 工作区语义，栈规则集节拼入），git 成版 exec 仍走缺省 null（静默降级口径不变）。
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
-                        || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
-                .thenReturn(new ExecResultResponse("", "", 0));
         // #601 内核收尾判据双件（pnpm build＋8081 探活）默认成功——失败态用例后注册覆盖
         when(workspaceLifecycleAppService.exec(any(),
                 argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
@@ -288,10 +280,9 @@ class MainAgentAppServiceTest {
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(
                 UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
-        // 后续轮不重注知识：systemPrompt 即配置原文＋#538 试用轨协议段＋#543 风格目录尾注
+        // 后续轮不重注知识：systemPrompt 即配置原文＋#538 试用轨协议段
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
-                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
         // #371 对话轮活超时：命令携可配静默判死阈值（还在干活就不掐——慢工具轮
         // 不被 2 分钟总墙钟一次性掐死），替换原三 null 总墙钟口径
         assertThat(value.silenceTimeout()).isEqualTo(mainAgentProperties.getSilenceTimeout());
@@ -316,10 +307,9 @@ class MainAgentAppServiceTest {
 
         ArgumentCaptor<AgentCommand> overridden = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(1)).converse(overridden.capture(), any());
-        // 库值优先全量覆盖本体协议；#538 访谈协议段＋#543 风格目录尾注仍随附（覆盖行管本体，管不到动态装配段）
+        // 库值优先全量覆盖本体协议；#538 访谈协议段仍随附（覆盖行管本体，管不到动态装配段）
         assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。"
-                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
         assertThat(overridden.getValue().modelString()).isEqualTo("deepseek:deepseek-v4-pro");
         // 开关库值编入规格串（ws 关、fu 缺省开；#545 gi 件随 #604 出图开关退役，不再
         // 编入规格串）
@@ -333,8 +323,7 @@ class MainAgentAppServiceTest {
         verify(agentClient, times(6)).converse(fallback.capture(), any());
         assertThat(fallback.getAllValues().get(3).systemPrompt())
                 .isEqualTo(AgentProfile.MAIN.systemPrompt()
-                        + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                        + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
         assertThat(fallback.getAllValues().get(3).modelString())
                 .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(fallback.getAllValues().get(3).toolSpec())
@@ -394,43 +383,6 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_any_round_when_main_command_then_style_direction_catalog_tail_attached() {
-        // #543 目录注入（ADR-0052「目录经每轮 systemPrompt 动态装配注入、正本单源
-        // 平台常量」）：访谈轮与迭代轮都随附风格方向库目录块（8 套全名＋选取协议
-        // 句）——与两轨访谈协议段同缝共存不冲突；迭代期无访谈段但目录照附
-        // （「想换风格」意见走对话修订的目录可见性）
-        Long interviewProject = persistedProject("9760");
-        givenSessionExecutorRunsInline();
-        appService.runOpinionTurn(interviewProject, "做一个课程平台");
-
-        ArgumentCaptor<AgentCommand> interview = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(1)).converse(interview.capture(), any());
-        String interviewPrompt = interview.getAllValues().get(0).systemPrompt();
-        assertThat(interviewPrompt)
-                .contains("【风格方向库·目录】")
-                .contains("风格方向：")
-                .contains("【访谈协议·试用轨");
-        for (StyleDirections.Direction direction : StyleDirections.all()) {
-            assertThat(interviewPrompt).contains("- " + direction.name() + "：");
-        }
-
-        Long iterationProject = persistedGeneratedProject("9761");
-        appService.runOpinionTurn(iterationProject, "把按钮改大一点");
-        ArgumentCaptor<AgentCommand> iteration = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(4)).converse(iteration.capture(), any());
-        // 取末次主智能体命令（编码 run 命令同 mock 混捕——按会话前缀过滤；
-        // 前面为访谈轮的纠偏链）
-        String iterationPrompt = iteration.getAllValues().stream()
-                .filter(c -> c.sessionId().startsWith("main-"))
-                .reduce((first, second) -> second)
-                .orElseThrow().systemPrompt();
-        assertThat(iterationPrompt)
-                .contains("【风格方向库·目录】")
-                .doesNotContain("【访谈协议·")
-                .endsWith(MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
-    }
-
-    @Test
     void given_quota_full_when_answer_question_then_resume_carries_closure_instruction() {
         // #538 收口指令注入（ADR-0048「第 5 问答完由编排层注入收口指令」）：试用态已答
         // 满 5 个问答缺口后，答复续跑的 system prompt 尾附收口指令（剩余必答缺口按推荐
@@ -448,11 +400,7 @@ class MainAgentAppServiceTest {
         verify(agentClient).resume(resume.capture(), any());
         assertThat(resume.getValue().systemPrompt())
                 .contains("【收口指令】")
-                .contains("访谈协议·试用轨")
-                // #551 补记（2026-11-18 收口赶工落缺省套实案）：收口指令内嵌
-                // 风格方向纪律——收口轮不因赶工省事选缺省套
-                .contains("风格方向行按随附「风格方向库·目录」选与项目领域气质最匹配的方向")
-                .contains("不得因收口赶工省事选缺省");
+                .contains("访谈协议·试用轨");
     }
 
     @Test
@@ -562,9 +510,8 @@ class MainAgentAppServiceTest {
                 .contains("〔平台沉淀｜需求案例〕宠物医院在线预约的典型形态")
                 .contains("非用户的确认信息，不构成对当前需求的约束")
                 .contains("主人选医生、按时段预约、迟到作废。")
-                // #538 知识尾注之后随附访谈协议段（试用轨）＋#543 风格目录尾注（动态装配缝同缝、恒最尾位）
-                .endsWith(MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                // #538 知识尾注之后随附访谈协议段（试用轨；动态装配缝同缝、恒最尾位）
+                .endsWith(MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
     }
 
     @Test
@@ -594,9 +541,8 @@ class MainAgentAppServiceTest {
                 + "，供梳理当前需求时作背景参考"
                 + "（非用户的确认信息，不构成对当前需求的约束）："
                 + "\n\n〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。"
-                // #538 会话注入块之后随附访谈协议段（试用轨）＋#543 风格目录尾注——全轮（含纠偏/续跑）同缝
-                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL;
+                // #538 会话注入块之后随附访谈协议段（试用轨）——全轮（含纠偏/续跑）同缝
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL;
         assertThat(command.getAllValues()).extracting(AgentCommand::systemPrompt)
                 .containsOnly(expected);
         assertThat(resume.getValue().systemPrompt()).isEqualTo(expected);
@@ -616,11 +562,10 @@ class MainAgentAppServiceTest {
         // 开场轮命令＝首次 converse（#445：访谈悬空形另派纠偏轮，次数不断言）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(1)).converse(command.capture(), any());
-        // 检索失败降级为空注入 + #538 试用轨协议段＋#543 风格目录尾注随附（访谈期每轮动态装配）
+        // 检索失败降级为空注入 + #538 试用轨协议段随附（访谈期每轮动态装配）
         assertThat(command.getValue().systemPrompt())
                 .isEqualTo(AgentProfile.MAIN.systemPrompt()
-                        + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                        + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
     }
 
     @Test
@@ -759,10 +704,9 @@ class MainAgentAppServiceTest {
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.workspaceId()).isEqualTo("9703");
         assertThat(value.modelString()).isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
-        // #538 续跑同缝随附试用轨协议段（额度内无收口指令）＋#543 风格目录尾注
+        // #538 续跑同缝随附试用轨协议段（额度内无收口指令）
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt()
-                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
-                + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL);
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue(); // 续跑同只读面（#86：不漂移成读写面）
         assertThat(value.replyId()).isEqualTo("reply-9");
@@ -971,9 +915,8 @@ class MainAgentAppServiceTest {
         assertThat(mainCommands).hasSize(2);
         assertThat(mainCommands.get(0).systemPrompt()).doesNotContain("平台轻提醒");
         assertThat(mainCommands.get(1).systemPrompt())
-                // #543 风格目录尾注恒最尾位（提醒段在前）
-                .endsWith(MainAgentAppService.SEDIMENT_NUDGE_TAIL
-                        + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
+                // 提醒段恒最尾位
+                .endsWith(MainAgentAppService.SEDIMENT_NUDGE_TAIL);
         // 用户 prompt 原样不动（提醒只进 system prompt 尾——交接物与呈现面零扰动）
         assertThat(mainCommands.get(1).prompt()).isEqualTo("再把按钮做成圆角");
     }
@@ -1284,9 +1227,6 @@ class MainAgentAppServiceTest {
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
-        // #543 风格物化写面（首个构建派发四件落位——本类不断言其内容，缺省成功）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
@@ -1319,9 +1259,6 @@ class MainAgentAppServiceTest {
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
-        // #543 风格物化写面（首个构建派发四件落位——本类不断言其内容，缺省成功）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
@@ -1487,9 +1424,6 @@ class MainAgentAppServiceTest {
         seedPrdVersionRow(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
         givenSessionExecutorRunsInline();
-        // #543 风格物化写面（首个构建派发四件落位——本用例不断言其内容，缺省成功）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {

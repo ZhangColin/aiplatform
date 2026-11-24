@@ -25,6 +25,9 @@ package com.semgravio.aiplatform.base.agentscope;
  *       {@code packages/fs/tool-fs/src/read.ts:74}（read 引导一段，含两句）、
  *       {@code write.ts:68}、{@code edit.ts:82}（#595 施工经一手源码逐字核对；
  *       工具件的说明文字同口径见 {@link KernelTools}）</li>
+ *   <li>工作区约定句（#607）：原工作区 AGENTS.md 平台约定退场后，仍成立的四条生产
+ *       约束（data/ 持久化、external/ 外部仓库、.platform/ 不写、.env 只读）并入
+ *       本提示词单一权威；已由环境句／起服句覆盖或不再需要的约定不重复</li>
  * </ul>
  *
  * <p>环境句事实清单（2026-11-23 逐字对照当前镜像实况，验收第二条的正本）：</p>
@@ -74,6 +77,27 @@ public final class KernelSystemPrompt {
     static final String SERVER_NOTE = "开发服务器已由平台启动并常驻在 0.0.0.0:8081，"
             + "改动会自动生效，不要停掉或重启它（日志在 /workspace/.app.log）。";
 
+    /**
+     * 工作区约定句（#607 并入：原工作区 AGENTS.md 平台约定退场后，仍成立的
+     * 四条生产约束归提示词单一权威）。原 AGENTS.md 逐条去向：
+     * <ul>
+     *   <li>并入——data/ 持久化、external/ 外部仓库、.platform/ 不写、.env 只读
+     *       （含变量名 DATABASE_URL／REDIS_URL）</li>
+     *   <li>已被覆盖不重复——基座技术栈／8081 常驻／起服节奏（环境句、起服句）、
+     *       docs/PRD.md 只读（任务句：需求正本与实现依据，需求修订归主智能体对话面）</li>
+     *   <li>平台侧保证、不需模型动作——external/ 不进交付源码包/文件树/版本正本、
+     *       node_modules 打包排除</li>
+     *   <li>删除——AGENTS.md 自述（平台不再写该文件）、依赖安装提示（环境句已述
+     *       依赖已装）</li>
+     * </ul>
+     */
+    static final String WORKSPACE_CONSTRAINTS = "工作区约定：应用自用的文件数据落 "
+            + "/workspace/data/ 目录（随卷持久、不进交付源码包）；PRD 引用外部仓库时"
+            + "用 git clone --depth 1 <仓库地址> external/<仓库名> 浅克隆进 "
+            + "/workspace/external/，只读参考其 README/文档/源码结构、不合并进系统；"
+            + "/workspace/.platform/ 是平台产物目录，不要写入；/workspace/.env 由平台"
+            + "生成维护，不要修改（数据库连接串读 DATABASE_URL，缓存用 REDIS_URL）。";
+
     /** 完成判据句（#593：build 过＋8081 探活有响应才算完成）。 */
     static final String COMPLETION_CRITERIA = "完成后用 pnpm build 验证可构建，"
             + "用 curl http://localhost:8081 确认有响应才算完成。";
@@ -110,8 +134,8 @@ public final class KernelSystemPrompt {
      * 原文即连排单行形态。
      */
     private static final String TEXT = ROLE + ENVIRONMENT + TASK + LONG_FILE_HINT + SERVER_NOTE
-            + COMPLETION_CRITERIA + TOOL_USAGE_READ + TOOL_USAGE_WRITE + TOOL_USAGE_EDIT
-            + DISCIPLINE_FIRST + DISCIPLINE_SECOND + DISCIPLINE_THIRD + LANGUAGE;
+            + WORKSPACE_CONSTRAINTS + COMPLETION_CRITERIA + TOOL_USAGE_READ + TOOL_USAGE_WRITE
+            + TOOL_USAGE_EDIT + DISCIPLINE_FIRST + DISCIPLINE_SECOND + DISCIPLINE_THIRD + LANGUAGE;
 
     private KernelSystemPrompt() {
     }

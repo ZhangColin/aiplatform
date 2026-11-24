@@ -24,10 +24,12 @@ class KernelSystemPromptTest {
     void given_authoritative_prompt_when_text_then_full_body_matches_decided_form() {
         String text = KernelSystemPrompt.text();
 
-        // 六基件（#593 结构决议）：角色／环境描述／任务句／长文件拆分提示／完成判据／全程中文
+        // 六基件（#593 结构决议）：角色／环境描述／任务句／长文件拆分提示／完成判据／
+        // 全程中文；外加平台追加段（#593 起服句、#607 工作区约定句）
         assertThat(text).isEqualTo(KernelSystemPrompt.ROLE + KernelSystemPrompt.ENVIRONMENT
                 + KernelSystemPrompt.TASK + KernelSystemPrompt.LONG_FILE_HINT
-                + KernelSystemPrompt.SERVER_NOTE + KernelSystemPrompt.COMPLETION_CRITERIA
+                + KernelSystemPrompt.SERVER_NOTE + KernelSystemPrompt.WORKSPACE_CONSTRAINTS
+                + KernelSystemPrompt.COMPLETION_CRITERIA
                 + KernelSystemPrompt.TOOL_USAGE_READ + KernelSystemPrompt.TOOL_USAGE_WRITE
                 + KernelSystemPrompt.TOOL_USAGE_EDIT + KernelSystemPrompt.DISCIPLINE_FIRST
                 + KernelSystemPrompt.DISCIPLINE_SECOND + KernelSystemPrompt.DISCIPLINE_THIRD
@@ -45,6 +47,7 @@ class KernelSystemPromptTest {
                 KernelSystemPrompt.TASK,
                 KernelSystemPrompt.LONG_FILE_HINT,
                 KernelSystemPrompt.SERVER_NOTE,
+                KernelSystemPrompt.WORKSPACE_CONSTRAINTS,
                 KernelSystemPrompt.COMPLETION_CRITERIA,
                 KernelSystemPrompt.TOOL_USAGE_READ,
                 KernelSystemPrompt.TOOL_USAGE_WRITE,
@@ -114,6 +117,25 @@ class KernelSystemPromptTest {
         assertThat(note).contains("0.0.0.0:8081");
         assertThat(note).contains("/workspace/.app.log");
         assertThat(note).doesNotContain("/tmp/app.log");
+    }
+
+    /**
+     * 工作区约定句（#607）：原工作区 AGENTS.md 平台约定退场后，仍成立的四条生产
+     * 约束并入内核提示词单一权威——data/ 持久化、external/ 外部仓库、.platform/
+     * 不写、.env 只读。已被环境句／起服句覆盖的约定不重复。
+     */
+    @Test
+    void given_authoritative_prompt_when_text_then_workspace_constraints_merged_from_agents_md() {
+        String constraints = KernelSystemPrompt.WORKSPACE_CONSTRAINTS;
+
+        assertThat(constraints).contains("/workspace/data/");
+        assertThat(constraints).contains("external/<仓库名>");
+        assertThat(constraints).contains("/workspace/external/");
+        assertThat(constraints).contains("不合并进系统");
+        assertThat(constraints).contains("/workspace/.platform/").contains("不要写入");
+        assertThat(constraints).contains("/workspace/.env").contains("不要修改");
+        assertThat(constraints).contains("DATABASE_URL").contains("REDIS_URL");
+        assertThat(KernelSystemPrompt.text()).contains(constraints);
     }
 
     /** 完成判据句（#593：build 过＋8081 探活有响应才算完成）。 */

@@ -9,13 +9,13 @@ import java.util.List;
  * <ol>
  *   <li><b>根路径</b>：容器内唯一持久根 {@link #ROOT}（{@code -v 卷:ROOT -w ROOT}），
  *       供给、run 执行体文件面、平台读侧同锚，不散落第二根</li>
- *   <li><b>布局</b>：根下八类落位——AGENTS.md（平台约定，内容归生成环资产）、
- *       {@code docs/}（PRD 等文档）、应用代码占根、{@code data/pg/}（pg 数据，
- *       PGDATA 进卷）、{@code .platform/{rules,logs}}（平台产物——skills 预留位
- *       已随技能草稿库制删除，ADR-0022；既有工作区残留目录无害不再创建）、
- *       {@code materials/}（物料）、{@code design/}（设计产物）、
- *       {@code exports/}（导出物）——后三目录为设计线存储地基（#283/ADR-0027，
- *       图片一律以工作区为正本）</li>
+ *   <li><b>布局</b>：根下八类落位——AGENTS.md（#607 起平台不再写入；存量系统
+ *       遗留件无害、不再刷新）、{@code docs/}（PRD 等文档）、应用代码占根、
+ *       {@code data/pg/}（pg 数据，PGDATA 进卷）、{@code .platform/{rules,logs}}
+ *       （平台产物——skills 预留位已随技能草稿库制删除，ADR-0022；既有工作区
+ *       残留目录无害不再创建）、{@code materials/}（物料）、{@code design/}
+ *       （设计产物）、{@code exports/}（导出物）——后三目录为设计线存储地基
+ *       （#283/ADR-0027，设计线已整条退役、目录常量留作存量工作区事实）</li>
  *   <li><b>.env 唯一注入通道</b>：平台生成的连接串只经 {@link #ENV_FILE} 进工作区，
  *       run 执行体与应用从环境读，不经其他注入面</li>
  *   <li><b>可重建性断言</b>：全部持久物（代码、文档、数据、平台产物）都在卷内——
@@ -34,13 +34,15 @@ public final class WorkspaceLayout {
     /** 约定一：容器内工作区根（唯一持久锚点，docker -v/-w 与 run 执行体/平台文件面的同源事实）。 */
     public static final String ROOT = "/workspace";
 
-    /** 约定二：平台约定文件（生成环注入内容，v1 由 system prompt 承载、文件面随资产就位）。 */
+    /**
+     * 约定二：平台约定文件（#607 起平台不再写入——原 AGENTS.md 平台约定退场，
+     * 仍成立的生产约束并入内核提示词单一权威；存量工作区遗留件无害、不再刷新）。
+     */
     public static final String AGENTS_MD = "AGENTS.md";
 
     /**
-     * 设计规范规则文件（#296/ADR-0028 双件之规则面）：带规范项目由平台随定稿刷新
-     * 确定性写入（人读正本——token 表/品牌色板/风格/遵守条目），AGENTS.md 指路
-     * 每轮读；无规范项目不落位。
+     * 设计规范规则文件（#296/ADR-0028 双件之规则面；设计线已整条退役，#609／#612
+     * 起平台不再写入）。常量留作存量工作区事实；#607 起也不再有 AGENTS.md 每轮指路。
      */
     public static final String DESIGN_MD = "DESIGN.md";
 
@@ -132,16 +134,17 @@ public final class WorkspaceLayout {
      * 写保护在 run 执行体文件面 {@code DockerExecFilesystem}，路径段精确匹配），
      * 定制只走三通道（参数 props/文案覆盖 props/wrapper）。机械清单单源：基座
      * 模板内容演进（预置目录增减）须同步本表——BaselineEntryFilesTest 锚定
-     * 表与模板内容不漂移；告知正本＝工作区 AGENTS.md 本栈写法规则节（栈规则集，
-     * 随基座 tag 换版——本表只是写保护的判据面，不教用法）。存量工作区无这些
-     * 目录＝零命中零影响。
+     * 表与模板内容不漂移；#607 起工作区不再写 AGENTS.md 本栈写法规则节（告知面
+     * 退场，本表只是写保护的判据面；拒写文案自带三通道指引供模型自愈）。存量
+     * 工作区无这些目录＝零命中零影响。
      */
     public static final List<String> BASELINE_PRESET_DIRS = List.of(
             "src/lib/robust", "src/components/robust", "src/components/patterns");
 
     /**
      * 约定二的目录面（init 骨架幂等落位的清单）：随骨架落位的目录——应用代码占根
-     * 无目录约定，AGENTS.md 是文件资产非目录，都不在骨架内；external/（#214 run
+     * 无目录约定，AGENTS.md 是文件资产非目录（#607 起平台不再写入），都不在
+     * 骨架内；external/（#214 run
      * 起手浅克隆创建）与 agents/（#95 框架委派位创建）是运行时按需创建，不进骨架
      * （写入方自带 mkdir -p）；设计线三目录（#283 物料/设计产物/导出物）进骨架——
      * 布局约定物理先行，写入方（上传端点/设计执行体/导出打包）仍自带 mkdir -p

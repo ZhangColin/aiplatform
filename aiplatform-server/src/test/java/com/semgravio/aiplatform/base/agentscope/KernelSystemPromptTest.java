@@ -25,10 +25,11 @@ class KernelSystemPromptTest {
         String text = KernelSystemPrompt.text();
 
         // 六基件（#593 结构决议）：角色／环境描述／任务句／长文件拆分提示／完成判据／
-        // 全程中文；外加平台追加段（#593 起服句、#607 工作区约定句）
+        // 全程中文；外加平台追加段（#593 起服句、#607 工作区约定句、#635 清库纪律句）
         assertThat(text).isEqualTo(KernelSystemPrompt.ROLE + KernelSystemPrompt.ENVIRONMENT
                 + KernelSystemPrompt.TASK + KernelSystemPrompt.LONG_FILE_HINT
                 + KernelSystemPrompt.SERVER_NOTE + KernelSystemPrompt.WORKSPACE_CONSTRAINTS
+                + KernelSystemPrompt.DATA_CLEARING_DISCIPLINE
                 + KernelSystemPrompt.COMPLETION_CRITERIA
                 + KernelSystemPrompt.TOOL_USAGE_READ + KernelSystemPrompt.TOOL_USAGE_WRITE
                 + KernelSystemPrompt.TOOL_USAGE_EDIT + KernelSystemPrompt.DISCIPLINE_FIRST
@@ -48,6 +49,7 @@ class KernelSystemPromptTest {
                 KernelSystemPrompt.LONG_FILE_HINT,
                 KernelSystemPrompt.SERVER_NOTE,
                 KernelSystemPrompt.WORKSPACE_CONSTRAINTS,
+                KernelSystemPrompt.DATA_CLEARING_DISCIPLINE,
                 KernelSystemPrompt.COMPLETION_CRITERIA,
                 KernelSystemPrompt.TOOL_USAGE_READ,
                 KernelSystemPrompt.TOOL_USAGE_WRITE,
@@ -136,6 +138,23 @@ class KernelSystemPromptTest {
         assertThat(constraints).contains("/workspace/.env").contains("不要修改");
         assertThat(constraints).contains("DATABASE_URL").contains("REDIS_URL");
         assertThat(KernelSystemPrompt.text()).contains(constraints);
+    }
+
+    /**
+     * 清库纪律句（#635，平台自写）：改动时不得重跑或重写会清空数据的种子／迁移脚本，
+     * 不得用 TRUNCATE 或 DROP … CASCADE 清表；补演示数据只插入缺失行、保留用户录入的
+     * 数据。出处：#590 七·1 两次实证（工单题追加修改第 67／71 轮跑 {@code pnpm db:seed}、
+     * 拼音题迭代第 38／45 轮跑 {@code node scripts/seed.mjs}，脚本内
+     * {@code TRUNCATE … RESTART IDENTITY CASCADE} 把用户录入的数据清掉）。
+     */
+    @Test
+    void given_authoritative_prompt_when_text_then_data_clearing_discipline_present() {
+        String rule = KernelSystemPrompt.DATA_CLEARING_DISCIPLINE;
+
+        assertThat(rule).isEqualTo("清库纪律：改动时不得重跑或重写会清空数据的种子／迁移脚本，"
+                + "不得用 TRUNCATE 或 DROP … CASCADE 清表；需要补演示数据时只插入缺失行，"
+                + "保留用户在系统里录入的数据。");
+        assertThat(KernelSystemPrompt.text()).contains(rule);
     }
 
     /** 完成判据句（#593：build 过＋8081 探活有响应才算完成）。 */

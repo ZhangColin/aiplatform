@@ -3,7 +3,8 @@ package com.semgravio.aiplatform.base.agentscope;
 /**
  * 生成内核系统提示词权威版本（#595，ADR-0054／#593 用户故事 9/11）：角色＋环境描述
  * ＋任务句＋长文件拆分提示＋开发服务器常驻句＋完成判据＋全程中文，外加完成纪律三句
- * （bolt.diy 原文口径）与工具使用说明三件（DeepSeek Harness 原文只换工具名）。
+ * （bolt.diy 原文口径）、清库纪律一句（平台自写，#635）与工具使用说明三件
+ * （DeepSeek Harness 原文只换工具名）。
  *
  * <p><b>权威版本住代码、不进后台可配</b>：改提示词＝改内核＝开 issue。装配唯一合法
  * 入口 {@link AgentscopeHarnessAgentFactory#obtainKernel}——直用内核工作区携外来
@@ -28,6 +29,11 @@ package com.semgravio.aiplatform.base.agentscope;
  *   <li>工作区约定句（#607）：原工作区 AGENTS.md 平台约定退场后，仍成立的四条生产
  *       约束（data/ 持久化、external/ 外部仓库、.platform/ 不写、.env 只读）并入
  *       本提示词单一权威；已由环境句／起服句覆盖或不再需要的约定不重复</li>
+ *   <li>清库纪律句（#635，平台自写；出处 #590 七·1 两次实证）：追加修改时模型重跑了
+ *       自写的演示数据脚本（工单题第 67／71 轮 {@code pnpm db:seed}、拼音题迭代
+ *       第 38／45 轮 {@code node scripts/seed.mjs}），脚本内
+ *       {@code TRUNCATE … RESTART IDENTITY CASCADE} 把用户在系统里录入的数据清掉——
+ *       故钉住不重跑／不重写会清库的种子或迁移脚本、补演示数据只插入缺失行</li>
  * </ul>
  *
  * <p>环境句事实清单（2026-11-23 逐字对照当前镜像实况，验收第二条的正本）：</p>
@@ -99,6 +105,16 @@ public final class KernelSystemPrompt {
             + "/workspace/.platform/ 是平台产物目录，不要写入；/workspace/.env 由平台"
             + "生成维护，不要修改（数据库连接串读 DATABASE_URL，缓存用 REDIS_URL）。";
 
+    /**
+     * 清库纪律句（#635，平台自写；出处 #590 七·1 两次实证）：追加修改时模型重跑了
+     * 自写的演示数据脚本（{@code pnpm db:seed}／{@code node scripts/seed.mjs}），脚本内
+     * {@code TRUNCATE … RESTART IDENTITY CASCADE} 把用户录入的数据清掉。要求不重跑／
+     * 不重写会清库的种子或迁移脚本、补演示数据只插入缺失行。
+     */
+    static final String DATA_CLEARING_DISCIPLINE = "清库纪律：改动时不得重跑或重写会清空数据的种子／迁移脚本，"
+            + "不得用 TRUNCATE 或 DROP … CASCADE 清表；需要补演示数据时只插入缺失行，"
+            + "保留用户在系统里录入的数据。";
+
     /** 完成判据句（#593：build 过＋8081 探活有响应才算完成）。 */
     static final String COMPLETION_CRITERIA = "完成后用 pnpm build 验证可构建，"
             + "用 curl http://localhost:8081 确认有响应才算完成。";
@@ -131,11 +147,12 @@ public final class KernelSystemPrompt {
     static final String LANGUAGE = "全程中文。";
 
     /**
-     * 权威版本全文（段落序＝#593 结构决议序＝#590 修正轮原文序）：段间无分隔符——
-     * 原文即连排单行形态。
+     * 权威版本全文（段落序＝#593 结构决议序＝#590 修正轮原文序；平台追加段紧随其
+     * 工作区约定之后）：段间无分隔符——原文即连排单行形态。
      */
     private static final String TEXT = ROLE + ENVIRONMENT + TASK + LONG_FILE_HINT + SERVER_NOTE
-            + WORKSPACE_CONSTRAINTS + COMPLETION_CRITERIA + TOOL_USAGE_READ + TOOL_USAGE_WRITE
+            + WORKSPACE_CONSTRAINTS + DATA_CLEARING_DISCIPLINE + COMPLETION_CRITERIA
+            + TOOL_USAGE_READ + TOOL_USAGE_WRITE
             + TOOL_USAGE_EDIT + DISCIPLINE_FIRST + DISCIPLINE_SECOND + DISCIPLINE_THIRD + LANGUAGE;
 
     private KernelSystemPrompt() {

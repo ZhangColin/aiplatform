@@ -130,7 +130,7 @@ class KernelFirstRunLiveTest {
 
     // 独立容器形态：建法与起服命令照 DockerEnvironmentBackend 原文（startDevContainer／
     // settleMiddleware／appStartCommand），差别只有容器名与端口映射
-    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.19";
     private static final String STANDALONE_DB = "kernelfirstrun";
     private static final String STANDALONE_WORKSPACE_ID = "kernel-first-run-standalone";
     private static final String STANDALONE_ENV = "DATABASE_URL=postgresql://" + STANDALONE_DB

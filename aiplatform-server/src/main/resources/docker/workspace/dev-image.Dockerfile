@@ -1,5 +1,10 @@
 FROM node:22-bookworm
 
+# 东八区（#633 阶段五-1）：页面时间不再比北京时间慢 8 小时。0.18 的 zoneinfo
+# 已含 Asia/Shanghai，不额外装 tzdata；容器内 PG 会话时区由 init-workspace.sh
+# 在就绪后幂等对齐（存量卷同受益）。
+ENV TZ=Asia/Shanghai
+
 # 单容器 all-in-one（ADR 0001）：编码智能体与应用运行时（node）与中间件（pg/redis）
 # 同容器不拆分；/workspace 为唯一持久卷、容器无状态——pg 数据落 PGDATA=/workspace/data/pg，
 # 销毁重建由入口脚本自愈。pg 取 bookworm 发行版的 postgresql-15（旧独立容器为
@@ -7,6 +12,8 @@ FROM node:22-bookworm
 # 版本差异对生成应用透明）。编码智能体 = AgentScope 进程内单栈（平台侧运行），
 # 容器只承载应用运行时与中间件，不装智能体 CLI。git 显式安装（版本层 #91：
 # 收口自动成版走容器内 git；基座 buildpack-deps 隐式自带，显式声明防漂移）。
+# #633 补端口/进程工具——0.18 实测 fuser（psmisc）、lsof、ss（iproute2）三者皆无，
+# 模型查端口/找进程只能改读 /proc/net/tcp。
 # 第一层 apt 也走 tuna（对齐 deploy 变体「换源前置到第一层」：本机直连
 # deb.debian.org 实测每包分钟级、大件小时级；sed 换源、层末还原——不留镜像
 # 配置残留，同下方渲染层口径）
@@ -15,6 +22,7 @@ RUN cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         postgresql-15 postgresql-client-15 redis-server git \
+        psmisc lsof iproute2 \
     && mv /tmp/debian.sources.orig /etc/apt/sources.list.d/debian.sources \
     && rm -rf /var/lib/apt/lists/*
 
@@ -94,7 +102,9 @@ ENV RENDER_CHROMIUM=/opt/chrome/chrome-linux/chrome
 # 依赖 / shadcn add）会报 UNEXPECTED_STORE。预先对齐 storeDir，就位后 pnpm add
 # 只增量下载新依赖、不复装全部。
 COPY baseline/ /opt/baseline/
-RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store && pnpm test
+# #633 起 pnpm test 之后追加 pnpm lint：模板 ESLint 9 flat config 进场，配置缺失
+# 或腐烂在构建期就红（模板 pnpm lint 退出 0 是硬门）。
+RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store && pnpm test && pnpm lint
 
 # 演示种子数据（#340）：通用示例集引擎 seed.sql（只补空表、按列形合成）＋幂等
 # 施用入口 apply.sh。三处调用——init-workspace.sh（容器自愈，初始化脚本扩位）、

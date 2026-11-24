@@ -37,6 +37,15 @@ if ! pg_isready -h localhost -p "$PG_PORT" -q; then
   su postgres -c "$PG_BIN/pg_ctl -D '$PG_DATA' -l '$PG_STARTUP_LOG' -w start"
 fi
 
+# 2.5) 会话时区（#633 阶段五-1）：镜像 ENV TZ=Asia/Shanghai 只作用于新起进程，
+#      存量卷可能已带非东八区配置。PG 就绪后幂等对齐 timezone（已一致则跳过，
+#      变更后 reload）——只影响后续写入与会话显示，不改写已有数据。
+CURRENT_TZ=$(su postgres -c "$PG_BIN/psql -h localhost -p $PG_PORT -U postgres -tAc 'SHOW timezone'" | tr -d '[:space:]')
+if [ "$CURRENT_TZ" != "Asia/Shanghai" ]; then
+  su postgres -c "$PG_BIN/psql -h localhost -p $PG_PORT -U postgres -c \"ALTER SYSTEM SET timezone = 'Asia/Shanghai'\"" >/dev/null
+  su postgres -c "$PG_BIN/psql -h localhost -p $PG_PORT -U postgres -c 'SELECT pg_reload_conf()'" >/dev/null
+fi
+
 # 3) 应用库（幂等）：角色与库同名（WORKSPACE_DB 由置备方注入），不存在则建。
 if [ -n "${WORKSPACE_DB:-}" ] && ! su postgres -c \
     "$PG_BIN/psql -h localhost -p $PG_PORT -U postgres -tAc \

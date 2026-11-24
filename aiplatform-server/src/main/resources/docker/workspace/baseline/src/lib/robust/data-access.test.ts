@@ -160,47 +160,6 @@ describe("数据访问层·缓存降级", () => {
   });
 });
 
-/** 事务假件：借出可脚本化 PoolClient，记 BEGIN/COMMIT/release 序列。 */
-class FakeTxPool implements PgLike {
-  readonly calls: string[] = [];
-  private released: (Error | undefined)[] = [];
-  private fn: (client: PoolClientLike) => Promise<unknown>;
-  private readonly client: PoolClientLike;
-
-  constructor(fn: (client: PoolClientLike) => Promise<unknown>) {
-    this.fn = fn;
-    const pool = this;
-    this.client = {
-      query(text: string): Promise<unknown> {
-        pool.calls.push(text);
-        return Promise.resolve({ rows: [] });
-      },
-      release(e?: Error) {
-        pool.released.push(e);
-      },
-    };
-  }
-
-  query(): Promise<unknown> {
-    return Promise.reject(new Error("事务测试不触池级 query"));
-  }
-
-  connect(): Promise<PoolClientLike> {
-    this.calls.push("__connect__");
-    return Promise.resolve(this.client);
-  }
-
-  /** 断言面：借出命令序与 release 携错态。 */
-  get releaseArgs(): (Error | undefined)[] {
-    return this.released;
-  }
-}
-
-interface PoolClientLike {
-  query(text: string): Promise<unknown>;
-  release(e?: Error): void;
-}
-
 describe("数据访问层·事务", () => {
   /** 事务假池：借出记序客户端（query 记命令、release 记携错态）。 */
   function fakeTxPool() {

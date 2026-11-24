@@ -78,7 +78,10 @@ import lombok.extern.slf4j.Slf4j;
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
-     * 0.18（#540）：基座模板增首批模式件两件（src/components/patterns——
+     * 0.19（#633 阶段五-1）：模板补 ESLint 9 flat config（pnpm lint 可用，构建期
+     * 在 pnpm test 后追加 pnpm lint 狗粮门）＋中性网站图标 src/app/icon.svg；
+     * 镜像补端口/进程工具 psmisc（fuser）/lsof/iproute2（ss）与 ENV TZ=Asia/Shanghai，
+     * 自愈脚本在 PG 就绪后幂等对齐会话时区（存量卷同受益）。0.18（#540）：基座模板增首批模式件两件（src/components/patterns——
      * ValidatedForm 表单＋校验＋提交态、FilterableList 列表＋筛选＋分页，
      * ADR-0051；行为契约＋静态纪律测试同吃狗粮门；用法与纪律随栈规则集常量节
      * 扩容）。0.17（#471 后续）：bare-fetch 语义对齐（四正本改「任何 HTTP 调用
@@ -102,7 +105,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * ADR-0027）。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。升版强制重建镜像，
      * 存量项目经既有幂等重建（唤醒/重建容器即用新镜像）自愈。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.18";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.19";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */

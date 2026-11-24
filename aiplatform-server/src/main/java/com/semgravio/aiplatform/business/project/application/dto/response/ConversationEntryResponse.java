@@ -47,17 +47,18 @@ public record ConversationEntryResponse(
                 + "为 null。前端仅试用访谈期（额度读面在场）渲染问答卡序号徽标")
         Integer questionOrdinal,
         @Schema(description = "收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish "
-                + "收口扩载原样（#88 收尾卡服务端权威事实；schema 正本＝"
-                + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
-                + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
-                + "durationBreakdown{llmMs,toolsMs,closingMs,overhead{"
+                + "收口扩载原样（#617 五字段收尾卡服务端权威事实；schema 正本＝"
+                + "docs/spec/SSE事件清单·收口扩载节）——{ narrative?, "
+                + "criteria{buildPassed,previewPassed}, files=[{path,added,removed}], "
+                + "durationMs, durationBreakdown{llmMs,toolsMs,closingMs,overhead{"
                 + "configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},"
                 + "attempts[]} }（可缺省键＝"
                 + "该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略；"
-                + "验证统计/version 锚随审查与收口组退役 #605；modelTier 随模型路由"
-                + "退役 #606）",
-                example = "{\"summary\":\"完成首次生成：构建通过、预览可访问\",\"prdChanged\":false,"
-                        + "\"systemChanged\":true,\"systemNote\":\"完成首次生成\","
+                + "旧平台句式摘要 summary 与「需求文档／系统」判定键自 #617 退役、"
+                + "存量旧行由前端读侧回落；version 锚随审查与收口组退役 #605；"
+                + "modelTier 随模型路由退役 #606）",
+                example = "{\"narrative\":\"完成首次生成：构建通过、预览可访问\","
+                        + "\"criteria\":{\"buildPassed\":true,\"previewPassed\":true},"
                         + "\"files\":[{\"path\":\"/src/App.jsx\",\"added\":40,\"removed\":0}],"
                         + "\"durationMs\":183420}")
         Map<String, Object> closing,

@@ -104,9 +104,6 @@ public class GenerationAppService {
      */
     static final String KERNEL_FIRST_RUN_PROMPT = "开始";
 
-    /** 内核收口叙事（收尾卡 summary；#601 接线：build 过＋8081 探活双件判据全过）。 */
-    static final String KERNEL_CLOSING_SUMMARY = "完成首次生成：构建通过、预览可访问";
-
     /**
      * 内核会话寻址（#601 接线）：单会话连续驱动至收尾判据过；run 维度新 run 换
      * 会话（同 #114 口径的会话有界）。
@@ -620,7 +617,8 @@ public class GenerationAppService {
      * 内核收口判据回调（#601 接线，ADR-0054）：run 正常返回（一轮无工具调用）后的
      * 平台侧机器核验——{@code pnpm build} 过＋8081 探活双件全过才判完成
      * （{@link KernelClosingCriteria}，#597 落位件）；未过即抛——该场 run 失败转
-     * 终态（#604 单发：不自动重跑，用户在点火入口重跑即恢复）。
+     * 终态（#604 单发：不自动重跑，用户在点火入口重跑即恢复）。逐件结果（#617）
+     * 随收口判据回给派发器，进收尾卡「判据结果」。
      */
     private CodingRunDispatcher.ClosingJudgment closeKernelGeneration(Project project) {
         KernelClosingCriteria.KernelClosingResult closing =
@@ -631,7 +629,8 @@ public class GenerationAppService {
                     + (closing.probePassed() ? "有响应" : "无响应")
                     + "——按完成判据继续修复后再收口");
         }
-        return CodingRunDispatcher.ClosingJudgment.generation(KERNEL_CLOSING_SUMMARY);
+        return new CodingRunDispatcher.ClosingJudgment(
+                closing.buildPassed(), closing.probePassed());
     }
 
     /**

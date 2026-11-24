@@ -209,14 +209,17 @@ class ConversationHistoryTest {
         assertThat(history.get(3).text()).isEqualTo("企业客户");
         assertThat(history.get(3).kind()).isEqualTo(4); // answer
         assertThat(history.get(4).text()).isEqualTo("好的，按企业客户梳理");
-        // 收尾卡：#88 收口扩载同载荷（判定行 + 变更清单 + 轮末统计），runId = 用户面 run
+        // 收尾卡：#617 五字段收口扩载同载荷（内核自述 + 判据 + 变更清单 + 用时），
+        // runId = 用户面 run
         assertThat(history.get(5).question()).isNull();
         assertThat(history.get(5).closing())
-                .containsEntry("summary", "更新了系统")
-                .containsEntry("systemChanged", true)
-                .containsEntry("prdChanged", false)
+                .containsEntry("narrative", "修正完成")
+                .containsKey("criteria")
                 .containsKey("files")
                 .containsKey("durationMs");
+        assertThat((Map<String, Object>) history.get(5).closing().get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
         assertThat(history.get(5).closing().get("files")).asInstanceOf(
                         InstanceOfAssertFactories.LIST)
                 .containsExactly(Map.of("path", "/src/App.jsx", "added", 40, "removed", 0));

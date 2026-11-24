@@ -78,21 +78,26 @@ export type BalanceReminderCardFact = {
 /** guide-reply 事件缺 label 时的呈现兜底（正本在后端 GUIDE_LABEL）。 */
 export const DEFAULT_GUIDE_LABEL = "平台";
 
+/** 收尾卡判据逐件结果（#617）：build 与预览两项（服务端权威值）。 */
+export type WorkClosingCriteria = {
+  buildPassed: boolean;
+  previewPassed: boolean;
+};
+
 /**
- * 收尾卡权威事实（#88 收口扩载的载荷形状，#89 起归对话流）：四要素 = 摘要
- * （summary）/判定行（prd 与 system 两组布尔+说明——服务端权威值）/变更清单
- * （files，文件级）/轮末统计（durationMs；文件数与变更行数由 files 派生）。
- * live 经 run-finish.closing 到达、回访经对话史水合——同载荷同形。
+ * 收尾卡权威事实（#617 五字段骨架，#89 起归对话流）：用时（durationMs）/
+ * 判据逐件（criteria）/变更清单（files，文件级；本票仍为工具调用观察来源，
+ * #619 改真实 diff）/内核自述（narrative，内核末次文本）/预览入口（取既有
+ * 预览查询，不入载荷）。live 经 run-finish.closing 到达、回访经对话史水合
+ * ——同载荷同形；旧载荷（summary/判定键）由读侧回落呈现（见 toWorkClosing）。
  */
 export type WorkClosing = {
-  summary: string;
-  prdChanged: boolean;
-  prdNote?: string;
-  systemChanged: boolean;
-  systemNote?: string;
+  /** 内核自述（markdown 源；空则卡片不出该块）。 */
+  narrative?: string;
+  criteria: WorkClosingCriteria;
   files: { path: string; added: number; removed: number }[];
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
+  /** 成版 commit hash（#91 收口自动成版回填；#605 后新载荷不再携带，存量旧卡沿用）。 */
   version?: string;
 };
 
@@ -858,19 +863,30 @@ function appendMessage(chat: ProjectChat, message: ChatMessage): ProjectChat {
 }
 
 /**
- * closing 载荷的容错收窄（#88/#89：live 事件与水合同形）：类型镜像只做信任转型、
- * 缺字段容错归消费端——只兜「载荷非对象」的形状异常（视同无收尾卡，不出坏卡）；
- * files 非数组回落空清单。
+ * closing 载荷的容错收窄（#617 五字段；live 事件与水合同形）：只兜「载荷非对象」
+ * 的形状异常（视同无收尾卡，不出坏卡）；files 非数组回落空清单。
+ *
+ * <p>旧载荷回落可读（旧对话史不出坏卡）：#617 前落库的收尾卡没有 criteria /
+ * narrative，而是平台句式 summary＋「需求文档／系统」判定键。旧 summary 作为
+ * 内核自述的回退文本呈现；判据按收口不变式（closing 在场 ⟺ build＋预览双件
+ * 全过）回落双 ✓。新载荷的 narrative 为空/缺省时不出该块。</p>
  */
 export function toWorkClosing(raw: unknown): WorkClosing | undefined {
   const record = asRecord(raw);
   if (!record) return undefined;
+  const legacySummary = typeof record.summary === "string" ? record.summary : undefined;
+  const narrative = typeof record.narrative === "string" ? record.narrative : legacySummary;
+  const criteriaRecord = asRecord(record.criteria);
+  const criteria: WorkClosingCriteria = criteriaRecord
+    ? {
+        buildPassed: criteriaRecord.buildPassed === true,
+        previewPassed: criteriaRecord.previewPassed === true,
+      }
+    // 旧载荷：收尾卡在场 ⟺ 收口判据双件全过（#88 口径）
+    : { buildPassed: true, previewPassed: true };
   return {
-    summary: typeof record.summary === "string" ? record.summary : "",
-    prdChanged: record.prdChanged === true,
-    prdNote: typeof record.prdNote === "string" ? record.prdNote : undefined,
-    systemChanged: record.systemChanged === true,
-    systemNote: typeof record.systemNote === "string" ? record.systemNote : undefined,
+    ...(narrative ? { narrative } : {}),
+    criteria,
     files: Array.isArray(record.files)
       ? record.files.flatMap((file) => {
           const entry = asRecord(file);

@@ -42,9 +42,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>收口判据＝平台侧机器双件</b>（#601 内核接线；#604 finish_edit 收口件退役；
  * #605 事实登记件清场）：修正 run 正常返回后过 pnpm build＋8081 探活双件，未过即
- * 该场 run 失败终态；系统改没改以平台可观测文件改动事实为准（不依赖模型自报），
- * PRD 改没改＝本场交接物各轮修订说明。判定结果的呈现归收口扩载权威化（#88 收尾卡
- * 判定行）。</p>
+ * 该场 run 失败终态；系统改没改以平台可观测文件改动事实为准（不依赖模型自报）。
+ * 判据逐件结果与变更清单的呈现归收口扩载权威化（#617 五字段收尾卡）。</p>
  *
  * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334「小迭代基准＝当前已确认
  * 版本」随停派整段退役，ADR-0039/#450 裁决 A）</b>：范围级新草稿不再停派待确认
@@ -83,12 +82,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class IterationAppService {
-
-    /**
-     * 内核修正收口叙事（收尾卡 systemNote；#601 接线：build 过＋8081 探活双件判据
-     * 全过——与首建内核收口同口径）。
-     */
-    static final String KERNEL_FIX_CLOSING_SUMMARY = "完成系统更新：构建通过、预览可访问";
 
     /**
      * 内核修正任务 prompt（#601 接线）：交接物三要素结构化拼装同 {@link
@@ -406,7 +399,7 @@ public class IterationAppService {
                             // 单发提示（#604 失败即终态、不自动重试）
                             kernelFixRunPrompt(handoff),
                             (attemptRunId, attemptChanges) -> closeKernelFix(project, attemptRunId,
-                                    currentHandoff, prdVersionNo, attemptChanges),
+                                    prdVersionNo, attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN);
                 }
@@ -501,10 +494,10 @@ public class IterationAppService {
      * 未过即抛——该场 run 失败转终态（#604 单发：不自动重跑，恢复出口重派即续）。
      * 系统改没改以派发器的平台可观测文件改动事实为准（{@code attemptChanges} 非空——
      * 不依赖模型自报）；实动即 Demo 迭代轮成版（#333 同口径）＋演示种子补位（#340）。
-     * PRD 改没改＝本场交接物各轮修订说明。
+     * 逐件判据结果（#617）随收口判据回给派发器，进收尾卡「判据结果」。
      */
     private CodingRunDispatcher.ClosingJudgment closeKernelFix(Project project, String attemptRunId,
-            FixHandoff handoff, Integer prdVersionNo, List<FileChange> attemptChanges) {
+            Integer prdVersionNo, List<FileChange> attemptChanges) {
         KernelClosingCriteria.KernelClosingResult closing =
                 kernelClosingCriteria.assess(project.getWorkspaceId());
         if (!closing.complete()) {
@@ -526,15 +519,8 @@ public class IterationAppService {
         // 演示种子预置（#340）：迭代收口补位——系统实动后可能有新空表（幂等引擎
         // 只补空表）；失败不阻断收工。
         demoSeed.seedSandbox(project);
-        List<String> prdNotes = handoff.rounds().stream()
-                .map(FixHandoff.Round::prdRevisionSummary)
-                .filter(summary -> summary != null && !summary.isBlank())
-                .toList();
-        return CodingRunDispatcher.ClosingJudgment.update(
-                !prdNotes.isEmpty(),
-                prdNotes.isEmpty() ? null : String.join("；", prdNotes),
-                systemChanged,
-                KERNEL_FIX_CLOSING_SUMMARY);
+        return new CodingRunDispatcher.ClosingJudgment(
+                closing.buildPassed(), closing.probePassed());
     }
 
     /**

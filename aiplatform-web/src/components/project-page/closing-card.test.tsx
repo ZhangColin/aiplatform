@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkClosing } from "@/lib/store/chat";
 
@@ -25,13 +25,24 @@ vi.mock("@/hooks/use-version", () => ({
   }),
 }));
 
+// 预览入口（#617）取既有预览查询：此处替身直给 URL 就绪态（请求面归
+// use-project-preview 测试）
+const previewState = vi.hoisted(() => ({
+  data: undefined as { url?: string } | undefined,
+  refetch: vi.fn(),
+}));
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => previewState,
+}));
+
+afterEach(() => {
+  previewState.data = undefined;
+});
+
 function closing(overrides: Partial<WorkClosing> = {}): WorkClosing {
   return {
-    summary: "修订了需求文档，并更新了系统",
-    prdChanged: true,
-    prdNote: "配送范围改为全国",
-    systemChanged: true,
-    systemNote: "下单页新增配送范围说明",
+    narrative: "本次交付了**下单与配送范围**说明。",
+    criteria: { buildPassed: true, previewPassed: true },
     files: [
       { path: "/src/App.jsx", added: 4, removed: 0 },
       { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
@@ -50,68 +61,62 @@ function renderCard(card: WorkClosing) {
 }
 
 /**
- * 收尾卡四要素（#88 AC①）：摘要 / 判定行（服务端权威值直译，非前端推导）/
- * 变更清单（文件级 +N −M）/ 轮末统计（时长 + 文件数 + 变更行数 + 检查通过）
- * + 版本控件（#92/#93：成版锚点 version 在场才出「查看当时 / 回滚到此」）
- * ——SSR 断言（形态轻、事件→状态归桥接测试，Testing Decisions 口径）。
+ * 收尾卡五字段（#617）：用时 / 判据逐件（build＋预览）/ 变更清单合计 / 内核自述
+ * （markdown）/ 预览入口（未就绪禁用、就绪可开）。SSR 断言（形态轻；点击开窗归
+ * 交互测试）。
  */
-describe("ClosingCard · 四要素（#88 定格收口）", () => {
-  it("四要素齐：摘要、判定行（带原因）、变更清单、轮末统计", () => {
+describe("ClosingCard · 五字段（#617）", () => {
+  it("五字段齐：标题「生成完成」、判据逐件、内核自述 markdown、清单合计、用时、预览入口", () => {
     const html = renderCard(closing());
 
-    expect(html).toContain("本轮完成");
-    expect(html).toContain("修订了需求文档，并更新了系统"); // 摘要（合并叙事）
-    expect(html).toContain("需求文档：");
-    expect(html).toContain("已修订");
-    expect(html).toContain("配送范围改为全国"); // 判定行·PRD 原因（权威值）
-    expect(html).toContain("系统：");
-    expect(html).toContain("已更新");
-    expect(html).toContain("下单页新增配送范围说明"); // 判定行·系统原因
-    expect(html).toContain("/src/pages/Orders.jsx"); // 变更清单
+    expect(html).toContain("生成完成");
+    // 判据逐件如实
+    expect(html).toContain("构建");
+    expect(html).toContain("通过");
+    expect(html).toContain("预览");
+    expect(html).toContain("可用");
+    // 内核自述：markdown 渲染（非源码记号）
+    expect(html).toContain("内核自述");
+    expect(html).toContain("<strong>下单与配送范围</strong>");
+    expect(html).not.toContain("**下单与配送范围**");
+    // 变更清单：文件级 ±行数 + 合计（文件数/行数在清单头一次呈现）
+    expect(html).toContain("/src/pages/Orders.jsx");
     expect(html).toContain("+12");
     expect(html).toContain("−3");
-    expect(html).toContain("2"); // 文件数（无独立断言面，随清单断言兜住）
-    expect(html).toContain("3 分 03 秒"); // 轮末统计·时长（183420ms）
-    expect(html).toContain("+16"); // 变更行数（4 + 12）
-    expect(html).toContain("检查通过"); // 自检终值计入统计（closing ⟺ 核验通过）
+    expect(html).toContain("2</b> 个文件"); // 合计·文件数
+    expect(html).toContain("+16"); // 合计·新增行数（4 + 12）
+    expect(html).toContain("−3"); // 合计·删除行数
+    // 用时（183420ms）
+    expect(html).toContain("用时");
+    expect(html).toContain("3 分 03 秒");
+    // 预览入口：未就绪禁用
+    expect(html).toContain('aria-label="在新窗口打开预览"');
+    expect(html).toContain('disabled=""');
   });
 
-  it("系统无需改动轮：判定行如实呈现原因、空清单不出清单区与文件统计", () => {
+  it("内核自述为空：不出该块（其余字段照常）", () => {
+    const html = renderCard(closing({ narrative: undefined }));
+
+    expect(html).not.toContain("内核自述");
+    expect(html).toContain("生成完成");
+    expect(html).toContain("用时");
+  });
+
+  it("判据未过如实呈现（组件不写死「通过」）", () => {
     const html = renderCard(
-      closing({
-        summary: "本轮系统无需改动",
-        prdChanged: false,
-        prdNote: undefined,
-        systemChanged: false,
-        systemNote: "页面上没有写死配送范围，都以文档为准",
-        files: [],
-      }),
+      closing({ criteria: { buildPassed: false, previewPassed: true } }),
     );
 
-    expect(html).toContain("本轮系统无需改动");
-    expect(html).toContain("未修订");
-    expect(html).toContain("无需改动");
-    expect(html).toContain("页面上没有写死配送范围，都以文档为准");
+    expect(html).toContain("未通过");
+    expect(html).toContain("可用");
+  });
+
+  it("空清单不出清单区（如系统无实际文件改动的轮）", () => {
+    const html = renderCard(closing({ files: [] }));
+
+    expect(html).not.toContain("变更清单");
     expect(html).not.toContain("个文件");
-    expect(html).not.toContain("查看全部");
-    expect(html).toContain("用时"); // 时长统计恒在
-  });
-
-  it("生成轮：摘要「首次生成了系统」、判定行无原因注脚（说明缺省）", () => {
-    const html = renderCard(
-      closing({
-        summary: "首次生成了系统",
-        prdChanged: false,
-        prdNote: undefined,
-        systemChanged: true,
-        systemNote: undefined,
-        files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
-      }),
-    );
-
-    expect(html).toContain("首次生成了系统");
-    expect(html).toContain("已更新");
-    expect(html).toContain("+40");
+    expect(html).toContain("用时");
   });
 
   it("长清单默认收五条，「查看全部 N 个文件」收进折叠", () => {
@@ -126,9 +131,17 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
     expect(html).not.toContain("/src/File6.jsx"); // 五条之外收进折叠（SSR 默认收起）
     expect(html).toContain("查看全部 7 个文件");
   });
+
+  it("预览就绪：入口可点（未就绪的 disabled 退场）", () => {
+    previewState.data = { url: "https://preview.example.com/" };
+    const html = renderCard(closing());
+
+    expect(html).toContain('aria-label="在新窗口打开预览"');
+    expect(html).not.toContain('disabled=""');
+  });
 });
 
-describe("ClosingCard · 版本控件（#92/#93）", () => {
+describe("ClosingCard · 版本控件（#92/#93，存量旧卡）", () => {
   it("成版锚点（version）在场：出「查看当时 / 回滚到此」两动作", () => {
     const html = renderCard(closing({ version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" }));
 

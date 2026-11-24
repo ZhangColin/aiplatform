@@ -62,7 +62,8 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     @Column(name = "question", columnDefinition = "jsonb", updatable = false)
     private Map<String, Object> question;
 
-    /** kind=closing：#88 收口扩载载荷原样（summary/判定行/变更清单/轮末统计）。 */
+    /** kind=closing：#617 收口扩载载荷原样（内核自述/判据/变更清单/用时）；存量旧
+     *  载荷（摘要/判定键）照读不迁移。 */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "closing", columnDefinition = "jsonb", updatable = false)
     private Map<String, Object> closing;

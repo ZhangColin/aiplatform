@@ -132,19 +132,19 @@ export type SseClosingFile = {
 };
 
 /**
- * 收口扩载（#88 正本 closing schema）：收尾卡的服务端权威事实——摘要/判定行
- * （PRD/系统改没改 + 各自说明）/变更清单（文件级）/轮末统计（时长；文件数与
- * 变更行数由 files 派生）。判定与清单以平台可观测事实为准，不由模型自报。
+ * 收口扩载（#617 正本 closing schema，五字段骨架）：收尾卡的服务端权威事实——
+ * 内核自述（末次文本，空则缺省）/判据逐件（build 与预览）/变更清单（文件级，
+ * 本票仍为工具调用观察来源，#619 改真实 diff）/用时。预览入口取既有预览查询，
+ * 不入载荷；旧平台句式摘要与「需求文档／系统」判定键已退役（旧对话史由读侧
+ * toWorkClosing 回落呈现）。判据与清单以平台可观测事实为准，不由模型自报。
  */
 export type SseClosing = {
-  summary: string;
-  prdChanged: boolean;
-  prdNote?: string;
-  systemChanged: boolean;
-  systemNote?: string;
+  /** 内核自述（markdown 源；内核末次文本为空时缺省）。 */
+  narrative?: string;
+  criteria: { buildPassed: boolean; previewPassed: boolean };
   files: SseClosingFile[];
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。 */
+  /** 成版 commit hash（#91；#605 后新载荷不再携带，存量旧卡沿用）——版本控件锚。 */
   version?: string;
 };
 
@@ -176,7 +176,7 @@ export type PlatformAgentEvent =
   | {
       /** 运行结束：到达即真收口（#84——编码 run 在收口判据落定后才发，一场至多
        * 一次、中场无假收口）；挂起轮不发（软终点）。编码 run 真收口携带 `closing`
-       * （#88 收口扩载——收尾卡的服务端权威事实，四要素 schema 见正本）；主智能体
+       * （#617 收口扩载——收尾卡五字段的服务端权威事实，schema 见正本）；主智能体
        * 对话轮（咨询/纯追问）不携带——无收尾卡。 */
       type: "run-finish";
       payload: AgentPayload & { sessionId: string; finish: string; closing?: SseClosing };

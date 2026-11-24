@@ -67,7 +67,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 |---|---|---|
 | `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） `slice`（可缺省） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run / `designer` 设计会话（[#289](https://github.com/ZhangColin/aiplatform/issues/289) 设计执行体——事件封闭集零新增、agent 扩值即达，ADR-0025）；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）、designer 同构直播卡（计划区＝设计物清单、agent 标识区分，呈现归 #290）。**工作消息头部标题扩载（[#118](https://github.com/ZhangColin/aiplatform/issues/118)）**：`slice` = `{ title }`——`title` 为用户语言标题（生成轨道 = 「系统初始化」、更新 run = 「系统更新」）；主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。切片序号与进度随切片机器退役（#602/#608），不再携带 `index`/`total`。**一场 run 恰一次**（#604 起编码 run 单发无重试——用户面 run 身份全程不变） |
 | `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口对话轮，如实呈现重提即兜底）。#604 起生成/更新 run 单发无重试（无「尝试环内中间失败」）；设计轨的中间重试失败信号不出用户面——run 级唯一失败终态见 run-failed |
-| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（#604 起生成/更新 run 单发：判据不过 = 该场 run 失败终态、不发 run-finish；设计座重试环尝试间不发、落定才发——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡。**定稿收尾卡（[#291](https://github.com/ZhangColin/aiplatform/issues/291)）经平台侧直接发射本事件**（无前置 run-start、无过程事件——定稿是用户显式动作收口、非智能体 run）：runId ＝ 定稿锚、sessionId ＝ 该件设计会话标识、closing 携 drafts 单条（定稿稿＋triggers 后续触发）；回访经对话史水合同载荷。成版锚（version）随 Run-Id trailer 退役（#605） |
+| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（#604 起生成/更新 run 单发：判据不过 = 该场 run 失败终态、不发 run-finish；设计座重试环尝试间不发、落定才发——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#617](https://github.com/ZhangColin/aiplatform/issues/617)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema617-五字段骨架)）——工作消息定格为收尾卡（五字段：用时/判据结果/变更清单/内核自述/预览入口）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡。**定稿收尾卡（[#291](https://github.com/ZhangColin/aiplatform/issues/291)）经平台侧直接发射本事件**（无前置 run-start、无过程事件——定稿是用户显式动作收口、非智能体 run）：runId ＝ 定稿锚、sessionId ＝ 该件设计会话标识、closing 携 drafts 单条（定稿稿＋triggers 后续触发）；回访经对话史水合同载荷。成版锚（version）随 Run-Id trailer 退役（#605） |
 | `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（ask_user，唯一挂起源——权限确认机制已随透明面化删除，[#219](https://github.com/ZhangColin/aiplatform/issues/219)；破坏性命令直通、过程经 `part-action` 动作卡透明可见）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面；`data.questionOrdinal`＝「第 N 问」序号（#538/#549，平台转发前注入——缺口首次出现序 1..k，同缺口重派复用旧号，挂起卡也占号；水合读口顶层 `questionOrdinal` 重算为权威，前端仅试用访谈期渲染） |
 | `run-failed` | `projectId` `runId` `message`（可缺省） `stopped`（可缺省） `failure`（可缺省） | 编码 run 终态失败收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)；#604 起生成/更新 run 单发无重试——失败/停止即终态，失败语义＝明确展示＋重跑即恢复；设计轨保留有界重试，重试耗尽即终态）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道失败/停止即终态。`runId` = 该场 run 的用户面标识。**run 失败为唯一失败终态**（不自动重跑：失败原因与恢复入口随本事件明确展示），前端恢复出口只认本事件。`message`（[#355](https://github.com/ZhangColin/aiplatform/issues/355) 机制检查·终态零原因补齐）＝一句用户面失败原因（末次错误现场经桥映射的人话定型，映射不中截首行定宽 120；原样留档归终态日志/失败留账）——前端失败档原因行消费，缺省不携带。`stopped`（[#359](https://github.com/ZhangColin/aiplatform/issues/359) 生成取消）＝`true` 时本终态由用户主动停止收口（失败账口径：计量如实落账；停止＝中断口径非判死——已落盘成果保留、不回滚，重跑入口照常可达）——前端失败档文案据此分岔「已停止」（不称中断/失败），`message` 携定型人话；缺省＝真失败（#604 单发：一场 run 失败即终态）。**失败面扩载**（[#418](https://github.com/ZhangColin/aiplatform/issues/418) 失败片落库面）：`failure` 对象＝逐尝试墙钟/模型配置/失败原因/本场累计（生成/更新 run 单发：attempts 至多一条；设计轨逐尝试各一条；schema 见[下节](#失败面-failure-schema418)），**与对话史失败留账行同载荷**（同收尾卡「SSE 扩载与落库同载荷」先例；先落库后发事件）——平台分析口径、前端不渲染（同 durationBreakdown），速度观测不再只看成功者 |
 | `guide-reply` | `projectId` `runId` `prompt`（可缺省） `label` `text` | 平台侧定型文案直达对话面（带「平台」标签气泡，非智能体话语）。三类使用：兜底轻引导（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支——非意见非咨询输入的零产物路径，本事件即该次派发的全部）；在途意见回执（[#360](https://github.com/ZhangColin/aiplatform/issues/360)——首个构建 run 在途时意见轮收口的排队事实告知，`runId` 锚该意见轮、`text` 为定型回执文案「生成完成后将自动落实」，事件封闭集零新增·复用本型）；悬空补救（ADR-0032·[#373](https://github.com/ZhangColin/aiplatform/issues/373)——需求梳理期轮悬空收口（无挂起问答且无 PRD，含判死/savePrd 失败形）的平台如实状态，`runId` 锚该轮、`text` 按可观测失败分形且恒带「继续」指路，同型复用零新增）。`prompt` 为锚定的用户输入（事件到达重建对话面用；回访经对话史水合——#89），在途回执与悬空补救不携带（用户气泡已由所属轮自落，不重复重建） |
@@ -84,58 +84,36 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 > **来源归属（#95 委派位）**：委派子智能体转发进父流的过程事件带 `source` 字段（值 = 子智能体声明名，引擎 source 路径的末段）；run 执行体自身产出的过程事件**不携带** `source`（缺省 = 执行体——用户面仍无角色标签，source 只用于过程呈现归属）。携带范围：引擎透传事件（`text`/`reasoning`/`tool`/`step-*`，payload 顶层）与消息部件事件（`part-signal`/`part-action`）。生命周期事件（`run-start`/`run-finish` 等）恒为执行体层级，不带 source。
 
-#### 收口扩载 closing schema（#88）
+#### 收口扩载 closing schema（#617 五字段骨架）
 
-run-finish 的 `closing` 对象——收尾卡（工作消息定格后的收尾部件，非另起的卡）的唯一权威事实源，**对话史落库（#89）与版本锚定（#91）复用同一载荷**。判定与清单以平台可观测事实为准（工具调用/探活），不由模型自报：
+run-finish 的 `closing` 对象——收尾卡（工作消息定格后的收尾部件，非另起的卡）的唯一权威事实源，**对话史落库（#89）复用同一载荷**。判据与清单以平台可观测事实为准（工具调用/探活），不由模型自报：
 
 ```
 closing: {
-  summary:      "本轮做了什么（判定事实的合并叙事，文档与系统不分侧）"  # 收口各一句：
-                #   生成轨道（#104）= 本段叙事（「起服了系统骨架」/「完成切片：用户能 X」）
-                #   更新轮 = 修订了需求文档，并更新了系统 / 修订了需求文档，系统无需改动
-                #   / 更新了系统 / 本轮系统无需改动
-  prdChanged:   true | false        # 判定行·PRD 改没改（更新轮 = 交接物修订说明事实；生成轮恒 false）
-  prdNote:      "修订说明"          # 可缺省——未修订/无说明（多轮排队合并以「；」连缀）
-  systemChanged: true | false       # 判定行·系统改没改（更新轮 = 平台可观测文件改动事实；生成轮 = 探活收口产出）
-  systemNote:   "改了什么/为什么无需改"  # 可缺省（更新轮 = 内核收口叙事；生成轨道 = 本段叙事，与 summary 同值）
-  files: [                         # 变更清单（文件清单级——服务端不产出 patch 类事件，清单由本扩载权威承载）
+  narrative:    "内核自述"           # 可缺省——内核自然终止时的末次文本（markdown 源）；
+                                    # 空文本不携带（前端不出该块）。模型文本不直播，
+                                    # 只在此落收尾卡（ADR-0057）。
+  criteria: {                       # 判据逐件结果（收口硬判据的可视化）
+    buildPassed:   true,            #   pnpm build exit 0 = 可构建
+    previewPassed: true             #   8081 探活有响应 = 预览可用
+  },                                #   双件全过才判完成（closing 在场 ⟺ 双件全过）
+  files: [                          # 变更清单（文件清单级——服务端不产出 patch 类事件，
+                                    # 清单由本扩载权威承载；本票仍为工具调用观察来源，
+                                    # 真实 diff 归 #619）
     { path: "src/App.jsx", added: 40, removed: 0 }    # path = write_file/edit_file 参数原形
     ...                                              # （提示词示例为相对形、模型可携锚定形——两形自选，
                                                      # 呈现面纯文本零语义消费，#306）；行数为
                                                      # write_file（新文件行数）/ edit_file（新旧串行数）
   ],                               # 的活动量口径：同路径跨尝试合并、按路径排序；
                                    # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
-                                   # （真 diff 归版本层 #91 容器 git）——已知取舍，非精确 diff
-  durationMs: 183420               # 轮末统计·时长（首试起跑到收口；文件数/变更行数由 files 派生）
-  drafts:      [                   # 可缺省——稿清单（#289 设计会话收尾卡扩载，closing 复用先例
-                                   # 对偶 designLint）：设计会话真收口携带本轮稿清单与
-                                   # 去向（判定以平台可观察的文件变更事实为准——本场落进
-                                   # design/ 的稿；#292：平面类代码出图稿〔首行画幅声明〕
-                                   # 收口即渲成同名 PNG——渲成的条目以 PNG 为正身
-                                   # 〔media=image、path 指 PNG〕、渲败/未渲回落 HTML 形态
-                                   # 如实；图片模型路的稿经平台工具落盘事实〔LandedFileFacts〕
-                                   # 同入清单）：
-    { item: "首页主视觉",          #   item = 本场设计物（清单章条目原文——会话即设计物）
-      media: "html",               #   media = 稿形态（html＝界面类可交互轻量实现 / image＝
-      path: "/design/home-1.html", #          平面类位图，按扩展名派生）；path = 去向（工作区
-      triggers: [] }               #   锚定形，文件区可见可下载）；triggers（#291，仅定稿
-                                   #   收尾卡携带）＝后续触发事实（用户语言：「系统已开始
-                                   #   按定稿设计对齐」/「系统更新已排入下一轮」/「设计已
-                                   #   全部定稿，系统开始构建」/「设计已全部定稿，可以确认
-                                   #   下单了」——开放下单是可见性事实非派发）；候选产出轮
-                                   #   （首产/改稿）不携带 triggers；编码 run 不携带本键
-  ],
-  designLint:  {                    # 可缺省——设计规范扫描（#296 遵守三件套③）：带规范
-    status: "violations",           # 项目编码 run（生成段/更新轮）携带（收尾卡「按稿对齐」
-    retried:   true,                # 行）；status ∈ passed（样式合规）/ violations（违规清
-    total:     3,                   # 单随附）/ unavailable（扫描未执行——如实不假装达标）；
-    violations: [                   # retried＝曾发现违规并自动修一轮（修净仍携 passed＋
-      { file: "src/app/page.tsx",   # retried，纠偏过程如实）；total＝违规总数（清单截 20）；
-        line: 3,                    # violations 条目＝file（工作区相对形）/ line / rule
-        rule: "no-raw-colors",      # （no-raw-colors 裸色 / no-arbitrary-values 任意值 /
-        message: "..." }            # no-inline-styles 内联样式——@shadcn/lint 规则名）/
-    ]                               # message（诊断原文）。无规范项目与设计会话不携带——
-  }                                 # 调色板不收窄、不扫描（基座行为零改变，一等断言）
+  durationMs: 183420               # 用时（起跑到收口；文件数/变更行数由 files 派生，卡上
+                                   # 只在变更清单头部呈现一次）
+  # 预览入口不入载荷：前端取既有预览查询（GET /projects/{id}/preview）的 URL——
+  # 未就绪禁用、就绪走既有「新窗口打开」动作（#617）。
+  # 旧平台句式摘要 summary 与「需求文档／系统」判定键（prdChanged/prdNote/
+  # systemChanged/systemNote）自 #617 起不再写入；存量旧行由前端读侧回落呈现
+  # （旧 summary 作内核自述文本、判据按收口不变式回落双 ✓——旧对话史不出坏卡）。
+  # drafts / designLint 为设计线历史记录（设计线整条退役 #610/#613）。
   # modelTier 已随模型路由退役（#606，ADR-0055 #583）：路由判定留档不再携带；
   # 逐尝试生效配置仍见 durationBreakdown.attempts[].modelId（供给链归因）。
 
@@ -189,9 +167,10 @@ closing: {
 }
 ```
 
-- **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 收口判据通过（build＋8081 探活双件）——前端过程明细（动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。
+- **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 收口判据通过（build＋8081 探活双件）——前端过程明细（动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。失败/停止不出现收尾卡（回归现状）。
+- **五字段（#617）**：用时（`durationMs`）/ 判据结果（`criteria` 逐件）/ 变更清单（`files`，本票仍为工具调用观察；真实 diff 归 #619、首建目录汇总归 #620）/ 内核自述（`narrative`，markdown）/ 预览入口（前端既有预览查询，不入载荷）。
 - **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 收口尾序 / 每迭代平台开销（#453 `overhead`——残差饼图）+ 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。验证桶 verifyMs 随验证机器退役（#605）。
-- **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
+- **旧载荷读侧回落（#617）**：新写入不再携带 `summary` 与判定键；存量对话史中的旧 closing 由前端 `toWorkClosing` 回落（旧 summary 作内核自述文本、判据按收口不变式回落双 ✓），旧卡不空白不坏卡。
 
 #### 失败面 failure schema（#418）
 

@@ -69,6 +69,11 @@ vi.mock("@/hooks/use-chat", () => ({
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
+// 收尾卡预览入口（#617）：取既有预览查询——SSR 无 QueryClient 可挂，直给未就绪态
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
+}));
+
 // 收尾卡版本控件（#92/#93）的请求面：服务端直读种子渲染，无 QueryClient 可挂——
 // 收尾卡用例只断言呈现序，版本动作不发请求
 vi.mock("@/hooks/use-version", () => ({
@@ -257,9 +262,8 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         id: "run-1:9",
         runId: "run-1",
         closing: {
-          summary: "主色调已改为绿色",
-          prdChanged: false,
-          systemChanged: true,
+          narrative: "主色调已改为绿色",
+          criteria: { buildPassed: true, previewPassed: true },
           files: [],
           durationMs: 5000,
         },
@@ -285,9 +289,9 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
     expect(html).toContain("没做成");
-    expect(html).toContain("本轮完成");
+    expect(html).toContain("生成完成");
     // 定格的工作消息上承意见、下启收尾卡——过程在上、结果卡在下
-    expect(html.indexOf("修改【全局样式】")).toBeLessThan(html.indexOf("本轮完成"));
+    expect(html.indexOf("修改【全局样式】")).toBeLessThan(html.indexOf("生成完成"));
     // 收尾卡已入流：活性行随定格沉没——失败红行留驻、无在跑残骸（#235）
     expect(html).not.toContain("进行中");
     expect(html).not.toContain("animate-pulse");

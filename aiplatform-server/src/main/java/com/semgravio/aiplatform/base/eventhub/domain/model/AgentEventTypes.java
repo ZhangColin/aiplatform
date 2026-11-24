@@ -30,19 +30,20 @@ public final class AgentEventTypes {
 
     /**
      * 运行结束（finish = 引擎结煞语，如 end / error）。编码 run 在收口判据落定后
-     * 扩载 {@link #CLOSING_FIELD}（#88 收尾卡——服务端权威的摘要/判定行/变更清单/
-     * 轮末统计，schema 见 SSE事件清单·收口扩载节）；主智能体对话轮（咨询/纯追问）
-     * 不携带——无收尾卡。
+     * 扩载 {@link #CLOSING_FIELD}（#617 五字段收尾卡——用时/判据结果/变更清单/
+     * 内核自述/预览入口，schema 见 SSE事件清单·收口扩载节）；主智能体对话轮
+     * （咨询/纯追问）不携带——无收尾卡。
      */
     public static final String RUN_FINISH = "run-finish";
 
     /**
-     * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
-     * systemChanged, systemNote?, files[{path,added,removed}], durationMs,
+     * run-finish 的收口扩载键（#617 五字段骨架）：值为对象 { narrative?,
+     * criteria{buildPassed,previewPassed}, files[{path,added,removed}], durationMs,
      * durationBreakdown（#111 阶段耗时分布——平台分析口径，前端不渲染） }
-     * ——对话史落库（#89）复用同一载荷。判定与
-     * 清单以平台可观测事实为准（工具调用/探活），不由模型自报。验证统计与
-     * version 锚随审查与收口组退役（#605）；modelTier 随模型路由退役（#606）。
+     * ——对话史落库（#89）复用同一载荷。判据与清单以平台可观测事实为准（工具
+     * 调用/探活），不由模型自报。旧平台句式摘要与「需求文档／系统」判定键已
+     * 退役（读侧回落）；version 锚随审查与收口组退役（#605）；modelTier 随
+     * 模型路由退役（#606）。
      */
     public static final String CLOSING_FIELD = "closing";
 

@@ -488,7 +488,7 @@ class IterationAppServiceTest {
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
-    // ---------- 收口扩载（#88：判定行 + 变更清单 + 轮末统计，服务端权威） ----------
+    // ---------- 收口扩载（#617 五字段：判据 + 内核自述 + 变更清单 + 用时，服务端权威） ----------
 
     /**
      * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 过程部件 → run-finish）
@@ -511,11 +511,10 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
-        // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/
-        // 变更清单/统计）且判定行为服务端权威值（PRD 改没改 = 交接物修订说明、
-        // 系统改没改 = 平台可观测文件改动事实，不由模型自报）；清单与统计源 = 工具
-        // 调用观察（文件级）+ run 时长
+    void given_scripted_update_round_when_fix_closes_then_run_finish_carries_five_field_closing() {
+        // 灵魂用例（#617）：脚本化更新轮收口——五字段骨架齐（用时/判据逐件/内核
+        // 自述/变更清单/预览入口由前端查询提供）；判定键与平台句式摘要退役；
+        // 清单与统计源 = 工具调用观察（文件级，真实 diff 归 #619）+ run 时长
         Long projectId = persistedGeneratedProject("9915");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseClosing(List.of(
@@ -531,14 +530,15 @@ class IterationAppServiceTest {
         // 扩载随被押后的 run-finish 一体到达（收口判据落定后——真收口才扩载）
         Map<String, Object> closing =
                 (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        // 系统改没改＝平台可观测文件改动事实（#601 内核接线）；判定行 systemNote 为
-        // 内核收口叙事（双件判据全过——不取模型自报文本）
-        assertThat(closing)
-                .containsEntry("summary", "修订了需求文档，并更新了系统")
-                .containsEntry("prdChanged", true)
-                .containsEntry("prdNote", "配送范围改为全国")
-                .containsEntry("systemChanged", true)
-                .containsEntry("systemNote", IterationAppService.KERNEL_FIX_CLOSING_SUMMARY);
+        // 内核自述 = 内核末次文本（本轮 AgentReply.text）
+        assertThat(closing).containsEntry("narrative", "修正完成");
+        // 判据逐件如实（build＋预览双件）
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
+        // 旧平台句式摘要与「需求文档／系统」判定键退役
+        assertThat(closing).doesNotContainKeys(
+                "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
         // 变更清单：文件级、路径排序稳定
         assertThat((List<Map<String, Object>>) closing.get("files")).containsExactly(
                 Map.of("path", "/src/App.jsx", "added", 4, "removed", 0),
@@ -576,10 +576,9 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_no_file_changes_when_fix_closes_then_closing_judgment_reflects_no_system_change() {
-        // 判定行的另一半（#88）：系统无需改动——平台可观测文件改动事实为空
-        // （#601 内核接线：不依赖模型自报，说明文本不进判定行）；
-        // 无修订说明的轮 prdChanged=false
+    void given_no_file_changes_when_fix_closes_then_closing_has_empty_change_list() {
+        // #617：系统无实际文件改动的轮——变更清单为空（不再有「系统无需改动」
+        // 判定行）；判据双件仍全过才收口，内核自述照常取末次文本
         Long projectId = persistedGeneratedProject("9916");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseClosing(List.of());
@@ -592,12 +591,12 @@ class IterationAppServiceTest {
                 payload.capture());
         Map<String, Object> closing =
                 (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(closing)
-                .containsEntry("summary", "本轮系统无需改动")
-                .containsEntry("prdChanged", false)
-                .containsEntry("systemChanged", false)
-                .containsEntry("systemNote", IterationAppService.KERNEL_FIX_CLOSING_SUMMARY);
-        assertThat(closing).doesNotContainKey("prdNote");
+        assertThat(closing).containsEntry("narrative", "修正完成");
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
+        assertThat(closing).doesNotContainKeys(
+                "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
         assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
     }
 

@@ -105,46 +105,28 @@ class CodingRunDispatcher {
     }
 
     /**
-     * 收口判定的权威事实（#88 判定行）：PRD 改没改（生成轮恒未动；更新轮 = 交接物
-     * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = 平台可观测文件改动
-     * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本层
-     * 只拼装不判定。验证统计／基座 lint 两档／已知缺陷清单随审查与收口组退役（#605）。
+     * 收口判据的逐件结果（#617 五字段收尾卡·判据结果）：build 过没过＋预览探活
+     * 有响应——由收口判据回调（onSuccess）给出权威事实，本层只拼装不判定。
+     * 生成与更新同形（旧「PRD／系统改没改」判定行随平台句式摘要一起退役）。
      */
-    record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
-            String systemNote) {
-
-        /**
-         * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本场叙事，进收尾卡
-         * summary（版本成版主题同源）。
-         */
-        static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note);
-        }
-
-        /**
-         * 修正轨道的分段判定（#26）：判定事实随交接物与平台可观测文件改动事实直拼。
-         */
-        static ClosingJudgment update(boolean prdChanged, String prdNote,
-                boolean systemChanged, String systemNote) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote);
-        }
+    record ClosingJudgment(boolean buildPassed, boolean previewPassed) {
     }
 
     /**
      * 一场编码 run 的收场事实：成败（终态收口事件 run-failed 的用户面锚 = 调用方
-     * 持有的 runId，#84——run 身份全程不变）+ 收口时的执行体终文（{@code closingText}，
-     * 成功收口才非 null——生成轨把它当交接摘要用；修正轨不用）+ 失败面
-     * （{@code failure}，终态失败/停止才非 null——#418 失败 run 落库面：本场墙钟/
-     * 失败原因/观察面，轨道层经事件桥与 run-failed SSE 扩载同载荷落库）。
+     * 持有的 runId，#84——run 身份全程不变）+ 失败面（{@code failure}，终态失败/
+     * 停止才非 null——#418 失败 run 落库面：本场墙钟/失败原因/观察面，轨道层经
+     * 事件桥与 run-failed SSE 扩载同载荷落库）。收口终文（内核自述）不在此携带
+     * ——收尾卡拼装在派发器内直接取当次末次文本（#617）。
      */
-    record RunResult(boolean succeeded, String closingText, Map<String, Object> failure) {
+    record RunResult(boolean succeeded, Map<String, Object> failure) {
 
-        static RunResult ok(String closingText) {
-            return new RunResult(true, closingText, null);
+        static RunResult ok() {
+            return new RunResult(true, null);
         }
 
         static RunResult failed(Map<String, Object> failure) {
-            return new RunResult(false, null, failure);
+            return new RunResult(false, failure);
         }
     }
 
@@ -219,18 +201,19 @@ class CodingRunDispatcher {
     /**
      * 跑一场编码/设计 run（座席 {@link RunSeat} 定配置与工具面）：成功收口即
      * {@code onSuccess}（收口回调携该次 run 的 runId 与本场累计文件变更事实——
-     * 对偶 8081 探活看的是工作区累计状态；返回收口判定的权威事实——#88 判定行；
-     * 回调抛异常即该次尝试失败——收口判据不满足的既有口径，如生成 8081 核验）。
+     * 对偶 8081 探活看的是工作区累计状态；返回收口判据的逐件权威事实——#617
+     * 判据结果；回调抛异常即该次尝试失败——收口判据不满足的既有口径，如生成
+     * 8081 核验）。
      * 项目事实（工作区 / owner）从聚合派生。
      *
      * <p><b>尝试口径（#604）</b>：生成与更新 run（内核座）<b>单发</b>——一次尝试
      * 即终态，失败语义＝明确展示＋重跑即恢复、不自动重跑（ADR-0055 #580-13：不造
      * 第三层重试）。#610 设计座与有界重试环随设计线整条退役拆除。</p>
      *
-     * <p><b>收口扩载（#88）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
-     * 载荷——摘要（判定事实的合并叙事）/ 判定行（onSuccess 返回的权威事实）/ 变更
-     * 清单（{@link AgentReply#changes()} 的文件级观察）/ 轮末统计（时长 = 起跑到
-     * 收口）/ 阶段耗时分布（#111 durationBreakdown——平台分析口径、前端不渲染）。
+     * <p><b>收口扩载（#617）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
+     * 载荷——判据逐件（onSuccess 返回的权威事实）/ 内核自述（内核末次文本）/
+     * 变更清单（{@link AgentReply#changes()} 的文件级观察）/ 用时（起跑到收口）/
+     * 阶段耗时分布（#111 durationBreakdown——平台分析口径、前端不渲染）。
      * 咨询/纯追问轮不经本层，run-finish 无扩载（无收尾卡）。</p>
      *
      * @param what           日志标签（generate / fix）
@@ -407,8 +390,10 @@ class CodingRunDispatcher {
             // 核验未过＝本次尝试失败（onSuccess 抛错直接上抛）
             ClosingJudgment judgment = state.onSuccess().apply(attemptRunId, runChanges);
             if (pendingFinish.get() != null) {
+                // 内核自述 = 内核自然终止时的末次文本（#617；模型文本不直播，
+                // 只在此落收尾卡）
                 Map<String, Object> closing = closingPayload(judgment, runChanges,
-                        runStartedAt, what);
+                        runStartedAt, reply.text());
                 // 阶段耗时分布（#111）：收口尾序止表于载荷定型（落库自指不可测——
                 // 载荷先于落库定型，量级极小忽略）；三桶齐备 + 逐尝试分布
                 closing.put(CLOSING_BREAKDOWN_FIELD, durationBreakdown(attemptDurations,
@@ -419,7 +404,7 @@ class CodingRunDispatcher {
                 conversationHistory.recordClosing(projectId, firstRunId, closing);
                 projection.accept(withClosing(pendingFinish.get(), closing));
             }
-            return AttemptOutcome.terminal(RunResult.ok(reply.text()));
+            return AttemptOutcome.terminal(RunResult.ok());
         }
         catch (RuntimeException e) {
             // 关停旁路（#477，先于停止处置——进程正死时事件面无意义）：宽限窗内
@@ -522,11 +507,14 @@ class CodingRunDispatcher {
         return minutes / 60 + " 小时 " + minutes % 60 + " 分";
     }
 
-    /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
+    /** 生成轨日志标签（run 的 what 参数值）——调用点同包引用。 */
     static final String GENERATE_LABEL = "generate";
 
-    /** 收口扩载载荷的摘要键（对话史收尾卡叙事）。 */
-    static final String CLOSING_SUMMARY_FIELD = "summary";
+    /** 收口扩载载荷的内核自述键（内核末次文本；空文本缺省不写）。 */
+    static final String CLOSING_NARRATIVE_FIELD = "narrative";
+
+    /** 收口扩载载荷的判据结果键（build 与预览逐件布尔）。 */
+    static final String CLOSING_CRITERIA_FIELD = "criteria";
 
     /**
      * 收口扩载的阶段耗时分布键（#111；#453 增 overhead 桶）：{@code { llmMs,
@@ -539,27 +527,24 @@ class CodingRunDispatcher {
     static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
 
     /**
-     * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
-     * schema 见 SSE事件清单·收口扩载（对话史落库 #89 复用同一载荷，
-     * 拼装单点：SSE 扩载与对话史落库取同一 map）。
-     * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径行数
-     * 合并——用户面一场 run 的活动量口径）；时长 = 起跑到本收口。验证统计／
-     * 基座 lint／已知缺陷清单随审查与收口组退役（#605）；模型路由判定留档
-     * {@code modelTier} 随 #606 退役——逐尝试生效配置仍见
-     * {@code durationBreakdown.attempts[].modelId}（供给链归因）。
+     * 收口扩载拼装（#617 五字段骨架）：被押后的 run-finish 载荷加 {@code closing}
+     * 对象——schema 见 SSE事件清单·收口扩载（对话史落库 #89 复用同一载荷，
+     * 拼装单点：SSE 扩载与对话史落库取同一 map）。五字段 = 用时（durationMs）/
+     * 判据逐件（criteria）/ 变更清单（files，本票仍为工具调用观察，#619 改真实
+     * diff）/ 内核自述（narrative，空文本不写）/ 预览入口（前端取既有预览查询，
+     * 不入载荷）。旧平台句式摘要与「需求文档／系统」判定键退役；档案内旧载荷由
+     * 前端读侧回落呈现（旧对话史不出坏卡）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
-            List<FileChange> changes, Instant runStartedAt, String what) {
+            List<FileChange> changes, Instant runStartedAt, String narrative) {
         Map<String, Object> closing = new LinkedHashMap<>();
-        closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
-        closing.put("prdChanged", judgment.prdChanged());
-        if (judgment.prdNote() != null) {
-            closing.put("prdNote", judgment.prdNote());
+        if (narrative != null && !narrative.isBlank()) {
+            closing.put(CLOSING_NARRATIVE_FIELD, narrative);
         }
-        closing.put("systemChanged", judgment.systemChanged());
-        if (judgment.systemNote() != null) {
-            closing.put("systemNote", judgment.systemNote());
-        }
+        Map<String, Object> criteria = new LinkedHashMap<>();
+        criteria.put("buildPassed", judgment.buildPassed());
+        criteria.put("previewPassed", judgment.previewPassed());
+        closing.put(CLOSING_CRITERIA_FIELD, criteria);
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
         return closing;
@@ -681,26 +666,6 @@ class CodingRunDispatcher {
         Map<String, Object> payload = new LinkedHashMap<>(finish.payload());
         payload.put(AgentEventTypes.CLOSING_FIELD, closing);
         return new AgentEvent(finish.type(), payload);
-    }
-
-    /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成
-     * 轨道按段叙事。 */
-    private static String closingSummary(ClosingJudgment judgment, String what) {
-        if (GENERATE_LABEL.equals(what)) {
-            // 生成轨道（#104）：summary = 本场叙事（note 恒非空——轨道层
-            // ClosingJudgment.generation 同形拼装）
-            return judgment.systemNote();
-        }
-        if (judgment.prdChanged() && judgment.systemChanged()) {
-            return "修订了需求文档，并更新了系统";
-        }
-        if (judgment.prdChanged()) {
-            return "修订了需求文档，系统无需改动";
-        }
-        if (judgment.systemChanged()) {
-            return "更新了系统";
-        }
-        return "本轮系统无需改动";
     }
 
     /** 变更清单载荷：同路径合并行数、按路径排序（呈现稳定，非时间序）。 */

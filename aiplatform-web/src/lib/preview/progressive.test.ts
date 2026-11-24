@@ -101,7 +101,12 @@ describe("预览渐进 b 档（#90 → #104/#106 run 收口口径）· 脚本化
     dispatchAgentEvent(queryClient, agentEvent("run-finish", {
       ...run,
       finish: "end",
-      closing: { summary: "系统骨架已起服", prdChanged: false, systemChanged: true, files: [], durationMs: 60_000 },
+      closing: {
+        narrative: "系统骨架已起服",
+        criteria: { buildPassed: true, previewPassed: true },
+        files: [],
+        durationMs: 60_000,
+      },
     }));
     expect(epochNow()).toBe(1);
     expect(watch(phaseNow({ url: PREVIEW_URL, generationState: "generated" }))).toEqual({ kind: "page" });
@@ -136,9 +141,8 @@ describe("预览渐进 b 档（#90 → #104/#106 run 收口口径）· 脚本化
       ...run,
       finish: "end",
       closing: {
-        summary: "主色调已改为绿色",
-        prdChanged: false,
-        systemChanged: true,
+        narrative: "主色调已改为绿色",
+        criteria: { buildPassed: true, previewPassed: true },
         files: [{ path: "src/styles/theme.css", added: 6, removed: 6 }],
         durationMs: 60_000,
       },

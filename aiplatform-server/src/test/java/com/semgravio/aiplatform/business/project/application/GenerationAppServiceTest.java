@@ -748,10 +748,10 @@ class GenerationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_scripted_generation_when_closes_then_run_finish_carries_slice_closing() {
-        // #88 收口扩载·生成轨道：切片的收尾卡权威事实随 run-finish 到达——PRD 未动
-        // （生成不改 PRD）、系统产出（8081 探活收口事实）、summary = 切片叙事、变更
-        // 清单 = 工具调用观察、时长在场
+    void given_scripted_generation_when_closes_then_run_finish_carries_five_field_closing() {
+        // #617 收口扩载·生成轨道五字段骨架：用时 / 判据逐件（build＋预览）/
+        // 内核自述（内核末次文本）/ 变更清单（本票仍为工具调用观察）/ 预览入口由
+        // 前端既有预览查询提供；旧平台句式摘要与「需求文档／系统」判定键不再写
         Long projectId = persistedProject("9811");
         givenSessionExecutorRunsInline();
         givenWorkspaceExecSucceeds();
@@ -775,12 +775,15 @@ class GenerationAppServiceTest {
                 payloads.capture());
         Map<String, Object> sliceClosing =
                 (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(sliceClosing)
-                .containsEntry("summary", GenerationAppService.KERNEL_CLOSING_SUMMARY)
-                .containsEntry("prdChanged", false)
-                .containsEntry("systemChanged", true)
-                .containsEntry("systemNote", GenerationAppService.KERNEL_CLOSING_SUMMARY);
-        assertThat(sliceClosing).doesNotContainKey("prdNote");
+        // 内核自述 = 内核末次文本（本轮 AgentReply.text）
+        assertThat(sliceClosing).containsEntry("narrative", "系统已生成");
+        // 判据逐件如实（build＋预览双件）
+        assertThat((Map<String, Object>) sliceClosing.get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
+        // 旧平台句式摘要与「需求文档／系统」判定键退役
+        assertThat(sliceClosing).doesNotContainKeys(
+                "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
         assertThat((List<Map<String, Object>>) sliceClosing.get("files")).hasSize(2);
         assertThat((Long) sliceClosing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }

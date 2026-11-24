@@ -58,6 +58,11 @@ vi.mock("@/hooks/use-chat", () => ({
   useAnswerQuestion: () => ({ isPending: false, mutate: answerMutate }),
 }));
 
+// 收尾卡预览入口（#617）：取既有预览查询——顶层用例无 QueryClient 可挂，直给未就绪态
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
+}));
+
 // 收尾卡版本动作请求面（仅「查看当时」链路用例消费）：起快照直读就绪态
 // （会话 startView.data 即回 previewUrl），请求面归 use-version 与后端测试
 vi.mock("@/hooks/use-version", () => ({
@@ -240,9 +245,8 @@ describe("CommandArea · 查看当时标题轮次语境（#142 整链：对话�
         id: "c1",
         runId: "run-1",
         closing: {
-          summary: "主色调已改为绿色",
-          prdChanged: false,
-          systemChanged: true,
+          narrative: "主色调已改为绿色",
+          criteria: { buildPassed: true, previewPassed: true },
           files: [],
           durationMs: 5000,
           version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",

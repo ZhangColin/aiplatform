@@ -350,8 +350,9 @@ class ProjectControllerTest {
                         LocalDateTime.of(2026, 9, 5, 10, 1)),
                 new ConversationEntryResponse(3L, 5, "收尾卡",
                         "run-2", null, null, null,
-                        Map.of("summary", "首次生成了系统", "prdChanged", false,
-                                "systemChanged", true, "files", List.of(), "durationMs", 183420),
+                        Map.of("narrative", "首次生成了系统",
+                                "criteria", Map.of("buildPassed", true, "previewPassed", true),
+                                "files", List.of(), "durationMs", 183420),
                         null, null, null, false,
                         LocalDateTime.of(2026, 9, 5, 10, 9)),
                 new ConversationEntryResponse(4L, 7, "报价卡",
@@ -380,7 +381,7 @@ class ProjectControllerTest {
                 // 「第 N 问」序号随问答卡读面（#538/#549，服务端单源）
                 .andExpect(jsonPath("$.data[1].questionOrdinal").value(1))
                 .andExpect(jsonPath("$.data[2].kind").value(5))
-                .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[2].closing.narrative").value("首次生成了系统"))
                 .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420))
                 // #203 报价卡读面：kind=7、quote 载荷原样（事件 + 订单引用，不含金额）
                 .andExpect(jsonPath("$.data[3].kind").value(7))

@@ -321,6 +321,7 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
       }),
       entry(4, "answer", { text: "企业客户" }),
       entry(5, "agent", { text: "好的，按企业客户梳理" }),
+      // 旧载荷（#617 前落库）：平台句式摘要 + 判定键——读侧回落可读
       entry(6, "closing", {
         text: undefined,
         closing: {
@@ -342,9 +343,15 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     const pending = pendingQuestionOf(useChatStore.getState(), "p1");
     expect(pending?.question).toBe("面向谁?");
     expect(pending?.engineRef).toBe("reply-1");
-    // 收尾卡（#89 归对话流常驻）
+    // 收尾卡（#89 归对话流常驻）：旧载荷回落——旧 summary 作内核自述文本、
+    // 判据按收口不变式回落双 ✓（旧对话史不出坏卡）
     expect(chat?.messages.find((m) => m.kind === "closing")).toMatchObject({
-      closing: { summary: "首次生成了系统" },
+      closing: {
+        narrative: "首次生成了系统",
+        criteria: { buildPassed: true, previewPassed: true },
+        files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
+        durationMs: 183_420,
+      },
     });
     // 轻引导带「平台」标签
     expect(chat?.messages.find((m) => m.kind === "agent" && m.label === "平台")).toMatchObject({
@@ -480,7 +487,7 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
       entry(1, "user", { text: "第一句" }, "run-1"),
       entry(2, "agent", { text: "第一答" }, "run-1"),
       entry(3, "user", { text: "更早的排队意见" }, "run-9"),
-      entry(4, "closing", { closing: { summary: "更新了系统", prdChanged: false, systemChanged: true, files: [], durationMs: 1 } }, "run-9"),
+      entry(4, "closing", { closing: { narrative: "更新了系统", criteria: { buildPassed: true, previewPassed: true }, files: [], durationMs: 1 } }, "run-9"),
     ]);
 
     const chat = useChatStore.getState().chats["p1"];
@@ -491,7 +498,12 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
 
   it("live 收尾卡被水合同 run 块接管（不双卡）：断线补发的 run-finish 回声不双卡", () => {
     const s = useChatStore.getState();
-    const closing = { summary: "更新了系统", prdChanged: false, systemChanged: true, files: [], durationMs: 5 };
+    const closing = {
+      narrative: "更新了系统",
+      criteria: { buildPassed: true, previewPassed: true },
+      files: [],
+      durationMs: 5,
+    };
     // live 到达（bridge：run-finish 携 closing → appendClosing）
     s.appendClosing("p1", "run-1", closing, "run-1:9");
     s.appendClosing("p1", "run-1", closing, "run-1:9"); // 补发回声：事件 id 只收一次

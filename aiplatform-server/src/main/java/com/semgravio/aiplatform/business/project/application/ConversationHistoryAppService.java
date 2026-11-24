@@ -208,29 +208,6 @@ public class ConversationHistoryAppService {
     }
 
     /**
-     * 已收口成果清单读口（#223 存量恢复的对照源）：项目收尾卡（kind=closing）的
-     * summary → 收口 run 锚（同叙事多次收口——往次重发起服——以后到为准）。收尾卡
-     * 是平台侧收口权威事实（Run-Id 成版锚已随审查与收口组退役，#605，
-     * 旁证同源）——存量在途项目（生成早于轨道表、无持久化计划）补产计划落库时
-     * 对照此清单标已完片、只补缺口。
-     */
-    public Map<String, String> closedGenerationSummaries(Long projectId) {
-        Map<String, String> summaries = new LinkedHashMap<>();
-        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
-                ConversationEntryKind.CLOSING)) {
-            if (entry.getClosing() == null) {
-                continue;
-            }
-            // 载荷键是收口扩载契约的 String summary（#88）；非 String 视同缺失——
-            // 不 String.valueOf 铸假匹配键（对照是逐字精确匹配）
-            if (entry.getClosing().get(CodingRunDispatcher.CLOSING_SUMMARY_FIELD) instanceof String summary) {
-                summaries.put(summary, entry.getRunId());
-            }
-        }
-        return summaries;
-    }
-
-    /**
      * 已答问答缺口计数读口（#538 五问额度程序计数权威，ADR-0048）：按项目计对话
      * 史问答卡行——只计<b>用户已答</b>卡（同 run 有问答作答行——收口作答收口的卡
      * 只置位不落作答行，不计入「第 N/5」进度）、以问题文本为缺口标识去重（同缺口

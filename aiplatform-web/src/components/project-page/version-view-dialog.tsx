@@ -28,16 +28,17 @@ import {
  * 与系统 tab 同一件，外壳/切换/舞台口径归 ./device-frame 单源——浅色锁定文字色
  * 随单源归正，以系统 tab 为正本）+ 新窗口打开（window.open 快照真实地址；弹窗仍
  * 是快照宿主，关窗即销毁，新标签页随之失效——不引入保活）；③标题带收尾语境——
- * 收尾摘要（closing.summary：#88 服务端权威事实，收尾卡正文同源）；轮次序数呈现
- * 随 #608 呈现面清场退役（ADR-0057「轮次计数不呈现」）。</p>
+ * 内核自述（#617 closing.narrative：服务端权威事实，收尾卡「内核自述」同源；
+ * 存量旧卡由读侧回落旧摘要文本）；轮次序数呈现随 #608 呈现面清场退役
+ * （ADR-0057「轮次计数不呈现」）。</p>
  */
-/** 标题里收尾摘要的字数上限（最简一行——超长截断）。 */
+/** 标题里收尾文本的字数上限（最简一行——超长截断）。 */
 const TITLE_SUMMARY_MAX = 20;
 
 /**
- * 标题式样：「那次生成结束时的系统——<收尾摘要截断>」。摘要 = closing.summary
- * （#88 服务端权威事实，收尾卡正文同源）；轮次序数呈现随 #608 退役，摘要缺场
- * 回落裸式样。
+ * 标题式样：「那次生成结束时的系统——<收尾文本截断>」。文本 = 内核自述
+ * （#617 closing.narrative；存量旧卡回落旧摘要）；轮次序数呈现随 #608 退役，
+ * 文本缺场回落裸式样。
  */
 export function viewThenTitle(summary?: string): string {
   const base = "那次生成结束时的系统";
@@ -61,7 +62,7 @@ export function VersionViewDialog({
   pending: boolean;
   error: boolean;
   previewUrl?: string;
-  /** 收尾摘要（标题语境：closing.summary 服务端权威事实）。 */
+  /** 收尾文本（标题语境：closing.narrative 内核自述；存量旧卡回落旧摘要）。 */
   summary?: string;
   /** 标题覆写（#344 版本记录抽屉 Demo 条目：「Demo vN 当时的系统」版本语境）。 */
   title?: string;

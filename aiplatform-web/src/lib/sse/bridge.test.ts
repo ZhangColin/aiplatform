@@ -1059,11 +1059,8 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
   }
 
   const closing = {
-    summary: "修订了需求文档，并更新了系统",
-    prdChanged: true,
-    prdNote: "配送范围改为全国",
-    systemChanged: true,
-    systemNote: "下单页新增配送范围说明",
+    narrative: "下单页已加入配送范围说明。",
+    criteria: { buildPassed: true, previewPassed: true },
     files: [
       { path: "/src/App.jsx", added: 4, removed: 0 },
       { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
@@ -1076,7 +1073,7 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
    * closes_then_run_finish_carries_authoritative_closing）：编码 run 真收口的
    * run-finish 携 closing——收尾卡归对话流（#89：chat store 常驻、live 到达经
    * appendClosing），工作消息原地定格留驻（#117：部件保留、不再清空——「过程上文、
-   * 结果下卡」，判定行不由前端推导）；对话史域失效（水合增量接管）。
+   * 结果下卡」，判据/清单不由前端推导）；对话史域失效（水合增量接管）。
    */
   it("编码 run 收口携 closing：收尾卡落对话流、工作消息定格留驻、对话史域失效（#89/#117）", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };

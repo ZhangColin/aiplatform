@@ -100,8 +100,9 @@ class BackofficeProjectContentSeamTest {
                 Map.of("engineRef", "reply-1", "data", Map.of("toolCalls", List.of()))));
         entries.save(ConversationEntry.answer(id, "run-1", "选 A：三页官网"));
         entries.save(ConversationEntry.closing(id, "run-2", Map.of(
-                "summary", "首次生成了系统", "prdChanged", false,
-                "systemChanged", true, "files", List.of(), "durationMs", 183420L)));
+                "narrative", "首次生成了系统",
+                "criteria", Map.of("buildPassed", true, "previewPassed", true),
+                "files", List.of(), "durationMs", 183420L)));
         entries.save(ConversationEntry.guide(id, "run-3", "确认下单请点「立即下单」"));
 
         signedGet("/api/backoffice/projects/" + id + "/conversation")
@@ -115,8 +116,8 @@ class BackofficeProjectContentSeamTest {
                 .andExpect(jsonPath("$.data[2].question.engineRef").value("reply-1"))
                 .andExpect(jsonPath("$.data[2].answered").value(false))
                 // 收尾卡＝run-finish 扩载同载荷（版本详情锚定的权威事实）
-                .andExpect(jsonPath("$.data[4].closing.summary").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data[4].closing.systemChanged").value(true))
+                .andExpect(jsonPath("$.data[4].closing.narrative").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[4].closing.criteria.buildPassed").value(true))
                 .andExpect(jsonPath("$.data[4].closing.durationMs").value(183420))
                 .andExpect(jsonPath("$.data[5].text").value("确认下单请点「立即下单」"));
     }

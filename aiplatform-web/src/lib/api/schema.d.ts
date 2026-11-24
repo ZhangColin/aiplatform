@@ -2855,7 +2855,7 @@ export interface paths {
          *     | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed / order-repriced | 通知 | projectId（+ 各自载荷）+ ownerAccountId（路由键） |
          *     | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title） |
          *     | error | 智能体·生命周期 | runId, message |
-         *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
+         *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#617 收口扩载：编码 run 真收口携带五字段收尾卡权威事实（narrative/criteria/files/durationMs），主智能体对话轮不携带） |
          *     | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
          *     | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
          *     | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
@@ -5946,12 +5946,13 @@ export interface components {
              */
             questionOrdinal?: number;
             /**
-             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, durationBreakdown{llmMs,toolsMs,closingMs,overhead{configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略；验证统计/version 锚随审查与收口组退役 #605；modelTier 随模型路由退役 #606）
+             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#617 五字段收尾卡服务端权威事实；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ narrative?, criteria{buildPassed,previewPassed}, files=[{path,added,removed}], durationMs, durationBreakdown{llmMs,toolsMs,closingMs,overhead{configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略；旧平台句式摘要 summary 与「需求文档／系统」判定键自 #617 退役、存量旧行由前端读侧回落；version 锚随审查与收口组退役 #605；modelTier 随模型路由退役 #606）
              * @example {
-             *       "summary": "完成首次生成：构建通过、预览可访问",
-             *       "prdChanged": false,
-             *       "systemChanged": true,
-             *       "systemNote": "完成首次生成",
+             *       "narrative": "完成首次生成：构建通过、预览可访问",
+             *       "criteria": {
+             *         "buildPassed": true,
+             *         "previewPassed": true
+             *       },
              *       "files": [
              *         {
              *           "path": "/src/App.jsx",

@@ -36,7 +36,6 @@ import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
 import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
-import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
@@ -115,9 +114,6 @@ class ProjectControllerTest {
 
     @MockitoBean
     private GenerationAppService generationAppService;
-
-    @MockitoBean
-    private IterationAppService iterationAppService;
 
     @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
@@ -501,32 +497,6 @@ class ProjectControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(4018))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD——确认此版后平台开始生成 Demo"));
-    }
-
-    @Test
-    void given_fix_terminal_when_restart_fix_then_run_id_returned() throws Exception {
-        // 「继续更新」（#48 超限终态恢复出口）：纯动作无入参，重派即返回新 run 首试
-        // runId（与新 run 的链路锚，同 /generate 口径）
-        when(iterationAppService.restartFixRun(100L)).thenReturn(
-                new IterationAppService.FixDispatch("run-fix-2", false));
-
-        performAsUser(post("/api/projects/100/fix-runs/restart"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.runId").value("run-fix-2"));
-        verify(iterationAppService).restartFixRun(100L);
-    }
-
-    @Test
-    void given_no_terminal_failure_when_restart_fix_then_prj_026_as_409() throws Exception {
-        // 无终态账守卫（未派过/已成功收工/重启丢账）——指路指令区重提意见
-        when(iterationAppService.restartFixRun(100L)).thenThrow(
-                new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE));
-
-        performAsUser(post("/api/projects/100/fix-runs/restart"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(4026))
-                .andExpect(jsonPath("$.message").value("没有可恢复的更新，请在对话区重新提意见"));
     }
 
     @Test

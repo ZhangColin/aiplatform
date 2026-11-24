@@ -449,7 +449,6 @@ class DispatchAppServiceTest {
         assertThat(command.getAllValues().stream().map(AgentCommand::sessionId))
                 .noneMatch(id -> id.startsWith("coder-"));
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ACCEPTANCE_START), anyMap());
         // 对话史（#89）：用户 + 回复两行——刷新可水合
         assertThat(conversationHistory.read(projectId))
                 .extracting(entry -> entry.kind(), entry -> entry.text())
@@ -616,7 +615,6 @@ class DispatchAppServiceTest {
                 .anySatisfy(entry -> assertThat(entry.kind()).isEqualTo(3)); // 问答卡落库可水合
         assertThat(conversationHistory.read(projectId))
                 .anySatisfy(entry -> assertThat(entry.text()).contains("先确认一下要改哪一块"));
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ACCEPTANCE_START), anyMap());
     }
 
     @Test

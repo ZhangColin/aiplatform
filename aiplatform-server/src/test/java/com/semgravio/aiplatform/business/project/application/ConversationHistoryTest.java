@@ -66,6 +66,10 @@ class ConversationHistoryTest {
     @Autowired
     private MainAgentAppService mainAgentAppService;
 
+    /** 迭代修改链（#623/#625）：交指令触发内核重跑并收口出收尾卡。 */
+    @Autowired
+    private IterationAppService iterationAppService;
+
     @Autowired
     private ConversationHistoryAppService conversationHistory;
 
@@ -191,12 +195,21 @@ class ConversationHistoryTest {
                 .thenReturn(false)
                 .thenReturn(true)
                 .thenReturn(false);
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
 
         MainAgentAppService.MainAgentRun turn =
                 mainAgentAppService.runOpinionTurn(projectId, "给宠物医院做预约系统");
         mainAgentAppService.answerQuestion(projectId, turn.runId(), "reply-1",
                 List.of(Map.of("id", "tc-1", "name", "ask_user",
                         "input", Map.of("question", "目标用户是谁？"))), "企业客户");
+        // 修改可落地（#623/#625）：对话面交指令 → 内核重跑收口 → 收尾卡落库
+        iterationAppService.handOffModification(
+                projectRepository.findById(projectId).orElseThrow(),
+                List.of(new ModificationHandoffFacts.Instruction(
+                        "给列表加导出按钮", "加个导出按钮", null)), "dialog-run");
 
         List<ConversationEntryResponse> history = conversationHistory.read(projectId);
         assertThat(history).extracting(ConversationEntryResponse::kind)
@@ -408,8 +421,17 @@ class ConversationHistoryTest {
                     AgentEventTypes.FINISH_FIELD, "end")));
             return new AgentReply(command.runId(), "修正完成");
         });
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
 
         mainAgentAppService.runOpinionTurn(projectId, "加个导出按钮");
+        // 修改经对话面交指令落内核重跑（#623/#625）——收尾卡入对话史
+        iterationAppService.handOffModification(
+                projectRepository.findById(projectId).orElseThrow(),
+                List.of(new ModificationHandoffFacts.Instruction(
+                        "给列表加导出按钮", "加个导出按钮", null)), "dialog-run");
 
         assertThat(conversationHistory.read(projectId))
                 .extracting(ConversationEntryResponse::kind)

@@ -31,7 +31,6 @@ import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
 import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
-import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
@@ -45,7 +44,6 @@ import com.semgravio.aiplatform.business.project.application.dto.command.CreateP
 import com.semgravio.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.RenameProjectCommand;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStopResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BalanceReminderCardResponse;
@@ -72,11 +70,11 @@ import com.semgravio.aiplatform.support.BinaryResponses;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
- * 派发）/ 问答卡作答 / 生成点火（岔路口「立即生成」与前端「继续生成」恢复出口
- * 共用——#604 起重发即在既有工作区重跑）→ 继续更新（更新
- * run 终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / PRD 确认成版与
- * 版本清单详情（#330 确认即成版）/ 文件树只读浏览 → 源码包下载 → 预览 → 删除真删级联。
+ * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（生成前入口
+ * 三分类派发 / 生成后对话面）/ 问答卡作答 / 生成点火（岔路口「立即生成」与前端
+ * 「继续生成」恢复出口共用——#604 起重发即在既有工作区重跑）→ 归档 / 改名 / 详情
+ * / 列表 / 用量 / PRD 读 / PRD 确认成版与版本清单详情（#330 确认即成版）/ 文件树
+ * 只读浏览 → 源码包下载 → 预览 → 删除真删级联。
  *
  * <p>#325 owner 守卫：{@code /api/projects/{id}/**} 单项目寻址统一过归属判定
  * （{@code ProjectOwnerInterceptor} 先于控制器）——非本人项目与不存在项目同 404
@@ -85,7 +83,7 @@ import com.semgravio.aiplatform.support.Tsid;
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / Demo 版本与确认标记 / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（生成前三分类派发、生成后对话面）/ 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / Demo 版本与确认标记 / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -93,7 +91,6 @@ public class ProjectController {
     private final DispatchAppService dispatchAppService;
     private final MainAgentAppService mainAgentAppService;
     private final GenerationAppService generationAppService;
-    private final IterationAppService iterationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
     private final InterviewQuotaAppService interviewQuotaAppService;
     private final PrdVersionAppService prdVersionAppService;
@@ -105,7 +102,6 @@ public class ProjectController {
                              DispatchAppService dispatchAppService,
                              MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
-                             IterationAppService iterationAppService,
                              ConversationHistoryAppService conversationHistoryAppService,
                              InterviewQuotaAppService interviewQuotaAppService,
                              PrdVersionAppService prdVersionAppService,
@@ -116,7 +112,6 @@ public class ProjectController {
         this.dispatchAppService = dispatchAppService;
         this.mainAgentAppService = mainAgentAppService;
         this.generationAppService = generationAppService;
-        this.iterationAppService = iterationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
         this.interviewQuotaAppService = interviewQuotaAppService;
         this.prdVersionAppService = prdVersionAppService;
@@ -351,31 +346,13 @@ public class ProjectController {
                     + "停止后未生成项目的生成态投影回「从未生成」（不显假生成中；#604"
                     + "起无「生成中断」档），重跑入口照常可达——首建停止清点火位"
                     + "（岔路口卡/PRD 确认按钮复现；前端「继续生成」同口：不带断点、"
-                    + "不携错误现场，在既有工作区重跑）；更新轨停止记"
-                    + "终态账，「继续更新」照常可达。幂等：无在途返回 stopped=false"
+                    + "不携错误现场，在既有工作区重跑）。幂等：无在途返回 stopped=false"
                     + "（连点/与自然收口的竞态如实回，不 409）。停止是异步收场：请求"
                     + "返回 ≠ 执行体已完全落定，以 SSE/REST 重查为准。"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<GenerationStopResponse> stopGeneration(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStopResponse(
                 generationAppService.stopInFlightRun(parseId(id))));
-    }
-
-    @PostMapping("/{id}/fix-runs/restart")
-    @Operation(summary = "继续更新（更新 run 终态恢复出口）",
-            description = "更新 run 失败转终态后的人工兜底（#604 起更新 run 同为单发"
-                    + "不自动重试——失败即终态；与首建的重跑入口对齐）：重派终态那场的"
-                    + "更新任务——交接物沿用（同任务清单）、续同 "
-                    + "coder-{projectId} 会话（建系统上下文保留），新 runId = 重派那场的"
-                    + "运行标识"
-                    + "（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），"
-                    + "重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发："
-                    + "更新在途（进行中/排队中）409 PRJ_025；无终态账（未派过更新/"
-                    + "已成功收工/平台重启丢账）409 PRJ_026（指路对话区重提意见）。"
-                    + "已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001")
-    public ApiResponse<FixRestartResponse> restartFix(@PathVariable String id) {
-        return ApiResponse.ok(new FixRestartResponse(
-                iterationAppService.restartFixRun(parseId(id)).runId()));
     }
 
     @GetMapping("/{id}")

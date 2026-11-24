@@ -1,9 +1,6 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import java.net.URI;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -71,15 +68,11 @@ import lombok.extern.slf4j.Slf4j;
  * PRD 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，构建基准序
  * ——确认不写版本行，记行归起跑单点）、Demo 版本锚捕获读「最新版」。</p>
  *
- * <p><b>首 Demo 在途的意见排队补派（#360）</b>：首个构建 run 在途期间（generated_at
- * 未落位）到达的意见轮，收口派发不再静默跳过——意见（原文＋需求侧修订说明）入队
- * （{@link #firstDemoTurnOpinions}，修正轨 queuedFixRuns 同构的进程内态）＋对话面
- * 平台明示（guide-reply 复用型，{@link #IN_FLIGHT_OPINION_NOTICE}）；生成<b>成功
- * 收口</b>后排空队列，多条意见合并为一场更新 run 补派（{@link IterationAppService}
- * 的逐轮配对交接物——同构修正轨排队合并，不逐条烧 run）。失败/停止收口不排空、
- * 队列保留：重跑成功收口时再消化（不自锁）；补派起跑撞修正轨在途即
- * 排进修正轨队列，那场收口排空时自然合并（竞态零丢失）。意见零丢失之外仍留兜底：
- * 进程内队列重启即清（同修正轨口径），用户重提即恢复。</p>
+ * <p><b>生成后发言走对话面（#622/#625）</b>：首个构建 run 在途或项目已生成时，对话区
+ * 发言先分岔到对话面轻会话（{@link DialogAppService}）；说清的修改经
+ * {@code submit_modification} 交平台，由 {@link IterationAppService} 的对话面待办
+ * 承接（首建成功收口后作为第一轮迭代补派）。旧首 Demo 在途意见队列（#360）随旧受理链
+ * 拆除退场。</p>
  *
  * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡）随全部智能体
  * 事件流产出（parts 契约，前端长成工作消息）。</p>
@@ -143,13 +136,12 @@ public class GenerationAppService {
     private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
     private final TransactionTemplate transactionTemplate;
-    private final ConversationHistoryAppService conversationHistory;
     private final BuildDispatchPolicy buildDispatchPolicy;
     private final DemoVersionAppService demoVersionAppService;
     private final PrdVersionAppService prdVersionAppService;
     private final DemoSeedAppService demoSeed;
 
-    /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
+    /** 迭代派发口（#623）：首建成功收口后排空对话面交指令待办。 */
     private final IterationAppService iterationAppService;
 
     private final BalanceGateAppService balanceGate;
@@ -161,27 +153,9 @@ public class GenerationAppService {
     private final KernelServingGuard kernelServingGuard;
 
     /**
-     * 首 Demo 在途期间到达的意见轮（#360，projectId → 按收口序排队）：生成成功
-     * 收口后由 {@link #dispatchFirstDemoTurnOpinions} 排空合并补派一场更新 run；
-     * 失败/停止收口保留（重跑成功收口时消化）。进程内态与轨道状态
-     * 同口径——重启即清，用户重提即兜底（修正轨 queuedFixRuns 同构）。
-     */
-    private final Map<Long, List<TurnOpinion>> firstDemoTurnOpinions = new ConcurrentHashMap<>();
-
-    /**
-     * 一条在途意见轮的排队载荷（#360）：意见原文＋该轮需求侧判定（savePrd 修订
-     * 说明，null = 未修订）＋意见轮 runId（明示回执的对话面锚）——排空时逐轮
-     * 配对成修正轨交接物（{@link IterationAppService.FixHandoff.Round} 同形）。
-     */
-    record TurnOpinion(String opinion, String prdRevisionSummary, String turnRunId) {
-    }
-
-    /**
      * 余额闸暂存的生成派发 intent（#537 段边界余额门，projectId 集）：余额门
-     * 拦下时生成派发被暂存于此，充值回正经 {@link #drainBalanceBlocked} 自动重派
-     * （被拦意见轮已并入 {@link #firstDemoTurnOpinions} 排队面——按既有在途
-     * 口径消化：生成成功收口后合并补派更新 run）。进程内锚形态（同排队态口径）
-     * ——重启丢账属既有兜底哲学。
+     * 拦下时生成派发被暂存于此，充值回正经 {@link #drainBalanceBlocked} 自动重派。
+     * 进程内锚形态（同排队态口径）——重启丢账属既有兜底哲学。
      */
     private final Set<Long> balanceBlockedGeneration = ConcurrentHashMap.newKeySet();
 
@@ -191,7 +165,6 @@ public class GenerationAppService {
             CodingRunDispatcher codingRunDispatcher, AgentEventBridge eventBridge,
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
             TransactionTemplate transactionTemplate,
-            ConversationHistoryAppService conversationHistory,
             BuildDispatchPolicy buildDispatchPolicy,
             DemoVersionAppService demoVersionAppService,
             PrdVersionAppService prdVersionAppService,
@@ -208,7 +181,6 @@ public class GenerationAppService {
         this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
         this.transactionTemplate = transactionTemplate;
-        this.conversationHistory = conversationHistory;
         this.buildDispatchPolicy = buildDispatchPolicy;
         this.demoVersionAppService = demoVersionAppService;
         this.prdVersionAppService = prdVersionAppService;
@@ -232,8 +204,7 @@ public class GenerationAppService {
      */
     public GenerationRun startGeneration(Long projectId) {
         Project project = requireGeneratableProject(projectId);
-        GenerationRun run = dispatchGeneration(project, /* rejectInFlight= */ true,
-                /* turnOpinion= */ null);
+        GenerationRun run = dispatchGeneration(project, /* rejectInFlight= */ true);
         if (run == null) {
             // 收口自动路径的 null 静默跳过不经过本入口——按钮路径在途已由守卫拒绝，
             // 此处 null 只剩环境性早退（余额门等已各自抛错），按重复触发口径兜住
@@ -268,9 +239,8 @@ public class GenerationAppService {
      * 本入口</b>：试用态出岔路口卡（{@link BuildGateAppService#ensureForkPending}）、
      * 付费态确认门读面在场（PRD 文档面按钮）——点火归用户。守卫沿用
      * {@link #startGeneration}（存在 / 未归档 / 未生成过 / PRD 已产出——
-     * {@link #requireGeneratableProject} 单点），在途口径：生成进行中意见轮
-     * （{@code turnOpinion} 在场）入队＋明示、无意见载荷的调用面（设计定稿
-     * 构建）静默跳过（不派不报错）。
+     * {@link #requireGeneratableProject} 单点），在途（生成进行中）静默跳过
+     * （不派不报错；返回 null 供调用方区分「已派」与「未派」）。
      *
      * @return 派发的 run 标识；在途（生成进行中）静默跳过返回 null——调用方
      *         据此区分「已派」与「未派」，不误报派发事实
@@ -279,48 +249,8 @@ public class GenerationAppService {
      *                              兜其余竞态调用面）
      */
     public GenerationRun dispatchGenerationOnTurnClose(Long projectId) {
-        return dispatchGenerationOnTurnClose(projectId, /* turnOpinion= */ null);
-    }
-
-    /**
-     * 携意见轮载荷的收口派发（#360 首 Demo 在途的反馈不静默丢）：{@code turnOpinion}
-     * 在场且生成在途时意见入队＋对话面平台明示，返回 null（调用方不误报派发事实，
-     * 排空补派是生成收口后的次生事实）；其余路径同两参形。
-     */
-    public GenerationRun dispatchGenerationOnTurnClose(Long projectId, TurnOpinion turnOpinion) {
         Project project = requireGeneratableProject(projectId);
-        return dispatchGeneration(project, /* rejectInFlight= */ false, turnOpinion);
-    }
-
-    /**
-     * 在途意见排队（#360 面，#542 两入口退役后的<b>非快道</b>收口观测）：首个
-     * 构建 run 在途期间到达的意见轮——意见入队＋对话面平台明示（生成成功收口后
-     * 合并补派更新 run，不静默丢），<b>不派发</b>（自然收口无自动路径——点火归
-     * 用户：岔路口「立即生成」/确认按钮/快道）。不在途（首建未点火/已收口）静默
-     * 跳过：意见由 PRD 修订承载，无需排队。
-     *
-     * <p>返回 void：排队是次生事实而非派发——恒 null 的返回值只会引诱调用方误读
-     * 为派发回执。
-     */
-    public void queueFirstDemoTurnOpinion(Long projectId, TurnOpinion turnOpinion) {
-        if (turnOpinion == null || turnOpinion.opinion() == null
-                || turnOpinion.opinion().isBlank()) {
-            return; // 无意见载荷（平台轮等）——无事可排
-        }
-        Project project = projectRepository.findById(projectId).orElse(null);
-        if (project == null) {
-            return;
-        }
-        synchronized (codingRunTrack) { // 与派发侧同锁（begin 失败 ⟹ end 未发生的锁序）
-            if (!codingRunTrack.isInFlight(projectId)) {
-                return; // 不在途——不排（意见由 PRD 承载，点火归用户动作）
-            }
-            firstDemoTurnOpinions.computeIfAbsent(projectId, key -> new ArrayList<>())
-                    .add(turnOpinion);
-        }
-        log.info("[generate] 项目 {} 首 Demo 在途，意见轮收口入队（成功收口后"
-                + "合并补派，轮锚 {}）", projectId, turnOpinion.turnRunId());
-        notifyTurnOpinionQueued(project, turnOpinion); // 锁外：回执不占轨道锁
+        return dispatchGeneration(project, /* rejectInFlight= */ false);
     }
 
     /**
@@ -330,28 +260,15 @@ public class GenerationAppService {
      * 静默跳过（返回 null 即「未派」，调用方不关心）。资产就位失败如实上抛并
      * 释放在途标记（环境故障口径，生成不起跑）。
      */
-    private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight,
-            TurnOpinion turnOpinion) {
+    private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight) {
         Long projectId = project.getId();
-        boolean hasTurnOpinion = turnOpinion != null && turnOpinion.opinion() != null
-                && !turnOpinion.opinion().isBlank();
         // 段边界余额门（#537 计费③，ADR-0047 段间硬门）：生成 run 起跑前查门——
         // 源池≤0 拦下：项目入暂存集（充值回正经 drainBalanceBlocked 自动重派〔不手动
-        // 重试〕）＋余额提醒卡直达对话面（显负额＋充值入口）；意见轮载荷按在途口径
-        // 入队 firstDemoTurnOpinions＋明示回执（同 #360 不静默丢——重派收口后合并
-        // 补派更新 run）。按钮路径（rejectInFlight）同步抛 BILL_025 指路充值；
-        // 收口自动路径静默返回 null（同静默跳过口径）。试用恒放行。run 内绝不检查
-        // 绝不中断——本门只在此（run 起跑前）被消费。
+        // 重试〕）＋余额提醒卡直达对话面（显负额＋充值入口）。按钮路径（rejectInFlight）
+        // 同步抛 BILL_025 指路充值；收口自动路径静默返回 null（同静默跳过口径）。
+        // 试用恒放行。run 内绝不检查绝不中断——本门只在此（run 起跑前）被消费。
         BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
         if (gate.blocked()) {
-            if (hasTurnOpinion) {
-                // 入队与 begin 同临界区口径（#360 锁序——此处不占轨道，仅队列锁序）
-                synchronized (codingRunTrack) {
-                    firstDemoTurnOpinions.computeIfAbsent(projectId, key -> new ArrayList<>())
-                            .add(turnOpinion);
-                }
-                notifyTurnOpinionQueued(project, turnOpinion);
-            }
             balanceBlockedGeneration.add(projectId);
             eventBridge.emitBalanceReminder(project,
                     BalanceReminderAppService.BalanceReminderCard.forRunBlock(
@@ -363,31 +280,11 @@ public class GenerationAppService {
             }
             return null;
         }
-        if (hasTurnOpinion) {
-            // #360 首 Demo 在途的反馈不静默丢：入队判定与 begin 同临界区（修正轨排队
-            // 锁序同款——begin 失败 ⟹ end 未发生 ⟹ 排空 remove 未发生，add 不落在
-            // 排空之后，零丢失；remove 同锁见 {@link #dispatchFirstDemoTurnOpinions}）
-            boolean queued = false;
-            synchronized (codingRunTrack) {
-                if (!codingRunTrack.begin(projectId)) {
-                    firstDemoTurnOpinions.computeIfAbsent(projectId, key -> new ArrayList<>())
-                            .add(turnOpinion);
-                    queued = true;
-                }
-            }
-            if (queued) {
-                log.info("[generate] 项目 {} 首 Demo 在途，意见轮收口入队（成功收口后"
-                        + "合并补派，轮锚 {}）", projectId, turnOpinion.turnRunId());
-                notifyTurnOpinionQueued(project, turnOpinion); // 锁外：回执不占轨道锁
-                return null;
-            }
-        }
-        else if (!codingRunTrack.begin(projectId)) {
+        if (!codingRunTrack.begin(projectId)) {
             if (rejectInFlight) {
                 throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
             }
-            log.info("[generate] 项目 {} 生成在途，收口自动派发静默跳过（无意见载荷调用面）",
-                    projectId);
+            log.info("[generate] 项目 {} 生成在途，收口自动派发静默跳过", projectId);
             return null;
         }
 
@@ -428,7 +325,7 @@ public class GenerationAppService {
     /**
      * 轨道任务提交（派发尾单点）：生成轨道任务提交会话执行器（#603 起直接执行——
      * 原生成车道的排队/错峰/排空已拆，即交即跑）＋停止/关停收口面装配——内核
-     * 轨道正常返回后排空在途意见队列（#360）。
+     * 轨道正常返回后排空对话面交指令待办（#623）。
      */
     private Future<?> submitTrack(Project project, String firstRunId, Integer prdVersionNo) {
         Long projectId = project.getId();
@@ -442,8 +339,8 @@ public class GenerationAppService {
                     }
                     catch (RunStoppedException e) {
                         // 停止收口（#359 生成取消）：中断口径非判死——已完成进度保留；
-                        // 终态按失败账口径 run-failed(stopped=true) 收口；#360 在途
-                        // 意见队列保留（不排空）——重跑成功收口时消化，不自锁
+                        // 终态按失败账口径 run-failed(stopped=true) 收口；对话面交指令
+                        // 待办保留（不排空）——重跑成功收口时消化，不自锁
                         reopenFirstBuildRequest(projectId);
                         eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     }
@@ -459,10 +356,6 @@ public class GenerationAppService {
                         codingRunTrack.end(projectId);
                     }
                     if (trackReturned) {
-                        // #360 排空只在轨道正常返回后（停止/异常收场不动队列）；
-                        // 在途标记已释放（排空补派的更新 run 要占同一轨道）——补派
-                        // 是否起跑由排空内按 generated_at 事实判定
-                        dispatchFirstDemoTurnOpinions(projectId);
                         // #623 对话面交指令待办：首建成功收口（generated_at 已落）后
                         // 作为第一轮迭代补派；失败/停止（generated_at 未落）待办保留
                         try {
@@ -477,66 +370,10 @@ public class GenerationAppService {
     }
 
     /**
-     * 在途意见入队后的平台明示（#360）：guide-reply 复用型（prompt 不携带——用户
-     * 气泡已由意见轮自落，平台只补回执一条），同步落对话史（#89 闭史，刷新回访
-     * 不丢；落库内部 quietly 自吞失败）。事件发射失败只记日志不反噬排队事实。
-     */
-    private void notifyTurnOpinionQueued(Project project, TurnOpinion turnOpinion) {
-        conversationHistory.recordGuideNotice(project.getId(), turnOpinion.turnRunId(),
-                IN_FLIGHT_OPINION_NOTICE);
-        try {
-            eventBridge.emitGuideReply(project, turnOpinion.turnRunId(), /* prompt= */ null,
-                    DispatchAppService.GUIDE_LABEL, IN_FLIGHT_OPINION_NOTICE);
-        }
-        catch (RuntimeException e) {
-            log.warn("[generate] 项目 {} 在途意见回执事件发射失败（不反噬排队）：{}",
-                    project.getId(), e.toString());
-        }
-    }
-
-    /**
-     * 首 Demo 在途意见队列的排空（#360，生成轨道任务尾部调）：合并为一场更新 run
-     * 补派（逐轮配对交接物——同构修正轨排队合并，不逐条烧 run）。只在生成
-     * <b>成功收口</b>后排空——以 {@code generated_at} 落位事实为闸（失败收口轨道
-     * 正常返回的场景同走本方法、闸不过即原队保留，重跑成功时再来
-     * 消化——不自锁、不重复派）。补派撞修正轨在途（用户恰在收口窗口提意见起跑
-     * 了更新 run）即排进修正轨队列，那场收口排空时自然合并（竞态零丢失）。补派
-     * 失败不炸轨道任务（#51 口径）——记日志，用户重提即兜底。
-     */
-    private void dispatchFirstDemoTurnOpinions(Long projectId) {
-        Project current = projectRepository.findById(projectId).orElse(null);
-        if (current == null || current.getGeneratedAt() == null) {
-            return; // 未成功收口（失败/停止/收口落位失败）——队列保留待重跑成功
-        }
-        List<TurnOpinion> queued;
-        synchronized (codingRunTrack) { // 与入队侧同锁（begin 失败 ⟹ end 未发生的锁序）
-            queued = firstDemoTurnOpinions.remove(projectId);
-        }
-        if (queued == null || queued.isEmpty()) {
-            return;
-        }
-        IterationAppService.FixHandoff handoff = new IterationAppService.FixHandoff(
-                queued.stream().map(opinion -> new IterationAppService.FixHandoff.Round(
-                        opinion.opinion(), opinion.prdRevisionSummary())).toList());
-        try {
-            IterationAppService.FixDispatch dispatch =
-                    iterationAppService.startFixRun(projectId, handoff);
-            log.info("[generate] 项目 {} 首 Demo 收口，排空在途意见 {} 轮合并补派更新 run（{}）",
-                    projectId, queued.size(), dispatch.queued() ? "撞在途转修正轨排队" : "起跑");
-        }
-        catch (RuntimeException e) {
-            log.warn("[generate] 项目 {} 在途意见排空补派失败（用户重提即兜底）：{}",
-                    projectId, e.toString());
-        }
-    }
-
-    /**
      * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
      * 余额闸暂存的生成派发 intent 逐项目重派（未回正的项目保持暂存待下一次入账）。
-     * 已生成（生成在拦下窗口外竞态收口）的项目不重演生成——只在途意见队列排空
-     * （合并补派更新 run）；未生成的重派生成（被拦意见轮随 firstDemoTurnOpinions
-     * 既有口径消化）。重派失败记日志——用户重提即兜底。入账事件（AFTER_COMMIT
-     * 监听）触发。
+     * 已生成（生成在拦下窗口外竞态收口）的项目不重演生成；未生成的重派生成。
+     * 重派失败记日志——用户重提即兜底。入账事件（AFTER_COMMIT 监听）触发。
      */
     public void drainBalanceBlocked() {
         for (Long projectId : Set.copyOf(balanceBlockedGeneration)) {
@@ -548,12 +385,10 @@ public class GenerationAppService {
             }
             try {
                 log.info("[generate] 项目 {} 余额回正：暂存生成派发 intent 自动重派", projectId);
-                dispatchFirstDemoTurnOpinions(projectId); // 已生成：在途意见合并补派更新 run
                 Project current = projectRepository.findById(projectId).orElse(null);
                 if (current != null && current.getArchivedAt() == null
                         && current.getGeneratedAt() == null) {
-                    dispatchGeneration(current, /* rejectInFlight= */ false,
-                            /* turnOpinion= */ null);
+                    dispatchGeneration(current, /* rejectInFlight= */ false);
                 }
             }
             catch (RuntimeException e) {
@@ -661,13 +496,6 @@ public class GenerationAppService {
                     e.toString());
         }
     }
-
-    /**
-     * 首 Demo 在途时意见轮的平台明示文案（#360）：入队即回执——用户面「说了没反应」
-     * 补上平台事实（意见已记录、生成完成后自动落实），兑现靠排空补派而非空话。
-     */
-    static final String IN_FLIGHT_OPINION_NOTICE =
-            "首次生成进行中，本条意见已记录，生成完成后将自动落实";
 
     /**
      * 切片收口推 URL（#105 URL 事件驱动推送）：8081 已在容器内探活通过（执行体已起服），

@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -1317,78 +1316,6 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_first_demo_in_flight_when_turn_opinions_arrive_then_notified_and_merged_fix_after_close()
-            throws InterruptedException {
-        // 灵魂用例（#360 AC①）：首 Demo 在途时意见轮收口的派发不再静默丢——意见入队
-        // + 对话面平台明示（guide-reply 复用，prompt 缺省不再重建用户气泡）；生成
-        // 收口成功后排空队列，多条意见合并为一场更新 run 补派（修正轨排队合并同构）
-        Long projectId = persistedProject("9860");
-        givenWorkspaceExecSucceeds();
-        List<Runnable> tracks = givenTrackCollected();
-        CountDownLatch generating = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch fixDone = new CountDownLatch(1);
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            if (command.sessionId().contains("-kernel-")) {
-                // 内核首 run 在途挂住——制造首 Demo 生成在途窗口
-                generating.countDown();
-                release.await();
-            }
-            if (command.sessionId().contains("-fix-")) {
-                // 排空补派的更新 run：内核收口（平台侧 build＋探活判据照跑）
-                fixDone.countDown();
-                return new AgentReply(command.runId(), "更新完成");
-            }
-            return new AgentReply(command.runId(), "完成");
-        });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-        Thread generationWorker = new Thread(tracks.remove(0));
-        generationWorker.start();
-        assertThat(generating.await(5, TimeUnit.SECONDS)).isTrue();
-
-        // 在途窗口内两条意见轮收口：不再静默跳过——入队不派（无新 converse）+ 平台明示
-        assertThat(appService.dispatchGenerationOnTurnClose(projectId,
-                new GenerationAppService.TurnOpinion("列表加筛选", null, "turn-1"))).isNull();
-        assertThat(appService.dispatchGenerationOnTurnClose(projectId,
-                new GenerationAppService.TurnOpinion("加导出功能", "PRD 已加导出节", "turn-2")))
-                .isNull();
-        verify(agentClient, times(1)).converse(any(), any());
-        // 平台明示（guide-reply 复用型）：锚各自意见轮、无 prompt 键（用户气泡已由
-        // 意见轮自落，不重复重建）、定型文案告知排队事实
-        for (String turnRunId : List.of("turn-1", "turn-2")) {
-            verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
-                    argThat(payload -> turnRunId.equals(payload.get(EventsAppService.RUN_FIELD))
-                            && !payload.containsKey(AgentEventTypes.GUIDE_PROMPT_FIELD)
-                            && GenerationAppService.IN_FLIGHT_OPINION_NOTICE
-                                    .equals(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))));
-        }
-        // 明示同步落库（#89 闭史）：guide 行挂各自意见轮 runId，刷新回访不丢
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_conversation_entries WHERE project_id = ?"
-                        + " AND kind = 6 AND run_id IN ('turn-1', 'turn-2')",
-                Integer.class, projectId)).isEqualTo(2);
-
-        // 首 Demo 收口成功（generated_at 落位）→ 排空队列：合并为一场更新 run 补派
-        release.countDown();
-        generationWorker.join(5000);
-        assertThat(generatedAt(projectId)).isNotNull();
-        assertThat(tracks).hasSize(1); // 排空只补派一场（合并），不逐条烧 run
-        Thread fixWorker = new Thread(tracks.remove(0));
-        fixWorker.start();
-        assertThat(fixDone.await(5, TimeUnit.SECONDS)).isTrue();
-        fixWorker.join(5000);
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        // 补派 prompt = 内核修正轨交接物拼装（逐轮配对：各轮「意见 → 修订说明」）
-        assertThat(commands.getAllValues().get(1).prompt()).isEqualTo(
-                IterationAppService.kernelFixRunPrompt(new IterationAppService.FixHandoff(
-                        List.of(new IterationAppService.FixHandoff.Round("列表加筛选", null),
-                                new IterationAppService.FixHandoff.Round("加导出功能", "PRD 已加导出节")))));
-    }
-
-    @Test
     void given_first_build_in_flight_when_dialog_hands_off_then_dispatched_after_success()
             throws InterruptedException {
         // #623 首建在途：对话面交指令进待办＋轻提示（不另起 run）；首建成功后作为第一
@@ -1441,78 +1368,6 @@ class GenerationAppServiceTest {
         assertThat(commands.getAllValues().get(1).prompt())
                 .contains("用户原话：列表加分页")
                 .contains("修改指令：给预约列表加分页");
-    }
-
-    @Test
-    void given_stopped_first_demo_when_turn_opinion_queued_then_resume_digests_without_deadlock()
-            throws InterruptedException {
-        // #360 AC②：停止收口不排空（队列保留）、「继续生成」续跑成功收口时消化——
-        // 与恢复出口不冲突（不自锁、不重复派）；生成成功后「继续生成」出口按已生成
-        // 口径拒绝（PRJ_017），不与补派的更新 run 抢轨道
-        Long projectId = persistedProject("9861");
-        givenWorkspaceExecSucceeds();
-        List<Runnable> tracks = givenTrackCollected();
-        CountDownLatch generating = new CountDownLatch(1);
-        CountDownLatch fixDone = new CountDownLatch(1);
-        AtomicBoolean released = new AtomicBoolean(false);
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            if (command.sessionId().contains("-kernel-") && !released.get()) {
-                // 首 Demo 内核 run 在途挂住，等停止请求落位（Future.cancel 线程中断的
-                // 现场等价物——停止检查点在中断侧，此处以中断形态异常收场）
-                generating.countDown();
-                while (!codingRunTrack.stopRequested(projectId)) {
-                    Thread.sleep(50);
-                }
-                throw new RuntimeException("java.lang.InterruptedException");
-            }
-            if (command.sessionId().contains("-fix-")) {
-                fixDone.countDown();
-                return new AgentReply(command.runId(), "更新完成");
-            }
-            return new AgentReply(command.runId(), "完成");
-        });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-        Thread generationWorker = new Thread(tracks.remove(0));
-        generationWorker.start();
-        assertThat(generating.await(5, TimeUnit.SECONDS)).isTrue();
-
-        // 在途窗口入队一条意见后用户停止首 Demo
-        assertThat(appService.dispatchGenerationOnTurnClose(projectId,
-                new GenerationAppService.TurnOpinion("列表加筛选", null, "turn-1"))).isNull();
-        assertThat(codingRunTrack.requestStop(projectId)).isTrue();
-        generationWorker.join(5000);
-        // 停止收口：run-failed(stopped) 终态、不排空（无补派任务提交）
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
-                argThat(payload -> Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
-        assertThat(tracks).isEmpty();
-        assertThat(generatedAt(projectId)).isNull();
-
-        // 「继续生成」续跑：成功收口后排空消化排队意见（合并为一场更新 run 补派）
-        released.set(true);
-        appService.startGeneration(projectId);
-        assertThat(tracks).hasSize(1);
-        Thread resumeWorker = new Thread(tracks.remove(0));
-        resumeWorker.start();
-        resumeWorker.join(10_000);
-        assertThat(generatedAt(projectId)).isNotNull();
-        assertThat(tracks).hasSize(1); // 排空补派一场（合并）——不逐条烧 run
-        Thread fixWorker = new Thread(tracks.remove(0));
-        fixWorker.start();
-        assertThat(fixDone.await(5, TimeUnit.SECONDS)).isTrue();
-        fixWorker.join(5000);
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(1)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().stream()
-                .filter(command -> command.sessionId().contains("-fix-"))
-                .findFirst().orElseThrow().prompt())
-                .isEqualTo(IterationAppService.kernelFixRunPrompt(new IterationAppService.FixHandoff(
-                        List.of(new IterationAppService.FixHandoff.Round("列表加筛选", null)))));
-        // 已生成后「继续生成」出口不再可达（PRJ_017）——补派的更新 run 独占轨道，不自锁
-        assertThatThrownBy(() -> appService.startGeneration(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.GENERATION_ALREADY_REQUESTED.message());
     }
 
     // ---------- 测试数据 ----------

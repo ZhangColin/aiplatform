@@ -87,7 +87,6 @@ public class EventsController {
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#617 收口扩载：编码 run 真收口携带五字段收尾卡权威事实（narrative/criteria/files/durationMs），主智能体对话轮不携带） |
             | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
             | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
-            | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
             | part-signal | 智能体·部件 | signal（脱轨信号：#240 机器语法吞段的留痕，v1 唯一值 derailed） |
             | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
             | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |

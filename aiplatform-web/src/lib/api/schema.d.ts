@@ -611,7 +611,7 @@ export interface paths {
         put?: never;
         /**
          * 停止在途生成/更新（#359 生成取消）
-         * @description 用户叫停在途编码 run（生成/迭代更新/设计过程任一在途即停——停止请求置停＋中断执行任务，模型流订阅随之中止不再烧 token）。停止＝中断口径非判死：已落盘成果保留，不回滚；终态按失败账口径收口——run-failed 载荷带 stopped=true＋一句人话（「已按你的要求停止，已完成的进度都保留」），已耗计量如实落账。停止后未生成项目的生成态投影回「从未生成」（不显假生成中；#604起无「生成中断」档），重跑入口照常可达——首建停止清点火位（岔路口卡/PRD 确认按钮复现；前端「继续生成」同口：不带断点、不携错误现场，在既有工作区重跑）；更新轨停止记终态账，「继续更新」照常可达。幂等：无在途返回 stopped=false（连点/与自然收口的竞态如实回，不 409）。停止是异步收场：请求返回 ≠ 执行体已完全落定，以 SSE/REST 重查为准。项目不存在 404 PRJ_001
+         * @description 用户叫停在途编码 run（生成/迭代更新/设计过程任一在途即停——停止请求置停＋中断执行任务，模型流订阅随之中止不再烧 token）。停止＝中断口径非判死：已落盘成果保留，不回滚；终态按失败账口径收口——run-failed 载荷带 stopped=true＋一句人话（「已按你的要求停止，已完成的进度都保留」），已耗计量如实落账。停止后未生成项目的生成态投影回「从未生成」（不显假生成中；#604起无「生成中断」档），重跑入口照常可达——首建停止清点火位（岔路口卡/PRD 确认按钮复现；前端「继续生成」同口：不带断点、不携错误现场，在既有工作区重跑）。幂等：无在途返回 stopped=false（连点/与自然收口的竞态如实回，不 409）。停止是异步收场：请求返回 ≠ 执行体已完全落定，以 SSE/REST 重查为准。项目不存在 404 PRJ_001
          */
         post: operations["stopGeneration"];
         delete?: never;
@@ -654,26 +654,6 @@ export interface paths {
          * @description #544 访谈③（ADR-0048 切片③——三选上卡压平版）：访客选付费项（source 传 1=由我的账户付费 / 2=由本项目付费——扣减源随选择一次选定；账户源须先登录，访客吃 BILL_009 指路 M01）后按所选池判定——源池余额为正即翻转回访谈（flipped=true：五问额度解除、协议分轨回原归读面派生、卡随GET /build-gate 熄灭）；非正返回 rechargeRequired=true（引导充值——源已一次选定，重选拒绝 BILL_008），到账后经本端点重判（空 source）即翻转、无需重走选择。后台已充项目池的项目源已选定（入账即选择）——空 source 直达翻转判定＝免登录直接翻转（销售演示动线）。中途放弃＝不落翻转、卡留岔路口（试用态持久可回、随时改选「立即生成」）。错误码：PRJ_085 岔路口卡不在场 / BILL_008 改选拒绝（源已随选择一次选定——同源重传容忍＝重判语义）/ BILL_009 账户源须登录 / BILL_010 源未定且未随卡选定 / BILL_012 已是付费态（幂等前置，既往翻转返回 flipped=true 不报错）。项目不存在 404 PRJ_001
          */
         post: operations["continueDiscussion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{id}/fix-runs/restart": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 继续更新（更新 run 终态恢复出口）
-         * @description 更新 run 失败转终态后的人工兜底（#604 起更新 run 同为单发不自动重试——失败即终态；与首建的重跑入口对齐）：重派终态那场的更新任务——交接物沿用（同任务清单）、续同 coder-{projectId} 会话（建系统上下文保留），新 runId = 重派那场的运行标识（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发：更新在途（进行中/排队中）409 PRJ_025；无终态账（未派过更新/已成功收工/平台重启丢账）409 PRJ_026（指路对话区重提意见）。已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001
-         */
-        post: operations["restartFix"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2858,7 +2838,6 @@ export interface paths {
          *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#617 收口扩载：编码 run 真收口携带五字段收尾卡权威事实（narrative/criteria/files/durationMs），主智能体对话轮不携带） |
          *     | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
          *     | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
-         *     | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
          *     | part-signal | 智能体·部件 | signal（脱轨信号：#240 机器语法吞段的留痕，v1 唯一值 derailed） |
          *     | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
          *     | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
@@ -4718,17 +4697,6 @@ export interface components {
              * @example 5000
              */
             sourcePoolBalance?: number;
-        };
-        ApiResponseFixRestartResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["FixRestartResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        FixRestartResponse: {
-            runId?: string;
         };
         ApiResponseDemoVersionSummaryResponse: {
             /** Format: int32 */
@@ -8060,28 +8028,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseContinueDiscussionResponse"];
-                };
-            };
-        };
-    };
-    restartFix: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseFixRestartResponse"];
                 };
             };
         };

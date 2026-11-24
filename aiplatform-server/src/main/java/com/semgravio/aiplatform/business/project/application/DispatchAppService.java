@@ -40,13 +40,13 @@ import lombok.extern.slf4j.Slf4j;
  * 此分岔内拦）、咨询走主智能体答询轮（{@link MainAgentAppService#answerInquiry}，
  * 零产物短路，随时可答）、兜底走平台定型引导（零产物，不起任何智能体 run）。
  * 意见与咨询同一 {@code main-{projectId}} 会话连续（#86）——分岔只是车道语义
- * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
+ * （守卫有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
  *
  * <p><b>生成后对话面（#622，ADR-0056 两平面）</b>：项目已生成或编码 run 在途时，
  * 发言在分类前直接分岔到对话面（{@link DialogAppService}）——独立轻会话
  * （{@code dialog-{projectId}}）、只读答疑与澄清、零派发；生成前的首建访谈链
- * （分类/答询/兜底）原样不动。旧迭代受理链与其上的试用拦截/余额留存不接本面
- * （商业面代码保留，归 #625 清场）。</p>
+ * （分类/答询/兜底）原样不动。旧迭代受理链已随 #625 拆除；其上的试用拦截/余额
+ * 留存代码作为商业面保留，不接本面。</p>
  *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
  * 一次性会话（{@code classify-{runId}}，模型档走边缘点配置链——classification

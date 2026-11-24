@@ -235,24 +235,14 @@ export type PlatformAgentEvent =
       /**
        * 平台侧定型文案直达对话面（带「平台」标签气泡）。两类使用：兜底轻引导
        * （#47 入口三分类——非意见非咨询输入的零产物路径，本事件即该次派发的
-       * 全部）；在途意见回执（#360——首个构建 run 在途时意见轮收口的排队事实
-       * 告知，runId 锚该意见轮）。`prompt` 为锚定的用户输入（事件到达重建对话
-       * 面；回访经对话史水合——#89）——可缺省（在途回执不携带：用户气泡已由
-       * 意见轮自落，不重复重建）；`label` 为呈现标签（「平台」）；`text` 为
-       * 定型文案。
+       * 全部）；悬空补救（ADR-0032，#373——需求梳理期轮悬空收口）。对话面交指令
+       * 在途入待办时也复用本型发轻提示（#623）。`prompt` 为锚定的用户输入（事件
+       * 到达重建对话面；回访经对话史水合——#89）——可缺省（在途轻提示与悬空补救
+       * 不携带：用户气泡已由所属轮自落，不重复重建）；`label` 为呈现标签
+       * （「平台」）；`text` 为定型文案。
        */
       type: "guide-reply";
       payload: AgentPayload & { prompt?: string; label: string; text: string };
-    }
-  | {
-      /**
-       * 受理开始（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理事实——意见
-       * 已接住、主智能体正在受理（追问或改 PRD）。对话区受理动作卡的呈现源；受理
-       * 落定不出新事件（该轮 run-finish / error 推导）。场景矩阵：咨询轮与纯追问轮
-       * （访谈期意见轮）服务端不发。
-       */
-      type: "acceptance-start";
-      payload: AgentPayload;
     }
   | {
       /**
@@ -350,7 +340,6 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "question-raised",
   "run-failed",
   "guide-reply",
-  "acceptance-start",
   "intercept-card",
   "balance-reminder",
   "part-signal",

@@ -234,8 +234,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         if (isCoderRun(generation, payload.projectId, payload.runId)) return;
         // 对话轮失败（非重试族）：对话面收轮 + 失败气泡；生成面不写状态（#84）
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
-        // 受理卡落定不死转（#87）：受理轮炸——中断提示已是兜底呈现，卡不悬转
-        chat.settleAcceptance(payload.projectId, payload.runId);
         return;
       }
       case "run-failed": {
@@ -258,9 +256,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       case "run-finish": {
         const { payload } = platform;
         chat.finishTurn(payload.projectId, payload.runId);
-        // 受理卡落定（#87）：受理轮收口（受理完成——追问挂起轮不发本事件，挂起
-        // 期间卡保持受理中）；更新 run 随收口自动派发，工作消息即视觉衔接
-        chat.settleAcceptance(payload.projectId, payload.runId);
         // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88/#89
         // 收尾卡权威事实归对话流随后入流，工作消息原地定格留驻 #117，非锚定 run
         // 的收口在 store 内忽略）
@@ -299,14 +294,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           payload.text,
           event.id,
         );
-        return;
-      }
-      case "acceptance-start": {
-        // 受理动作卡（#87）：受理轮开场受理事实——意见已接住、正在受理（服务端
-        // 守卫全过后、受理动作前发，先于 run-start 到达）。落定不出专事件：该轮
-        // run-finish / error 收口即落定（见上两分支）；咨询轮与纯追问轮服务端不发
-        const { payload } = platform;
-        chat.noteAcceptance(payload.projectId, payload.runId, event.id);
         return;
       }
       case "intercept-card": {

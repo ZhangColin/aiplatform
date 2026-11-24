@@ -57,11 +57,10 @@ public class AgentEventBridge {
 
     /**
      * run-failed 发射（编码 run 终态失败收口，#56；#604 起生成/更新 run 单发无重试
-     * ——失败/停止即终态）：轨道层在真终态落定点
-     * 调用——修正轨道与终态账（恢复出口 {@code restartFixRun} 的重派依据）同
-     * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道失败/停止即终态。
+     * ——失败/停止即终态）：轨道层在真终态落定点调用；生成轨道失败/停止即终态，
+     * 迭代修改轨失败/停止即终态（不自动补派，用户重说即新一轮）。
      * runId = 该场 run 的用户面标识。前端恢复出口只认本事件，run 失败为唯一
-     * 失败终态（#604 明确展示：失败原因与恢复入口随本事件呈现，不自动重跑）。
+     * 失败终态（#604 明确展示：失败原因随本事件呈现，不自动重跑）。
      *
      * <p><b>失败原因随事件（#355 机制检查）</b>：失败面的 {@code error}（该场尝试
      * 的错误现场，原样留档于终态日志/失败留账）经
@@ -157,10 +156,10 @@ public class AgentEventBridge {
     }
 
     /**
-     * error 发射（失败家族——非重试族的失败表达）：意见链收口后派发修正 run 失败
+     * error 发射（失败家族——非重试族的失败表达）：主智能体轮收口派发失败
      * （#51 → #82 失败家族归位：dispatch-failed 阶段族退役，失败信号归本事件）——
-     * 意见锚已消费、不自动重试，用户重提即兜底；锚定收口对话轮的 runId（对话面
-     * 已登记，失败提示随对话呈现）。
+     * 不自动重试，用户重提即兜底；锚定收口对话轮的 runId（对话面已登记，失败提示
+     * 随对话呈现）。
      */
     public void emitError(Project project, String runId, String message) {
         eventsAppService.publishAgentEvent(AgentEventTypes.ERROR, Map.of(
@@ -253,22 +252,6 @@ public class AgentEventBridge {
             payload.put(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD, card.sourcePoolBalance());
         }
         publishQuietly(AgentEventTypes.BALANCE_REMINDER, payload);
-    }
-
-    /**
-     * acceptance-start 发射（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理
-     * 事实——意见已接住、主智能体正在受理（追问或改 PRD 的过程呈现位，衔接收口
-     * 自动派的更新 run 工作消息）。纯呈现事件：受理落定不出新事件（该轮
-     * run-finish / error 即收口）；发射走 {@link #publishQuietly}——失败只记日志
-     * 不断受理（其余 emit* 是语义关键事件，失败如实上抛不静默）。
-     */
-    public void emitAcceptanceStarted(Project project, String runId) {
-        publishQuietly(AgentEventTypes.ACCEPTANCE_START, Map.of(
-                EventsAppService.PROJECT_FIELD, project.getId().toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
-                EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerGuestId()),
-                EventsAppService.RUN_FIELD, runId));
     }
 
     /**

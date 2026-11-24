@@ -38,7 +38,8 @@ import lombok.extern.slf4j.Slf4j;
  * 主智能体单会话编排（#86 并轨，ADR 0006「单一主智能体+委派式执行」）：主智能体
  * 是平台进程内对话智能体（AgentScope HarnessAgent，经 {@link AgentscopeAgentClient}
  * 直调——编排缝极薄，无中间端口层），与用户的全部对话——建项目开场、追问、答询、
- * 受理意见、PRD 撰写修订、需求侧判定——都续同一会话，连续不换会话。
+ * PRD 撰写修订——都续同一会话，连续不换会话（生成后发言另走对话面，见
+ * {@link DialogAppService}）。
  *
  * <p><b>会话寻址（projectId → 主智能体会话的稳定绑定）</b>：sessionId =
  * {@code main-{projectId}} 无表派生、userId = 项目 owner（状态槽位
@@ -59,22 +60,18 @@ import lombok.extern.slf4j.Slf4j;
  * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
  *
  * <p><b>链必达收口（#43；#101 生成无门→#332 生成加门→#462 去确认门→<b>#542
- * 首建派发门（ADR-0048/0049）</b>）</b>：主智能体无派发权——生成与更新 run 的
- * 派发都不在模型手里，平台在意见轮落定后观测收口（无挂起问答）即按项目态派发：
- * 已生成派更新 run（交接物 = 用户意见原文 + 需求侧判定结果——PRD 改没改、改了
- * 什么，见 {@link #dispatchOnTurnClose}，受理即派不动）；未生成但 PRD 已产出按
- * <b>快道事实分岔</b>（#542——自动派发两入口整体退役、全域无无条件自动路径）：
- * 快道（savePrd 的 fastLane 工具调用事实——试用态＝用户明确收敛令〔2026-11-17
- * 起未答满五问唯一合法提前收口形〕；付费态＝零必答短路/「直接开始做」视同确认，
- * {@link FastLaneFacts}）直派首次生成 run（
- * {@link GenerationAppService#dispatchGenerationOnTurnClose}，在途静默跳过＋意见
- * 入队 #360）；自然收口<b>不派发</b>——试用态置岔路口状态位（
- * {@link BuildGateAppService#ensureForkPending}，三选卡持久可回、「立即生成」即
- * 点火）、付费态确认门读面在场（PRD 文档面按钮确认即派发）；未产出 PRD 止于
- * 对话（访谈期常态）。判定结果从工具调用事实观测（{@link PrdRevisionFacts}
- * {@link FastLaneFacts}），不新增模型自报结论的面；守卫沿用（未产出 PRD 止于
- * 对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
- * {@link GenerationAppService}）。</p>
+ * 首建派发门（ADR-0048/0049）</b>→#622/#625 生成后走对话面</b>）</b>：主智能体
+ * 无派发权——生成 run 的派发不在模型手里。生成前（未生成但 PRD 已产出）由平台在
+ * 意见轮落定后观测收口（无挂起问答）按<b>快道事实分岔</b>（#542——自动派发两入口
+ * 整体退役、全域无无条件自动路径）：快道（savePrd 的 fastLane 工具调用事实——
+ * 试用态＝用户明确收敛令〔2026-11-17 起未答满五问唯一合法提前收口形〕；付费态＝
+ * 零必答短路/「直接开始做」视同确认，{@link FastLaneFacts}）直派首次生成 run
+ * （{@link GenerationAppService#dispatchGenerationOnTurnClose}）；自然收口
+ * <b>不派发</b>——试用态置岔路口状态位（{@link BuildGateAppService#ensureForkPending}，
+ * 三选卡持久可回、「立即生成」即点火）、付费态确认门读面在场（PRD 文档面按钮确认
+ * 即派发）；未产出 PRD 止于对话（访谈期常态）。生成后发言走对话面（#622）：说清的
+ * 修改经 submit_modification 交平台、由 {@link IterationAppService} 的对话面待办
+ * 承接，旧意见轮收口派发面随 #625 拆除。</p>
  *
  * <p><b>访谈轮收口硬契约与悬空接管（ADR-0032，#373）</b>：需求梳理期（未出 PRD）
  * 意见轮与问答作答复跑轮的合法收口只有两形——再问一问（挂起问答）或产出 PRD
@@ -110,7 +107,6 @@ public class MainAgentAppService {
     private final AgentConfigAppService agentConfigs;
     private final ModelConfigAppService modelConfigs;
     private final OrderQueryAppService orderQueryAppService;
-    private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
     private final PrdRevisionFacts prdRevisions;
     private final ConversationHistoryAppService conversationHistory;
@@ -127,15 +123,6 @@ public class MainAgentAppService {
 
     /** 岔路口与派发门（#542）：自然收口置岔路口状态位（试用态出卡）。 */
     private final BuildGateAppService buildGateService;
-
-    /**
-     * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
-     * （任务首行 put，随执行器串行——意见轮在途的新意见各自成轮，后写不覆盖在途
-     * 轮的锚，#54），追问挂起期间的答复逐条并入（{@link #appendOpinionReply}）
-     * ——收口派发的任务即锚的终值；收口即消费，轮炸即清（失败不留锚，重提即
-     * 兜底）。进程内态，重启丢锚（续跑收口降级为仅末条答复，实质由 PRD 承载）。
-     */
-    private final Map<String, String> opinionExchanges = new ConcurrentHashMap<>();
 
     /**
      * 挂起问答的会合锚（sessionId → 本进程内最近一次 ask_user 挂起事实）：轮落定
@@ -169,7 +156,7 @@ public class MainAgentAppService {
 
     /**
      * 沉淀兜底盘问记账（#460 数据飞轮采集层）：用户轮合法收口（挂起问答在场 / PRD
-     * 产出 / 迭代期受理）且本轮主智能体无 propose_sediment 调用事实时置位（
+     * 产出）且本轮主智能体无 propose_sediment 调用事实时置位（
      * 「该提未提」——平台不判该不该提，只记提没提）；下一主智能体对话轮命令构建时
      * 消费（system prompt 尾附轻提醒，{@link #mainCommand}），提醒非硬门——不设
      * 拦、不播报、用户无感知。进程内态，重启丢记账（协议软指引仍在，不影响）。
@@ -245,7 +232,7 @@ public class MainAgentAppService {
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             OrderQueryAppService orderQueryAppService,
-            IterationAppService iterationAppService, GenerationAppService generationAppService,
+            GenerationAppService generationAppService,
             PrdRevisionFacts prdRevisions,
             ConversationHistoryAppService conversationHistory,
             MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
@@ -261,7 +248,6 @@ public class MainAgentAppService {
         this.agentConfigs = agentConfigs;
         this.modelConfigs = modelConfigs;
         this.orderQueryAppService = orderQueryAppService;
-        this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
         this.prdRevisions = prdRevisions;
         this.conversationHistory = conversationHistory;
@@ -445,7 +431,6 @@ public class MainAgentAppService {
                 // #371 续跑与 converse 同口径：与首轮命令同源阈值（活超时接管续跑流）
                 mainAgentProperties.getSilenceTimeout(),
                 mainAgentProperties.getToolSilenceTimeout());
-        appendOpinionReply(sessionId, answerText);
         ConversationHistoryAppService.TurnRecorder recorder =
                 conversationHistory.recorder(projectId, eventBridge.sink(project));
         sessionExecutor.submit(sessionId, () -> {
@@ -478,29 +463,18 @@ public class MainAgentAppService {
         requireNoPendingQuestion(project, sessionId);
 
         String runId = EventsAppService.newRunId();
-        // 圈注随意见同句发送：渲染进主智能体 prompt 与交接物（意见原文）——结构化
-        // 定位随链下到更新 run，执行体知道改哪里
+        // 圈注随意见同句发送：渲染进主智能体 prompt——结构化定位随句进对话面，
+        // 修改指令蒸馏时据此写清改哪里（#622/#623）
         String annotated = prompt + AttachmentPrompt.renderSuffix(attachments);
         // 对话史落库（#89）：提交守卫全过后同步落用户发言（失败上抛撤回 REST 面——
         // 「落库 ⟺ 说过」不漂移）；智能体回复段在轮落定点写（见 recordTurnReply）。
         // attachments 原始 JSON 落库供刷新回显重建圈注 chip
         conversationHistory.recordUserUtterance(projectId, runId, prompt, attachments);
-        // 受理动作卡（#87）：迭代期意见轮（受理轮）开场即发受理事件——意见已接住、
-        // 主智能体正在受理（追问或改 PRD 的过程呈现位，衔接轮收口自动派的更新 run
-        // 工作消息）。守卫全过才发（拒绝即零事件）；访谈期意见轮是纯追问轮、咨询
-        // 轮走 {@link #answerInquiry}，场景矩阵均无卡
-        if (project.isGenerated()) {
-            eventBridge.emitAcceptanceStarted(project, runId);
-        }
         AgentCommand command = mainCommand(project, runId, annotated);
         sessionExecutor.submit(sessionId, () -> {
-            // 排队成轮（#54）：锚随任务落（同会话 FIFO——后发意见的 put 排在本轮
-            // 收口之后，不覆盖在途轮的锚）：意见轮在途连发的意见各自成轮、各自
-            // 收口派发，撞在途更新 run 走排队合并
-            opinionExchanges.put(sessionId, annotated);
-            // 本轮需求侧判定从零起算（随会话执行器串行——上一轮收口消费在前，
-            // 不会被本轮起跑插队 wipe）：炸轮滞留/访谈期的 savePrd 事实残留不进
-            // 本轮交接物（意见锚无此滞留——失败即清，见下）
+            // 本轮 savePrd 失败事实从零起算（随会话执行器串行——上一轮收口消费在前，
+            // 不会被本轮起跑插队 wipe）：炸轮滞留/访谈期的失败事实残留不进本轮悬空
+            // 补救分形
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             fastLaneFacts.clear(Long.toString(project.getWorkspaceId()));
             sedimentProposals.clear(Long.toString(project.getWorkspaceId()));
@@ -674,19 +648,14 @@ public class MainAgentAppService {
 
     /**
      * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门→<b>#462 去确认门
-     * 整段退役</b>，ADR-0039）：轮落定（对话轮收口或问答续跑收口）后观测链的走向
-     * ——会话有挂起问答 = 本轮未收口（答复后续跑再判，意见锚保留）；收口前归档 =
-     * 竞态守卫，静默不派。落定即按项目态自动派发：<b>已生成派更新 run</b>（交接物 =
-     * {@link #opinionExchanges} 中的意见原文及追问答复 + {@link #prdRevisions} 中的
-     * PRD 修订事实——本轮 savePrd 调用的 summary 终值，无调用事实即 null「未修订」）
-     * ——大改小改分流的机械停派已随确认门退役（#462：范围级新草稿照派，判定权归
-     * 主智能体工作协议）；<b>未生成但已产出 PRD</b>——系统终点自动派首个构建 run
-     * （首次 savePrd 落盘回调已先行触发，{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}；
-     * 此处收口观测再兜一轮，撞在途静默跳过）。意见锚与修订事实同「收口即消费」
-     * 清掉——生成读的是工作区 PRD 正本，不进交接物；未产出 PRD 止于对话（访谈期
-     * 常态）。主智能体无派发权：模型存没存 PRD、调没调任何工具都不影响派发——链
-     * 的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、
-     * 不自动重试——用户重提即兜底。
+     * 整段退役</b>，ADR-0039；#622/#625 生成后走对话面）：轮落定（对话轮收口或问答
+     * 续跑收口）后观测链的走向——会话有挂起问答 = 本轮未收口（答复后续跑再判）；
+     * 收口前归档 = 竞态守卫，静默不派。<b>已生成</b>＝生成后发言走对话面，修改经
+     * submit_modification 交平台、由迭代待办承接——旧意见轮收口派发面随 #625 拆除，
+     * 此处不再派发；<b>未生成但已产出 PRD</b>——按快道事实分岔直派首个构建 run 或
+     * 置岔路口卡/确认门；未产出 PRD 止于对话（访谈期常态）。主智能体无派发权：模型
+     * 存没存 PRD、调没调任何工具都不影响派发——链的收口在平台代码。派发失败不炸
+     * 对话轨道、不自动重试——用户重提即兜底。
      *
      * <p><b>平台轮</b>：{@code platformRound} 区分平台发起的收口轮（收口纠偏／额度
      * 收口）与用户对话轮。去门化后用户轮与平台轮同判据（PRD 已产出即派），平台轮
@@ -700,12 +669,12 @@ public class MainAgentAppService {
      * 与「说可出 PRD 但未调 savePrd」两形——平台无可观测信号可靠区分，确定性纠正
      * 不解析自由文本〕，失格再派一轮同档兜底，封顶两轮，{@link #dispatchCorrectiveChain}），
      * 双失格才置 {@link #danglingInterviews}＋平台补救（文案按 savePrd 失败事实分形）。
-     * 两合法形与迭代期、归档路径随观测清除标记（接管解除单点归一）；平台轮不入
+     * 两合法形与归档路径随观测清除标记（接管解除单点归一）；平台轮不入
      * 契约。轮失败（判死等异常上抛）不经本观测与纠偏链——悬空补救在轮任务的
      * catch 侧（{@link #remedyFailedInterviewTurn}，即时点名播报）。</p>
      *
      * <p><b>沉淀兜底盘问记账（#460，ADR-0038）</b>：用户轮合法收口（挂起问答在场／
-     * PRD 产出／迭代期受理三形）且本轮主智能体无 propose_sediment 调用事实（
+     * PRD 产出两形）且本轮主智能体无 propose_sediment 调用事实（
      * {@link SedimentProposalFacts}）即置 {@link #sedimentNudges} 记账——下一对话轮
      * system prompt 尾附软提醒（{@link #mainCommand} 消费即清）。不设硬门：不拦
      * 收口、不播报、用户无感知；悬空收口与平台轮不记账。</p>
@@ -741,100 +710,74 @@ public class MainAgentAppService {
             // 在挂起判定之后——问答续跑的用量同段同锚，幂等不重扣
             settleTurn(projectId, runId);
             if (project.getArchivedAt() != null) {
-                clearTurnAnchors(sessionId, workspaceId); // 归档竞态守卫：静默不派
+                clearTurnAnchors(workspaceId); // 归档竞态守卫：静默不派
                 danglingInterviews.remove(sessionId); // 归档即对话区关闭：标记随清（终态）
                 return;
             }
-            if (project.getGeneratedAt() == null) {
-                // 未生成：PRD 已产出即平台自动派首次生成轨（轨内无门——系统终点）；
-                // 未产出 PRD 静默止于对话（访谈期常态：生成前意见链终点）。#602 起
-                // 切片计划机器整体退役——生成无计划交接物，PRD 正本即全部输入
-                // 意见锚取出：生成路径不需要（生成读工作区 PRD 正本）——锚照
-                // 「收口即消费」清掉
-                String opinion = opinionExchanges.remove(sessionId);
-                String prdRevisionSummary = prdRevisions.consume(workspaceId);
-                if (project.getPrdProducedAt() == null) {
-                    // 访谈轮收口硬契约（ADR-0032，#373）：合法收口只有「再问一问」
-                    // （上方挂起检查已排除）或「产出 PRD」（本判定已排除）两形——
-                    // 此处即悬空。用户轮置标记＋平台补救；平台轮（补产/切换通告）不
-                    // 入契约（补产必在 PRD 后；通告轮的悬空不扩大接管面）。补救文案
-                    // 按 savePrd 失败事实分形（点名/泛形），恢复轮再悬空标记保持、
-                    // 再补一条
-                    boolean prdSaveFailed = prdRevisions.consumeFailure(workspaceId);
-                    // #538 额度收口（quotaClosure）不受 platformRound 限：收口作答续跑轮
-                    // （platformRound=true）再挂起同属额度失格，须再纠偏（推进归
-                    // quotaCorrectiveRounds 账）；非额度平台轮不入契约（原口径）
-                    if (!platformRound || quotaClosure) {
-                        // ADR-0036（#445）收口纠偏链：用户轮悬空命中不立即播报——先
-                        // 自动纠偏（主档＋确定性微指令重派），失格再派一轮同档兜底，
-                        // 双失格才置标记＋平台补救（markDanglingInterview 单点收口，
-                        // 文案按 savePrd 失败事实分形——点名/泛形）。纠偏轮封顶两轮
-                        // 防烧 token；均为平台轮不入本契约（不递归）。升强档随模型
-                        // 路由退役（#606）——纠正只靠确定性微指令。轮失败（异常收
-                        // 口）不经本链——catch 侧 remedyFailedInterviewTurn 即时点名
-                        // 播报（环境性失败重试照样失败，ADR-0032 原 rationale 保持）
-                        dispatchCorrectiveChain(project, sessionId, runId, prdSaveFailed,
-                                quotaClosure, suspensionPending);
-                    }
-                    return;
-                }
-                // 合法收口形二（ADR-0032）：PRD 产出（含修订）——悬空标记随解除
+            if (project.getGeneratedAt() != null) {
+                // 已生成：生成后发言走对话面（#622），说清的修改经 submit_modification
+                // 交平台、由迭代待办承接（#623/#625）——旧意见轮收口派发面已拆，此处
+                // 不再派发任何 run、不再出受理事件；悬空标记随清（迭代期无访谈悬空态）
                 danglingInterviews.remove(sessionId);
-                quotaCorrectiveRounds.remove(sessionId); // #538：收口即清纠偏推进账
-                sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
-                // 首建派发门（#542 访谈②，ADR-0048/0049——自动派发两入口整体退役）：
-                // PRD 已产出的收口按<b>快道事实</b>分岔——快道（savePrd 的
-                // fastLane 工具调用事实：用户明确收敛令〔试用态未问满五问唯一合法的
-                // 提前收口形〕/付费态零必答首轮直产与「直接开始做」视同确认）
-                // 直派首个构建 run（急着要的给快的——不出卡不确认，在途撞车静默跳过
-                // ＋意见载荷按 #360 入队不静默丢）；自然收口（判定明确含提前明确）
-                // <b>不派发</b>——试用态置岔路口状态位（三选卡持久可回，「立即生成」
-                // 即点火）、付费态确认门读面在场（PRD 文档面按钮确认即派发）——点火
-                // 归用户，全域无无条件自动路径。
-                if (fastLaneFacts.consume(workspaceId)) {
-                    GenerationAppService.GenerationRun run =
-                            generationAppService.dispatchGenerationOnTurnClose(projectId,
-                                    new GenerationAppService.TurnOpinion(
-                                            opinion, prdRevisionSummary, runId));
-                    if (run != null) {
-                        log.info("[main-close] 项目 {} 快道收口（用户收敛令/付费零必答/直接开始做），"
-                                + "直接派发首次生成 run（{}）", projectId, run.runId());
-                    }
-                    return;
-                }
-                // 自然收口：在途意见照旧排队（#360——首 Demo 在途的反馈不静默丢），
-                // 试用态置岔路口位（幂等——意见修订轮再收口卡照旧在场）
-                generationAppService.queueFirstDemoTurnOpinion(projectId,
-                        new GenerationAppService.TurnOpinion(opinion, prdRevisionSummary, runId));
-                if (buildGateService.ensureForkPending(projectId)) {
-                    log.info("[main-close] 项目 {} 试用态自然收口：岔路口三选卡在场"
-                            + "（持久可回，「立即生成」即点火）", projectId);
+                return;
+            }
+            // 未生成（访谈期/首建前）：PRD 已产出按快道事实分岔派首次生成轨；未产出
+            // PRD 静默止于对话（访谈期常态：生成前意见链终点）
+            if (project.getPrdProducedAt() == null) {
+                // 访谈轮收口硬契约（ADR-0032，#373）：合法收口只有「再问一问」
+                // （上方挂起检查已排除）或「产出 PRD」（本判定已排除）两形——
+                // 此处即悬空。用户轮置标记＋平台补救；平台轮（补产/切换通告）不
+                // 入契约（补产必在 PRD 后；通告轮的悬空不扩大接管面）。补救文案
+                // 按 savePrd 失败事实分形（点名/泛形），恢复轮再悬空标记保持、
+                // 再补一条
+                boolean prdSaveFailed = prdRevisions.consumeFailure(workspaceId);
+                // #538 额度收口（quotaClosure）不受 platformRound 限：收口作答续跑轮
+                // （platformRound=true）再挂起同属额度失格，须再纠偏（推进归
+                // quotaCorrectiveRounds 账）；非额度平台轮不入契约（原口径）
+                if (!platformRound || quotaClosure) {
+                    // ADR-0036（#445）收口纠偏链：用户轮悬空命中不立即播报——先
+                    // 自动纠偏（主档＋确定性微指令重派），失格再派一轮同档兜底，
+                    // 双失格才置标记＋平台补救（markDanglingInterview 单点收口，
+                    // 文案按 savePrd 失败事实分形——点名/泛形）。纠偏轮封顶两轮
+                    // 防烧 token；均为平台轮不入本契约（不递归）。升强档随模型
+                    // 路由退役（#606）——纠正只靠确定性微指令。轮失败（异常收
+                    // 口）不经本链——catch 侧 remedyFailedInterviewTurn 即时点名
+                    // 播报（环境性失败重试照样失败，ADR-0032 原 rationale 保持）
+                    dispatchCorrectiveChain(project, sessionId, runId, prdSaveFailed,
+                            quotaClosure, suspensionPending);
                 }
                 return;
             }
-            // 已生成（迭代期）：收口不变量不适用（ADR-0032——受理即派、有派发链与
-            // run 留痕兜底），悬空标记随清（迭代期无访谈悬空态）
+            // 合法收口形二（ADR-0032）：PRD 产出（含修订）——悬空标记随解除
             danglingInterviews.remove(sessionId);
+            quotaCorrectiveRounds.remove(sessionId); // #538：收口即清纠偏推进账
             sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
-            String task = opinionExchanges.remove(sessionId);
-            if (task == null || task.isBlank()) {
-                return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
+            // 首建派发门（#542 访谈②，ADR-0048/0049——自动派发两入口整体退役）：
+            // PRD 已产出的收口按<b>快道事实</b>分岔——快道（savePrd 的
+            // fastLane 工具调用事实：用户明确收敛令〔试用态未问满五问唯一合法的
+            // 提前收口形〕/付费态零必答首轮直产与「直接开始做」视同确认）
+            // 直派首个构建 run（急着要的给快的——不出卡不确认，在途撞车静默跳过）；
+            // 自然收口（判定明确含提前明确）<b>不派发</b>——试用态置岔路口状态位
+            // （三选卡持久可回，「立即生成」即点火）、付费态确认门读面在场（PRD 文档面
+            // 按钮确认即派发）——点火归用户，全域无无条件自动路径。
+            if (fastLaneFacts.consume(workspaceId)) {
+                GenerationAppService.GenerationRun run =
+                        generationAppService.dispatchGenerationOnTurnClose(projectId);
+                if (run != null) {
+                    log.info("[main-close] 项目 {} 快道收口（用户收敛令/付费零必答/直接开始做），"
+                            + "直接派发首次生成 run（{}）", projectId, run.runId());
+                }
+                return;
             }
-            String prdRevisionSummary = prdRevisions.consume(workspaceId);
-            // 大改分流（#462 去确认门——机械停派整段退役，ADR-0039/#450 裁决 A）：
-            // 不再以「修订事实＋草稿漂移」停派待确认——意见轮收口一律受理即派，
-            // 范围级/小反馈的判定权归主智能体（工作协议第 11 条：意见明确→修订
-            // PRD 直接派；不明确→当场 ask_user 问清）。修订说明照旧进交接物。
-            IterationAppService.FixDispatch dispatch =
-                    iterationAppService.startFixRun(projectId, task, prdRevisionSummary);
-            log.info("[main-close] 项目 {} 意见轮收口，平台自动派更新 run（{}，{}）",
-                    projectId, dispatch.queued() ? "排队下一轮" : "起跑",
-                    prdRevisionSummary != null ? "PRD 已修订" : "本轮无修订");
+            // 自然收口：试用态置岔路口位（幂等——意见修订轮再收口卡照旧在场）
+            if (buildGateService.ensureForkPending(projectId)) {
+                log.info("[main-close] 项目 {} 试用态自然收口：岔路口三选卡在场"
+                        + "（持久可回，「立即生成」即点火）", projectId);
+            }
         }
         catch (RuntimeException e) {
-            // 派发失败（#51 → #82 失败家族归位；#101 起同 catch 接生成与更新两路）：
-            // 意见锚已消费（不恢复）、不自动重试，用户重提即兜底——失败信号归 error
-            // 事件（dispatch-failed 阶段族已退役），对话面如实呈现不静默
+            // 派发失败（#51 → #82 失败家族归位）：不自动重试，用户重提即兜底——失败
+            // 信号归 error 事件（dispatch-failed 阶段族已退役），对话面如实呈现不静默
             try {
                 // 派发失败路径（非热）：归属重查一次携聚合——正常路径在 try 内已携
                 projectRepository.findById(projectId).ifPresentOrElse(
@@ -1044,10 +987,8 @@ public class MainAgentAppService {
         return agentClient.hasAskingToolCall(project.ownerUserId(), sessionId);
     }
 
-    /** 收口即消费：意见锚与修订事实同口径清掉（不留过轮）——归档 / 未产出 PRD /
-     * 未生成派生成前的三条静默路径共用（生成读的是工作区 PRD 正本，不进交接物）。 */
-    private void clearTurnAnchors(String sessionId, String workspaceId) {
-        opinionExchanges.remove(sessionId);
+    /** 收口即消费：savePrd 失败事实与快道事实同口径清掉（不留过轮）——归档静默路径用。 */
+    private void clearTurnAnchors(String workspaceId) {
         prdRevisions.clear(workspaceId);
         fastLaneFacts.clear(workspaceId);
     }
@@ -1078,7 +1019,6 @@ public class MainAgentAppService {
      * 不走本口。
      */
     private void failUserTurn(Long projectId, String sessionId, String runId) {
-        opinionExchanges.remove(sessionId);
         suspendedQuestions.remove(sessionId);
         remedyFailedInterviewTurn(projectId, runId);
     }
@@ -1181,13 +1121,6 @@ public class MainAgentAppService {
             log.warn("[main-close] 项目 {} 失败收口悬空补救发射失败（不遮原始轮失败）：{}",
                     projectId, e.toString());
         }
-    }
-
-    /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；
-     * 无锚（重启丢锚的续跑）时以答复自立。 */
-    private void appendOpinionReply(String sessionId, String reply) {
-        opinionExchanges.compute(sessionId, (key, opinion) -> opinion == null
-                ? reply : opinion + "；用户对追问的答复：" + reply);
     }
 
     private static Map<String, Object> correlationOf(Long projectId) {

@@ -114,24 +114,6 @@ class DesignProcessAppServiceTest {
     private ConversationHistoryAppService conversationHistory;
 
     @Autowired
-    private FinishEditFacts finishFixFacts;
-
-    /** 验证事实登记口（#424 片轻验常开硬门脚本位：模拟 verify 子智能体轮内登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
-
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 常开硬门缺省脚本位）：定稿触发的修正/
-     * 生成 run 收口须验证在场——coder 会话登记一次。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("对齐点主径可走通（刷新仍在）", "browser", true, null)));
-        }
-    }
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @MockitoBean
@@ -218,8 +200,8 @@ class DesignProcessAppServiceTest {
                 });
     }
 
-    /** 脚本化智能体边界（定稿后续分岔用）：designer 会话落稿、coder 更新 run 以
-     * finish_edit 收口（changed=true）。 */
+    /** 脚本化智能体边界（定稿后续分岔用）：designer 会话落稿、coder 更新 run 内核收口
+     * （平台机器判据双件）。 */
     private void givenScriptedDesignAndFixSessions(String draftPath) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -228,8 +210,6 @@ class DesignProcessAppServiceTest {
             }
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             if (command.sessionId().startsWith("coder-")) {
-                finishFixFacts.record(command.workspaceId(), true, "已按定稿稿对齐");
-                verifyRan(command); // #424 常开硬门：修正/生成 run 收口须验证在场
                 return new AgentReply(command.runId(), "已对齐", null, List.of());
             }
             sink.accept(AgentEventScripts.scripted(AgentEventTypes.RUN_START, command.runId(),
@@ -351,7 +331,7 @@ class DesignProcessAppServiceTest {
                 .containsEntry("prdChanged", false)
                 .containsEntry("systemChanged", false)
                 .doesNotContainKey("prdNote")
-                .doesNotContainKey(CodingRunDispatcher.CLOSING_VERSION_FIELD);
+                .doesNotContainKey("version");
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
                 (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
@@ -814,7 +794,7 @@ class DesignProcessAppServiceTest {
                 DesignProcessAppService.revisionClosingSummary("电商海报——竖版，验收：主体清晰"));
         assertThat(closing.toString()).contains("/design/logo-4.html");
         assertThat(closing.toString()).doesNotContain("/design/logo-1.html");
-        assertThat(closing).doesNotContainKey(CodingRunDispatcher.CLOSING_VERSION_FIELD);
+        assertThat(closing).doesNotContainKey("version");
         // 件状态不翻：两件仍是已收口（改稿是探索、不是首产收口位变化）
         assertThat(itemRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2);
@@ -823,8 +803,8 @@ class DesignProcessAppServiceTest {
     @Test
     void given_revision_without_new_drafts_when_session_closes_then_zero_drafts_close_cleanly() {
         // 改稿收口判据＝对话收口（relaxed）：意见不涉改稿（确认/提问）也是合法收口
-        //——drafts 如实空清单（「本轮 0 稿」）、不重试不 run-failed（对偶修正
-        // finish_edit(changed=false)），件状态保持
+        //——drafts 如实空清单（「本轮 0 稿」）、不重试不 run-failed（对偶修正轮
+        // 的系统无改动口径），件状态保持
         Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
         givenSessionExecutorRunsInline();
         givenPrdContent(DESIGN_PRD);
@@ -1067,11 +1047,11 @@ class DesignProcessAppServiceTest {
     // ---------- #291 定稿：git commit 成版＋收尾卡＋后续三分岔 ----------
 
     @Test
-    void given_closed_item_when_finalized_then_version_committed_and_closing_card_anchored() {
-        // 灵魂用例（#291 验收③）：定稿＝显式动作收口——git commit 成版（Run-Id
-        // trailer 对偶锚定定稿收尾卡）＋件状态转已定稿（finalized_path 记选定稿）
-        //＋定稿收尾卡入对话流（run-finish 载 closing：version 锚＋稿清单单条带
-        // triggers）＋对话史落库同载荷（「查看当时」经版本详情联接本卡）
+    void given_closed_item_when_finalized_then_closing_card_emitted_without_version_anchor() {
+        // 定稿＝显式动作收口：件状态转已定稿（finalized_path 记选定稿）＋定稿收尾卡
+        // 入对话流（run-finish 载 closing：稿清单单条带 triggers）＋对话史落库同载荷。
+        // 收口自动成版（Run-Id trailer）随审查与收口组退役（#605）：定稿不再提交
+        // git 版本、versionHash 恒 null、closing 无 version 键。
         Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
         givenSessionExecutorRunsInline();
         givenWorkspaceCommands(DESIGN_PRD);
@@ -1079,22 +1059,18 @@ class DesignProcessAppServiceTest {
         appService.dispatchDesignOnTurnClose(projectId, null);
 
         clearInvocations(eventsAppService);
+        clearInvocations(workspaceLifecycleAppService);
         DesignProcessAppService.DesignFinalization finalization =
                 appService.finalizeDesignItem(projectId, 1, "/design/logo-1.html");
 
         assertThat(finalization.runId()).isNotBlank();
-        assertThat(finalization.versionHash()).isEqualTo("abc123def456");
-        // 成版提交携 Run-Id trailer 对偶锚定收尾卡（版本正本＝git log 的联接键）
+        assertThat(finalization.versionHash()).isNull();
+        // 不再有任何成版提交（Run-Id trailer 退役）
         ArgumentCaptor<WorkspaceExecCommand> execCommands =
                 ArgumentCaptor.forClass(WorkspaceExecCommand.class);
         verify(workspaceLifecycleAppService, atLeastOnce()).exec(any(), execCommands.capture());
-        assertThat(execCommands.getAllValues().stream()
-                .map(WorkspaceExecCommand::command))
-                .anySatisfy(command -> assertThat(command)
-                        .contains("git commit")
-                        .contains("Run-Id: " + finalization.runId())
-                        .contains(DesignProcessAppService.finalizeClosingSummary(
-                                "品牌主 logo——方形构图，扁平风格")));
+        assertThat(execCommands.getAllValues().stream().map(WorkspaceExecCommand::command))
+                .noneSatisfy(command -> assertThat(command).contains("git commit"));
         // 件行：已定稿＋选定稿路径＋run 锚＝定稿锚
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT ord, status, run_id, finalized_path FROM prj_design_items"
@@ -1103,8 +1079,8 @@ class DesignProcessAppServiceTest {
                 .containsEntry("finalized_path", "/design/logo-1.html")
                 .containsEntry("run_id", finalization.runId());
         assertThat(rows.get(1)).containsEntry("status", 2); // 未定稿件不受影响
-        // 定稿收尾卡：run-finish 载 closing 直达对话流（判定行恒未动、version 锚、
-        // 稿清单单条、triggers 空清单如实）——事件封闭集零新增
+        // 定稿收尾卡：run-finish 载 closing 直达对话流（判定行恒未动、稿清单单条、
+        // triggers 空清单如实）——事件封闭集零新增
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -1119,16 +1095,15 @@ class DesignProcessAppServiceTest {
                                 "品牌主 logo——方形构图，扁平风格"))
                 .containsEntry("prdChanged", false)
                 .containsEntry("systemChanged", false)
-                .containsEntry(CodingRunDispatcher.CLOSING_VERSION_FIELD, "abc123def456");
+                .doesNotContainKey("version");
         assertThat(closing.toString())
                 .contains("/design/logo-1.html")
                 .contains("triggers=[]");
-        // 对话史回访完整（版本详情经 Run-Id 联接本卡——「查看当时」可见定稿稿）
+        // 对话史回访完整（定稿稿可见）
         assertThat(conversationHistory.read(projectId))
                 .anySatisfy(entry -> {
                     assertThat(entry.kindName()).isEqualTo("收尾卡");
-                    assertThat(entry.closing()).containsEntry(
-                            CodingRunDispatcher.CLOSING_VERSION_FIELD, "abc123def456");
+                    assertThat(entry.closing()).doesNotContainKey("version");
                 });
     }
 

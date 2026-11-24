@@ -36,21 +36,6 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 @Service
 public class AgentConfigAppService {
 
-    /**
-     * 单场验证轮次预算代码缺省（#424 片轻验）：3＝首轮验证＋至多两轮修复复验
-     * （修复预算与 #406 终验缺省两轮同量级）；库覆盖（executor 行
-     * verify_round_budget，1-20）优先于此值。
-     */
-    public static final int DEFAULT_VERIFY_ROUND_BUDGET = 3;
-
-    /**
-     * 整轨终验修复预算代码缺省（#427，#406 裁决「缺省两轮」）：终验 fail 自动起
-     * fix run 修→复走终验的轮数上限，耗尽版本照成＋已知缺陷如实呈现；库覆盖
-     * （executor 行 final_verify_fix_budget，0-10——0＝不起修复 run 的运营选择）
-     * 优先于此值。
-     */
-    public static final int DEFAULT_FINAL_VERIFY_FIX_BUDGET = 2;
-
     private final AgentConfigStore configStore;
 
     public AgentConfigAppService(AgentConfigStore configStore) {
@@ -60,31 +45,20 @@ public class AgentConfigAppService {
     /**
      * 生效配置束（一次查库同取——prompt 与配置在命令构建处恒结伴，工具开关
      * #252 同批；模型路由策略 #354 同批——路由判定消费，阈值/强档的代码缺省
-     * 回落归 {@code ModelRoutingAppService}；验证面两件 #424 同批——verify 配置
-     * 覆盖（null＝随执行体生效档）与轮次预算生效值）：生效 systemPrompt、生效
+     * 回落归 {@code ModelRoutingAppService}）：生效 systemPrompt、生效
      * 配置键（ADR-0031：语义键，模型串与通道注入由 {@code ModelConfigAppService
      * #resolve} 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关
      * 生效态、配置覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
      * 结构性信号两开关 #454 同批——文件面/规模标签信号缺省 false＝不参与升档判定
-     * （失败重试信号常开不受影响），路由判定处随生效配置同取；verify 配置覆盖与
-     * 轮次预算生效值；收口闸开关 #433 同批——在场闸/整轨终验
-     * 判定处动态读，
-     * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
-     * 基座 lint 强制档阻断开关 #541 同批——缺省 false＝让路
-     * （强制档违规收口照扫、只随收尾卡标注，不喂修轮不触发失败链；true＝恢复
-     * #425 原阻断形态＝回滚保险），尝试环收口判定处随每次尝试读取
-     * （{@code CodingRunDispatcher}），仅 run 执行体行消费。
+     * （失败重试信号常开不受影响），路由判定处随生效配置同取。验证面／收口闸／
+     * 基座 lint 阻断已随审查与收口组退役（#605，V84 删列）。
      */
     public record EffectiveConfig(String systemPrompt, String modelConfigKey,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
             boolean modelConfigKeyOverridden, boolean routingEnabled,
             String routingStrongModelConfigKey, Integer routingFileCountThreshold,
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
-            boolean routingFileCountSignalEnabled, boolean routingSizeLabelSignalEnabled,
-            String verifyModelConfigKey, int verifyRoundBudget, int finalVerifyFixBudget,
-            boolean verificationPresenceGateEnabled,
-            boolean finalVerificationGateEnabled,
-            boolean robustLintBlockingEnabled) {
+            boolean routingFileCountSignalEnabled, boolean routingSizeLabelSignalEnabled) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -106,15 +80,7 @@ public class AgentConfigAppService {
                 config.modelConfigKey() != null, config.routingEnabled(),
                 config.routingStrongModelConfigKey(), config.routingFileCountThreshold(),
                 config.routingEscalatingSizeLabels(),
-                config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled(),
-                config.verifyModelConfigKey(),
-                config.verifyRoundBudget() != null
-                        ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET,
-                config.finalVerifyFixBudget() != null
-                        ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET,
-                config.verificationPresenceGateEnabled(),
-                config.finalVerificationGateEnabled(),
-                config.robustLintBlockingEnabled());
+                config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled());
     }
 
     /**

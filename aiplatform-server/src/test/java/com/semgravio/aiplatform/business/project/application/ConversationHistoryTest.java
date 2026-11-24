@@ -78,24 +78,6 @@ class ConversationHistoryTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private FinishEditFacts finishFixFacts;
-
-    /** 验证事实登记口（#424 片轻验常开硬门脚本位：模拟 verify 子智能体轮内登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
-
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 常开硬门缺省脚本位）：收口自动派的修正
-     * run 收口须验证在场——coder 会话登记一次。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
-        }
-    }
-
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -188,14 +170,12 @@ class ConversationHistoryTest {
                         new AgentSuspension("reply-1", List.of(Map.of(
                                 "id", "tc-1", "name", "ask_user"))));
             }
-            // 收口自动派的修正 run：run-finish 事件 + finish_edit 事实 + 文件变更
-            // 观察 → 真收口出收尾卡（被押后的 run-finish 携 closing 释放）
+            // 收口自动派的修正 run：run-finish 事件 + 文件变更观察 → 真收口出收尾卡
+            // （被押后的 run-finish 携 closing 释放）
             Consumer<AgentEvent> coderSink = invocation.getArgument(1);
             coderSink.accept(new AgentEvent(AgentEventTypes.RUN_FINISH, Map.of(
                     AgentEventTypes.RUN_FIELD, command.runId(),
                     AgentEventTypes.FINISH_FIELD, "end")));
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成", null, List.of(
                     new FileChange("/src/App.jsx", 40, 0)));
         });
@@ -413,8 +393,6 @@ class ConversationHistoryTest {
                         AgentEventTypes.RUN_FIELD, command.runId(), "state", "running")));
                 return new AgentReply(command.runId(), "好的");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已修正");
-            verifyRan(command);
             Consumer<AgentEvent> coderSink = invocation.getArgument(1);
             coderSink.accept(new AgentEvent(AgentEventTypes.RUN_FINISH, Map.of(
                     AgentEventTypes.RUN_FIELD, command.runId(),

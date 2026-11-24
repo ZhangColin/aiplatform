@@ -32,22 +32,10 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * <p>行不存在与「行存在但覆盖列全 null」语义等价（全回落）；行经 upsert 持续
  * 存在（清空覆盖不删行——操作者列留最近写者，运营可见「谁最后动过」）。</p>
  *
- * <p><b>验证面两列（#424 片轻验）</b>：run 执行体行的 verify 子智能体配置覆盖与
- * 单场验证轮次预算——档位 null＝随执行体生效档（含路由升档，缺省同执行体档不降
- * ＝#406 裁决）；预算 null＝回落代码缺省（首轮＋两轮复验）。主智能体/设计执行体
- * 行同列恒无消费（不委派 verify）。</p>
- *
- * <p><b>终验修复预算列（#427 整轨终验）</b>：run 执行体行的整轨终验修复 run 预算
- * ——null＝回落代码缺省（两轮）；主智能体/设计执行体行同列恒无消费。</p>
- *
- * <p><b>收口闸开关列（#433 开关承载面，#435 翻转缺省；#604 读法顺延）</b>：验证
- * 在场闸（#424）／整轨终验拦「生成完成」（#427）的独立开关——缺省 false＝闸关
- * ＝#432 Step 1 砍验证税落地态（秒级确定性探活三件套〔8081 探活＋入口文件完整
- * ＋git 成版〕为唯一收口要件）；true＝该闸生效（运营可一键切回旧行为）。空转
- * 产出证明闸列（#420）随 #604 拆除（proof_of_output_gate_enabled 经 V83 迁移
- * 删列）。仅 run 执行体行消费（闸判定全部发生在 run 收口路径），主智能体/设计
- * 执行体行同列恒无消费。闸判定处动态查库不缓存——运营面改完下一次闸判定即
- * 生效，不发版、进行中 run 不定格。</p>
+ * <p><b>审查与收口组配置列已随 #605 拆除</b>：验证面两列（#424）、终验修复预算
+ * 列（#427）、收口闸开关两列（#433）与基座 lint 阻断列（#541）随验证子智能体／
+ * 整轨终验／收口三开关／基座 lint 扫描整组退役（ADR-0055，#579 判决），经 V84
+ * 迁移删列——本行只余供给链与工具开关仍在消费的列。</p>
  *
  * <p><b>生成会话形态两开关列（#436）已随 #602 拆除</b>：单会话连续编码开关
  * 与切片并行机器开关随切片/轨道机器整体退役（prj_agent_configs 两列＋留痕四面
@@ -76,23 +64,6 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *                                   不参与升档判定——观测值照留；true＝恢复阈值判据）
  * @param routingSizeLabelSignalEnabled 规模标签信号开关（#454；缺省 false＝关＝规模
  *                                   标签不参与升档判定；true＝恢复标签映射判据）
- * @param verifyModelConfigKey              verify 子智能体模型配置键（#424：null＝随执行体生效档；
- *                                   非空即时校验同 modelConfigKey〔#367〕）
- * @param verifyRoundBudget          单场验证轮次预算（#424 防无限复验：report_verification
- *                                   登记达预算仍有未过项即停修复—复验；null＝回落代码缺省 3）
- * @param finalVerifyFixBudget       整轨终验修复预算（#427：终验 fail 自动起 fix run 修→
- *                                   复走，耗尽版本照成＋已知缺陷如实呈现；null＝回落代码
- *                                   缺省 2；0＝不起修复 run——合法运营选择）
- * @param verificationPresenceGateEnabled 验证在场闸开关（#433；#435 起缺省 false＝闸关——
- *                                   本 run 无验证登记不收口仅在该闸被运营打开时生效）
- * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝
- *                                   闸关——终验不起 run、不拦完成叙事）
- * @param robustLintBlockingEnabled  基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半
- *                                   让路的回滚保险；缺省 false＝让路——强制档违规收口
- *                                   照扫、只随收尾卡标注，不喂修轮、不触发失败链、不
- *                                   间接升档，修轮触发面收窄至样式合规；true＝恢复
- *                                   #425 原阻断形态〔强制档喂修轮＋修不完结构性拒绝＋
- *                                   耗尽段级回滚重跑〕。仅 run 执行体行消费）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -110,12 +81,6 @@ public record AgentOperationalConfig(
         Set<SliceSizeLabel> routingEscalatingSizeLabels,
         boolean routingFileCountSignalEnabled,
         boolean routingSizeLabelSignalEnabled,
-        String verifyModelConfigKey,
-        Integer verifyRoundBudget,
-        Integer finalVerifyFixBudget,
-        boolean verificationPresenceGateEnabled,
-        boolean finalVerificationGateEnabled,
-        boolean robustLintBlockingEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -123,14 +88,11 @@ public record AgentOperationalConfig(
     /**
      * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
      * 路由结构性信号两开关关（#454 缺省——文件面/规模标签不参与升档判定）、
-     * 收口两闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态；产出证明闸随 #604
-     * 拆除）、基座 lint 强制档阻断关（#541 让路
-     * 缺省——违规只标注）、无写者——装配解析与留痕前态共用的归一形（null 行先落
-     * 此形再走生效拼装）。
+     * 无写者——装配解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, false, false, null, null, null, false, false, false, null, null, null);
+                null, false, false, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

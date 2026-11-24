@@ -226,19 +226,9 @@ public class GenerationAppService {
      * {@link ClosingProbes} 引用——8081 探活＝预览转可用的门，保留腿）：
      * {@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 = 端口有 HTTP 应答
      * （连接拒绝即非 0）；{@code --max-time} 上限（#183）——收口线程不被无响应对端
-     * 挂死。
+     * 挂死。入口文件完整检查已随审查与收口组退役（#605）。
      */
     static final String CLOSING_PROBE = "curl -s --max-time 2 -o /dev/null http://localhost:8081";
-
-    /**
-     * 入口文件完整性探针（#339；#602 起本服务内无消费面，正本留此供
-     * {@link ClosingProbes} 引用——入口文件完整检查的留存处置归审查收口组票
-     * #605）：读预览入口文件（{@link ProjectFiles#BASELINE_ENTRY} 基座首页）
-     * 内容——取件退出码非 0 = 入口文件缺失（残缺）。命令全常量（路径平台固定，
-     * 无用户可控片段）。
-     */
-    static final String ENTRY_FILE_PROBE =
-            "cat '" + WorkspaceLayout.absolute(ProjectFiles.BASELINE_ENTRY) + "'";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;

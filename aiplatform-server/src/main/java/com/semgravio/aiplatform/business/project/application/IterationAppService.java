@@ -41,12 +41,11 @@ import lombok.extern.slf4j.Slf4j;
  * 共用派发器 {@link CodingRunDispatcher}，#604 尝试环退役——失败＝明确展示
  * ＋重跑即恢复，不自动重试）。
  *
- * <p><b>收口判据＝平台侧机器双件</b>（#601 内核接线；#604 finish_edit 收口件退役）：
- * 修正 run 正常返回后过 pnpm build＋8081 探活双件，未过即该场 run 失败终态；
- * 系统改没改以平台可观测文件改动事实为准（不依赖模型自报），PRD 改没改＝本场
- * 交接物各轮修订说明。判定结果的呈现归收口扩载权威化（#88 收尾卡判定行）；
- * finish_edit 结束工具与判定消费已随 #604 退役，{@link FinishEditFacts} 类暂留
- * 至 #605 清场。</p>
+ * <p><b>收口判据＝平台侧机器双件</b>（#601 内核接线；#604 finish_edit 收口件退役；
+ * #605 事实登记件清场）：修正 run 正常返回后过 pnpm build＋8081 探活双件，未过即
+ * 该场 run 失败终态；系统改没改以平台可观测文件改动事实为准（不依赖模型自报），
+ * PRD 改没改＝本场交接物各轮修订说明。判定结果的呈现归收口扩载权威化（#88 收尾卡
+ * 判定行）。</p>
  *
  * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334「小迭代基准＝当前已确认
  * 版本」随停派整段退役，ADR-0039/#450 裁决 A）</b>：范围级新草稿不再停派待确认
@@ -80,8 +79,7 @@ import lombok.extern.slf4j.Slf4j;
  * 派发（{@link CodingRunDispatcher.RunSeat#kernel()}——系统提示权威版本、工具恰四件、
  * 循环语义中间件、装配键不带 executor 旧中间件）；收尾＝平台侧机器判据双件
  * （{@link KernelClosingCriteria}：{@code pnpm build} 过＋8081 探活），不再经
- * finish_edit 事实／验证在场／产出证明／终验复走旧验收链（段四技术债）。下列
- * finish_edit 相关叙旧段归旧形态留档，入口不可达（清场票处置）。</p>
+ * finish_edit 事实／验证在场／产出证明／终验复走旧验收链。</p>
  */
 @Service
 @Slf4j
@@ -95,7 +93,7 @@ public class IterationAppService {
 
     /**
      * 内核修正任务 prompt（#601 接线）：交接物三要素结构化拼装同 {@link
-     * #fixRunPrompt}（意见原文＋逐轮需求侧判定＋PRD 正本引用），收口判据句换内核
+     * {@link #kernelFixRunPrompt}（意见原文＋逐轮需求侧判定＋PRD 正本引用），收口判据句换内核
      * 口径——pnpm build 过＋8081 探活有响应双件全过才算完成（无 finish_edit 尾句：
      * 内核工具面恰四件、收口以平台侧机器判据为准）。
      */
@@ -125,16 +123,15 @@ public class IterationAppService {
     }
 
     /**
-     * 更新 run 工作消息头部标题（#118）：平台生成（标题来源实施时定——判定跟职责走：
-     * 更新 run 的收口判定归 finish_edit 事实、标题不做自由文本解析），用户语言
-     * 「系统更新」（对应用户面「更新」词条），无切片进度。
+     * 更新 run 工作消息头部标题（#118）：平台生成（判定跟职责走——收口判定归平台
+     * 机器判据双件、标题不做自由文本解析），用户语言「系统更新」（对应用户面
+     * 「更新」词条），无切片进度。
      */
     static final String FIX_TITLE = "系统更新";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
     private final CodingRunDispatcher codingRunDispatcher;
-    private final FinishEditFacts finishFacts;
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -142,7 +139,6 @@ public class IterationAppService {
     private final DemoVersionAppService demoVersionAppService;
     private final PrdVersionAppService prdVersionAppService;
     private final DemoSeedAppService demoSeed;
-    private final RobustKitLintAppService robustKitLint;
     private final BalanceGateAppService balanceGate;
     /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
     private final KernelClosingCriteria kernelClosingCriteria;
@@ -166,20 +162,18 @@ public class IterationAppService {
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
-            FinishEditFacts finishFacts, AgentEventBridge eventBridge,
+            AgentEventBridge eventBridge,
             CodingRunTrack codingRunTrack,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             DesignSpecAppService designSpecs,
             DemoVersionAppService demoVersionAppService,
             PrdVersionAppService prdVersionAppService,
             DemoSeedAppService demoSeed,
-            RobustKitLintAppService robustKitLint,
             BalanceGateAppService balanceGate,
             KernelClosingCriteria kernelClosingCriteria) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.codingRunDispatcher = codingRunDispatcher;
-        this.finishFacts = finishFacts;
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -187,7 +181,6 @@ public class IterationAppService {
         this.demoVersionAppService = demoVersionAppService;
         this.prdVersionAppService = prdVersionAppService;
         this.demoSeed = demoSeed;
-        this.robustKitLint = robustKitLint;
         this.balanceGate = balanceGate;
         this.kernelClosingCriteria = kernelClosingCriteria;
     }
@@ -275,7 +268,7 @@ public class IterationAppService {
      * 载体——逐轮配对的「意见原文 → 该轮判定结果」（{@link Round}，#55）：一轮
      * 派发一条意见一份判定，配对关系由平台代码在拼装时锚定，不依赖意见清单与
      * 说明清单的位置对齐——某轮零修订不再引起后续轮错位。summary null = 该轮
-     * 无 savePrd 调用事实（即未修订；占位呈现归 {@link #fixRunPrompt}）。PRD
+     * 无 savePrd 调用事实（即未修订；占位呈现归 {@link #kernelFixRunPrompt}）。PRD
      * 引用不随物携带（路径固定 {@link ProjectArtifacts#PRD}，prompt 拼装时引用）。
      */
     record FixHandoff(List<Round> rounds) {
@@ -389,8 +382,6 @@ public class IterationAppService {
      */
     private void runFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
         Long projectId = project.getId();
-        // 本轨收口判定从零起算：上一轨/生成 run 的事实残留不进本轨（#46）
-        finishFacts.clear(Long.toString(project.getWorkspaceId()));
         boolean released = false;
         try {
             FixHandoff handoff = firstHandoff;
@@ -552,44 +543,8 @@ public class IterationAppService {
                 systemChanged,
                 KERNEL_FIX_CLOSING_SUMMARY)
                 // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
-                // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
-                .withDesignLint(designSpecs.lintClosingPayload(project))
-                // 基座 lint 两档扫描事实（#425——更新轨同盖：强制档违规修不完＝收口
-                // 被拒（尝试环判定），预置档如实标注不拦收口；存量工作区 null 不携带）
-                .withRobustKitLint(robustKitLint.lintClosingPayload(project.getWorkspaceId()));
-    }
-
-    /**
-     * 修正任务 prompt：交接物三要素结构化拼装（#52，#55 逐轮配对）——每条意见
-     * 原文后紧跟该轮的需求侧判定（已修订带修订说明、未修订显式「本轮无修订」
-     * 占位——哪条意见被哪轮处理了一目了然，不静默缺席）+ PRD 基准引用 + 收口
-     * 判据复述（8081 常驻 + 结束工具必调）。
-     *
-     * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334 基准两形〔内联已确认
-     * 版/正本引用〕随停派退役收敛为单形）</b>：修正 run 一律以工作区
-     * {@code docs/PRD.md} 正本为准（路径引用、不注全文，执行体重读约定见配置）——
-     * 范围级新草稿照派照跑，记行（构建基准快照）由派发处在起跑时先行完成。</p>
-     */
-    static String fixRunPrompt(FixHandoff handoff) {
-        StringBuilder prompt = new StringBuilder(
-                "系统修正：系统已生成并可操作，用户提出了如下修正意见（每条意见后紧跟"
-                        + "该轮的需求侧判定），请在现有工作区内完成修正（系统的其余部分"
-                        + "保持可用）：");
-        for (int index = 0; index < handoff.rounds().size(); index++) {
-            FixHandoff.Round round = handoff.rounds().get(index);
-            prompt.append("\n").append(index + 1).append(". 意见原文：").append(round.opinion())
-                    .append("\n   需求侧判定（主智能体已收口）：")
-                    .append(round.prdRevisionSummary() != null
-                            ? "PRD 已修订——" + round.prdRevisionSummary()
-                            : "本轮无修订（未触发 PRD 变更）");
-        }
-        prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
-                .append("，以正本与上述意见为准。");
-        prompt.append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
-                .append("\n收尾必须调用 finish_edit 工具：动了系统传 changed=true 并说明改了什么；")
-                .append("判定无需改动系统也必须调用，传 changed=false 并说明原因——")
-                .append("不调用即本轮修正未收口。");
-        return prompt.toString();
+                // 不抛，仍违规随收尾卡如实；无规范 null 不携带）
+                .withDesignLint(designSpecs.lintClosingPayload(project));
     }
 
     /**

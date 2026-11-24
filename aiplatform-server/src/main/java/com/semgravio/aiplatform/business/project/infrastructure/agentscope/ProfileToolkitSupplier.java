@@ -34,25 +34,16 @@ import io.agentscope.core.tool.Toolkit;
  * 三槽位齐开——需求案例/功能模块/业务规则自荐，软指引＋轮收口轻兜底盘问），
  * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
  * PRD 写入走 savePrd 自带通道，草稿写入走 propose_skill 平台侧通道——两写面
- * 均不落工作区文件）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
- * （更新收口结束工具——「要不要动系统」的判定面）+ update_plan（步骤清单——
- * run 级计划的全量快照观测面，#236：part-plan 部件由部件映射表从参数增量产出）
- * + propose_skill（技能自荐——验证过的编码模式写草稿待审，#259 自产线；骨架件
- * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）
- * + propose_sediment（沉淀自荐——可复用功能模块/业务规则写采集层草稿待审，
- * #460；骨架件无开关，软指引在工作协议——无内容不调用）＋generate_image
- * （#545 图片能力下放构建轨，ADR-0052——演示配图落 public/；增强件，
- * {@code gi} 规格件关即不挂载，回无图现状）；
+ * 均不落工作区文件）；{@link AgentProfile#EXECUTOR run 执行体} = 空集（#604 拆
+ * run 尝试体旧机制：finish_edit／update_plan／自荐 executor 槽／构建轨出图 gi 件
+ * 随旧执行协议退役——生成/更新 run 工具面＝内核恰四件经 {@code KernelTools} 装配）；
  * {@link AgentProfile#DESIGNER 设计执行体} = generate_image（出图工具件，#288
  * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由；骨架件
  * 恒挂载不读 gi 件），随设计面
  * 工作区注册（写文件件是 harness 内建、经 ProjectDesign 形态自带——shell 与
  * 委派在工厂结构性关闭）；
- * verify 子键（#352，子智能体自有平台工具面——平台工厂构建子级时按此键取
- * 视图合并，镜像技能仓库的子键路由先例）= report_verification（验证结果登记
- * ——收尾卡验证统计的事实源）+ propose_skill（subagent 槽血统实例，验证经验
- * 自荐——绑任务回交前，挂载与否归声明 allowlist 治理）+ propose_sediment
- * （subagent 槽血统实例，沉淀自荐——#460，挂载治理归声明 allowlist）；
+ * verify 子键（#352，历史面——#604 子智能体委派退役后无运行时消费）=
+ * report_verification＋subagent 槽自荐两件（#263/#460 血统实例）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
  * 工作区 / 无配置语境 = 空集（模型不可见）。<b>#604 拆 run 尝试体旧机制</b>：run

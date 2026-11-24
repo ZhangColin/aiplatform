@@ -25,8 +25,9 @@ import org.junit.jupiter.api.Test;
  */
 class BaselineEntryFilesTest {
 
-    /** 强制档＋预置档的裸原语字面（与 {@code RobustKitLintAppService} 两档 ERE 的
-     * 命中面同轴；入口注释措辞也不得含这些 token——防「文档式违规」）。 */
+    /** 强制档＋预置档的裸原语字面（收口 lint 已随审查与收口组退役 #605，但入口
+     * 零裸原语纪律仍按基座件契约守住；入口注释措辞也不得含这些 token——
+     * 防「文档式违规」）。 */
     private static final List<String> BARE_PRIMITIVES = List.of(
             "new Pool(", "new Client(", "new Redis(", "createClient(",
             "fetch(", "cookies(", "scrypt", "bcrypt", "pbkdf2");

@@ -311,7 +311,7 @@ class PreviewGatewaySmokeTest {
             // 挂别名）→ snap-{viewId}.localhost 经网关路由到快照容器——只逛不换：HTML
             // 不含注入标签（快照 server 块不 include 注入块），句柄 URL 与路由同源
             String viewId = "483920104737";
-            String hash = commit(handle, "首次生成了系统", "111");
+            String hash = commit(handle, "首次生成了系统");
             SnapshotHandle snap = backend.startSnapshot(handle, viewId, hash);
             try {
                 assertThat(snap.previewUrl().toString())
@@ -479,12 +479,14 @@ class PreviewGatewaySmokeTest {
         return docker("exec", handle.containerName(), "sh", "-c", command);
     }
 
-    /** 幂等 init + 成版提交（照 WorkspaceVersions 纯函数——快照检出的 ref 来源）。 */
-    private static String commit(WorkspaceHandle handle, String summary, String runId) {
+    /** 幂等 init + 手动提交（照 WorkspaceVersions 纯函数——快照检出的 ref 来源）。 */
+    private static String commit(WorkspaceHandle handle, String summary) {
         ExecResult ensured = execIn(handle, WorkspaceVersions.ensureRepoCommand());
         assertThat(ensured.exitCode()).as("仓库初始化应成功：%s", ensured.stderr()).isZero();
-        ExecResult committed = execIn(handle, WorkspaceVersions.commitCommand(summary, runId));
-        assertThat(committed.exitCode()).as("成版提交应成功：%s", committed.stderr()).isZero();
+        ExecResult committed = execIn(handle, "cd /workspace && git add -A"
+                + " && git commit -q --allow-empty -m '" + summary + "'"
+                + " && git rev-parse HEAD");
+        assertThat(committed.exitCode()).as("提交应成功：%s", committed.stderr()).isZero();
         return committed.stdout().trim();
     }
 

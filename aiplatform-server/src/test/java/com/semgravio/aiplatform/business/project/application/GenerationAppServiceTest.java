@@ -126,14 +126,6 @@ class GenerationAppServiceTest {
     @Autowired
     private com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter prdArtifacts;
 
-    /** 验证事实登记口（#352 收口卡验证统计脚本：模拟 verify 子智能体轮内工具登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
-
-    /** finish_edit 事实登记口（#360 排空补派的更新 run 收口脚本）。 */
-    @Autowired
-    private FinishEditFacts finishEditFacts;
-
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -207,23 +199,8 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(AgentCommand.class), any()))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-                    verifyRan(command);
                     return new AgentReply(command.runId(), text);
                 });
-    }
-
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 片轻验；#435 起验证非收口要件、观测面
-     * 不动）：登记仍进验证统计（收尾卡事实源）——converse 桩内调用即「verify 已
-     * 跑并登记」；按工作区登记一次
-     * （run 起跑清残留后逐 run 重登，多尝试不虚增复验轮次）。零验证场景的测试
-     * 不调用本位（如 {@code given_zero_verification_slice_...}）。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("首页主径可走通（刷新仍在）", "browser", true, null)));
-        }
     }
 
     /**
@@ -241,7 +218,6 @@ class GenerationAppServiceTest {
                 throw failure;
             }
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             return (AgentReply) outcome;
         }).when(agentClient).converse(any(), any());
     }
@@ -292,7 +268,6 @@ class GenerationAppServiceTest {
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             if (converseCalls.incrementAndGet() == 1) {
                 // 首试在飞时关停置位（内核 JVM 钩子语义；经 base.agentscope 测试缝
                 // ——business 不直触内核）＋流段失败上浮（关停态下一切失败按关停
@@ -348,7 +323,6 @@ class GenerationAppServiceTest {
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            verifyRan(command);
             if (converseCalls.incrementAndGet() == 1) {
                 // 首试在途被中断（Future.cancel 线程中断打断模型流的现场等价物）
                 codingRunTrack.requestStop(projectId);
@@ -525,7 +499,6 @@ class GenerationAppServiceTest {
                 throw new IllegalStateException("java.lang.InterruptedException");
             }
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            verifyRan(command);
             return new AgentReply(command.runId(), "完成");
         });
 
@@ -825,56 +798,7 @@ class GenerationAppServiceTest {
 
     // ---------- 产出证明闸（#420 空转片防呆：零 diff＋无「能力已存在」确认＝结构性拒绝） ----------
 
-    /**
-     * 两闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行两开关
-     * true＝#424/#427 现行为（验证在场拒绝—补做链路与整轨终验的既有用例承载面）。
-     * 砍税缺省面由 given_presence_and_proof_gates_closed_.../
-     * given_final_verification_gate_closed_... 锚定。产出证明闸（#420）随 #604 拆
-     * run 尝试体旧机制一并退役——本面只余两闸。
-     */
-    private void givenClosingGatesOpen() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     verification_presence_gate_enabled, final_verification_gate_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    verification_presence_gate_enabled
-                        = EXCLUDED.verification_presence_gate_enabled,
-                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
-                """);
-    }
-
-    /**
-     * 基座 lint 强制档阻断开关切回旧行为（#541 缺省＝让路——阻断形态用例显式切回）：
-     * 直写 executor 行 robust_lint_blocking_enabled=TRUE（强制档违规喂修轮修一轮＋
-     * 修不完收口结构性拒绝＝#425 原阻断形态——回滚保险承载面）。与
-     * {@link #givenClosingGatesOpen} 可叠加（列各写各的）。
-     * 让路缺省面由 given_bare_client_..._default_... 系新用例锚定。
-     */
-    private void givenRobustLintBlocking() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     robust_lint_blocking_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    robust_lint_blocking_enabled = EXCLUDED.robust_lint_blocking_enabled
-                """);
-    }
-
-    // ---------- 验证在场硬门（#424；#433 开关化、#435 缺省闸关——闸开用例显式切回） ----------
-
-    @Test
-    void given_closing_probes_when_inspect_then_entry_completeness_anchored() {
-        // #339 收口判据锚（#604 执行体协议清场后正本＝收口探针面）：入口文件写全
-        // 约定落在收口判据行为（残缺「其余代码略」式占位不收口——重试修全语义随
-        // 尝试环退役，判据本身保留：判死即终态、重跑即恢复）
-        assertThat(ProjectFiles.hasTruncationPlaceholder("// 其余代码略")).isTrue();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("完整实现")).isFalse();
-        assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("本缺省协议正文已退役无消费面"); // #604 占位注记（枚举槽位保留）
-    }
+    // ---------- 收口判据与探针（#605 起只余 build 探活＋8081 探活双件） ----------
 
     @Test
     @SuppressWarnings("unchecked")
@@ -887,7 +811,6 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -912,11 +835,6 @@ class GenerationAppServiceTest {
                 .containsEntry("systemChanged", true)
                 .containsEntry("systemNote", GenerationAppService.KERNEL_CLOSING_SUMMARY);
         assertThat(sliceClosing).doesNotContainKey("prdNote");
-        // #424 观测面：verifyRan 脚本位登记进收尾卡验证统计——统计呈现随新载荷
-        // 口径一致（#435 起登记非收口要件，但登记的统计照实呈现）
-        assertThat((Map<String, Object>) sliceClosing.get(AgentEventTypes.VERIFICATION_FIELD))
-                .containsEntry(AgentEventTypes.VERIFICATION_TOTAL_FIELD, 1)
-                .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1);
         assertThat((List<Map<String, Object>>) sliceClosing.get("files")).hasSize(2);
         assertThat((Long) sliceClosing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }
@@ -924,17 +842,17 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_scripted_durations_when_closes_then_closing_carries_duration_breakdown() {
-        // #111 收口扩载·阶段耗时分布：四桶齐备（llmMs / toolsMs 按工具名分桶·command
-        // 按命令归组嵌套 / verifyMs 源账 / closingMs 收口尾序）+ 逐尝试分布；委派族
-        // 工具（agent_spawn 旧名＋agent_send/wait_async_results）#604 起如实入桶
+        // #111 收口扩载·阶段耗时分布：三桶齐备（llmMs / toolsMs 按工具名分桶·command
+        // 按命令归组嵌套 / closingMs 收口尾序）+ 逐尝试分布；委派族工具
+        // （agent_spawn 旧名＋agent_send/wait_async_results）#604 起如实入桶
         // （除名规则随委派机器退役，双计口径不复存在）；SSE 扩载与对话史落库同载荷；
-        // 桶计与 durationMs 一致性守卫（允许小误差，量级不符即埋点有洞）
+        // 桶计与 durationMs 一致性守卫（允许小误差，量级不符即埋点有洞）；验证桶
+        // verifyMs 随验证机器退役（#605）
         Long projectId = persistedProject("9818");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -958,7 +876,7 @@ class GenerationAppServiceTest {
                 (Map<String, Object>) closing.get("durationBreakdown");
         assertThat(breakdown).isNotNull()
                 .containsEntry("llmMs", 5L)
-                .containsEntry("verifyMs", 1L);
+                .doesNotContainKey("verifyMs");
         Map<String, Object> toolsMs = (Map<String, Object>) breakdown.get("toolsMs");
         assertThat(toolsMs)
                 .containsEntry("write_file", 2L)
@@ -976,7 +894,7 @@ class GenerationAppServiceTest {
                 .satisfies(attempt -> {
                     assertThat(attempt).containsEntry("attempt", 1);
                     assertThat(attempt).containsEntry("llmMs", 5L);
-                    assertThat(attempt).containsEntry("verifyMs", 1L);
+                    assertThat(attempt).doesNotContainKey("verifyMs");
                     assertThat((Map<String, Object>) attempt.get("toolsMs"))
                             .containsEntry("write_file", 2L)
                             .containsEntry("agent_spawn", 9L)
@@ -987,7 +905,7 @@ class GenerationAppServiceTest {
                 });
         // 一致性守卫：桶计 ≈ durationMs（量级守卫——纳秒/微秒单位混淆即超容差；
         // 正常全 mock 内联管道为毫秒级，2s 容差只放行管道抖动）
-        long bucketSum = 5L + 2L + 9L + 40L + 11L + 3L + 1L + closingMs;
+        long bucketSum = 5L + 2L + 9L + 40L + 11L + 3L + closingMs;
         long durationMs = ((Number) closing.get("durationMs")).longValue();
         assertThat(Math.abs(bucketSum - durationMs)).isLessThan(2_000L);
 
@@ -999,8 +917,9 @@ class GenerationAppServiceTest {
         Map<String, Object> persistedBreakdown =
                 (Map<String, Object>) persisted.get("durationBreakdown");
         assertThat(persistedBreakdown).isNotNull()
-                .containsKey("llmMs").containsKey("toolsMs").containsKey("verifyMs")
-                .containsKey("closingMs").containsKey("attempts");
+                .containsKey("llmMs").containsKey("toolsMs")
+                .containsKey("closingMs").containsKey("attempts")
+                .doesNotContainKey("verifyMs");
         assertThat(((Number) persistedBreakdown.get("llmMs")).longValue()).isEqualTo(5L);
         assertThat((Map<String, Object>) persistedBreakdown.get("toolsMs"))
                 .containsKey("command")
@@ -1251,7 +1170,6 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             return new AgentReply(command.runId(), "完成");
         });
 
@@ -1306,7 +1224,6 @@ class GenerationAppServiceTest {
             if (command == null) {
                 return null; // matcher 空参调用（重打桩触发旧 answer）直接过
             }
-            verifyRan(command);
             throw new IllegalStateException("起服失败"); // 审核段失败（重试耗尽转终态）
         });
 
@@ -1319,7 +1236,6 @@ class GenerationAppServiceTest {
         // 旧 answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "完成") : null;
         });
         GenerationAppService.GenerationRun again = appService.startGeneration(projectId);
@@ -1379,7 +1295,6 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             return new AgentReply(command.runId(), "完成");
         });
 
@@ -1409,7 +1324,6 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             // 在途插确认：PRD v2 在生成 run 进行中落库（幂等——阶段 0/切片各跑一
             // 次 converse，冲突即已插过）
             jdbcTemplate.update("""
@@ -1478,7 +1392,6 @@ class GenerationAppServiceTest {
         CountDownLatch fixDone = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            verifyRan(command);
             if (command.sessionId().contains("-kernel-")) {
                 // 内核首 run 在途挂住——制造首 Demo 生成在途窗口
                 generating.countDown();
@@ -1551,7 +1464,6 @@ class GenerationAppServiceTest {
         AtomicBoolean released = new AtomicBoolean(false);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            verifyRan(command);
             if (command.sessionId().contains("-kernel-") && !released.get()) {
                 // 首 Demo 内核 run 在途挂住，等停止请求落位（Future.cancel 线程中断的
                 // 现场等价物——停止检查点在中断侧，此处以中断形态异常收场）
@@ -1682,7 +1594,6 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "已构建", null, List.of())
                     : null;
         });
@@ -1735,7 +1646,6 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse(" 87\n", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -1774,7 +1684,6 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -1813,7 +1722,6 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));

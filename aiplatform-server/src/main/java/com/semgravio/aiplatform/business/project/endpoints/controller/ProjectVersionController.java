@@ -24,14 +24,15 @@ import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 版本 REST 面（#91 版本层地基）：每轮 run 收口自动成版的只读面——版本列表
- * （git log 即正本，新→旧）与版本详情（元数据 + 锚定的收尾卡载荷）。版本是
- * 项目子资源，独立控制器分列（照 OrderController 先例——ProjectController 已满）。
+ * 版本 REST 面（#91 版本层地基；#605 起收口成版提交退役）：版本列表（git log
+ * 即正本，新→旧；成员判据只余 Rollback-From）与版本详情（元数据）。版本语义
+ * 归阶段四重建（单轴时间线、探活通过即自动成版）。版本是项目子资源，独立控制器
+ * 分列（照 OrderController 先例——ProjectController 已满）。
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/versions")
 @Validated
-@Tag(name = "Versions", description = "版本：每轮 run 收口自动成版（容器内 git）的列表与详情（锚定收尾卡）")
+@Tag(name = "Versions", description = "版本：容器内 git log 的列表与详情（#605 起不再自动成版，版本语义归阶段四重建）")
 public class ProjectVersionController {
 
     private final ProjectVersionAppService versionAppService;
@@ -45,17 +46,18 @@ public class ProjectVersionController {
 
     @GetMapping
     @Operation(summary = "版本列表（新→旧）",
-            description = "git log 即版本序列（无便利表）：每轮编码 run 收口自动成版（commit 主题 = "
-                    + "收口摘要、Run-Id trailer 锚定收尾卡）。零版本（尚无收口）= 空列表非错误。"
+            description = "git log 即版本序列（无便利表）：带 Rollback-From trailer 的版本 commit "
+                    + "入列（#605 起收口成版提交退役，本阶段不自动成版，版本语义归阶段四重建；"
+                    + "存量 Run-Id 版本不再入列）。零版本 = 空列表非错误。"
                     + "项目不存在 404 PRJ_001；环境故障 WSP_002")
     public ApiResponse<List<VersionResponse>> list(@PathVariable String projectId) {
         return ApiResponse.ok(versionAppService.list(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{ref}")
-    @Operation(summary = "版本详情（锚定收尾卡）",
-            description = "版本元数据（hash / 摘要 / 锚定 run / 成版时刻）+ 收尾卡载荷（Run-Id 联接对话史 "
-                    + "closing 条目；收尾卡缺位时 closing 为 null）。ref = commit hash（hex）——"
+    @Operation(summary = "版本详情",
+            description = "版本元数据（hash / 摘要 / 锚定 run / 成版时刻）；收尾卡载荷字段 closing "
+                    + "随 Run-Id 联接退役（#605）恒空，留至阶段四版本重建。ref = commit hash（hex）——"
                     + "非 hash 形态 404 PRJ_028 且不触工作区（shell 注入防线）。项目不存在 404 PRJ_001")
     public ApiResponse<VersionDetailResponse> detail(@PathVariable String projectId,
             @PathVariable String ref) {

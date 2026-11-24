@@ -211,7 +211,7 @@ public class ConversationHistoryAppService {
     /**
      * 已收口成果清单读口（#223 存量恢复的对照源）：项目收尾卡（kind=closing）的
      * summary → 收口 run 锚（同叙事多次收口——往次重发起服——以后到为准）。收尾卡
-     * 是平台侧收口权威事实（git 收口 commit 经 Run-Id trailer 锚定同一收尾卡，
+     * 是平台侧收口权威事实（Run-Id 成版锚已随审查与收口组退役，#605，
      * 旁证同源）——存量在途项目（生成早于轨道表、无持久化计划）补产计划落库时
      * 对照此清单标已完片、只补缺口。
      */

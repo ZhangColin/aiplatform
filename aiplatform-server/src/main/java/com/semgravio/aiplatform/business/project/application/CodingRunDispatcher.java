@@ -92,10 +92,10 @@ class CodingRunDispatcher {
      * （{@link AgentProfile#EXECUTOR} / {@link AgentProfile#DESIGNER}——systemPrompt
      * 与模型配置经运营配置读面取生效值、计量 dims agentKind 同键）、工作区面
      * （designer 无 shell——ProjectDesign 形态，写文件件在、命令执行结构性关闭）、
-     * 收口成版（执行体真收口自动成版；设计<b>候选</b>不成版——版本流只认定稿，
-     * ADR-0025 候选与版本两套语义不打通）、收尾卡稿清单开关（designer 会话扩载
-     * 「本轮稿清单与去向」——条目随判定事实由轨道层拼装，#292；null = 非设计
-     * 会话不扩载）。
+     * 收尾卡稿清单开关（designer 会话扩载「本轮稿清单与去向」——条目随判定事实由
+     * 轨道层拼装，#292；null = 非设计会话不扩载）。<b>收口自动成版（Run-Id trailer）
+     * 随审查与收口组退役（#605）</b>：run 收口不再提交 git 版本，版本语义归阶段四
+     * 重建；设计定稿的成版提交同步出局（设计线整条退役另开新票）。
      *
      * <p>{@code kernelForm}（#601 接线，ADR-0054/0055）：<b>生成内核形态座席</b>——
      * 命令按内核装配形态构建（系统提示＝{@link KernelSystemPrompt} 权威版本、
@@ -106,7 +106,7 @@ class CodingRunDispatcher {
      * 通道行，#601 供给链不绕开）。</p>
      */
     record RunSeat(AgentProfile profile, boolean workspaceNoShell,
-            boolean commitVersionAtClosing, String draftsItem, boolean kernelForm) {
+            String draftsItem, boolean kernelForm) {
 
         /**
          * 生成内核座席（#601 接线）：首建与迭代重建派发走新内核装配——profile 仍
@@ -114,12 +114,12 @@ class CodingRunDispatcher {
          * kernelForm 分叉（提示词权威版本／内核装配键／无工具面规格）。
          */
         static RunSeat kernel() {
-            return new RunSeat(AgentProfile.EXECUTOR, false, true, null, true);
+            return new RunSeat(AgentProfile.EXECUTOR, false, null, true);
         }
 
-        /** 设计执行体座（#289 设计过程轨道）：无 shell、候选不成版、收尾卡带稿清单。 */
+        /** 设计执行体座（#289 设计过程轨道）：无 shell、收尾卡带稿清单。 */
         static RunSeat designer(String draftsItem) {
-            return new RunSeat(AgentProfile.DESIGNER, true, false, draftsItem, false);
+            return new RunSeat(AgentProfile.DESIGNER, true, draftsItem, false);
         }
     }
 
@@ -131,22 +131,19 @@ class CodingRunDispatcher {
      * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）；编码轨道
      * 另携 {@code designLint} 设计规范扫描事实（#296：token 合规是机器可判的
      * <b>验证事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
-     * 项目的编码 run 在场，非规范项目/设计会话恒 null）；编码轨道另携
-     * {@code robustKitLint} 基座 lint 两档扫描事实（#425：随收尾卡如实呈现）；
-     * 编码轨道另携 {@code knownDefects} 已知缺陷清单（#427 整轨终验修复预算耗尽
-     * 的如实呈现——终验机器本体退役归 #605）。
+     * 项目的编码 run 在场，非规范项目/设计会话恒 null）。验证统计／基座 lint 两档／
+     * 已知缺陷清单随审查与收口组退役（#605）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
             String systemNote, List<Map<String, Object>> drafts,
-            Map<String, Object> designLint, Map<String, Object> robustKitLint,
-            Map<String, Object> knownDefects) {
+            Map<String, Object> designLint) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本场叙事，进收尾卡
          * summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null, null, null, null);
+            return new ClosingJudgment(false, null, true, note, null, null);
         }
 
         /**
@@ -157,7 +154,7 @@ class CodingRunDispatcher {
          */
         static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
             return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts, null, null, null);
+                    drafts == null ? List.of() : drafts, null);
         }
 
         /**
@@ -167,28 +164,13 @@ class CodingRunDispatcher {
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote,
-                    null, null, null, null);
+                    null, null);
         }
 
         /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    lint, robustKitLint, knownDefects);
-        }
-
-        /** 附基座 lint 两档扫描事实（#425 收口回调拼装：存量工作区传 null＝不携带）。 */
-        ClosingJudgment withRobustKitLint(Map<String, Object> lint) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    designLint, lint, knownDefects);
-        }
-
-        /**
-         * 附已知缺陷清单（#427 整轨终验修复预算耗尽：终验末轮收口拼装——版本照成
-         * ＋缺陷清单如实进收尾卡；通过/预算内有修复路径不携带）。
-         */
-        ClosingJudgment withKnownDefects(Map<String, Object> knownDefects) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    designLint, robustKitLint, knownDefects);
+                    lint);
         }
     }
 
@@ -230,8 +212,6 @@ class CodingRunDispatcher {
     private final ModelConfigAppService modelConfigs;
     private final GenerationProperties properties;
     private final ConversationHistoryAppService conversationHistory;
-    private final ProjectVersionAppService versions;
-    private final VerificationFacts verificationFacts;
     private final ModelRoutingAppService modelRouting;
     private final CodingRunTrack codingRunTrack;
     private final SegmentSettlementAppService segmentSettlement;
@@ -241,7 +221,6 @@ class CodingRunDispatcher {
             AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
-            ProjectVersionAppService versions, VerificationFacts verificationFacts,
             ModelRoutingAppService modelRouting, CodingRunTrack codingRunTrack,
             SegmentSettlementAppService segmentSettlement) {
         this.agentClient = agentClient;
@@ -251,8 +230,6 @@ class CodingRunDispatcher {
         this.modelConfigs = modelConfigs;
         this.properties = properties;
         this.conversationHistory = conversationHistory;
-        this.versions = versions;
-        this.verificationFacts = verificationFacts;
         this.modelRouting = modelRouting;
         this.codingRunTrack = codingRunTrack;
         this.segmentSettlement = segmentSettlement;
@@ -351,9 +328,6 @@ class CodingRunDispatcher {
                     what, seat, heading, meterRunIds,
                     injectKnowledge ? knowledgeAppService.dispatchInjection(prompts.first()) : "",
                     Instant.now(), new ArrayList<>(), new ArrayList<>());
-            // 验证事实清残留（#352）：本轨验证统计从零起算——上一轨/生成 run 的遗留
-            // 不进本轨收尾卡（验证机器本体退役归 #605）
-            verificationFacts.clear(Long.toString(project.getWorkspaceId()));
             String previousError = null;
             int channelInstantRetries = 0;
             int iteration = 0;
@@ -571,25 +545,9 @@ class CodingRunDispatcher {
             emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
             if (pendingFinish.get() != null) {
                 Map<String, Object> closing = closingPayload(judgment, runChanges,
-                        runStartedAt, what,
-                        verificationFacts.consume(Long.toString(workspaceId)),
-                        seat.draftsItem(), config,
-                        agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyRoundBudget());
-                // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
-                // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
-                // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
-                // （缺 version 键 = 本轮未成版，run 收口不受影响）。成版提交腿
-                // 退役归 #605。设计会话不成版（ADR-0025 候选与版本两套语义不打
-                // 通——只有定稿成版）
-                if (seat.commitVersionAtClosing()) {
-                    String versionHash = versions.commitAtClosing(workspaceId, projectId,
-                            firstRunId, (String) closing.get(CLOSING_SUMMARY_FIELD));
-                    if (versionHash != null) {
-                        closing.put(CLOSING_VERSION_FIELD, versionHash);
-                    }
-                }
-                // 阶段耗时分布（#111）：收口尾序止表于成版（落库自指不可测——载荷
-                // 先于落库定型，量级极小忽略）；四桶齐备 + 逐尝试分布
+                        runStartedAt, what, seat.draftsItem(), config);
+                // 阶段耗时分布（#111）：收口尾序止表于载荷定型（落库自指不可测——
+                // 载荷先于落库定型，量级极小忽略）；三桶齐备 + 逐尝试分布
                 closing.put(CLOSING_BREAKDOWN_FIELD, durationBreakdown(attemptDurations,
                         Duration.between(closingStartedAt, Instant.now()).toMillis()));
                 // 对话史落库（#89 收尾卡腿）：先落库后发 run-finish——事件即触发
@@ -781,32 +739,28 @@ class CodingRunDispatcher {
     /** 设计轨日志标签（#289 设计过程轨道）：收口摘要口径分岔用。 */
     static final String DESIGN_LABEL = "design";
 
-    /** 收口扩载载荷的摘要键（成版提交主题 + 版本详情叙事同源）。 */
+    /** 收口扩载载荷的摘要键（对话史收尾卡叙事）。 */
     static final String CLOSING_SUMMARY_FIELD = "summary";
-
-    /** 收口扩载载荷的版本键（#91 收口自动成版回填的 commit hash；成版失败缺省）。 */
-    static final String CLOSING_VERSION_FIELD = "version";
 
     /**
      * 收口扩载的阶段耗时分布键（#111；#453 增 overhead 桶）：{@code { llmMs,
-     * toolsMs, verifyMs, closingMs, overhead, attempts[] }}——overhead＝每迭代平台
+     * toolsMs, closingMs, overhead, attempts[] }}——overhead＝每迭代平台
      * 开销归因桶（configMs/evalMs/eventPipelineMs/gateSkipped/gateEvaluated/
      * iterations，attempts[].overheadMs 同口径）——平台分析口径（时长优化归因用），
-     * 前端不渲染（收尾卡呈现不变，只有「用时」durationMs）。
+     * 前端不渲染（收尾卡呈现不变，只有「用时」durationMs）。验证桶 verifyMs 随
+     * 验证机器退役（#605）。
      */
     static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
 
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
-     * schema 见 SSE事件清单·收口扩载（对话史落库 #89 与版本锚定 #91 复用同一载荷，
+     * schema 见 SSE事件清单·收口扩载（对话史落库 #89 复用同一载荷，
      * 拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径行数
      * 合并——用户面一场 run 的活动量口径）；时长 = 起跑到本收口。设计会话
      * （#289）另扩 {@code drafts} 稿清单（#292 起随判定事实由轨道层拼装——平面稿
-     * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。验证统计
-     * （#352）另扩 {@code verification}——事实源＝verify 子智能体的
-     * report_verification 登记（{@code verification} 参数；null＝未跑/未登记，
-     * 如实缺省不携带；验证机器本体退役归 #605）。模型路由（#354）另扩
+     * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。验证统计／
+     * 基座 lint／已知缺陷清单随审查与收口组退役（#605）。模型路由（#354）另扩
      * {@code modelTier}——收口 run 的路由判定（哪场用了哪档、为什么：配置 + 来源
      * + 升档理由 + 判定依据快照）；{@code config} 非空才携带（run 执行体座的编码
      * run；设计/其余会话缺省不携带，平台分析口径、前端不渲染——逐尝试配置另见
@@ -814,8 +768,7 @@ class CodingRunDispatcher {
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
-            VerificationFacts.Facts verification, String draftsItem,
-            ModelRoutingAppService.ConfigSelection config, int verifyRoundBudget) {
+            String draftsItem, ModelRoutingAppService.ConfigSelection config) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -828,22 +781,11 @@ class CodingRunDispatcher {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        Map<String, Object> verificationPayload = verificationPayload(verification,
-                verifyRoundBudget);
-        if (verificationPayload != null) {
-            closing.put(AgentEventTypes.VERIFICATION_FIELD, verificationPayload);
-        }
         if (draftsItem != null) {
             closing.put(CLOSING_DRAFTS_FIELD, judgment.drafts());
         }
         if (judgment.designLint() != null) {
             closing.put(CLOSING_LINT_FIELD, judgment.designLint());
-        }
-        if (judgment.robustKitLint() != null) {
-            closing.put(CLOSING_ROBUST_LINT_FIELD, judgment.robustKitLint());
-        }
-        if (judgment.knownDefects() != null) {
-            closing.put(CLOSING_KNOWN_DEFECTS_FIELD, judgment.knownDefects());
         }
         if (config != null) {
             closing.put(CLOSING_MODEL_CONFIG_FIELD, config.payload());
@@ -861,25 +803,12 @@ class CodingRunDispatcher {
     static final String CLOSING_LINT_FIELD = "designLint";
 
     /**
-     * 收口扩载的基座 lint 键（#425：{@code { status, retried?, mandatory?, preset? }}
-     * ——各档 { total, violations[] }，条目 file/line/rule/message；存量工作区不携带）。
-     */
-    static final String CLOSING_ROBUST_LINT_FIELD = "robustKitLint";
-
-    /**
      * 收口扩载的模型路由键（#354：收口 run 的路由判定留档——{@code { modelId,
      * source, reasons?, signals }}；run 执行体座的编码 run 在场、其余缺省不携带。
      * 平台分析口径、前端不渲染，随收尾卡落对话史——「哪场用了哪档、为什么」的
      * 可查留档；逐尝试配置见 {@code durationBreakdown.attempts[].modelId}）。
      */
     static final String CLOSING_MODEL_CONFIG_FIELD = "modelTier";
-
-    /**
-     * 收口扩载的已知缺陷清单键（#427 整轨终验）：{@code { defects: [{ name, detail? }] }}
-     * ——修复预算耗尽时版本照成、末轮终验 run 收尾卡如实携带（完成叙事与收尾卡同
-     * 源——前端如实呈现，不粉饰「完成」）；通过与预算内修复路径不携带。
-     */
-    static final String CLOSING_KNOWN_DEFECTS_FIELD = "knownDefects";
 
     /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本
      *  = 工作区布局常量表）。 */
@@ -929,16 +858,15 @@ class CodingRunDispatcher {
 
     /**
      * 阶段耗时分布装配（#111；#417 口径修真；#453 增每迭代平台开销归因桶）：
-     * 四桶齐备（LLM 等待 = 模型调用累计 / 工具执行 = 按工具名分桶·command
-     * 按命令归组嵌套 / 验证 = verify 源账（其模型调用＋工具执行累计——并行父流时间
-     * 不入账）/ 收口尾序 = 探活＋成版）+ {@code overhead} 每迭代平台开销归因桶
+     * 三桶齐备（LLM 等待 = 模型调用累计 / 工具执行 = 按工具名分桶·command
+     * 按命令归组嵌套 / 收口尾序 = 探活）＋ {@code overhead} 每迭代平台开销归因桶
      * （#453：configMs 中间件动态查库 / evalMs 微指令判定 / eventPipelineMs 引擎
      * 事件处理链（含 SSE 派发）/ gateSkipped·gateEvaluated 判定门观测 / iterations
-     * 闭合模型调用计数——残差饼图：attempts[].durationMs − llm − tools − verify −
+     * 闭合模型调用计数——残差饼图：attempts[].durationMs − llm − tools −
      * overhead ≈ 未归因差值）+ 逐 run 分布（平台分析口径）。
      * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验、
-     * 委派等待屏障等）− 真并行重叠 = durationMs；closingMs 含成版而 durationMs
-     * 窗口不含（小正偏差）——量级不符即埋点有洞（缝测守卫）。
+     * 委派等待屏障等）− 真并行重叠 = durationMs——量级不符即埋点有洞（时长桶一致性校验）。
+     * 验证桶 verifyMs 随验证机器退役（#605）。
      */
     private static Map<String, Object> durationBreakdown(List<AttemptDuration> attempts,
             long closingMs) {
@@ -948,7 +876,6 @@ class CodingRunDispatcher {
         Map<String, Object> breakdown = new LinkedHashMap<>();
         breakdown.put("llmMs", total.llmMs());
         breakdown.put("toolsMs", toolsPayload(total));
-        breakdown.put("verifyMs", verifyMs(total));
         breakdown.put("closingMs", closingMs);
         breakdown.put("overhead", new LinkedHashMap<>(total.overheadMs()));
         breakdown.put("attempts", attempts.stream()
@@ -966,7 +893,6 @@ class CodingRunDispatcher {
         payload.put("modelId", attempt.modelConfigKey()); // 键＝持久化留档契约，#554 改名不改数据面
         payload.put("llmMs", attempt.durations().llmMs());
         payload.put("toolsMs", toolsPayload(attempt.durations()));
-        payload.put("verifyMs", verifyMs(attempt.durations()));
         payload.put("overheadMs", new LinkedHashMap<>(attempt.durations().overheadMs()));
         if (attempt.channelInstant()) {
             payload.put("channelInstant", true); // 通道级秒败 run（#477 标注——平台分析口径）
@@ -1039,54 +965,6 @@ class CodingRunDispatcher {
             tools.put("command", new LinkedHashMap<>(durations.commandMs()));
         }
         return tools;
-    }
-
-    /** 验证桶 = verify 源账（该源模型调用＋工具执行累计——并行父流时间不入账；
-     * 无验证 = 0——四桶齐备，缺省出 0 不缺席；验证机器本体退役归 #605）。 */
-    private static long verifyMs(StageDurations durations) {
-        return durations.subagentMs().getOrDefault(VERIFY_SOURCE_KEY, 0L);
-    }
-
-    /** verify 源账在阶段耗时事实里的分桶键（= 原验证子智能体声明名，#604 委派机制退役后键值无新写入、读面留到 #605 清账）。 */
-    private static final String VERIFY_SOURCE_KEY = "verify";
-
-    /**
-     * 验证统计（#352 收尾卡轮末统计；#424 片轻验载荷口径）：
-     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[], budgetExhausted? }}
-     * ——事实源＝verify 子智能体的 report_verification 登记：末轮快照的总项数/
-     * 未过数/三面分布/未过项名（修不了如实标注的落点）＋本场验证轮数（修复—
-     * 复验环如实：>1＝修后复验过）＋轮次预算用尽标注（达预算仍有未过＝停止
-     * 修复—复验的超预算如实呈现）。验证子智能体未跑/未登记（null）返回
-     * {@code null}（closing 不携带 verification 键——防御性保留；验证机器本体
-     * 退役归 #605）。
-     */
-    private static Map<String, Object> verificationPayload(VerificationFacts.Facts facts,
-            int roundBudget) {
-        if (facts == null || facts.lastRound().isEmpty()) {
-            return null;
-        }
-        List<VerificationFacts.Check> lastRound = facts.lastRound();
-        Map<String, Integer> faceCounts = new LinkedHashMap<>();
-        List<String> failedItems = new ArrayList<>();
-        for (String face : VerificationFacts.FACES) {
-            faceCounts.put(face, 0);
-        }
-        for (VerificationFacts.Check check : lastRound) {
-            faceCounts.merge(check.face(), 1, Integer::sum);
-            if (!check.ok()) {
-                failedItems.add(check.name());
-            }
-        }
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put(AgentEventTypes.VERIFICATION_TOTAL_FIELD, lastRound.size());
-        payload.put(AgentEventTypes.VERIFICATION_FAILED_FIELD, failedItems.size());
-        payload.put(AgentEventTypes.VERIFICATION_FACES_FIELD, faceCounts);
-        payload.put(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, facts.rounds());
-        payload.put(AgentEventTypes.VERIFICATION_FAILED_ITEMS_FIELD, failedItems);
-        if (facts.budgetExhausted(roundBudget)) {
-            payload.put(AgentEventTypes.VERIFICATION_BUDGET_EXHAUSTED_FIELD, true);
-        }
-        return payload;
     }
 
     /** 被押后的 run-finish 加挂 closing 载荷（载荷拼装归 {@link #closingPayload}）。 */

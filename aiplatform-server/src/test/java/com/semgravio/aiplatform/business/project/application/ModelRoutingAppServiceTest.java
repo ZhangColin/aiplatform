@@ -35,37 +35,32 @@ class ModelRoutingAppServiceTest {
      * 结构性信号开关缺省关 #454——文件面/规模标签不参与升档判定，仅失败重试升档）。 */
     private static AgentConfigAppService.EffectiveConfig routedDefault() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, false, true, null, null, null, false, false, null, 3, 2, true, true,
-                true);
+                true, true, false, true, null, null, null, false, false);
     }
 
     /** 路由开＋结构性信号开关开（#454：true＝恢复文件面阈值/规模标签映射判据）。 */
     private static AgentConfigAppService.EffectiveConfig routedWithSignalsOn() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, false, true, null, null, null, true, true, null, 3, 2, true, true,
-                true);
+                true, true, false, true, null, null, null, true, true);
     }
 
     /** 路由开＋人工档覆盖（覆盖＝兜底基础档——路由判定仍可升强档）。 */
     private static AgentConfigAppService.EffectiveConfig routedWithOverride() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, true, true, null, null, null, false, false, null, 3, 2, true, true,
-                true);
+                true, true, true, true, null, null, null, false, false);
     }
 
     /** 路由关＋人工档覆盖（钉死位——人工档恒生效）。 */
     private static AgentConfigAppService.EffectiveConfig pinned() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "pro",
-                true, true, true, false, null, null, null, false, false, null, 3, 2, true, true,
-                true);
+                true, true, true, false, null, null, null, false, false);
     }
 
     /** 路由开＋信号开＋自定义映射（升档规模标签集＝中＋大）、文件面阈值与强档覆盖。 */
     private static AgentConfigAppService.EffectiveConfig routedWithMapping(
             Set<SliceSizeLabel> escalating, Integer fileThreshold, String strongModelConfigKey) {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, false, true, strongModelConfigKey, fileThreshold, escalating, true, true,
-                null, 3, 2, true, true, true);
+                true, true, false, true, strongModelConfigKey, fileThreshold, escalating, true, true);
     }
 
     // ---------- 协同口径：路由判定优先、人工覆盖兜底；钉死位＝路由关 ----------
@@ -227,8 +222,7 @@ class ModelRoutingAppServiceTest {
     void given_routing_off_without_override_when_decide_then_enum_default_even_on_failure() {
         AgentConfigAppService.EffectiveConfig disabledDefault =
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                        true, true, false, false, null, null, null, false, false, null, 3, 2,
-                        true, true, true);
+                        true, true, false, false, null, null, null, false, false);
         ModelRoutingAppService.ConfigSelection selection =
                 ModelRoutingAppService.decide(disabledDefault, 3, 2, 999, null);
         assertThat(selection.modelConfigKey()).isEqualTo("flash");
@@ -312,7 +306,7 @@ class ModelRoutingAppServiceTest {
         // 两开关独立可翻转：文件面开＋规模标签关——文件面越阈升、大片不升
         AgentConfigAppService.EffectiveConfig fileOnly = new AgentConfigAppService
                 .EffectiveConfig("prompt", "flash", true, true, false, true, null, null, null,
-                        true, false, null, 3, 2, true, true, true);
+                        true, false);
         assertThat(ModelRoutingAppService.decide(fileOnly, 1, 1,
                 ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD, SliceSizeLabel.LARGE)
                 .reasons()).containsExactly("文件面超出阈值（"

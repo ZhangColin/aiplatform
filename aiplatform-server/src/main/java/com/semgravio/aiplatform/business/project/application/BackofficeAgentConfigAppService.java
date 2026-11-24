@@ -54,11 +54,10 @@ import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelS
 public class BackofficeAgentConfigAppService {
 
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
-     * ＋路由结构性信号两开关关〔#454 缺省〕＋收口两闸关〔#435 翻转缺省〕＋基座
-     * lint 阻断关〔#541 让路缺省〕」）。 */
+     * ＋路由结构性信号两开关关〔#454 缺省〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空配置覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -89,9 +88,9 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 配置全量写（PUT）：命令归一（覆盖两件空白＝null 清空、开关缺省＝增强工具/
-     * 路由缺省 true、收口三闸缺省 false〔#435 翻转——null＝闸关〕）
-     * → 与现行值面比对：无动即幂等回执（不落痕不写行）→ 有动即整行 upsert＋
-     * 留痕（变更前全量快照→变更后全量快照＋操作者）同事务落。回执与 GET 同形。
+     * 路由缺省 true）→ 与现行值面比对：无动即幂等回执（不落痕不写行）→ 有动即
+     * 整行 upsert＋留痕（变更前全量快照→变更后全量快照＋操作者）同事务落。
+     * 回执与 GET 同形。
      *
      * @throws ApplicationException PRJ_033 智能体不存在；PRJ_034 操作者缺（写
      *                              操作必留痕，无落空通道）
@@ -114,19 +113,12 @@ public class BackofficeAgentConfigAppService {
                 // 升档判定；失败重试信号不受两开关影响、常开）
                 safe.routingFileCountSignalEnabled() != null && safe.routingFileCountSignalEnabled(),
                 safe.routingSizeLabelSignalEnabled() != null && safe.routingSizeLabelSignalEnabled(),
-                blankToNull(safe.verifyModelConfigKey()), requireValidRoundBudget(safe.verifyRoundBudget()),
-                requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
-                safe.verificationPresenceGateEnabled() != null && safe.verificationPresenceGateEnabled(),
-                safe.finalVerificationGateEnabled() != null && safe.finalVerificationGateEnabled(),
-                // #541 缺省口径：基座 lint 强制档阻断 null＝关（让路形态——违规只标注）
-                safe.robustLintBlockingEnabled() != null && safe.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改配置写的配置键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
         // 枚举/代码正本，装配面自会校验）
         requireBindableConfig(next.modelConfigKey());
         requireBindableConfig(next.routingStrongModelConfigKey());
-        requireBindableConfig(next.verifyModelConfigKey());
         AgentOperationalConfig persisted =
                 persistIfChanged(profile.key(), current, next, operator);
         return BackofficeAgentConfigResponse.of(profile,
@@ -177,11 +169,6 @@ public class BackofficeAgentConfigAppService {
                 current.routingEnabled(), current.routingStrongModelConfigKey(),
                 current.routingFileCountThreshold(), current.routingEscalatingSizeLabels(),
                 current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
-                current.verifyModelConfigKey(), current.verifyRoundBudget(),
-                current.finalVerifyFixBudget(),
-                current.verificationPresenceGateEnabled(),
-                current.finalVerificationGateEnabled(),
-                current.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -221,12 +208,12 @@ public class BackofficeAgentConfigAppService {
         EdgeModelUpdateCommand safe = command == null ? EMPTY_EDGE_COMMAND : command;
         AgentOperationalConfig current = currentOf(point.key());
         // 值面仅配置：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态、
-        // 结构性信号两开关关〔#454 缺省〕、收口两闸开、基座 lint 阻断关——边缘行
-        // 不参与任何 run 判定，开关列取何值恒无消费）
+        // 结构性信号两开关关〔#454 缺省〕——边缘行不参与任何 run 判定，开关列取
+        // 何值恒无消费）
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelConfigKey()),
-                true, true, true, null, null, null, false, false, null, null, null, true, true,
-                false, operator.id(), operator.name(), null);
+                true, true, true, null, null, null, false, false,
+                operator.id(), operator.name(), null);
         requireBindableConfig(next.modelConfigKey()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
                 persistIfChanged(point.key(), current, next, operator);
@@ -282,20 +269,11 @@ public class BackofficeAgentConfigAppService {
                 current.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(current.routingEscalatingSizeLabels()),
                 current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
-                current.verifyModelConfigKey(), current.verifyRoundBudget(),
-                current.finalVerifyFixBudget(),
-                current.verificationPresenceGateEnabled(),
-                current.finalVerificationGateEnabled(),
-                current.robustLintBlockingEnabled(),
                 next.systemPrompt(), next.modelConfigKey(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelConfigKey(),
                 next.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
                 next.routingFileCountSignalEnabled(), next.routingSizeLabelSignalEnabled(),
-                next.verifyModelConfigKey(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
-                next.verificationPresenceGateEnabled(),
-                next.finalVerificationGateEnabled(),
-                next.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -318,36 +296,7 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
                 || !Objects.equals(current.routingEscalatingSizeLabels(), next.routingEscalatingSizeLabels())
                 || current.routingFileCountSignalEnabled() != next.routingFileCountSignalEnabled()
-                || current.routingSizeLabelSignalEnabled() != next.routingSizeLabelSignalEnabled()
-                || !Objects.equals(current.verifyModelConfigKey(), next.verifyModelConfigKey())
-                || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget())
-                || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget())
-                || current.verificationPresenceGateEnabled() != next.verificationPresenceGateEnabled()
-                || current.finalVerificationGateEnabled() != next.finalVerificationGateEnabled()
-                || current.robustLintBlockingEnabled() != next.robustLintBlockingEnabled();
-    }
-
-    /**
-     * 单场验证轮次预算校验（#424）：null＝清空回落代码缺省不校验；非空须 1-20
-     * 整数（越界 PRJ_078——错值写不进去，同配置键即时校验口径）。
-     */
-    private static Integer requireValidRoundBudget(Integer budget) {
-        if (budget != null && (budget < 1 || budget > 20)) {
-            throw new ApplicationException(ProjectMessage.VERIFY_ROUND_BUDGET_INVALID, budget);
-        }
-        return budget;
-    }
-
-    /**
-     * 整轨终验修复预算校验（#427）：null＝清空回落代码缺省不校验；非空须 0-10
-     * 整数（越界 PRJ_080——错值写不进去，同配置键即时校验口径；0＝不起修复 run
-     * 的合法运营选择）。
-     */
-    private static Integer requireValidFinalVerifyFixBudget(Integer budget) {
-        if (budget != null && (budget < 0 || budget > 10)) {
-            throw new ApplicationException(ProjectMessage.FINAL_VERIFY_FIX_BUDGET_INVALID, budget);
-        }
-        return budget;
+                || current.routingSizeLabelSignalEnabled() != next.routingSizeLabelSignalEnabled();
     }
 
     /**

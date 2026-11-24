@@ -89,8 +89,8 @@ public class DemoVersionAppService {
     }
 
     /**
-     * 迭代轮收口成版（系统实动的修正/更新 run 收口——递增成版；调用侧只在
-     * finish_edit changed=true 时调用，无新状态即无新版本）。
+     * 迭代轮收口成版（系统实动的修正/更新 run 收口——递增成版；调用侧只在平台
+     * 可观测文件改动非空时调用，无新状态即无新版本）。
      *
      * @param prdVersionNo 起跑时最新 PRD 版本锚（无版本记行起跑 = null）
      */

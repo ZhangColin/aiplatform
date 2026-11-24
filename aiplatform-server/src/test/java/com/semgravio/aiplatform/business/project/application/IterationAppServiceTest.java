@@ -74,7 +74,7 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * coder-{projectId}-fix-{runId}（#114）+ 同工作区 + EXECUTOR 配置 + live + 计量 dims
  * + 知识命中前置注入 +
  * 失败自动静默重试——run 失败为唯一失败终态）；run 在途时新任务排队（不即派）、当前 run 收口后
- * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以 finish_edit 工具事实
+ * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以平台机器判据双件
  * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」事件，
  * changed=true 现有收口行为不回归）；超限终态恢复出口（#48：重派终态那场的交接
  * 物，正常态 / 在途 / 排队均不可达）；交接物三要素（#52：判定结果 + PRD 路径
@@ -99,13 +99,6 @@ class IterationAppServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    private FinishEditFacts finishFixFacts;
-
-    /** 验证事实登记口（#420 豁免路径脚本：模拟 verify 子智能体轮内 existing 确认登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
 
     /** 停止面（#359 生成取消）——停止请求的注入口（测试经公开 requestStop 触发）。 */
     @Autowired
@@ -179,30 +172,12 @@ class IterationAppServiceTest {
         return tracks;
     }
 
-    /** 脚本化智能体边界：run 正常返回即调 finish_edit（coder 会话才记——忠实于
-     * 工具面按角色发放的事实），收口判定随脚本给定。 */
-    private void givenConverseFinishing(Boolean changed, String text) {
+    /** 脚本化智能体边界：run 正常返回即收口（内核座单发——收口判定归平台机器判据双件）。 */
+    private void givenConverseFinishing() {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                finishFixFacts.record(command.workspaceId(), changed, text);
-                verifyRan(command);
-            }
             return new AgentReply(command.runId(), "修正完成");
         });
-    }
-
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 片轻验；#435 起验证非收口要件、观测面
-     * 不动）：更新轨
-     * 收口须验证在场——coder 会话登记一次（run 起跑清残留后逐 run 重登）。零验证
-     * 场景的测试不调用本位。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
-        }
     }
 
     /**
@@ -214,7 +189,7 @@ class IterationAppServiceTest {
     }
 
     private void givenConverseSucceeds() {
-        givenConverseFinishing(true, "已按意见修正");
+        givenConverseFinishing();
     }
 
     @Test
@@ -284,12 +259,8 @@ class IterationAppServiceTest {
         CountDownLatch releaseRun = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
             runInFlight.countDown();
             releaseRun.await();
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             return new AgentReply(command.runId(), "修正完成");
         });
 
@@ -474,10 +445,6 @@ class IterationAppServiceTest {
         AtomicBoolean channelRecovered = new AtomicBoolean(true);
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            if (channelRecovered.get() && command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            }
             return new AgentReply(command.runId(), "已按意见修正");
         }).when(agentClient).converse(any(), any());
         tracks.remove(0).run();
@@ -517,12 +484,6 @@ class IterationAppServiceTest {
         // doAnswer 形（when() 形会先调一次在桩的停止脚本，误触发停止）
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
-            if (command.sessionId().startsWith("coder-")) {
-                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            }
             return new AgentReply(command.runId(), "已按意见修正");
         }).when(agentClient).converse(any(), any());
         tracks.remove(0).run();
@@ -533,7 +494,7 @@ class IterationAppServiceTest {
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
-    // ---------- 结束工具收口（#46：finish_edit 事实观测；判定呈现归 #88 收口扩载） ----------
+    // ---------- 收口判据（平台机器双件；收口扩载归 #88） ----------
 
     @Test
     void given_fix_run_when_closes_then_demo_seed_applied_and_failure_not_blocking() {
@@ -541,7 +502,7 @@ class IterationAppServiceTest {
         // 真假两态都收口不炸；施用失败也不阻断收工（轨道释放、下一场可派）
         Long projectId = persistedGeneratedProject("9916");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(true, "已按意见修正");
+        givenConverseFinishing();
         when(workspaceLifecycleAppService.exec(any(),
                 argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh"))))
                 .thenThrow(new IllegalStateException("容器 exec 失败"));
@@ -555,49 +516,15 @@ class IterationAppServiceTest {
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
-    @Test
-    void given_finish_edit_changed_false_when_fix_closes_then_normal_close_no_unchanged_frame() {
-        // 灵魂用例（#46 → #82 收缩）：脚本化结束工具 changed=false = 正常收口——
-        // 判定结果的呈现归收口扩载权威化（#88 收尾卡判定行），本层零事件
-        Long projectId = persistedGeneratedProject("9908");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(false, "纯文档性修订，系统现状已满足");
-
-        appService.startFixRun(projectId, "把首页标题改成「关于我们」", null);
-        tracks.remove(0).run();
-
-        // fix-unchanged 已退役（#82）：两态收口都不发
-        verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_finish_edit_changed_true_when_fix_closes_then_no_unchanged_frame() {
-        Long projectId = persistedGeneratedProject("9909");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(true, "已把主色调改为绿色");
-
-        appService.startFixRun(projectId, "把主色调改成绿色", null);
-        tracks.remove(0).run();
-
-        // changed=true：现有收口行为不回归——轨道正常收工
-        verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
     // ---------- 收口扩载（#88：判定行 + 变更清单 + 轮末统计，服务端权威） ----------
 
     /**
      * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 解说部件 → run-finish）
-     * + finish_edit 事实 + 回复携带文件变更观察（真实客户端的 AgentReply.changes 面）。
+     * + 回复携带文件变更观察（真实客户端的 AgentReply.changes 面）。
      */
-    private void givenConverseClosing(Boolean changed, String finishEditText,
-            List<FileChange> changes) {
+    private void givenConverseClosing(List<FileChange> changes) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -605,7 +532,6 @@ class IterationAppServiceTest {
                     Map.of(AgentEventTypes.PART_TEXT_FIELD, "正在按意见更新系统")));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            finishFixFacts.record(command.workspaceId(), changed, finishEditText);
             return new AgentReply(command.runId(), "修正完成", null, changes);
         });
     }
@@ -623,7 +549,7 @@ class IterationAppServiceTest {
                 4821000000000000002L, projectId, "/design/home-1.html", "run-final-1",
                 "{\"--primary\": \"#166534\"}");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(true, "按定稿设计统一配色", List.of(
+        givenConverseClosing(List.of(
                 new FileChange("/src/app/globals.css", 6, 2)));
         when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
                 .thenReturn(new ExecResultResponse("123", "", 0));
@@ -660,61 +586,14 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
-        // #425 更新轨同盖（#471 gap 收口改口径；#541 让路后两档同为标注缺省）：
-        // 基座 lint 预置档（会话件自写）不触发修轮——软档违规不烧 attempt+1 失败
-        // 升档，直接随收尾卡标注、不拦收口（强制档缺省同形＝只标注；阻断形态＝
-        // #541 运营开关回滚，生成轨用例承载）
-        Long projectId = persistedGeneratedProject("9961");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(true, "加了登录会话", List.of(
-                new FileChange("/src/app/login/actions.ts", 8, 1)));
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        // 强制档净、预置档恒余（手写 cookie 会话）——grep 前置判据防误截 AGENTS.md
-        // 写入命令（其正文含件路径字样）
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
-                        && cmd.command().contains("createClient"))))
-                .thenReturn(new ExecResultResponse("", "", 1));
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
-                        && cmd.command().contains("pbkdf2"))))
-                .thenReturn(new ExecResultResponse(
-                        "./src/app/login/actions.ts:8:const jar = await cookies();\n", "", 0));
-
-        appService.startFixRun(projectId, "加登录", null);
-        tracks.remove(0).run();
-
-        // 预置档不触发修轮：一试即收口（无修轮重试）、无失败终态；收尾卡
-        // robustKitLint 如实标注（violations＋预置档余项、无强制档、无 retried
-        // ——修轮没发生，叙事不伪造纠偏过程）
-        verify(agentClient, times(1)).converse(any(), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> robustLint = (Map<String, Object>) closing.get("robustKitLint");
-        assertThat(robustLint)
-                .containsEntry("status", "violations")
-                .doesNotContainKey("retried")
-                .doesNotContainKey("mandatory");
-        assertThat((Map<String, Object>) robustLint.get("preset"))
-                .containsEntry("total", 1);
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
         // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/
         // 变更清单/统计）且判定行为服务端权威值（PRD 改没改 = 交接物修订说明、
-        // 系统改没改 = finish_edit 工具事实，不由模型自报）；清单与统计源 = 工具
+        // 系统改没改 = 平台可观测文件改动事实，不由模型自报）；清单与统计源 = 工具
         // 调用观察（文件级）+ run 时长
         Long projectId = persistedGeneratedProject("9915");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(true, "下单页新增配送范围说明", List.of(
+        givenConverseClosing(List.of(
                 new FileChange("/src/pages/Orders.jsx", 12, 3),
                 new FileChange("/src/App.jsx", 4, 0)));
 
@@ -728,7 +607,7 @@ class IterationAppServiceTest {
         Map<String, Object> closing =
                 (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
         // 系统改没改＝平台可观测文件改动事实（#601 内核接线）；判定行 systemNote 为
-        // 内核收口叙事（双件判据全过——不再取 finish_edit 自报文本）
+        // 内核收口叙事（双件判据全过——不取模型自报文本）
         assertThat(closing)
                 .containsEntry("summary", "修订了需求文档，并更新了系统")
                 .containsEntry("prdChanged", true)
@@ -746,14 +625,12 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_scripted_update_round_when_fix_closes_then_version_committed_and_hash_in_closing() {
-        // 版本锚定（#91）：收口自动成版——commit hash 回填 closing 的 version 键
-        // （SSE 扩载与对话史落库同载荷，版本详情复用）
+    void given_scripted_update_round_when_fix_closes_then_closing_has_no_version_anchor() {
+        // 收口自动成版（Run-Id trailer）随审查与收口组退役（#605）：收尾卡不再携
+        // version 键、收口路径不再提交 git 版本（版本语义归阶段四重建）
         Long projectId = persistedGeneratedProject("9917");
         List<Runnable> tracks = givenTrackQueued();
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\n", "", 0));
-        givenConverseClosing(true, "下单页新增配送范围说明", List.of(
+        givenConverseClosing(List.of(
                 new FileChange("/src/pages/Orders.jsx", 12, 3)));
 
         appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
@@ -764,18 +641,23 @@ class IterationAppServiceTest {
                 payload.capture());
         Map<String, Object> closing =
                 (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(closing).containsEntry("version", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0");
+        assertThat(closing).doesNotContainKey("version");
+        ArgumentCaptor<WorkspaceExecCommand> execs =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(0)).exec(any(), execs.capture());
+        assertThat(execs.getAllValues().stream().map(WorkspaceExecCommand::command))
+                .noneSatisfy(command -> assertThat(command).contains("git commit"));
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void given_no_file_changes_when_fix_closes_then_closing_judgment_reflects_no_system_change() {
         // 判定行的另一半（#88）：系统无需改动——平台可观测文件改动事实为空
-        // （#601 内核接线：不再依赖 finish_edit 自报，模型说明文本不进判定行）；
+        // （#601 内核接线：不依赖模型自报，说明文本不进判定行）；
         // 无修订说明的轮 prdChanged=false
         Long projectId = persistedGeneratedProject("9916");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(false, "页面上没有写死配送范围，都以文档为准", List.of());
+        givenConverseClosing(List.of());
 
         appService.startFixRun(projectId, "把配送范围改成全国", null);
         tracks.remove(0).run();
@@ -899,7 +781,7 @@ class IterationAppServiceTest {
     @Test
     void given_handoffs_mixed_revision_when_merged_then_unrevised_round_kept_in_place() {
         // 有改有不改：未修订轮不丢不串位——轮次保留、summary 槽 null（占位呈现归
-        // fixRunPrompt，数据层不造「假说明」）；派发序两侧各验一次
+        // kernelFixRunPrompt，数据层不造「假说明」）；派发序两侧各验一次
         IterationAppService.FixHandoff unrevisedFirst = IterationAppService.FixHandoff.merge(List.of(
                 singleHandoff("意见A", null),
                 singleHandoff("意见B", "B轮修订：改Y")));
@@ -964,10 +846,6 @@ class IterationAppServiceTest {
                 .thenThrow(persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    finishFixFacts.record(command.workspaceId(), true, "恢复轮完成修正");
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
@@ -1066,10 +944,6 @@ class IterationAppServiceTest {
                 .thenThrow(persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    finishFixFacts.record(command.workspaceId(), true, "合并续派场完成修正");
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
@@ -1139,7 +1013,7 @@ class IterationAppServiceTest {
         givenWorkspacePrd("# PRD");
         List<Runnable> tracks = givenTrackQueued();
         // #601 内核接线：系统改没改＝回复携带的平台可观测文件改动事实——实动才成版
-        givenConverseClosing(true, "已按意见修正", List.of(new FileChange("/src/App.jsx", 1, 0)));
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
 
         IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表按时间倒序", null);
         tracks.remove(0).run();
@@ -1162,10 +1036,10 @@ class IterationAppServiceTest {
 
     @Test
     void given_unchanged_fix_run_when_close_then_no_demo_version() {
-        // changed=false＝无新系统状态即无新版本（判定无需改动不成版——不造空版本）
+        // 系统无改动（平台可观测文件改动为空）＝照常收口、无新版本（#605 起收口不再自动成版）
         Long projectId = persistedGeneratedProject("9951");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(false, "现状已满足意见");
+        givenConverseFinishing();
 
         appService.startFixRun(projectId, "列表按时间倒序", null);
         tracks.remove(0).run();

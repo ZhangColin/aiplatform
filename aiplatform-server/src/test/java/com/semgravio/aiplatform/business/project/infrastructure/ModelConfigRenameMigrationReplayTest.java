@@ -107,7 +107,9 @@ class ModelConfigRenameMigrationReplayTest {
                 + " 'deepseek-flash', 't554 drill: 401 AuthenticationException',"
                 + " 'run-t554', 'sess-t554')");
 
-        migrate();
+        // 本用例钉 V81 改名终态：后续迁移（V82–V84 拆除旧机制列）不参与本断言；
+        // 全新库全链回放终态由下一用例覆盖
+        migrateTo(MIGRATION_VERSION);
 
         // ① 表族改名到位：新名在、旧名零残留
         assertThat(modelConfigFamilyTables()).containsExactlyInAnyOrder(

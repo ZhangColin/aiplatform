@@ -371,8 +371,7 @@ class ProfileToolkitSupplierTest {
             for (boolean fu : new boolean[]{true, false}) {
                 String spec = new AgentConfigAppService.EffectiveConfig(
                         "prompt", "model", ws, fu,
-                        false, true, null, null, null, false, false, null, 3, 2, true,
-                        true, true).toolSpec();
+                        false, true, null, null, null, false, false).toolSpec();
                 assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
                 assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
             }

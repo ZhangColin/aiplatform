@@ -436,11 +436,11 @@ class DockerEnvironmentBackendTest {
                 + "res.end(fs.readFileSync(path.join(__dirname,'index.html')));}).listen(8081,'0.0.0.0');\n"
                 + "SNAP_EOF");
         execIn(provision.handle(), "printf '<html>v1</html>' > /workspace/index.html");
-        String hash1 = commit(provision.handle(), "首次生成了系统", "111");
+        String hash1 = commit(provision.handle(), "首次生成了系统");
 
         // 改到 v2 → 成版 v2（主容器现态是 v2）
         execIn(provision.handle(), "printf '<html>v2</html>' > /workspace/index.html");
-        String hash2 = commit(provision.handle(), "更新了系统", "222");
+        String hash2 = commit(provision.handle(), "更新了系统");
         assertThat(hash2).isNotEqualTo(hash1);
 
         // 主容器起服 v2（照 run 执行体约定：8081 后台常驻）
@@ -495,7 +495,7 @@ class DockerEnvironmentBackendTest {
         WorkspaceId workspaceId = WorkspaceId.generate();
         provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
         execIn(provision.handle(), "printf '<html>v1</html>' > /workspace/index.html");
-        String hash1 = commit(provision.handle(), "首次生成了系统", "111");
+        String hash1 = commit(provision.handle(), "首次生成了系统");
 
         SnapshotHandle snap = backend.startSnapshot(provision.handle(), "483920104737", hash1);
         assertThat(docker("inspect", snap.containerName()).exitCode())
@@ -590,12 +590,14 @@ class DockerEnvironmentBackendTest {
         throw new AssertionError("容器重启后 pg 未在期限内就绪");
     }
 
-    /** 幂等 init + 成版提交（照 WorkspaceVersions 纯函数——exclude 挡住 data/pg 重物）。 */
-    private static String commit(WorkspaceHandle handle, String summary, String runId) {
+    /** 幂等 init + 手动提交（照 WorkspaceVersions 纯函数——exclude 挡住 data/pg 重物）。 */
+    private static String commit(WorkspaceHandle handle, String summary) {
         ExecResult ensured = execIn(handle, WorkspaceVersions.ensureRepoCommand());
         assertThat(ensured.exitCode()).as("仓库初始化应成功：%s", ensured.stderr()).isZero();
-        ExecResult committed = execIn(handle, WorkspaceVersions.commitCommand(summary, runId));
-        assertThat(committed.exitCode()).as("成版提交应成功：%s", committed.stderr()).isZero();
+        ExecResult committed = execIn(handle, "cd /workspace && git add -A"
+                + " && git commit -q --allow-empty -m '" + summary + "'"
+                + " && git rev-parse HEAD");
+        assertThat(committed.exitCode()).as("提交应成功：%s", committed.stderr()).isZero();
         return committed.stdout().trim();
     }
 

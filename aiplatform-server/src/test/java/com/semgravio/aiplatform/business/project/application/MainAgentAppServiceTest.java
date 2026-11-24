@@ -113,13 +113,6 @@ class MainAgentAppServiceTest {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private FinishEditFacts finishFixFacts;
-
-    /** 验证事实登记口（#424 片轻验常开硬门脚本位：模拟 verify 子智能体轮内登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
-
-    @Autowired
     private PrdRevisionFacts prdRevisions;
 
     /** 快道事实登记口（#542：模拟轮内 savePrd 带 fastLane=true 的工具调用事实）。 */
@@ -236,30 +229,13 @@ class MainAgentAppServiceTest {
         }).when(sessionExecutor).submitGeneration(any(), any());
     }
 
-    /** 脚本化智能体边界（#46 收口以 finish_edit 事实为准）：主智能体正常回复；
-     * 自动派发的修正 run 收口即调 finish_edit（changed=true——coder 会话才记，
-     * 忠实于工具面）；#424 片轻验常开后 coder 会话同时登记验证（收口须在场）。 */
+    /** 脚本化智能体边界：主智能体正常回复；自动派发的修正 run 内核收口（平台机器
+     * 判据双件——#604 起不再依赖结束工具自报）。 */
     private void givenConverseMainRepliesAndExecutorFinishes(String mainReply) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-                verifyRan(command);
-                verifyRan(command);
-            }
             return new AgentReply(command.runId(), mainReply);
         });
-    }
-
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 片轻验常开硬门后的缺省脚本位）：修正/
-     * 生成 run 收口须验证在场——coder 会话登记一次（run 起跑清残留后逐 run 重登）。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
-        }
     }
 
     /** 脚本化智能体边界（#52 修订事实观测）：主智能体轮内调 savePrd(content,
@@ -274,9 +250,6 @@ class MainAgentAppServiceTest {
                 }
                 return new AgentReply(command.runId(), "已按意见修订 PRD");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
     }
@@ -526,8 +499,6 @@ class MainAgentAppServiceTest {
                 }
                 return new AgentReply(command.runId(), "好的");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
         // 挂起事实脚本：开场提交放行 → 开场收口见挂起（不派）→ 答复收口无挂起（派）
@@ -895,8 +866,6 @@ class MainAgentAppServiceTest {
                 return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
                         "reply-77", List.of(Map.of("id", "tc-9", "name", "ask_user"))));
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
         when(agentClient.resume(any(), any())).thenAnswer(invocation ->
@@ -1022,8 +991,6 @@ class MainAgentAppServiceTest {
                 sedimentProposals.record(command.workspaceId(), SkillSlot.MAIN.key());
                 return new AgentReply(command.runId(), "好的（已记录一个可复用规则）");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
 
@@ -1082,8 +1049,6 @@ class MainAgentAppServiceTest {
                                 AgentEventTypes.WAIT_SUMMARY_FIELD, "主色调想要哪种绿？"))));
                 return new AgentReply(command.runId(), "先问一下");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
         when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
@@ -1201,8 +1166,6 @@ class MainAgentAppServiceTest {
                 }
                 return new AgentReply(command.runId(), "好的");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
 
@@ -1260,8 +1223,6 @@ class MainAgentAppServiceTest {
                 }
                 return new AgentReply(command.runId(), "好的");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
 
@@ -1537,8 +1498,6 @@ class MainAgentAppServiceTest {
                 fastLaneFacts.record(command.workspaceId()); // #542 快道（收敛令形态）
                 return new AgentReply(command.runId(), "已按意见修订 PRD");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
 
@@ -1660,8 +1619,6 @@ class MainAgentAppServiceTest {
             if (command.sessionId().startsWith("main-")) {
                 throw new IllegalStateException("对话轮失败"); // 首个（唯一）对话轮即炸
             }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         });
 
@@ -1709,8 +1666,6 @@ class MainAgentAppServiceTest {
                                 AgentEventTypes.WAIT_SUMMARY_FIELD, "主色调想要哪种绿？"))));
                 return new AgentReply(command.runId(), "先问一下");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成");
         }).when(agentClient).converse(any(), any());
         // 提交守卫放行 → 本轮收口观测见挂起（不派）→ 答复续跑收口观测无挂起（派）

@@ -119,7 +119,7 @@ public class DesignItem extends Auditable implements AggregateRoot<DesignItem, L
 
     /**
      * 定稿落位（#291，显式动作收口）：候选中锁定一稿——状态转已定稿、runId 锚
-     * 定稿收尾卡（版本 Run-Id trailer 对偶锚定）、finalizedPath 记选定稿。幂等
+     * 定稿收尾卡（Run-Id 成版提交已退役，#605）、finalizedPath 记选定稿。幂等
      * 覆写（再定稿即刷新——改稿产新代后重新锁定）。
      */
     public void finalize(String runId, String finalizedPath) {

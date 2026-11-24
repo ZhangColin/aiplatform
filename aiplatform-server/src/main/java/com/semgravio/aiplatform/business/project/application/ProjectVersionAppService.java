@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import java.util.List;
-import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
@@ -13,34 +12,29 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
-import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersion;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
-import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 版本用例（#91 版本层地基 + #93 回滚）：每轮 run 收口自动成版（容器内 git，
- * 版本正本 = git log，无便利表）+ 版本列表/详情读面 + 回滚到此（追加版本、
- * 只回代码不回数据）。
+ * 版本用例（#91 版本层地基 + #93 回滚）：版本正本 = git log，无便利表；版本
+ * 列表/详情读面 + 回滚到此（追加版本、只回代码不回数据）。
  *
- * <p><b>成版写口</b>：{@link #commitAtClosing} 由编码 run 尝试环的真收口块调用
- * （生成与更新同环；失败轮不到真收口、天然不成版）。失败 quietly 只记日志——
- * 照 {@code ConversationHistoryAppService.recordClosing} 先例，成版成败不绑架
- * run 收口（缺 version 键即本轮未成版，用户面无感，排查走日志）。</p>
+ * <p><b>成版写口已随审查与收口组退役（#605）</b>：run 收口自动成版（Run-Id
+ * trailer）与设计定稿成版提交一并出局——版本语义归阶段四重建（单轴时间线、
+ * 探活通过即自动成版）；本类保留读面与回滚写口（存量 Rollback-From 版本仍可
+ * 回），不新增版本。</p>
  *
- * <p><b>回滚写口</b>：{@link #rollback} 由用户显式触发（收尾卡「回滚到此」），
- * 与收口成版不同——失败如实上抛（用户面动作，不 quietly 吞），走环境故障
- * WSP_002。</p>
+ * <p><b>回滚写口</b>：{@link #rollback} 由用户显式触发，失败如实上抛（用户面
+ * 动作，不 quietly 吞），走环境故障 WSP_002。</p>
  *
  * <p><b>读面</b>：git log 实时读取（exec 不经业务事务，同 {@code ProjectQueryAppService}
- * 形制）；详情锚定收尾卡——版本的 Run-Id trailer 联接对话史 closing 条目（#89
- * 同载荷复用；回滚版本无 run，closing 为空）。</p>
+ * 形制）；详情锚定收尾卡（版本 runId 联接对话史 closing 条目——#605 后新版本
+ * 无 run，closing 为空）。</p>
  */
 @Service
 @Slf4j
@@ -48,48 +42,18 @@ public class ProjectVersionAppService {
 
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
-    private final ConversationEntryRepository entries;
     private final CodingRunTrack codingRunTrack;
 
     public ProjectVersionAppService(ProjectRepository projectRepository,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            ConversationEntryRepository entries, CodingRunTrack codingRunTrack) {
+            CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
-        this.entries = entries;
         this.codingRunTrack = codingRunTrack;
     }
 
     /**
-     * 收口自动成版：幂等 init（存量工作区与容器重建自愈同覆盖）→ 全量提交携
-     * Run-Id trailer（锚定收尾卡）。
-     *
-     * @return 成版 commit hash；成版失败返回 null（quietly——不绑架 run 收口）
-     */
-    public String commitAtClosing(Project project, String runId, String summary) {
-        return commitAtClosing(project.getWorkspaceId(), project.getId(), runId, summary);
-    }
-
-    /**
-     * 显式工作区成版（#351 切片并行——fork 副本收口提交到 fork 工作区，非项目主
-     * 工作区）：同一 git 管道（幂等 init → 全量提交携 Run-Id trailer → 回读 hash），
-     * 仅 exec 目标换为 fork 容器。失败 quietly 只记日志（同 {@link #commitAtClosing}）。
-     */
-    public String commitAtClosing(Long workspaceId, Long projectId, String runId, String summary) {
-        try {
-            execOrThrow(Long.toString(workspaceId), WorkspaceVersions.ensureRepoCommand(), "仓库初始化");
-            ExecResultResponse commit =
-                    execOrThrow(Long.toString(workspaceId), WorkspaceVersions.commitCommand(summary, runId), "成版提交");
-            return commit.stdout().trim();
-        } catch (RuntimeException e) {
-            log.error("[version] 项目 {} 收口成版失败（runId={}，run 收口不受影响）：{}",
-                    projectId, runId, e.toString());
-            return null;
-        }
-    }
-
-    /**
-     * 版本序列（git log 原生序：新→旧）。零版本（尚无收口成版）= 空列表非错误。
+     * 版本序列（git log 原生序：新→旧）。零版本 = 空列表非错误。
      *
      * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
      */
@@ -109,8 +73,8 @@ public class ProjectVersionAppService {
     }
 
     /**
-     * 版本详情：版本元数据 + 锚定的收尾卡载荷（Run-Id 联接对话史 closing 条目；
-     * 收尾卡缺位时 closing 为 null——落库缺口不遮版本事实）。
+     * 版本详情：版本元数据（closing 恒空——Version 与收尾卡的 Run-Id 联接随
+     * 收口成版提交退役，#605；字段留至阶段四版本重建）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_028 版本不存在（含非
      *                              hash 形态 ref——用户可控入参不进 shell）；
@@ -118,13 +82,7 @@ public class ProjectVersionAppService {
      */
     public VersionDetailResponse detail(Long projectId, String ref) {
         Project project = loadProject(projectId);
-        WorkspaceVersion version = resolveVersion(project, ref);
-        Map<String, Object> closing = entries
-                .findFirstByProjectIdAndRunIdAndKindOrderByIdDesc(
-                        projectId, version.runId(), ConversationEntryKind.CLOSING)
-                .map(ConversationEntry::getClosing)
-                .orElse(null);
-        return VersionDetailResponse.of(version, closing);
+        return VersionDetailResponse.of(resolveVersion(project, ref), null);
     }
 
     /**
@@ -140,7 +98,7 @@ public class ProjectVersionAppService {
      * （历史只追加不改写），数据不在此跟踪面故原样保留（回滚只回代码不回数据）。
      * 目标版本经寻址守卫（{@link #requireVersion}）——非成版 / 非 hex 一律 404
      * 且不触工作区；再经并发守卫（#100 {@link #requireRollbackSafe}）——在途 run
-     * 或脏工作树 409 拒绝。失败如实上抛（用户面动作，区别于收口成版的 quietly）。
+     * 或脏工作树 409 拒绝。失败如实上抛（用户面动作）。
      *
      * @return 追加出的新版本（回滚版本：runId 空、rollbackFrom 锚定源版本）
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_028 版本不存在（含非
@@ -167,7 +125,7 @@ public class ProjectVersionAppService {
         resolveVersion(project, ref);
     }
 
-    /** ref → 成版 commit 元数据（showCommand + 解析）；非成版 / 野 commit / 非 hex 一律 PRJ_028。 */
+    /** ref → 版本 commit 元数据（showCommand + 解析）；非版本 / 野 commit / 非 hex 一律 PRJ_028。 */
     private WorkspaceVersion resolveVersion(Project project, String ref) {
         ExecResultResponse result;
         try {
@@ -184,7 +142,7 @@ public class ProjectVersionAppService {
         }
         List<WorkspaceVersion> parsed = WorkspaceVersions.parseLog(result.stdout());
         if (parsed.isEmpty()) {
-            // rev-parse 过了但条目被过滤 = 野 commit（无 Run-Id trailer）——不是版本
+            // rev-parse 过了但条目被过滤 = 野 commit（无 Rollback-From trailer）——不是版本
             throw new ApplicationException(ProjectMessage.VERSION_NOT_FOUND);
         }
         return parsed.get(0);
@@ -214,17 +172,6 @@ public class ProjectVersionAppService {
     private ExecResultResponse exec(Project project, String command) {
         return workspaceLifecycleAppService.exec(
                 Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(command));
-    }
-
-    /** 成版写口的 exec：结果缺失/非零即失败（由 {@link #commitAtClosing} quietly 兜住）。 */
-    private ExecResultResponse execOrThrow(String workspaceId, String command, String what) {
-        ExecResultResponse result = workspaceLifecycleAppService.exec(
-                workspaceId, new WorkspaceExecCommand(command));
-        if (result == null || result.exitCode() != 0) {
-            throw new IllegalStateException(what + "失败: "
-                    + (result == null ? "exec 无结果" : result.stderr()));
-        }
-        return result;
     }
 
     private Project loadProject(Long projectId) {

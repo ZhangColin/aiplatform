@@ -160,9 +160,10 @@ public class BackofficeProjectController {
     @GetMapping("/{id}/versions")
     @Operation(summary = "版本列表（后台面，新→旧）",
             description = "口径照用户面版本读口：git log 即版本序列（正本＝容器内 git log 直读，"
-                    + "无库表）——每轮编码 run 收口自动成版（commit 主题 = 收口摘要、"
-                    + "Run-Id trailer 锚定收尾卡）；回滚版本 runId 空、rollbackFrom 锚定"
-                    + "源版本。排序新→旧定死；零版本（尚无收口）= 空列表非错误。"
+                    + "无库表）——带 Rollback-From trailer 的版本 commit 列入序列（Run-Id"
+                    + " 成版提交已随审查与收口组退役 #605，本阶段不自动成版，版本语义归阶段四"
+                    + "重建）；回滚版本 runId 空、rollbackFrom 锚定源版本。排序新→旧定死；"
+                    + "零版本 = 空列表非错误。"
                     + "「上周五还好好的」按版本锚点回看的入口。归档项目照读。"
                     + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
     @ErrorCodes({"PRJ_001", "WSP_002"})
@@ -173,9 +174,9 @@ public class BackofficeProjectController {
     @GetMapping("/{id}/versions/{ref}")
     @Operation(summary = "版本详情（后台面，锚定收尾卡）",
             description = "口径照用户面版本详情：版本元数据（hash / 摘要 / 锚定 run / 成版时刻）＋"
-                    + "收尾卡载荷（Run-Id 联接对话史 closing 条目，#88 同载荷复用；收尾卡"
-                    + "缺位时 closing 为 null）＋rollbackFrom（回滚版本锚定源版本、runId 空；"
-                    + "run 版本反之）。ref = commit hash（hex 40 位）——非 hash 形态"
+                    + "收尾卡载荷（Run-Id 联接随成版提交退役 #605，closing 恒空；字段契约"
+                    + "留至阶段四版本重建）＋rollbackFrom（回滚版本锚定源版本、runId 空）。"
+                    + "ref = commit hash（hex 40 位）——非 hash 形态"
                     + "404 PRJ_028 且不触工作区（shell 注入防线）。归档项目照读。"
                     + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
     @ErrorCodes({"PRJ_001", "PRJ_028", "WSP_002"})

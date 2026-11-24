@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  AlertTriangle,
   Check,
   ChevronDown,
   Clock3,
@@ -9,9 +8,7 @@ import {
   FileCode2,
   FileText,
   Image as ImageIcon,
-  ListChecks,
   Monitor,
-  PackageCheck,
   Palette,
   PenLine,
   RotateCcw,
@@ -34,9 +31,6 @@ import { useRollbackVersion, useVersionViewSession } from "@/hooks/use-version";
 import type {
   ClosingDraft,
   DesignLintClosing,
-  KnownDefectsClosing,
-  RobustKitLintClosing,
-  RobustLintTier,
   WorkClosing,
 } from "@/lib/store/chat";
 import { rawFileUrl } from "@/lib/projects/files";
@@ -49,20 +43,6 @@ import { VersionViewDialog } from "./version-view-dialog";
 const VISIBLE_FILES = 5;
 /** 稿清单默认可见条数（其余收进「查看全部」——多稿候选可长，卡不无限长）。 */
 const VISIBLE_DRAFTS = 5;
-
-/** 验证三面的用户面标签（#352：browser/db/log → 界面/落库/日志——hover 明细用）。 */
-const VERIFICATION_FACE_LABELS: Record<string, string> = {
-  browser: "界面",
-  db: "落库",
-  log: "日志",
-};
-
-/** 验证三面分布的 hover 明细（「界面 2 · 落库 2 · 日志 1」；未知面按原名如实呈现）。 */
-function verificationFacesTitle(faces: Record<string, number>): string {
-  return Object.entries(faces)
-    .map(([face, count]) => `${VERIFICATION_FACE_LABELS[face] ?? face} ${count}`)
-    .join(" · ");
-}
 
 /** 稿形态 → 图标（html＝界面稿〔可交互轻页面〕/ image＝图像稿〔平面位图〕）。 */
 function DraftIcon({ media }: { media: ClosingDraft["media"] }) {
@@ -207,132 +187,6 @@ function DesignLintArea({ lint }: { lint: DesignLintClosing }) {
   );
 }
 
-/** 基座 lint 规则中文名（用户面不露工程码；件用法指引原文经行 hover 可见）。 */
-const ROBUST_LINT_RULE_LABELS: Record<string, string> = {
-  "bare-db-client": "裸数据库客户端",
-  "bare-fetch": "裸 fetch",
-  "handwritten-session": "会话自写",
-};
-
-/**
- * 基座件使用区（#425 基座 lint 两档的感知面；#541 让路缺省两档同为标注）：新基座
- * 工作区编码 run 的基座 lint 事实——基座件合规（曾自动修一轮则注明，纠偏过程
- * 如实）/违规清单（强制档裸客户端直用与预置档会话自写都如实随卡标注、不拦
- * 收口，两档并存合并计数与清单；文件:行＋规则中文名，hover 带件用法指引）/
- * 扫描未执行（如实，不假装达标）。阻断形态（运营开关回滚）下强制档修不完
- * ＝收口被拒，不会以该形态出现在本卡。
- */
-function RobustLintArea({ lint }: { lint: RobustKitLintClosing }) {
-  const [open, setOpen] = useState(false);
-  // 两档合并呈现（#541 让路后两档可同场）：计数取各档 total 之和（清单后端截
-  // 20，total 如实），清单拼接保持后端分档次序（强制档在前）
-  const tiers = [lint.mandatory, lint.preset].filter(
-    (tier): tier is RobustLintTier => tier != null,
-  );
-  const violations = tiers.flatMap((tier) => tier.violations ?? []);
-  const total = tiers.reduce((sum, tier) => sum + (tier.total ?? 0), 0);
-  const shown = open ? violations : violations.slice(0, VISIBLE_LINT);
-  const violating = lint.status === "violations";
-  return (
-    <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[13px]">
-        <PackageCheck className={cn("size-3.5 shrink-0", violating ? "text-amber-600" : "text-muted-foreground")} />
-        <span>
-          基座件使用：
-          {lint.status === "passed" ? (
-            lint.retried ? "基座件合规（曾自动修正一轮）" : "基座件合规"
-          ) : lint.status === "unavailable" ? (
-            "基座件扫描未执行"
-          ) : (
-            <>
-              <span className="font-medium text-amber-600">
-                余 {total || violations.length} 处基座件违规
-              </span>
-              {lint.retried ? "（已自动修正一轮，仍余）" : null}
-            </>
-          )}
-        </span>
-      </div>
-      {violating && violations.length > 0 ? (
-        <>
-          <div className="mt-1 font-mono text-xs">
-            {shown.map((violation) => (
-              <div
-                key={`${violation.file}:${violation.line}:${violation.rule}`}
-                className="flex items-center justify-between gap-2 py-0.5"
-                title={violation.message}
-              >
-                <span className="min-w-0 truncate text-foreground/80">
-                  {violation.file}:{violation.line || ""}
-                </span>
-                <span className="shrink-0 text-muted-foreground">
-                  {ROBUST_LINT_RULE_LABELS[violation.rule] ?? violation.rule}
-                </span>
-              </div>
-            ))}
-          </div>
-          {violations.length > VISIBLE_LINT ? (
-            <button
-              type="button"
-              className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setOpen(!open)}
-            >
-              <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-              {open ? "收起" : `查看全部 ${violations.length} 处`}
-            </button>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * 已知缺陷区（#427 整轨终验的如实呈现面）：修复预算耗尽时版本照成——不粉饰
- * 「完成」：总数定性一行（已交付＋自动修复预算已用完）＋逐项缺陷名（hover 带
- * 证据/失败现场），超可见上限收折叠（同 lint 清单收口）。终验通过/预算内有修复
- * 的收尾卡不携带不出。
- */
-function KnownDefectsArea({ knownDefects }: { knownDefects: KnownDefectsClosing }) {
-  const [open, setOpen] = useState(false);
-  const defects = knownDefects.defects;
-  const shown = open ? defects : defects.slice(0, VISIBLE_LINT);
-  return (
-    <div className="mt-2.5 rounded-lg border border-amber-600/40 bg-amber-500/[0.06] px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[13px]">
-        <AlertTriangle className="size-3.5 shrink-0 text-amber-600" />
-        <span>
-          系统已交付，但有{" "}
-          <span className="font-medium text-amber-600">{defects.length} 项已知缺陷</span>
-          （自动修复预算已用完，如实告知）
-        </span>
-      </div>
-      <div className="mt-1 text-[13px]">
-        {shown.map((defect) => (
-          <div
-            key={defect.name}
-            className="py-0.5 text-foreground/80"
-            title={defect.detail ?? defect.name}
-          >
-            <span className="mr-1.5 text-amber-600">✗</span>
-            {defect.name}
-          </div>
-        ))}
-      </div>
-      {defects.length > VISIBLE_LINT ? (
-        <button
-          type="button"
-          className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setOpen(!open)}
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-          {open ? "收起" : `查看全部 ${defects.length} 项`}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 /**
  * 定稿后续触发行（#291 定稿收尾卡）：drafts 携 triggers（仅定稿收尾卡——显式
  * 动作收口后的分岔事实：已按稿对齐/已开始构建/下单开放）即出「已触发」一行；
@@ -383,16 +237,8 @@ export function ClosingCard({
   const shown = filesOpen ? files : files.slice(0, VISIBLE_FILES);
   const added = files.reduce((total, file) => total + file.added, 0);
   const removed = files.reduce((total, file) => total + file.removed, 0);
-  // 验证统计（#352）：可缺省——验证子智能体未跑/未登记时不携带；全过带三面分布
-  // hover 明细，有未过如实标项名（修不了如实标注），修复后复验带轮次
-  const verification = closing.verification;
   // 设计规范扫描（#296）：可缺省——带规范项目编码 run 携带（「按稿对齐」行）
   const designLint = closing.designLint;
-  // 基座 lint 两档（#425）：可缺省——新基座工作区编码 run 携带（「基座件使用」行）
-  const robustKitLint = closing.robustKitLint;
-  // 已知缺陷清单（#427）：可缺省——整轨终验修复预算耗尽才携带（版本照成＋如实
-  // 呈现，不粉饰「完成」）；终验通过/预算内有修复路径不出
-  const knownDefects = closing.knownDefects;
   // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
   // 版本控件让位）——空数组（畸形载荷，后端收口判据＝有新稿、正常路径非空）也走
   // 设计形态如实出「本轮 0 稿」，不闪编码 run 语料
@@ -496,22 +342,14 @@ export function ClosingCard({
             </div>
           ) : null}
 
-          {/* 已知缺陷（#427）：整轨终验修复预算耗尽的如实呈现——最重的一行，
-              先于 lint/证明类标注出 */}
-          {knownDefects ? <KnownDefectsArea knownDefects={knownDefects} /> : null}
-
           {/* 按稿对齐（#296）：带规范项目的样式合规扫描事实——编码 run 面上的
               叙事行＋违规清单；设计会话不携带不出 */}
           {designLint ? <DesignLintArea lint={designLint} /> : null}
-
-          {/* 基座件使用（#425）：新基座工作区的基座 lint 两档事实——预置档余项
-              如实标注（不拦收口）；存量工作区不携带不出 */}
-          {robustKitLint ? <RobustLintArea lint={robustKitLint} /> : null}
         </>
       )}
 
       {/* 轮末统计：设计会话＝时长＋稿数（#290）；编码 run＝自检通过（closing 在场 ⟺
-          收口判据核验通过）+ 验证统计（#352，可缺省）+ 时长 + 文件数 + 变更行数 */}
+          收口判据核验通过）+ 时长 + 文件数 + 变更行数 */}
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         {design && drafts ? (
           <span className="flex items-center gap-1">
@@ -522,23 +360,6 @@ export function ClosingCard({
             <ShieldCheck className="size-3.5" /> 检查通过
           </span>
         )}
-        {verification ? (
-          <span className="flex items-center gap-1" title={verificationFacesTitle(verification.faces)}>
-            <ListChecks className="size-3.5" />
-            {verification.failed > 0 ? (
-              <>
-                验证 {verification.total} 项 ·{" "}
-                <span className="text-amber-600">
-                  {verification.failed} 项未过：{verification.failedItems.join("、")}
-                </span>
-              </>
-            ) : (
-              <>验证 {verification.total} 项通过</>
-            )}
-            {verification.rounds > 1 ? `（复验 ${verification.rounds} 轮）` : null}
-            {verification.budgetExhausted ? "（轮次预算已尽）" : null}
-          </span>
-        ) : null}
         <span className="flex items-center gap-1">
           <Clock3 className="size-3.5" /> 用时{" "}
           <b className="font-medium text-foreground/80">{formatDuration(closing.durationMs)}</b>

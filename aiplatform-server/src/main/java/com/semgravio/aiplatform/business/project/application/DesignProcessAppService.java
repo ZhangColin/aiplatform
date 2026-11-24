@@ -65,12 +65,12 @@ import lombok.extern.slf4j.Slf4j;
  * /定稿即意见直接成<b>改稿</b>（目标＝最近活跃件，跨件回溯经画布点选的作用域
  * 消息直达任意件——{@link #reviseDesignItem} 即会话路由能力）。改稿收口判据
  * ＝对话收口（relaxed）：意见不涉改稿的回应（确认、提问）也是合法收口——
- * drafts 如实反映本场落稿（可能 0 稿），对偶修正 finish_edit(changed=false)
+ * drafts 如实反映本场落稿（可能 0 稿），对偶修正轮的系统无改动口径
  * 「判定无需改动也合法收口」；首产判据照旧严格（本场 design/ 有新稿）。</p>
  *
  * <p><b>定稿机制（#291）</b>：定稿＝用户显式动作收口（{@link #finalizeDesignItem}
  * ——稿卡动作的 REST 面，画布接线归 #294）——件状态转已定稿、git commit 成版
- * （Run-Id 对偶锚定定稿收尾卡——收尾卡经 run-finish 载 closing 直达对话流，回访
+ * （收尾卡经 run-finish 载 closing 直达对话流，回访
  * 经对话史水合；「查看当时」即见定稿稿），并触发后续分岔：系统在途（已生成＋
  * 设计类终点＝中途切换）自动起更新 run 按稿对齐（交接物携定稿稿引用）；系统＋
  * 设计全部定稿自动起首个构建（稿入起跑上下文，经 {@code GenerationAppService}
@@ -237,7 +237,6 @@ public class DesignProcessAppService {
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
     private final TransactionTemplate transactionTemplate;
-    private final ProjectVersionAppService versions;
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
     private final OrderQueryAppService orderQueryAppService;
@@ -274,7 +273,7 @@ public class DesignProcessAppService {
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
             AgentEventBridge eventBridge, CodingRunTrack codingRunTrack,
-            TransactionTemplate transactionTemplate, ProjectVersionAppService versions,
+            TransactionTemplate transactionTemplate,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             OrderQueryAppService orderQueryAppService,
             ConversationHistoryAppService conversationHistory,
@@ -289,7 +288,6 @@ public class DesignProcessAppService {
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
         this.transactionTemplate = transactionTemplate;
-        this.versions = versions;
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
         this.orderQueryAppService = orderQueryAppService;
@@ -664,7 +662,7 @@ public class DesignProcessAppService {
      * 一场改稿 run（#291 改稿同会话继续；#294 携发散度档位进 prompt）：同件设计
      * 会话（审美上下文连续）、携意见原文产新代候选；收口判据＝对话收口（relaxed
      * ——意见不涉改稿的回应也是合法收口，drafts 如实可能 0 稿；对偶修正
-     * finish_edit(changed=false)）。改稿失败发 {@code run-failed}（唯一失败终态）
+     * 系统无改动口径）。改稿失败发 {@code run-failed}（唯一失败终态）
      * ——件状态不翻失败（首产收口位保持、定稿锚不覆写），用户重提即兜底。
      *
      * @return 收场事实（成败）
@@ -867,7 +865,7 @@ public class DesignProcessAppService {
      * 守卫序＝存在 → 未归档 → 未冻结（订单）→ 轨道空闲（在途 run 读写工作区，
      * 成版全量提交会卷入在途改动——收口后再定稿）→ 件在 → 件已产出稿 → 稿在
      * 工作区（容器事实——候选可被悬卡删除）。落定序＝件状态成版落表 → git commit
-     * 成版（Run-Id 对偶锚定定稿收尾卡，「查看当时」即见定稿稿）→ 刷新项目设计
+     * 收口（Run-Id 成版提交已退役，#605）→ 刷新项目设计
      * 规范（#295 提炼线：界面类 :root 确定性直提／平面类出图参数转正——新定稿
      * 覆盖项目正本、提炼无所得不刷新）→ 后续分岔派发 → 定稿收尾卡入对话流
      * （对话史落库＋run-finish 载 closing 直达——SSE 事件封闭零新增）。
@@ -916,24 +914,23 @@ public class DesignProcessAppService {
         // 收尾卡取件的下游消费单一形
         draftPath = ProjectFiles.anchoredFormOf(draftPath);
         Instant startedAt = Instant.now();
-        // 定稿落位（先于成版——状态是事实源，成版/落卡失败不反噬）
+        // 定稿落位（状态是事实源，落卡失败不反噬）
         String runId = EventsAppService.newRunId();
         item.finalize(runId, draftPath);
         designItems.save(item);
         lastActiveOrd.put(projectId, ord);
-        String versionHash = versions.commitAtClosing(project, runId,
-                finalizeClosingSummary(item.getTitle()));
-        // 随定稿刷新项目设计规范（#295 提炼线——CONTEXT「定稿」：稿随即进版本流、
-        // 刷新项目设计规范并触发后续）：先于后续分岔，按稿对齐的 run 以刷新后的
-        // 正本为准；提炼无所得/失败 quietly 不反噬定稿（规范是伴随事实）
+        // 定稿成版（Run-Id trailer）随审查与收口组退役（#605）：定稿不再产生
+        // git 版本锚，versionHash 恒 null（设计线整条退役另开新票）。
+        // 随定稿刷新项目设计规范（#295 提炼线——CONTEXT「定稿」：稿刷新项目设计
+        // 规范并触发后续）：先于后续分岔，按稿对齐的 run 以刷新后的正本为准；
+        // 提炼无所得/失败 quietly 不反噬定稿（规范是伴随事实）
         designSpecs.refreshAtFinalize(project, draftPath, runId);
         List<String> triggers = dispatchFinalizeTriggers(project, item, draftPath);
-        emitFinalizeClosingCard(project, item, draftPath, runId, versionHash, triggers,
-                startedAt);
-        return new DesignFinalization(runId, versionHash);
+        emitFinalizeClosingCard(project, item, draftPath, runId, triggers, startedAt);
+        return new DesignFinalization(runId, null);
     }
 
-    /** 定稿事实（#291 REST 面）：runId＝定稿锚（收尾卡/成版 Run-Id trailer 同锚）。 */
+    /** 定稿事实（#291 REST 面）：runId＝定稿锚；versionHash 随成版提交退役恒 null（#605）。 */
     public record DesignFinalization(String runId, String versionHash) {
     }
 
@@ -1020,12 +1017,12 @@ public class DesignProcessAppService {
 
     /**
      * 定稿收尾卡（#291）：closing 复用收口扩载形——判定行恒未动（定稿不是产出
-     * 轮）、稿清单单条（定稿稿＋triggers 后续触发）、成版锚进 version（收尾卡
-     * 版本控件即「查看当时」，对偶执行体收口成版）。对话史落库（回访水合）＋
+     * 轮）、稿清单单条（定稿稿＋triggers 后续触发）。对话史落库（回访水合）＋
      * run-finish 直达（live 入流）同载荷；落库/发射失败只记日志（呈现不反噬定稿）。
+     * 成版锚随 Run-Id trailer 退役（#605）。
      */
     private void emitFinalizeClosingCard(Project project, DesignItem item, String draftPath,
-            String runId, String versionHash, List<String> triggers, Instant startedAt) {
+            String runId, List<String> triggers, Instant startedAt) {
         Map<String, Object> draft = new LinkedHashMap<>();
         draft.put("item", item.getTitle());
         draft.put("media", CodingRunDispatcher.mediaOf(draftPath));
@@ -1038,9 +1035,6 @@ public class DesignProcessAppService {
         closing.put("systemChanged", false);
         closing.put("files", List.of());
         closing.put("durationMs", Duration.between(startedAt, Instant.now()).toMillis());
-        if (versionHash != null) {
-            closing.put(CodingRunDispatcher.CLOSING_VERSION_FIELD, versionHash);
-        }
         closing.put(CodingRunDispatcher.CLOSING_DRAFTS_FIELD, List.of(draft));
         try {
             conversationHistory.recordClosing(project.getId(), runId, closing);

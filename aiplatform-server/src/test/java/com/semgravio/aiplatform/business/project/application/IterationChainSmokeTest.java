@@ -34,7 +34,6 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -77,9 +76,6 @@ class IterationChainSmokeTest {
 
     @Autowired
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
-
-    @Autowired
-    private ProjectVersionAppService versionAppService;
 
     /** 事件发射边收口（单端点单流）：智能体事件与通知分口捕获（真实链路无订阅者，
      *  发射本身是观测缝）。 */
@@ -165,7 +161,7 @@ class IterationChainSmokeTest {
         // 1) 预置已生成形态：8081 常驻小系统（主色蓝）+ generated_at 落位——须在访谈
         //    产出 PRD **之前**落位：#462 去确认门后首次产 PRD 即自动派首个构建
         //    （轮收口观测），访谈收口时若仍「未生成」会真起一条生成轨与手工预置竞速
-        //    （4b 按 run-start 首捕会捕到生成轨切片 run——该片不以 finish_edit 收口，
+        //    （4b 按 run-start 首捕会捕到生成轨内核 run——该场以收口判据双件收口，
         //    4f 断言必红；#460e 时代无此自动派发故无竞速）
         placeRunningSystem();
         pageBefore = servedPage();
@@ -229,18 +225,13 @@ class IterationChainSmokeTest {
                 .doesNotContain("ask_user")
                 .doesNotContain("savePrd")
                 .doesNotContain("startFixRun");
-        // 4f) 结束工具收口（#46）：真模型以 finish_edit 收口（工具调用事件可见——
-        //     未调用即 run 未正常收口，本断言红）；fix-unchanged 已退役（#82），
-        //     判定呈现归收口扩载（#88）
-        assertThat(coderPayloads).contains("finish_edit");
+        // 4f) 真收口（#604/#605）：收口判据落定后 run-finish 到达（收尾卡扩载的
+        //     承载事件）；fix-unchanged 已退役（#82），判定呈现归收口扩载（#88）；
+        //     收口自动成版（Run-Id trailer）随审查与收口组退役（#605）——不再断言
+        //     版本序列（版本语义归阶段四重建）
         assertThat(coderFrames.stream().map(Frame::type))
+                .contains(AgentEventTypes.RUN_FINISH)
                 .doesNotContain("fix-unchanged");
-        // 4g) 收口自动成版（#91）：修正 run 收口即容器内 git 成版——版本序列至少
-        //     一条、Run-Id 锚定该修正 run（版本正本 = git log，真容器真 git）
-        awaitUntil(FIX_DEADLINE, () -> !versionAppService.list(projectId).isEmpty());
-        assertThat(versionAppService.list(projectId))
-                .extracting(VersionResponse::runId)
-                .contains(coderAssigned.runId());
     }
 
     // ---------- 编排步骤 ----------

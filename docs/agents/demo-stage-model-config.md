@@ -15,7 +15,7 @@ Demo 阶段的模型配置初档与改配置 SOP。机制正本＝[ADR-0021](../
 
 ## 二、初档配置（缺省）
 
-Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智能体（#352 三面验证）、收口判据核验承担质量面）。缺省档正本＝`AgentProfile.EXECUTOR` 枚举默认：
+Demo 阶段激进用快模型（质量靠生成内核自证＋收口判据兜底——内核按完成判据自跑 `pnpm build`、平台侧机器判据双件〔build 探活＋8081 探活〕承担质量面）。缺省档正本＝`AgentProfile.EXECUTOR` 枚举默认：
 
 - **缺省档 ＝ 快模型档**（配置键 `flash`）；清空覆盖即回落此值。
 - 设计执行体（`designer`）与主智能体（`main`）不在本档范围——设计线独立、档位另配；主智能体为对话/需求侧，档位另配。
@@ -37,34 +37,11 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 
 **边缘调用点同面改配置（#366）**：项目取名（`naming`）、上下文压缩（`compaction`）、入口分类（`classification`）、技能预检（`precheck`）四件一次性轻调用的模型配置收编同一配置面——端点 `/api/backoffice/agent-configs/edge/{edgeKey}`（GET/PUT/traces 同制，值面仅模型配置：`{"modelConfigKey": "pro"}`；缺省一律 `flash`）。改配置下一轮调用即生效（装配动态查库）。
 
-**verify 验证子智能体配置与轮次预算（#424 片轻验常开）**：**#604 起 verify 子智能体的声明与装配已随子智能体委派机制退役，本段配置暂无消费面**（两列随审查与收口组拆除，#605）——原文留作过渡期参照：verify 子智能体（片轻验的执行侧）的配置与单场轮次预算收编在 **executor 行**（同一 PUT 通道）——
-
-1. **缺省＝随执行体档**：`verifyModelConfigKey` 缺省 null＝随执行体**生效档**（含路由升档——重片升强档时 verify 同档跟随，不降；#406 裁决「验证判错代价高于省的秒数」）。
-2. **改配置**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verifyModelConfigKey": "pro"}`（即时校验同 `modelConfigKey`：PRJ_074/075）；null 清空回落随执行体档。改完下一轮命令构建即生效（子智能体档位进智能体实例缓存键指纹）。
-3. **轮次预算**：`{"verifyRoundBudget": 5}`（1-20 整数，越界 PRJ_078；null＝回落代码缺省 3＝首轮验证＋至多两轮修复复验）。预算＝单场防无限复验的护栏：verify 经 report_verification 登记达预算仍有未过项时，登记回执告知「停止修复—复验」，收尾卡验证统计带 `budgetExhausted` 如实标注。动态逐次读——改完下一轮登记即生效。
-4. **查/回滚**：GET 同面（`verifyModelConfigKey`/`verifyModelConfigKeyOverridden`/`verifyRoundBudget`/`defaultVerifyRoundBudget`）；traces 前后快照含验证面两件。
-
-**收口两硬门开关（#433 开关承载面；#435 翻转缺省——#432 Step 1 砍验证税落地态）**：验证在场闸（#424）、整轨终验拦「生成完成」（#427）两件收口硬门各持独立开关，收编 **executor 行**（同一 PUT 通道）。原第三件——空转产出证明闸（#420）——连同开关 `proofOfOutputGateEnabled` 已随 #604 拆除（闸本体退役，字段退出 GET/PUT 面）——
-
-1. **缺省＝闸关（#435 起）**：两开关缺省 false＝#432 Step 1 正式落地——秒级确定性探活（8081 探活＋入口文件完整＋git 成版）是唯一收口要件；#433 的开关机制原样保留（闸代码全留仓）。
-2. **切闸**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verificationPresenceGateEnabled": true, "finalVerificationGateEnabled": true}`（两件各自独立，可组合）＝一键切回旧行为（#424/#427 现行为）；false/null＝闸关。留痕前后快照含两闸（回滚腿完整）。
-3. **生效时机＝下一次闸判定**：闸判定处动态查库——在场闸/整轨终验在收口/完成判定时读；改完不发版即生效，进行中 run 不定格。
-4. **闸开语义**：在场闸开＝本 run 无验证登记不收口；整轨终验开＝轨道完成前以核心旅程为轴终验、fail 拦「生成完成」。秒级确定性探活（8081 探活＋入口文件完整＋git 成版）不受两开关影响，常开。
-5. **查生效值**：GET 同面（`verificationPresenceGateEnabled`/`finalVerificationGateEnabled` 生效态）。
-
-**生成会话形态两开关（#436——#432 Step 2 单长会话落地＋切片机器退役）**：Demo 首建的生成会话形态由两开关决定（编排缝动态读档），收编 **executor 行**（同一 PUT 通道）——
-
-1. **缺省＝单会话开＋并行机器关（#436 落地态）**：`singleSessionGenerationEnabled` 缺省 true＝分段任务在同一执行会话槽位（`coder-{projectId}-single`）内连续追加（每段新对话＋交接传递，#434 T2 排练定稿形态）；`parallelSliceMachineEnabled` 缺省 false＝fork 隔离工作区/波调度/并行执行/合并机器整体关。切片计划保留但降级为进度/预览叙事，不再驱动新 session；依赖图产出保留用于进度展示；断点续跑跨进程重启语义保留。
-2. **切回切片机器态**：`PUT /api/backoffice/agent-configs/executor` 带 `{"singleSessionGenerationEnabled": false, "parallelSliceMachineEnabled": true}`——每片新会话（`coder-{projectId}-slice-n`）＋宽波 fork 并行（#351 现行为）；半开（单会话关＋并行关）＝每片新会话但全轨主工作区串行、零 fork。两开关独立可组合；null 归一缺省（单会话 null→true、并行 null→false）。留痕前后快照含两开关（回滚腿完整）。
-3. **单会话形态失败语义**：段级自愈＝同会话返工提示（原地修重试环），重试耗尽转终态失败、**不传段级回滚钩**（工作区不回滚、无重跑轮）；续跑现状盘点按脏续口径（未回滚、保留已对的工作——与中断段同口径）。被失败片阻塞的后续片跳过不派（#429 不变）。
-4. **生效时机＝轨道起跑时读档**：改完不发版即生效，进行中 run 不定格（同模型档语义）。
-5. **查生效值**：GET 同面（`singleSessionGenerationEnabled`/`parallelSliceMachineEnabled` 生效态）；编排行为锚定见 `GenerationAppServiceTest` given_single_session_ 系用例。
-
-**verify 自决开关（#442）与决策时注入四件（#437）——已随 #604 退役**：两者只被按 `executor` 装配键挂载的两个旧中间件（`VerifySelfDecisionMiddleware`／`DecisionHintMiddleware`）消费；生成与更新 run 全部经内核装配形态派发后（装配键 `generation-kernel`，#601），`executor` 键不再进任何派发路径。中间件、配置列（`verify_self_decision_enabled`、`decision_hints_enabled`／`decision_hint_error_streak`／`decision_hint_stack_cap`／`decision_hint_disabled`，V83 迁移拆除）、后台 GET/PUT/留痕面的对应字段与错误码 PRJ_081–083 一并移除——后台配置面不再有这些开关。
+**收口与验证面开关（#424／#427／#433／#442）已随审查与收口组退役（#605，ADR-0055）**：验证子智能体、整轨终验、收口三运营开关与基座 lint 阻断开关整体出局——`prj_agent_configs` 六列经 V84 迁移拆除，后台 GET/PUT/留痕面不再有这些字段；收口判据只余平台侧机器双件（build 探活＋8081 探活）。生成会话形态两开关随切片与轨道机器退役（#602，V82 迁移拆除）。
 
 ## 四、进行中 run 不定格
 
-配置读取时机＝**起跑时读档**：模型配置在每次命令构建（下发 run/对话轮）时取一次生效值，随命令交给智能体工厂；工厂缓存键含模型串，新值即新实例。因此**改配置不影响在途 run**——在跑的那一段沿用起跑时读到的配置跑完，改配置只影响**下一轮**命令构建。修订中的工作协议（systemPrompt）同理。verify 档位同律（随命令构建解析）；轮次预算更细——逐次登记时动态读，改预算对在跑的场也即刻生效（预算是防烧护栏，越早生效越好）。
+配置读取时机＝**起跑时读档**：模型配置在每次命令构建（下发 run/对话轮）时取一次生效值，随命令交给智能体工厂；工厂缓存键含模型串，新值即新实例。因此**改配置不影响在途 run**——在跑的那一段沿用起跑时读到的配置跑完，改配置只影响**下一轮**命令构建。修订中的工作协议（systemPrompt）同理。
 
 ## 五、边界与模型路由协同（#354）
 
@@ -81,7 +58,7 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 速度目标（与 Replit 相当，首版 40 分钟量级带）的推算依赖 Demo 阶段快模型档与模型路由的实测对比。做法（真运行是唯一准绳）：
 
 1. 起 dev 栈（`scripts/dev.sh`），建项目 → 改一条需求触发首 Demo（或对已有项目发一条迭代意见）跑一轮；
-2. 记录本轮**时长**（run 级已运行时钟 / 收尾卡轮末统计）与**质量**（预览可用性、验证子智能体 ✅/❌ 统计（收尾卡验证统计）、收口是否需重试）；
+2. 记录本轮**时长**（run 级已运行时钟 / 收尾卡轮末统计）与**质量**（预览可用性、收口判据〔build 探活＋8081 探活〕是否通过）；
 3. 对照轮次按同一任务各跑一轮，逐轮记录时长、质量、项目账 token 与**路由决策留档**（收尾卡 `closing.modelTier`——哪段用了哪档、为什么）：
    - **路由开（缺省态）**：`GET /api/backoffice/agent-configs/executor` 确认 `routingEnabled=true` 且 `modelConfigKeyOverridden=false`；
    - **路由关（对照基线）**：`PUT /api/backoffice/agent-configs/executor` 写 `{"routingEnabled": false}`；

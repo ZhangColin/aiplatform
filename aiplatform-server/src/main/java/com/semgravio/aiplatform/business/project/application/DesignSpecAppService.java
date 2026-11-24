@@ -136,7 +136,7 @@ public class DesignSpecAppService {
      *
      * @param project    定稿项目（工作区锚）
      * @param draftPath  定稿选定的稿（工作区锚定形——与件行 finalizedPath 同形）
-     * @param runId      定稿锚（与定稿收尾卡/成版 Run-Id 同锚）
+     * @param runId      定稿锚（与定稿收尾卡同锚；成版 Run-Id 已退役，#605）
      */
     public void refreshAtFinalize(Project project, String draftPath, String runId) {
         String relative = ProjectFiles.relativeFormOf(draftPath);

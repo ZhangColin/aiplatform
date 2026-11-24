@@ -45,7 +45,7 @@ public class DesignSpec extends Auditable implements AggregateRoot<DesignSpec, L
     @Column(name = "source_draft_path", nullable = false, length = 500)
     private String sourceDraftPath;
 
-    /** 提炼锚：定稿 runId（与定稿收尾卡/成版 Run-Id 同锚——溯源「哪次定稿产出的规范」）。 */
+    /** 提炼锚：定稿 runId（与定稿收尾卡同锚——溯源「哪次定稿产出的规范」；成版 Run-Id 已退役）。 */
     @Column(name = "source_run_id", nullable = false, length = 100)
     private String sourceRunId;
 

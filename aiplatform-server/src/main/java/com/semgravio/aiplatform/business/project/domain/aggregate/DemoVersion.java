@@ -21,7 +21,7 @@ import com.cartisan.data.jpa.id.TsidGenerator;
  * 每版锚定<b>起跑时</b>已确认 PRD 版本（{@code prdVersionNo}，「Demo vN（基于
  * PRD vM 快照）」式关联——在途 Demo 照跑完收口绑起跑时版本，不随后续确认漂移；
  * 无确认版项目/设计类起跑为 null）；{@code runId}＝收口 run 的用户面标识
- * （版本记录抽屉 #344「查看当时」的 git 成版 Run-Id 同锚）。
+ * （Run-Id 成版锚已随审查与收口组退役，#605）。
  *
  * <p><b>不可变＝只插不改</b>：全列 {@code updatable=false}、聚合零变更方法
  * ——历史行无任何 UPDATE 路径（版本表模式先例＝{@link PrdVersion} V32）。
@@ -51,7 +51,7 @@ public class DemoVersion extends Auditable implements AggregateRoot<DemoVersion,
     @Column(name = "prd_version_no", updatable = false)
     private Integer prdVersionNo;
 
-    /** 收口 run 的用户面标识（git 成版 Run-Id 同锚——「查看当时」的接续缝）。 */
+    /** 收口 run 的用户面标识（Run-Id 成版锚已退役，#605——留作 run 追溯）。 */
     @Column(name = "run_id", nullable = false, updatable = false)
     private String runId;
 

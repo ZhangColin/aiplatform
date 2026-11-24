@@ -8,9 +8,9 @@ import java.util.Map;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersion;
 
 /**
- * 版本详情读面（#91/#93）：版本元数据 + 锚定的收尾卡载荷（Run-Id 联接对话史
- * closing 条目——收尾卡落库失败等缺口下 closing 可空，版本元数据仍如实返回）。
- * 回滚版本无 run / 收尾卡（runId 与 closing 均为空，rollbackFrom 锚定源版本）。
+ * 版本详情读面（#91/#93）：版本元数据 + 收尾卡载荷。Run-Id 联接随收口成版提交
+ * 退役（#605）——closing 恒空、runId 恒空；字段契约留至阶段四版本重建（该期
+ * 重建成版/收尾卡联动后重新定义）。回滚版本 rollbackFrom 锚定源版本。
  */
 public record VersionDetailResponse(
         String commitHash,

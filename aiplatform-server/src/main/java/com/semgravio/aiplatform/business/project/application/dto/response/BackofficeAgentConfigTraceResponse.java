@@ -10,7 +10,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * 配置变更留痕读面行（#251 历史可查）：一次实际变更的前后全量值快照＋操作者＋
  * 时刻，按时间倒序（最近先）。append-only——留痕不随任何动作删除；回滚＝把旧值
  * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。值面全量（含路由策略四件
- * #354、验证面两件 #424）留痕。
+ * #354）留痕；验证面与收口闸留痕面随审查与收口组退役（#605，V84 删列）。
  *
  * @param id                  留痕标识（TSID 十进制串）
  * @param oldSystemPrompt     变更前 systemPrompt（null＝此前即缺省回落）
@@ -25,9 +25,6 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param oldRoutingFileCountSignalEnabled 变更前文件面信号开关（#454；恒有值——缺省
  *                                       态恒 false＝不参与升档判定）
  * @param oldRoutingSizeLabelSignalEnabled 变更前规模标签信号开关（#454；同上）
- * @param oldVerifyModelConfigKey    变更前 verify 配置（#424；null＝此前即随执行体档）
- * @param oldVerifyRoundBudget 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
- * @param oldFinalVerifyFixBudget 变更前整轨终验修复预算（#427；null＝此前即代码缺省）
  * @param newSystemPrompt     变更后 systemPrompt（null＝本次清空回落）
  * @param newModelConfigKey          变更后模型配置（null 同上）
  * @param newWebSearchEnabled 变更后联网搜索开关
@@ -39,14 +36,6 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  *                                       null 同上；空串＝空映射）
  * @param newRoutingFileCountSignalEnabled 变更后文件面信号开关（#454；恒有值）
  * @param newRoutingSizeLabelSignalEnabled 变更后规模标签信号开关（#454；恒有值）
- * @param newVerifyModelConfigKey    变更后 verify 配置（null＝本次清空随执行体档）
- * @param newVerifyRoundBudget 变更后单场验证轮次预算（null＝本次清空回落代码缺省）
- * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
- * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
- *                          缺省态恒 false＝闸关，#435）
- * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
- * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
- * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -75,18 +64,6 @@ public record BackofficeAgentConfigTraceResponse(
         boolean oldRoutingFileCountSignalEnabled,
         @Schema(description = "变更前规模标签信号开关（#454；恒有值——缺省态恒 false）")
         boolean oldRoutingSizeLabelSignalEnabled,
-        @Schema(description = "变更前 verify 配置（#424；null＝此前即随执行体生效档）")
-        String oldVerifyModelConfigKey,
-        @Schema(description = "变更前单场验证轮次预算（#424；null＝此前即代码缺省）")
-        Integer oldVerifyRoundBudget,
-        @Schema(description = "变更前整轨终验修复预算（#427；null＝此前即代码缺省）")
-        Integer oldFinalVerifyFixBudget,
-        @Schema(description = "变更前验证在场闸开关（#433；恒有值——缺省态恒 false＝闸关，#435）")
-        boolean oldVerificationPresenceGateEnabled,
-        @Schema(description = "变更前整轨终验拦「生成完成」开关（#433；恒有值）")
-        boolean oldFinalVerificationGateEnabled,
-        @Schema(description = "变更前基座 lint 强制档阻断开关（#541；恒有值——缺省态恒 false＝让路）")
-        boolean oldRobustLintBlockingEnabled,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型配置（null＝本次清空回落）")
@@ -108,18 +85,6 @@ public record BackofficeAgentConfigTraceResponse(
         boolean newRoutingFileCountSignalEnabled,
         @Schema(description = "变更后规模标签信号开关（#454；恒有值）")
         boolean newRoutingSizeLabelSignalEnabled,
-        @Schema(description = "变更后 verify 配置（#424；null＝本次清空随执行体生效档）")
-        String newVerifyModelConfigKey,
-        @Schema(description = "变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）")
-        Integer newVerifyRoundBudget,
-        @Schema(description = "变更后整轨终验修复预算（#427；null＝本次清空回落代码缺省）")
-        Integer newFinalVerifyFixBudget,
-        @Schema(description = "变更后验证在场闸开关（#433；恒有值）")
-        boolean newVerificationPresenceGateEnabled,
-        @Schema(description = "变更后整轨终验拦「生成完成」开关（#433；恒有值）")
-        boolean newFinalVerificationGateEnabled,
-        @Schema(description = "变更后基座 lint 强制档阻断开关（#541；恒有值）")
-        boolean newRobustLintBlockingEnabled,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -135,21 +100,11 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldRoutingEnabled(), trace.oldRoutingStrongModelConfigKey(),
                 trace.oldRoutingFileCountThreshold(), trace.oldRoutingEscalatingSizeLabels(),
                 trace.oldRoutingFileCountSignalEnabled(), trace.oldRoutingSizeLabelSignalEnabled(),
-                trace.oldVerifyModelConfigKey(), trace.oldVerifyRoundBudget(),
-                trace.oldFinalVerifyFixBudget(),
-                trace.oldVerificationPresenceGateEnabled(),
-                trace.oldFinalVerificationGateEnabled(),
-                trace.oldRobustLintBlockingEnabled(),
                 trace.newSystemPrompt(), trace.newModelConfigKey(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelConfigKey(),
                 trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
                 trace.newRoutingFileCountSignalEnabled(), trace.newRoutingSizeLabelSignalEnabled(),
-                trace.newVerifyModelConfigKey(), trace.newVerifyRoundBudget(),
-                trace.newFinalVerifyFixBudget(),
-                trace.newVerificationPresenceGateEnabled(),
-                trace.newFinalVerificationGateEnabled(),
-                trace.newRobustLintBlockingEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

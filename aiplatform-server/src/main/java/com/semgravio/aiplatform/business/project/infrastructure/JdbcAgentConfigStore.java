@@ -19,6 +19,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
  * 先例——平台资产单表读写不挂 JPA 映射面）：覆盖行 upsert（键＝agent_key）＋
  * 变更留痕 append-only。装配读腿 {@link #find} 每轮命令构建时查（动态查库，
  * 配置变更下一轮自然生效——工厂实例缓存键含 sysPrompt，不改缓存机制）。
+ *
+ * <p>审查与收口组配置列（验证面两件／终验修复预算／收口闸两件／基座 lint 阻断）
+ * 经 V84 迁移拆除（#605），本存取面只余仍在消费的覆盖态与工具/路由开关。</p>
  */
 @Component
 public class JdbcAgentConfigStore implements AgentConfigStore {
@@ -27,10 +30,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
             SELECT agent_key, system_prompt, model_config_key, web_search_enabled, fetch_url_enabled,
                    routing_enabled, routing_strong_model_config_key, routing_file_count_threshold,
                    routing_escalating_size_labels, routing_file_count_signal_enabled,
-                   routing_size_label_signal_enabled, verify_model_config_key, verify_round_budget,
-                   final_verify_fix_budget, verification_presence_gate_enabled,
-                   final_verification_gate_enabled,
-                   robust_lint_blocking_enabled,
+                   routing_size_label_signal_enabled,
                    operator_id, operator_name, updated_at
             FROM prj_agent_configs WHERE agent_key = ?
             """;
@@ -41,12 +41,9 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 (agent_key, system_prompt, model_config_key, web_search_enabled, fetch_url_enabled,
                  routing_enabled, routing_strong_model_config_key, routing_file_count_threshold,
                  routing_escalating_size_labels, routing_file_count_signal_enabled,
-                 routing_size_label_signal_enabled, verify_model_config_key, verify_round_budget,
-                 final_verify_fix_budget, verification_presence_gate_enabled,
-                 final_verification_gate_enabled,
-                 robust_lint_blocking_enabled,
+                 routing_size_label_signal_enabled,
                  operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (agent_key) DO UPDATE SET
                 system_prompt = EXCLUDED.system_prompt,
                 model_config_key = EXCLUDED.model_config_key,
@@ -58,12 +55,6 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 routing_escalating_size_labels = EXCLUDED.routing_escalating_size_labels,
                 routing_file_count_signal_enabled = EXCLUDED.routing_file_count_signal_enabled,
                 routing_size_label_signal_enabled = EXCLUDED.routing_size_label_signal_enabled,
-                verify_model_config_key = EXCLUDED.verify_model_config_key,
-                verify_round_budget = EXCLUDED.verify_round_budget,
-                final_verify_fix_budget = EXCLUDED.final_verify_fix_budget,
-                verification_presence_gate_enabled = EXCLUDED.verification_presence_gate_enabled,
-                final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled,
-                robust_lint_blocking_enabled = EXCLUDED.robust_lint_blocking_enabled,
                 operator_id = EXCLUDED.operator_id,
                 operator_name = EXCLUDED.operator_name,
                 updated_at = CURRENT_TIMESTAMP
@@ -75,19 +66,13 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                  old_fetch_url_enabled, old_routing_enabled, old_routing_strong_model_config_key,
                  old_routing_file_count_threshold, old_routing_escalating_size_labels,
                  old_routing_file_count_signal_enabled, old_routing_size_label_signal_enabled,
-                 old_verify_model_config_key, old_verify_round_budget, old_final_verify_fix_budget,
-                 old_verification_presence_gate_enabled,
-                 old_final_verification_gate_enabled, old_robust_lint_blocking_enabled,
                  new_system_prompt, new_model_config_key, new_web_search_enabled,
                  new_fetch_url_enabled, new_routing_enabled, new_routing_strong_model_config_key,
                  new_routing_file_count_threshold, new_routing_escalating_size_labels,
                  new_routing_file_count_signal_enabled, new_routing_size_label_signal_enabled,
-                 new_verify_model_config_key, new_verify_round_budget, new_final_verify_fix_budget,
-                 new_verification_presence_gate_enabled,
-                 new_final_verification_gate_enabled, new_robust_lint_blocking_enabled,
                  operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     /** 倒序最近先（id 陪排——同秒多痕不乱序）。 */
@@ -96,17 +81,11 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    old_fetch_url_enabled, old_routing_enabled, old_routing_strong_model_config_key,
                    old_routing_file_count_threshold, old_routing_escalating_size_labels,
                    old_routing_file_count_signal_enabled, old_routing_size_label_signal_enabled,
-                   old_verify_model_config_key, old_verify_round_budget, old_final_verify_fix_budget,
-                   old_verification_presence_gate_enabled,
-                   old_final_verification_gate_enabled, old_robust_lint_blocking_enabled,
                    new_system_prompt, new_model_config_key,
                    new_web_search_enabled, new_fetch_url_enabled, new_routing_enabled,
                    new_routing_strong_model_config_key, new_routing_file_count_threshold,
                    new_routing_escalating_size_labels, new_routing_file_count_signal_enabled,
-                   new_routing_size_label_signal_enabled, new_verify_model_config_key,
-                   new_verify_round_budget, new_final_verify_fix_budget,
-                   new_verification_presence_gate_enabled,
-                   new_final_verification_gate_enabled, new_robust_lint_blocking_enabled,
+                   new_routing_size_label_signal_enabled,
                    operator_id, operator_name,
                    created_at
             FROM prj_agent_config_traces WHERE agent_key = ?
@@ -134,10 +113,6 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 config.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(config.routingEscalatingSizeLabels()),
                 config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled(),
-                config.verifyModelConfigKey(), config.verifyRoundBudget(), config.finalVerifyFixBudget(),
-                config.verificationPresenceGateEnabled(),
-                config.finalVerificationGateEnabled(),
-                config.robustLintBlockingEnabled(),
                 config.operatorId(), config.operatorName());
     }
 
@@ -149,21 +124,11 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 trace.oldRoutingStrongModelConfigKey(), trace.oldRoutingFileCountThreshold(),
                 trace.oldRoutingEscalatingSizeLabels(),
                 trace.oldRoutingFileCountSignalEnabled(), trace.oldRoutingSizeLabelSignalEnabled(),
-                trace.oldVerifyModelConfigKey(),
-                trace.oldVerifyRoundBudget(), trace.oldFinalVerifyFixBudget(),
-                trace.oldVerificationPresenceGateEnabled(),
-                trace.oldFinalVerificationGateEnabled(),
-                trace.oldRobustLintBlockingEnabled(),
                 trace.newSystemPrompt(), trace.newModelConfigKey(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelConfigKey(),
                 trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
                 trace.newRoutingFileCountSignalEnabled(), trace.newRoutingSizeLabelSignalEnabled(),
-                trace.newVerifyModelConfigKey(), trace.newVerifyRoundBudget(),
-                trace.newFinalVerifyFixBudget(),
-                trace.newVerificationPresenceGateEnabled(),
-                trace.newFinalVerificationGateEnabled(),
-                trace.newRobustLintBlockingEnabled(),
                 trace.operatorId(), trace.operatorName());
     }
 
@@ -182,11 +147,6 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 SliceSizeLabel.labelsOf(rs.getString("routing_escalating_size_labels")),
                 rs.getBoolean("routing_file_count_signal_enabled"),
                 rs.getBoolean("routing_size_label_signal_enabled"),
-                rs.getString("verify_model_config_key"), integerOrNull(rs, "verify_round_budget"),
-                integerOrNull(rs, "final_verify_fix_budget"),
-                rs.getBoolean("verification_presence_gate_enabled"),
-                rs.getBoolean("final_verification_gate_enabled"),
-                rs.getBoolean("robust_lint_blocking_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }
@@ -201,11 +161,6 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getString("old_routing_escalating_size_labels"),
                 rs.getBoolean("old_routing_file_count_signal_enabled"),
                 rs.getBoolean("old_routing_size_label_signal_enabled"),
-                rs.getString("old_verify_model_config_key"), integerOrNull(rs, "old_verify_round_budget"),
-                integerOrNull(rs, "old_final_verify_fix_budget"),
-                rs.getBoolean("old_verification_presence_gate_enabled"),
-                rs.getBoolean("old_final_verification_gate_enabled"),
-                rs.getBoolean("old_robust_lint_blocking_enabled"),
                 rs.getString("new_system_prompt"), rs.getString("new_model_config_key"),
                 rs.getBoolean("new_web_search_enabled"), rs.getBoolean("new_fetch_url_enabled"),
                 rs.getBoolean("new_routing_enabled"), rs.getString("new_routing_strong_model_config_key"),
@@ -213,11 +168,6 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getString("new_routing_escalating_size_labels"),
                 rs.getBoolean("new_routing_file_count_signal_enabled"),
                 rs.getBoolean("new_routing_size_label_signal_enabled"),
-                rs.getString("new_verify_model_config_key"), integerOrNull(rs, "new_verify_round_budget"),
-                integerOrNull(rs, "new_final_verify_fix_budget"),
-                rs.getBoolean("new_verification_presence_gate_enabled"),
-                rs.getBoolean("new_final_verification_gate_enabled"),
-                rs.getBoolean("new_robust_lint_blocking_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 createdAt == null ? null : createdAt.toLocalDateTime());
     }

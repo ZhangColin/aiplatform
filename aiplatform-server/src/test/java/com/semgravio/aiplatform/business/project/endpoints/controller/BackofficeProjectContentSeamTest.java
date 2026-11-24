@@ -166,7 +166,8 @@ class BackofficeProjectContentSeamTest {
             if (command.contains("PRD.md")) {
                 out.stdout = "1756100000\n# 归档项目的 PRD\n";
             } else {
-                out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");
+                out.stdout = rollbackLogLine(HASH_1, 1700000100L,
+                        "回滚到「更早的版本」", HASH_2);
             }
         });
 
@@ -266,27 +267,24 @@ class BackofficeProjectContentSeamTest {
     // ---------- 版本列表（新→旧） ----------
 
     @Test
-    void given_run_and_rollback_versions_when_signed_versions_then_newest_first()
+    void given_rollback_versions_when_signed_versions_then_newest_first()
             throws Exception {
         Long id = newProject("版本项目").getId();
         stubExec((command, out) -> out.stdout =
                 rollbackLogLine(HASH_3, 1700000300L, "回滚到「首次生成了系统」", HASH_1)
-                        + logLine(HASH_2, 1700000200L, "更新了系统", "222")
-                        + logLine(HASH_1, 1700000100L, "首次生成了系统", "111"));
+                        + rollbackLogLine(HASH_2, 1700000200L, "回滚到「更新了系统」", HASH_3)
+                        + rollbackLogLine(HASH_1, 1700000100L, "回滚到「更早的版本」", HASH_2));
 
         signedGet("/api/backoffice/projects/" + id + "/versions")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.length()").value(3))
-                // git log 原生序＝新→旧（回滚成版最近、首次成版最旧）
+                // git log 原生序＝新→旧（最新回滚最近、最早回滚最旧）
                 .andExpect(jsonPath("$.data[*].commitHash", contains(HASH_3, HASH_2, HASH_1)))
                 // 回滚版本：runId 空、rollbackFrom 锚定源版本
                 .andExpect(jsonPath("$.data[0].runId").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].rollbackFrom").value(HASH_1))
-                // run 版本：runId 锚定收尾卡、rollbackFrom 空
-                .andExpect(jsonPath("$.data[1].runId").value("222"))
-                .andExpect(jsonPath("$.data[1].rollbackFrom").value(nullValue()))
-                .andExpect(jsonPath("$.data[2].subject").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[2].subject").value("回滚到「更早的版本」"))
                 .andExpect(jsonPath("$.data[2].committedAt").value(localAt(1700000100L)));
     }
 
@@ -302,30 +300,6 @@ class BackofficeProjectContentSeamTest {
     }
 
     // ---------- 版本详情（收尾卡＋rollbackFrom） ----------
-
-    @Test
-    void given_version_with_closing_card_when_signed_detail_then_full_payload()
-            throws Exception {
-        Long id = newProject("收尾卡版本项目").getId();
-        stubExec((command, out) -> out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111"));
-        entries.save(ConversationEntry.closing(id, "111", Map.of(
-                "summary", "首次生成了系统", "systemChanged", true,
-                "files", List.of("src/app.js"), "durationMs", 183420L)));
-
-        signedGet("/api/backoffice/projects/" + id + "/versions/" + HASH_1)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.commitHash").value(HASH_1))
-                .andExpect(jsonPath("$.data.subject").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data.runId").value("111"))
-                .andExpect(jsonPath("$.data.rollbackFrom").value(nullValue()))
-                .andExpect(jsonPath("$.data.committedAt").value(localAt(1700000100L)))
-                // 收尾卡载荷完整（Run-Id 联接对话史 closing 条目——#88 同载荷复用）
-                .andExpect(jsonPath("$.data.closing.summary").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data.closing.systemChanged").value(true))
-                .andExpect(jsonPath("$.data.closing.files[0]").value("src/app.js"))
-                .andExpect(jsonPath("$.data.closing.durationMs").value(183420));
-    }
 
     @Test
     void given_rollback_version_when_signed_detail_then_run_id_empty_and_rollback_from()
@@ -399,11 +373,6 @@ class BackofficeProjectContentSeamTest {
         Project loaded = projectRepository.findById(project.getId()).orElseThrow();
         loaded.markPrdProduced();
         return projectRepository.save(loaded);
-    }
-
-    /** git log 单行（字段 \u001f 分隔、记录 \u001e 收尾——与 WorkspaceVersions 格式同源）。 */
-    private static String logLine(String hash, long at, String subject, String runId) {
-        return hash + FS + at + FS + subject + FS + "Run-Id: " + runId + "\n" + RS;
     }
 
     /** git log 单行的回滚变体（Rollback-From trailer，runId 空）。 */

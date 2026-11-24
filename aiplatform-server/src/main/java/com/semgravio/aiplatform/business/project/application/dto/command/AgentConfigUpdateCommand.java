@@ -28,9 +28,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 照留进判定快照）；true＝恢复对应判据（阈值/映射旋钮照旧生效）。失败重试信号
  * 不受两开关影响、常开。仅 run 执行体（executor）消费。</p>
  *
- * <p><b>验证面两件（#424 片轻验）</b>：verify 验证子智能体配置与单场验证轮次
- * 预算——档位 null＝随执行体生效档（含路由升档，缺省同档不降＝#406 裁决「验证
- * 判错代价高于省的秒数」）；预算 null＝清空回落代码缺省 3（首轮＋两轮复验）。</p>
+ * <p><b>审查与收口组配置面已随 #605 退役</b>：验证面两件（#424）、终验修复预算
+ * （#427）、收口闸开关（#433）与基座 lint 阻断开关（#541）随验证子智能体／整轨
+ * 终验／收口三开关／基座 lint 扫描整组拆除（ADR-0055），本命令只余仍在消费的
+ * 覆盖态与工具/路由开关。</p>
  *
  * @param systemPrompt      覆盖 systemPrompt（null＝清空回落枚举默认）
  * @param modelConfigKey           覆盖模型配置键（ADR-0031 语义键如 flash/pro；null＝清空
@@ -52,28 +53,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param routingSizeLabelSignalEnabled 规模标签信号开关（#454，ADR-0037；缺省 false/
  *                          null＝关＝规模标签不参与升档判定；true＝恢复标签映射判据，
  *                          映射旋钮照旧。仅 run 执行体行消费）
- * @param verifyModelConfigKey     verify 子智能体配置键（#424；null/缺省/纯空白＝清空随
- *                          执行体生效档；非空时即时校验同 modelConfigKey〔#367〕）
- * @param verifyRoundBudget 单场验证轮次预算（#424 防无限复验：report_verification
- *                          登记达预算仍有未过项即停修复—复验；null＝清空回落代码
- *                          缺省 3；1-20 整数，越界 PRJ_078）
- * @param finalVerifyFixBudget 整轨终验修复预算（#427：终验 fail 自动起 fix run 修→
- *                          复走，耗尽版本照成＋已知缺陷如实呈现；null＝清空回落
- *                          代码缺省 2；0-10 整数——0＝不起修复 run 的运营选择，
- *                          越界 PRJ_080）
- * @param verificationPresenceGateEnabled 验证在场闸开关（#433，#432 Step 1 开关承载
- *                          面；#435 翻转缺省：false/null＝闸关〔默认——本 run 无
- *                          report_verification 登记不收口不生效〕；true＝闸开〔#424〕。
- *                          仅 run 执行体行消费）
- * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 翻转缺省：
- *                          false/null＝闸关〔默认——终验不起 run，完成口径回落 #427 前
- *                          形态〕；true＝闸开——轨道完成前以核心旅程为轴终验、fail 拦完成
- *                          叙事〔#427〕。仅 run 执行体行消费）
- * @param robustLintBlockingEnabled 基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半
- *                          让路的回滚保险；缺省 false/null＝让路〔默认——强制档违规
- *                          收口照扫只随收尾卡标注，不喂修轮、不触发失败链〕；true＝
- *                          恢复 #425 原阻断形态〔强制档喂修轮＋修不完结构性拒绝〕。
- *                          仅 run 执行体行消费）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -111,32 +90,5 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "规模标签信号开关（#454，ADR-0037：缺省 false/null＝关＝规模"
                 + "标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。"
                 + "仅 run 执行体行消费）")
-        Boolean routingSizeLabelSignalEnabled,
-        @Schema(description = "verify 验证子智能体配置键（#424 片轻验：null/缺省/纯空白＝"
-                + "清空随执行体生效档〔含路由升档，缺省同档不降〕。即时校验同 modelConfigKey"
-                + "（#367：须在模型配置面有行且启用）",
-                example = "pro")
-        String verifyModelConfigKey,
-        @Schema(description = "单场验证轮次预算（#424 防无限复验：登记达预算仍有未过项即停"
-                + "修复—复验、未过项如实带入收口；null＝清空回落代码缺省 3；1-20 整数，"
-                + "越界 PRJ_078）",
-                example = "3")
-        Integer verifyRoundBudget,
-        @Schema(description = "整轨终验修复预算（#427：终验 fail 自动起 fix run 修→复走终验，"
-                + "耗尽版本照成＋已知缺陷清单如实呈现；null＝清空回落代码缺省 2；0-10 整数"
-                + "——0＝不起修复 run 的运营选择，越界 PRJ_080）",
-                example = "2")
-        Integer finalVerifyFixBudget,
-        @Schema(description = "验证在场闸开关（#433；#435 起缺省 false＝闸关——本 run 无验证"
-                + "登记不收口不生效；true＝闸开。仅 run 执行体行消费）")
-        Boolean verificationPresenceGateEnabled,
-        @Schema(description = "整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝闸关——终验"
-                + "不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事。仅 run 执行体行消费）")
-        Boolean finalVerificationGateEnabled,
-        @Schema(description = "基座 lint 强制档阻断开关（#541；缺省 false＝让路〔默认〕——"
-                + "强制档违规（裸客户端直用）收口照扫、只随收尾卡标注，不喂修轮、不触发"
-                + "失败链、不间接升档，修轮触发面收窄至样式合规；true＝恢复原阻断形态"
-                + "（强制档喂修轮修一轮＋修不完收口被拒——回滚保险，未来再收紧不发版）。"
-                + "仅 run 执行体行消费）")
-        Boolean robustLintBlockingEnabled) {
+        Boolean routingSizeLabelSignalEnabled) {
 }

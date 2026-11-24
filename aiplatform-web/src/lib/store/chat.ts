@@ -109,46 +109,12 @@ export type WorkClosing = {
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
   version?: string;
-  /** 验证统计（#352 独立验证子智能体的收尾统计；#424 片轻验常开后收口必在场）：
-   *  total/failed＝末轮总项数与未过数、faces＝末轮三面分布（browser 浏览器主径〔含
-   *  刷新验真落库〕/ db 按需下钻 / log 失败定位）、rounds＝本场验证轮数（修复—复验
-   *  环如实，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注）、
-   *  budgetExhausted＝轮次预算用尽仍未过（达预算停止修复—复验的如实标注）；逐项
-   *  ✅/❌ 明细与证据在过程播报里，收尾卡只带聚合。 */
-  verification?: VerificationClosing;
   /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
    *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
   drafts?: ClosingDraft[];
   /** 设计规范扫描（#296 遵守三件套③）：可缺省——带规范项目编码 run 携带（收尾卡
    *  「按稿对齐」行的呈现源）；无规范项目与设计会话不携带。 */
   designLint?: DesignLintClosing;
-  /** 基座 lint 两档扫描（#425；#541 让路）：可缺省——新基座工作区编码 run 携带
-   *  （收尾卡「基座件使用」行的呈现源：两档违规都如实标注、不拦收口——强制档
-   *  裸客户端直用与预置档会话自写在让路缺省下同场呈现，两档合并计数与清单）；
-   *  存量工作区与设计会话不携带。阻断形态（运营开关回滚）强制档修不完＝收口
-   *  被拒，不会以带强制档违规形态出现在收尾卡。 */
-  robustKitLint?: RobustKitLintClosing;
-  /** 已知缺陷清单（#427 整轨终验）：可缺省——修复预算耗尽时末轮终验 run 收尾卡
-   *  携带（版本照成＋缺陷如实呈现，不粉饰「完成」）；通过与预算内有修复路径不携带。 */
-  knownDefects?: KnownDefectsClosing;
-};
-
-/** 收尾卡已知缺陷清单事实（#427）：整轨终验修复预算耗尽时随末轮终验 run 呈现。 */
-export type KnownDefectsClosing = {
-  /** 缺陷清单（项名＋证据/失败现场——verify 登记原样）。 */
-  defects: { name: string; detail?: string }[];
-};
-
-/** 收尾卡验证统计事实（#352；#424 增轮次预算用尽标注）：末轮三面验证聚合＋复验轮次
- *  ＋未过项名＋预算用尽标注。 */
-export type VerificationClosing = {
-  total: number;
-  failed: number;
-  faces: Record<string, number>;
-  rounds: number;
-  failedItems: string[];
-  /** 轮次预算用尽仍未过（#424：达预算停止修复—复验、未过项如实呈现的标注）。 */
-  budgetExhausted?: boolean;
 };
 
 /** 收尾卡设计规范扫描事实（#296）：status 三态＋违规清单（file/line/rule/message）。 */
@@ -157,22 +123,6 @@ export type DesignLintClosing = {
   retried?: boolean;
   total?: number;
   violations?: { file: string; line: number; rule: string; message: string }[];
-};
-
-/** 收尾卡基座 lint 分档事实（#425）：各档 total＋违规清单——收尾卡只会见预置档余项
- *  （强制档修不完＝收口被拒，结构性不达收尾卡）。 */
-export type RobustLintTier = {
-  total: number;
-  violations: { file: string; line: number; rule: string; message: string }[];
-};
-
-/** 收尾卡基座 lint 两档扫描事实（#425）：status 三态＋预置档余项（强制档分节仅防御
- *  性容错——正常流转不携带）。 */
-export type RobustKitLintClosing = {
-  status: "passed" | "violations" | "unavailable";
-  retried?: boolean;
-  preset?: RobustLintTier;
-  mandatory?: RobustLintTier;
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -964,33 +914,9 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
       : [],
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
-    verification: toVerification(record.verification),
     drafts: toClosingDrafts(record.drafts),
     designLint: toDesignLint(record.designLint),
-    robustKitLint: toRobustKitLint(record.robustKitLint),
-    knownDefects: toKnownDefects(record.knownDefects),
   };
-}
-
-/**
- * knownDefects 载荷容错收窄（#427）：非对象或缺有效缺陷清单回落 undefined（不出
- * 坏区——已知缺陷随在场呈现）；条目缺 name 剔除、detail 可缺省。
- */
-function toKnownDefects(raw: unknown): KnownDefectsClosing | undefined {
-  const record = asRecord(raw);
-  if (!record || !Array.isArray(record.defects)) {
-    return undefined;
-  }
-  const defects = record.defects.flatMap((defect) => {
-    const entry = asRecord(defect);
-    return entry && typeof entry.name === "string"
-      ? [{
-          name: entry.name,
-          detail: typeof entry.detail === "string" ? entry.detail : undefined,
-        }]
-      : [];
-  });
-  return defects.length > 0 ? { defects } : undefined;
 }
 
 /**
@@ -1022,44 +948,6 @@ function toDesignLint(raw: unknown): DesignLintClosing | undefined {
             : [];
         })
       : undefined,
-  };
-}
-
-/**
- * robustKitLint 载荷容错收窄（#425）：非对象或缺有效 status 回落 undefined（不出
- * 坏行——收尾卡「基座件使用」行随在场呈现）；分档条目同 designLint 收窄（缺 file
- * 剔除）。status＝violations 而两档皆空照收（如实——防御性，正常流转不会出现）。
- */
-function toRobustKitLint(raw: unknown): RobustKitLintClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  if (record.status !== "passed" && record.status !== "violations"
-      && record.status !== "unavailable") {
-    return undefined;
-  }
-  const toTier = (tier: unknown): RobustLintTier | undefined => {
-    const entry = asRecord(tier);
-    if (!entry) return undefined;
-    const violations = Array.isArray(entry.violations)
-      ? entry.violations.flatMap((violation) => {
-          const item = asRecord(violation);
-          return item && typeof item.file === "string"
-            ? [{
-                file: item.file,
-                line: typeof item.line === "number" ? item.line : 0,
-                rule: typeof item.rule === "string" ? item.rule : "",
-                message: typeof item.message === "string" ? item.message : "",
-              }]
-            : [];
-        })
-      : [];
-    return { total: typeof entry.total === "number" ? entry.total : violations.length, violations };
-  };
-  return {
-    status: record.status,
-    retried: record.retried === true,
-    preset: toTier(record.preset),
-    mandatory: toTier(record.mandatory),
   };
 }
 
@@ -1096,33 +984,6 @@ export function toQuoteRef(raw: unknown): { orderId: string; event: string } | u
   return {
     orderId: record.orderId,
     event: typeof record.event === "string" && record.event !== "" ? record.event : "quoted",
-  };
-}
-
-/** verification 载荷容错收窄（#352；#424 增 budgetExhausted）：非对象或 total 为 0
- *  （未登记/空轮）回落 undefined；faces 非对象回落空表、failedItems 只收字符串项、
- *  rounds 缺省回落 1、budgetExhausted 只认显式 true。 */
-function toVerification(raw: unknown): VerificationClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  const total = typeof record.total === "number" ? record.total : 0;
-  if (total <= 0) return undefined;
-  const rawFaces = asRecord(record.faces);
-  const faces: Record<string, number> = {};
-  if (rawFaces) {
-    for (const [face, count] of Object.entries(rawFaces)) {
-      if (typeof count === "number") faces[face] = count;
-    }
-  }
-  return {
-    total,
-    failed: typeof record.failed === "number" ? record.failed : 0,
-    faces,
-    rounds: typeof record.rounds === "number" && record.rounds > 0 ? record.rounds : 1,
-    failedItems: Array.isArray(record.failedItems)
-      ? record.failedItems.filter((item): item is string => typeof item === "string")
-      : [],
-    ...(record.budgetExhausted === true ? { budgetExhausted: true } : {}),
   };
 }
 

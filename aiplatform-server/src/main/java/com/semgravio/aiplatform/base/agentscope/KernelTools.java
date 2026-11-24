@@ -161,25 +161,29 @@ public final class KernelTools {
 
         @Override
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return KernelToolCallLog.call("write_file", param, () -> invoke(param));
+        }
+
+        private ToolResultBlock invoke(ToolCallParam param) {
             Map<String, Object> input = param.getInput() != null ? param.getInput() : Map.of();
             ResolvedPath resolved = resolvePath(input.get("path"));
             if (resolved.error() != null) {
-                return Mono.just(ToolResultBlock.error(resolved.error()));
+                return ToolResultBlock.error(resolved.error());
             }
             Object content = input.get("content");
             if (content == null) {
-                return Mono.just(ToolResultBlock.error("content must be a non-empty string"));
+                return ToolResultBlock.error("content must be a non-empty string");
             }
             DockerExecFilesystem.ExecOutput out = exec.run(
                     DockerExecFilesystem.overwriteWriteCommand(resolved.containerPath()),
                     String.valueOf(content).getBytes(StandardCharsets.UTF_8));
             if (!out.ok()) {
-                return Mono.just(ToolResultBlock.error("写入失败: " + out.stderr()));
+                return ToolResultBlock.error("写入失败: " + out.stderr());
             }
             String echoed = new String(out.stdout(), StandardCharsets.UTF_8) + out.stderr();
-            return Mono.just(ToolResultBlock.text(echoed.length() > 2000
+            return ToolResultBlock.text(echoed.length() > 2000
                     ? echoed.substring(0, 2000)
-                    : (echoed.isEmpty() ? "ok" : echoed)));
+                    : (echoed.isEmpty() ? "ok" : echoed));
         }
     }
 
@@ -216,42 +220,46 @@ public final class KernelTools {
 
         @Override
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return KernelToolCallLog.call("read_file", param, () -> invoke(param));
+        }
+
+        private ToolResultBlock invoke(ToolCallParam param) {
             Map<String, Object> input = param.getInput() != null ? param.getInput() : Map.of();
             ResolvedPath resolved = resolvePath(input.get("path"));
             if (resolved.error() != null) {
-                return Mono.just(ToolResultBlock.error(resolved.error()));
+                return ToolResultBlock.error(resolved.error());
             }
             Integer offset = positiveInt(input.get("offset"));
             if (input.containsKey("offset") && offset == null) {
-                return Mono.just(ToolResultBlock.error("offset must be a positive integer"));
+                return ToolResultBlock.error("offset must be a positive integer");
             }
             Integer limit = positiveInt(input.get("limit"));
             if (input.containsKey("limit") && limit == null) {
-                return Mono.just(ToolResultBlock.error("limit must be a positive integer"));
+                return ToolResultBlock.error("limit must be a positive integer");
             }
             int from = offset == null ? 1 : offset;
             int maxLines = limit == null ? READ_LIMIT : limit;
             if (maxLines > READ_LIMIT) {
-                return Mono.just(ToolResultBlock.error(
-                        "invalid arguments: limit must be less than or equal to " + READ_LIMIT));
+                return ToolResultBlock.error(
+                        "invalid arguments: limit must be less than or equal to " + READ_LIMIT);
             }
             String displayPath = String.valueOf(input.get("path"));
             DockerExecFilesystem.ExecOutput out = exec.run(
                     "cat -- " + DockerExecFilesystem.sh(resolved.containerPath()), null);
             if (!out.ok()) {
-                return Mono.just(ToolResultBlock.error(
-                        "cannot read \"" + displayPath + "\": not found"));
+                return ToolResultBlock.error(
+                        "cannot read \"" + displayPath + "\": not found");
             }
             String text = decodeUtf8OrNull(out.stdout());
             if (text == null) {
-                return Mono.just(ToolResultBlock.error(
-                        "cannot read \"" + displayPath + "\" as text: file is not UTF-8"));
+                return ToolResultBlock.error(
+                        "cannot read \"" + displayPath + "\" as text: file is not UTF-8");
             }
             RenderOutcome rendered = renderRead(displayPath, text, from, maxLines);
             if (rendered.error() != null) {
-                return Mono.just(ToolResultBlock.error(rendered.error()));
+                return ToolResultBlock.error(rendered.error());
             }
-            return Mono.just(ToolResultBlock.text(rendered.text()));
+            return ToolResultBlock.text(rendered.text());
         }
 
         /** 渲染结果：error 非空即 offset 越界错误形（调用方转 error block），否则 text 为全文。 */
@@ -385,18 +393,22 @@ public final class KernelTools {
 
         @Override
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return KernelToolCallLog.call("edit_file", param, () -> invoke(param));
+        }
+
+        private ToolResultBlock invoke(ToolCallParam param) {
             Map<String, Object> input = param.getInput() != null ? param.getInput() : Map.of();
             ResolvedPath resolved = resolvePath(input.get("path"));
             if (resolved.error() != null) {
-                return Mono.just(ToolResultBlock.error(resolved.error()));
+                return ToolResultBlock.error(resolved.error());
             }
             Object old = input.get("old_string");
             if (old == null || String.valueOf(old).isEmpty()) {
-                return Mono.just(ToolResultBlock.error("old_string must be a non-empty string"));
+                return ToolResultBlock.error("old_string must be a non-empty string");
             }
             Object replacement = input.get("new_string");
             if (replacement == null) {
-                return Mono.just(ToolResultBlock.error("new_string must be a string"));
+                return ToolResultBlock.error("new_string must be a string");
             }
             String displayPath = String.valueOf(input.get("path"));
             String oldString = String.valueOf(old);
@@ -405,22 +417,22 @@ public final class KernelTools {
             DockerExecFilesystem.ExecOutput read = exec.run(
                     "cat -- " + DockerExecFilesystem.sh(resolved.containerPath()), null);
             if (!read.ok()) {
-                return Mono.just(ToolResultBlock.error(
-                        "cannot read \"" + displayPath + "\": not found"));
+                return ToolResultBlock.error(
+                        "cannot read \"" + displayPath + "\": not found");
             }
             String content = decodeUtf8OrNull(read.stdout());
             if (content == null) {
                 // 非 UTF-8 拒因照裁决脚本原文（v0-harness4.py VARIANT=3 该分支为自写中文句）
-                return Mono.just(ToolResultBlock.error(
-                        "ERROR: " + displayPath + " 不是 UTF-8 文本文件。"));
+                return ToolResultBlock.error(
+                        "ERROR: " + displayPath + " 不是 UTF-8 文本文件。");
             }
             List<Integer> positions = occurrences(content, oldString);
             String shown = oldString.length() <= SHOWN_OLD_MAX
                     ? oldString
                     : oldString.substring(0, SHOWN_OLD_MAX) + "…";
             if (positions.isEmpty()) {
-                return Mono.just(ToolResultBlock.error("No replacement was performed, old_string `"
-                        + shown + "` did not appear verbatim in " + displayPath + "."));
+                return ToolResultBlock.error("No replacement was performed, old_string `"
+                        + shown + "` did not appear verbatim in " + displayPath + ".");
             }
             if (positions.size() > 1 && !replaceAll) {
                 StringBuilder lines = new StringBuilder();
@@ -430,9 +442,9 @@ public final class KernelTools {
                     }
                     lines.append(lineOf(content, pos));
                 }
-                return Mono.just(ToolResultBlock.error("No replacement was performed. Multiple "
+                return ToolResultBlock.error("No replacement was performed. Multiple "
                         + "occurrences of old_string `" + shown + "` in lines [" + lines
-                        + "]. Please ensure it is unique"));
+                        + "]. Please ensure it is unique");
             }
             String updated = replaceAll
                     ? content.replace(oldString, newString)
@@ -441,13 +453,13 @@ public final class KernelTools {
                     DockerExecFilesystem.overwriteWriteCommand(resolved.containerPath()),
                     updated.getBytes(StandardCharsets.UTF_8));
             if (!written.ok()) {
-                return Mono.just(ToolResultBlock.error(
-                        "failed to write \"" + displayPath + "\": " + written.stderr()));
+                return ToolResultBlock.error(
+                        "failed to write \"" + displayPath + "\": " + written.stderr());
             }
-            return Mono.just(ToolResultBlock.text(replaceAll
+            return ToolResultBlock.text(replaceAll
                     ? "The file " + displayPath + " has been updated. All occurrences were "
                             + "successfully replaced."
-                    : "The file " + displayPath + " has been updated successfully."));
+                    : "The file " + displayPath + " has been updated successfully.");
         }
 
         /** 旧文本全部出现位置（字符偏移）——空目标按零处计（与原型 re.finditer 同形）。 */
@@ -509,22 +521,26 @@ public final class KernelTools {
 
         @Override
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return KernelToolCallLog.call("bash", param, () -> invoke(param));
+        }
+
+        private ToolResultBlock invoke(ToolCallParam param) {
             Object command = param.getInput() != null ? param.getInput().get("command") : null;
             if (command == null || String.valueOf(command).isBlank()) {
-                return Mono.just(ToolResultBlock.error("command must be a non-empty string"));
+                return ToolResultBlock.error("command must be a non-empty string");
             }
             String script = String.valueOf(command);
             if (windowsHost) {
                 // ①族守卫复用 DockerExecFilesystem 单源定义（#594 放宽包级可见，行为零变化）
                 String violation = DockerExecFilesystem.windowsArgvViolation(script);
                 if (violation != null) {
-                    return Mono.just(ToolResultBlock.error(
-                            DockerExecFilesystem.guardRejectMessage(violation)));
+                    return ToolResultBlock.error(
+                            DockerExecFilesystem.guardRejectMessage(violation));
                 }
             }
             DockerExecFilesystem.ExecOutput out = exec.run(script, null, TIMEOUT_SECONDS);
             if (out.exitCode() == TIMEOUT_EXIT_CODE) {
-                return Mono.just(ToolResultBlock.error("TIMEOUT after " + TIMEOUT_SECONDS + "s"));
+                return ToolResultBlock.error("TIMEOUT after " + TIMEOUT_SECONDS + "s");
             }
             String stdout = new String(out.stdout(), StandardCharsets.UTF_8);
             String output = out.stderr() == null || out.stderr().isBlank()
@@ -536,9 +552,9 @@ public final class KernelTools {
             if (output.isEmpty()) {
                 output = "(no output)";
             }
-            return Mono.just(out.ok()
+            return out.ok()
                     ? ToolResultBlock.text(output)
-                    : ToolResultBlock.error(output));
+                    : ToolResultBlock.error(output);
         }
     }
 }

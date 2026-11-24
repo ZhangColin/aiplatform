@@ -138,6 +138,42 @@ describe("ClosingCard · 五字段（#617）", () => {
     expect(html).toContain("用时");
   });
 
+  it("首建目录汇总：默认按目录呈现（目录、文件数、± 行数），不裸列文件（#620）", () => {
+    const html = renderCard(
+      closing({
+        files: [
+          { path: "/src/App.jsx", added: 4, removed: 0 },
+          { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+          { path: "/public/logo.png", added: 0, removed: 0 },
+        ],
+        directories: [
+          { path: "/public", fileCount: 1, added: 0, removed: 0 },
+          { path: "/src", fileCount: 1, added: 4, removed: 0 },
+          { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+        ],
+      }),
+    );
+
+    // 目录行（目录、文件数、± 行数）
+    expect(html).toContain("/public");
+    expect(html).toContain("/src/pages");
+    expect(html).toContain("1 个文件");
+    expect(html).toContain("+12");
+    // 百文件不裸列：文件级默认收起，不出文件全路径行
+    expect(html).not.toContain("/src/App.jsx");
+    expect(html).not.toContain("/src/pages/Orders.jsx");
+    // 合计仍按真实文件计（3 个文件，+16 −3）
+    expect(html).toContain("3</b> 个文件");
+    expect(html).toContain("+16");
+  });
+
+  it("迭代文件级清单（无 directories）：照旧文件级＋合计，不出目录行", () => {
+    const html = renderCard(closing());
+
+    expect(html).toContain("/src/pages/Orders.jsx");
+    expect(html).not.toContain("展开 /src 目录");
+  });
+
   it("长清单默认收五条，「查看全部 N 个文件」收进折叠", () => {
     const files = Array.from({ length: 7 }, (_, index) => ({
       path: `/src/File${index + 1}.jsx`,

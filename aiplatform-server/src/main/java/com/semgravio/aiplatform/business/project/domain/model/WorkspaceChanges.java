@@ -25,8 +25,10 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  *       取 {@code --numstat}——命令行改的文件也计入，行数反映真实结果（不是工具
  *       参数推算的活动量）。</li>
  *   <li><b>单文件只读 patch</b>（{@link #patchCommand}）：迭代模式对基线取完整
- *       patch 文本，本类按文件切分（{@link #splitPatch}）；首建不取 patch（目录
- *       汇总与首建不携 patch 归 #620，本票先不造无用载荷）。</li>
+ *       patch 文本，本类按文件切分（{@link #splitPatch}）；首建不取 patch。</li>
+ *   <li><b>首建目录汇总</b>（{@link #aggregateByDirectory}，#620）：首建只出行数，
+ *       同时按父目录聚合文件数与 ± 行数供卡片目录级呈现；迭代维持文件级清单＋
+ *       单文件 patch。</li>
  *   <li><b>大小上限与降级</b>（{@link #assemble}）：单文件 patch 上限 300 行 /
  *       20KB、整卡上限 128KB——超限只省略 patch、保留行数并标注（前端呈现
  *       「diff 过大」）。快照或 diff 执行失败由应用层降级为
@@ -174,8 +176,10 @@ public final class WorkspaceChanges {
 
     /**
      * 装配变更清单：按路径排序（呈现稳定，非时间序）；{@code includePatches=false}
-     * （首建）只出行数；逐文件上限（{@link #MAX_PATCH_LINES}/{@link #MAX_PATCH_BYTES}）
-     * 与整卡总预算（{@link #MAX_TOTAL_PATCH_BYTES}）在本方法内兑现。
+     * （首建）只出行数并按父目录汇总（{@link #aggregateByDirectory}，供卡片目录级
+     * 呈现、点开展开到文件）；逐文件上限（{@link #MAX_PATCH_LINES}/{@link #MAX_PATCH_BYTES}）
+     * 与整卡总预算（{@link #MAX_TOTAL_PATCH_BYTES}）在本方法内兑现。迭代
+     * （{@code includePatches=true}）不产出目录汇总——维持文件级清单。
      */
     public static ChangeSet assemble(List<Numstat> entries, Map<String, String> patches,
             boolean includePatches) {
@@ -209,7 +213,36 @@ public final class WorkspaceChanges {
             }
             files.add(new FileDiff(entry.path(), entry.added(), entry.removed(), patch, omitted));
         }
-        return new ChangeSet(List.copyOf(files), false);
+        List<FileDiff> immutableFiles = List.copyOf(files);
+        List<DirectoryDiff> directories = includePatches
+                ? List.of()
+                : aggregateByDirectory(immutableFiles);
+        return new ChangeSet(immutableFiles, false, directories);
+    }
+
+    /**
+     * 首建目录汇总（#620）：按文件父目录聚合文件数、新增行、删除行，按目录路径
+     * 排序（稳定）。根目录文件归 {@code "/"}（如 {@code /package.json}）；嵌套
+     * 目录各归其父目录（{@code /src/pages} 不并入 {@code /src}）。
+     */
+    public static List<DirectoryDiff> aggregateByDirectory(List<FileDiff> files) {
+        Map<String, int[]> merged = new TreeMap<>();
+        for (FileDiff file : files) {
+            int[] agg = merged.computeIfAbsent(directoryOf(file.path()), key -> new int[3]);
+            agg[0] += 1;
+            agg[1] += file.added();
+            agg[2] += file.removed();
+        }
+        List<DirectoryDiff> directories = new ArrayList<>();
+        merged.forEach((path, agg) ->
+                directories.add(new DirectoryDiff(path, agg[0], agg[1], agg[2])));
+        return List.copyOf(directories);
+    }
+
+    /** 工作区锚定路径 → 父目录锚定形（{@code /src/App.jsx} → {@code /src}；根下文件 → {@code /}）。 */
+    public static String directoryOf(String path) {
+        int slash = path == null ? -1 : path.lastIndexOf('/');
+        return slash <= 0 ? "/" : path.substring(0, slash);
     }
 
     private static boolean exceedsPerFileLimit(String patch) {
@@ -264,15 +297,20 @@ public final class WorkspaceChanges {
             boolean patchOmitted) {
     }
 
+    /** 首建目录汇总条目（#620）：目录、文件数、± 行数。 */
+    public record DirectoryDiff(String path, int fileCount, int added, int removed) {
+    }
+
     /**
      * 收口 diff 结果：{@code unavailable=true} 表示快照或 diff 执行失败——生成
      * 照常成功，变更清单标注「变更清单不可用」，其余字段照常（不把 git 副作用
-     * 升级成生成失败）。
+     * 升级成生成失败）。{@code directories} 仅首建（目录级呈现）非空；迭代为空。
      */
-    public record ChangeSet(List<FileDiff> files, boolean unavailable) {
+    public record ChangeSet(List<FileDiff> files, boolean unavailable,
+            List<DirectoryDiff> directories) {
 
         public static ChangeSet degraded() {
-            return new ChangeSet(List.of(), true);
+            return new ChangeSet(List.of(), true, List.of());
         }
     }
 }

@@ -89,6 +89,33 @@ describe("ClosingCard · 单文件只读 diff（#619）", () => {
   });
 });
 
+describe("ClosingCard · 首建目录展开（#620）", () => {
+  const files = [
+    { path: "/src/App.jsx", added: 4, removed: 0 },
+    { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+  ];
+  const directories = [
+    { path: "/src", fileCount: 1, added: 4, removed: 0 },
+    { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+  ];
+
+  it("点目录展开到该目录文件（首建无 diff 入口），再点收起", () => {
+    renderCard(card({ files, directories }));
+
+    // 默认不裸列文件
+    expect(screen.queryByText("/src/App.jsx")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开 /src 目录" }));
+    expect(screen.getByText("/src/App.jsx")).toBeTruthy();
+    // 首建不携 patch——文件行没有 diff 展开入口
+    expect(screen.queryByRole("button", { name: /App\.jsx 的差异/ })).toBeNull();
+    // 只展开所选目录：嵌套目录的文件不混入
+    expect(screen.queryByText("/src/pages/Orders.jsx")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起 /src 目录" }));
+    expect(screen.queryByText("/src/App.jsx")).toBeNull();
+  });
+});
+
 describe("ClosingCard · 预览入口（#617）", () => {
   it("未就绪：入口禁用（无地址可开）", () => {
     renderCard(card());

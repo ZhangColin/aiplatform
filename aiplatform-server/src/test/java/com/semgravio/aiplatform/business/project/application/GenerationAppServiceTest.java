@@ -801,10 +801,14 @@ class GenerationAppServiceTest {
         assertThat(sliceClosing).doesNotContainKeys(
                 "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
         // 变更清单 = 真实 diff 行数（不是 FileChange 的 40/60），按路径排序；
-        // 首建不携 patch（目录汇总归 #620，本票先不造无用载荷）
+        // 首建不携 patch（#620 起改按目录汇总呈现）
         assertThat((List<Map<String, Object>>) sliceClosing.get("files")).containsExactly(
                 Map.of("path", "/src/App.jsx", "added", 12, "removed", 3),
                 Map.of("path", "/src/pages/Home.jsx", "added", 60, "removed", 0));
+        // 首建目录汇总（#620）：按父目录聚合文件数/± 行数，供卡片目录级呈现
+        assertThat((List<Map<String, Object>>) sliceClosing.get("directories")).containsExactly(
+                Map.of("path", "/src", "fileCount", 1, "added", 12, "removed", 3),
+                Map.of("path", "/src/pages", "fileCount", 1, "added", 60, "removed", 0));
         assertThat(sliceClosing).doesNotContainKey("filesUnavailable");
         assertThat((Long) sliceClosing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }

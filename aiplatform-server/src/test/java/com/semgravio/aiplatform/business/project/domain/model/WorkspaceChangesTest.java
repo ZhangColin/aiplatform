@@ -175,6 +175,41 @@ class WorkspaceChangesTest {
         });
     }
 
+    // ---------- 首建目录汇总（#620） ----------
+
+    @Test
+    void given_files_in_nested_dirs_when_assemble_first_build_then_directories_by_parent_sorted() {
+        // 首建（includePatches=false）按父目录汇总：目录、文件数、± 行数；
+        // 根目录文件归 "/"，路径排序稳定
+        List<WorkspaceChanges.Numstat> entries = List.of(
+                new WorkspaceChanges.Numstat("/src/App.jsx", 4, 0),
+                new WorkspaceChanges.Numstat("/src/pages/Orders.jsx", 12, 3),
+                new WorkspaceChanges.Numstat("/src/pages/Detail.jsx", 2, 1),
+                new WorkspaceChanges.Numstat("/public/logo.png", 0, 0),
+                new WorkspaceChanges.Numstat("/package.json", 1, 1));
+
+        WorkspaceChanges.ChangeSet set = WorkspaceChanges.assemble(entries, Map.of(), false);
+
+        assertThat(set.directories()).containsExactly(
+                new WorkspaceChanges.DirectoryDiff("/", 1, 1, 1),
+                new WorkspaceChanges.DirectoryDiff("/public", 1, 0, 0),
+                new WorkspaceChanges.DirectoryDiff("/src", 1, 4, 0),
+                new WorkspaceChanges.DirectoryDiff("/src/pages", 2, 14, 4));
+    }
+
+    @Test
+    void given_iteration_mode_when_assemble_then_no_directory_aggregation() {
+        // 迭代（includePatches=true）维持文件级清单＋单文件 patch——不产出目录汇总
+        List<WorkspaceChanges.Numstat> entries = List.of(
+                new WorkspaceChanges.Numstat("/src/App.jsx", 4, 0),
+                new WorkspaceChanges.Numstat("/src/pages/Orders.jsx", 12, 3));
+
+        WorkspaceChanges.ChangeSet set = WorkspaceChanges.assemble(entries, Map.of(), true);
+
+        assertThat(set.files()).hasSize(2);
+        assertThat(set.directories()).isEmpty();
+    }
+
     @Test
     void given_patch_over_line_limit_when_assemble_then_patch_omitted_but_lines_kept() {
         List<WorkspaceChanges.Numstat> entries = List.of(
@@ -246,6 +281,7 @@ class WorkspaceChangesTest {
         WorkspaceChanges.ChangeSet set = WorkspaceChanges.ChangeSet.degraded();
 
         assertThat(set.files()).isEmpty();
+        assertThat(set.directories()).isEmpty();
         assertThat(set.unavailable()).isTrue();
     }
 

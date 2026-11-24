@@ -551,9 +551,10 @@ class CodingRunDispatcher {
      * run-finish 载荷加 {@code closing} 对象——schema 见 SSE事件清单·收口扩载
      * （对话史落库 #89 复用同一载荷，拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 五字段 = 用时（durationMs）/ 判据逐件（criteria）/ 变更清单（files，工作区
-     * 真实 diff；迭代携 patch、首建只出行数）/ 内核自述（narrative，空文本不写）/
-     * 预览入口（前端取既有预览查询，不入载荷）。快照或 diff 失败时 files 为空并
-     * 携 {@code filesUnavailable=true}（卡上标注「变更清单不可用」，其余字段照常）。
+     * 真实 diff；迭代携 patch、首建只出行数并另携 {@code directories} 目录汇总
+     * ——#620）/ 内核自述（narrative，空文本不写）/ 预览入口（前端取既有预览查询，
+     * 不入载荷）。快照或 diff 失败时 files 为空并携 {@code filesUnavailable=true}
+     * （卡上标注「变更清单不可用」，其余字段照常）。
      * 旧平台句式摘要与「需求文档／系统」判定键退役；档案内旧载荷由前端读侧回落
      * 呈现（旧对话史不出坏卡）。
      */
@@ -568,6 +569,9 @@ class CodingRunDispatcher {
         criteria.put("previewPassed", judgment.previewPassed());
         closing.put(CLOSING_CRITERIA_FIELD, criteria);
         closing.put("files", changePayloads(changes));
+        if (!changes.directories().isEmpty()) {
+            closing.put(CLOSING_DIRECTORIES_FIELD, directoryPayloads(changes));
+        }
         if (changes.unavailable()) {
             closing.put(CLOSING_FILES_UNAVAILABLE_FIELD, true);
         }
@@ -577,6 +581,9 @@ class CodingRunDispatcher {
 
     /** 收口扩载变更清单不可用标记键（#619：快照或 diff 执行失败时的降级事实）。 */
     static final String CLOSING_FILES_UNAVAILABLE_FIELD = "filesUnavailable";
+
+    /** 收口扩载首建目录汇总键（#620：目录、文件数、± 行数；迭代不产出该键）。 */
+    static final String CLOSING_DIRECTORIES_FIELD = "directories";
 
     /**
      * 真实 diff 变更清单载荷：文件级 ± 行数恒在；patch 可缺省（首建不携 / 超限
@@ -595,6 +602,22 @@ class CodingRunDispatcher {
             if (file.patchOmitted()) {
                 payload.put("patchOmitted", true);
             }
+            return payload;
+        }).toList();
+    }
+
+    /**
+     * 首建目录汇总载荷（#620）：目录、文件数、± 行数（顺序已由
+     * {@link WorkspaceChanges#aggregateByDirectory} 按路径排定）。前端以目录行
+     * 呈现，点开展开到所处目录的文件。
+     */
+    private static List<Map<String, Object>> directoryPayloads(WorkspaceChanges.ChangeSet changes) {
+        return changes.directories().stream().map(directory -> {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("path", directory.path());
+            payload.put("fileCount", directory.fileCount());
+            payload.put("added", directory.added());
+            payload.put("removed", directory.removed());
             return payload;
         }).toList();
     }

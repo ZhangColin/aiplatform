@@ -556,6 +556,8 @@ class IterationAppServiceTest {
         assertThat((String) files.get(1).get("patch")).contains("-旧").contains("+新");
         assertThat(files).allSatisfy(file -> assertThat(file).doesNotContainKey("patchOmitted"));
         assertThat(closing).doesNotContainKey("filesUnavailable");
+        // 迭代模式行为不变（#620）：仍是文件级清单＋单文件 diff，不产出目录汇总
+        assertThat(closing).doesNotContainKey("directories");
         // 轮末统计：时长在场（≥0——起跑到收口的活动量，非墙钟断言）
         assertThat(closing.get("durationMs")).isInstanceOf(Long.class);
         assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);

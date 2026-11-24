@@ -102,11 +102,21 @@ export type WorkClosingFile = {
   patchOmitted?: boolean;
 };
 
+/** 首建目录汇总（#620）：目录、文件数、± 行数——卡片先目录级呈现、点开展开。 */
+export type WorkClosingDirectory = {
+  path: string;
+  fileCount: number;
+  added: number;
+  removed: number;
+};
+
 export type WorkClosing = {
   /** 内核自述（markdown 源；空则卡片不出该块）。 */
   narrative?: string;
   criteria: WorkClosingCriteria;
   files: WorkClosingFile[];
+  /** 首建目录汇总（#620；迭代与旧载荷缺省——缺省时按文件级清单呈现）。 */
+  directories?: WorkClosingDirectory[];
   /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
   filesUnavailable?: boolean;
   durationMs: number;
@@ -918,6 +928,21 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
           }];
         })
       : [],
+    // 首建目录汇总（#620）：缺省/空数组＝按文件级清单呈现（迭代与旧载荷）
+    ...(Array.isArray(record.directories) && record.directories.length > 0
+      ? {
+          directories: record.directories.flatMap((dir) => {
+            const entry = asRecord(dir);
+            if (!entry || typeof entry.path !== "string") return [];
+            return [{
+              path: entry.path,
+              fileCount: typeof entry.fileCount === "number" ? entry.fileCount : 0,
+              added: typeof entry.added === "number" ? entry.added : 0,
+              removed: typeof entry.removed === "number" ? entry.removed : 0,
+            }];
+          }),
+        }
+      : {}),
     ...(record.filesUnavailable === true ? { filesUnavailable: true } : {}),
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,

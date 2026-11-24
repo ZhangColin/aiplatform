@@ -108,6 +108,14 @@ closing: {
                                     # 20KB 单文件、128KB 整卡）省略该键并标 patchOmitted
     { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true }
   ],
+  directories: [                    # 可缺省——首建（#620）目录汇总：先按目录呈现、
+                                    # 点目录展开到 files 中该目录的文件；迭代不携带
+                                    # （维持文件级清单＋单文件 patch）
+    { path: "/src", fileCount: 1, added: 12, removed: 3 },
+    { path: "/src/pages", fileCount: 1, added: 12, removed: 3 }
+  ],                                #   path = 父目录锚定形（根目录文件归 "/"）；
+                                    #   fileCount = 该目录文件数；± 行数为目录内合计。
+                                    #   首建 files 元素不携 patch——前端不出现 diff 展开入口。
   filesUnavailable: true,           # 可缺省——快照或 diff 执行失败时 files 为空并标 true
                                     # （卡上呈现「变更清单不可用」，生成照常成功）
   durationMs: 183420               # 用时（起跑到收口；文件数/变更行数由 files 派生，卡上
@@ -176,7 +184,7 @@ closing: {
 ```
 
 - **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 收口判据通过（build＋8081 探活双件）——前端过程明细（动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。失败/停止不出现收尾卡（回归现状）。
-- **五字段（#617；#619 变更清单改真实 diff）**：用时（`durationMs`）/ 判据结果（`criteria` 逐件）/ 变更清单（`files`，跑前快照基线的真实 ± 行数；迭代携单文件 `patch`、超限标 `patchOmitted`；首建只出行数，目录汇总归 #620；快照或 diff 失败标 `filesUnavailable`）/ 内核自述（`narrative`，markdown）/ 预览入口（前端既有预览查询，不入载荷）。
+- **五字段（#617；#619 变更清单改真实 diff；#620 首建目录汇总）**：用时（`durationMs`）/ 判据结果（`criteria` 逐件）/ 变更清单（`files`，跑前快照基线的真实 ± 行数；迭代携单文件 `patch`、超限标 `patchOmitted`；首建另携 `directories` 目录汇总——目录/文件数/± 行数、点展开到文件，且 files 不携 patch；快照或 diff 失败标 `filesUnavailable`）/ 内核自述（`narrative`，markdown）/ 预览入口（前端既有预览查询，不入载荷）。
 - **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 收口尾序 / 每迭代平台开销（#453 `overhead`——残差饼图）+ 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。验证桶 verifyMs 随验证机器退役（#605）。
 - **旧载荷读侧回落（#617）**：新写入不再携带 `summary` 与判定键；存量对话史中的旧 closing 由前端 `toWorkClosing` 回落（旧 summary 作内核自述文本、判据按收口不变式回落双 ✓），旧卡不空白不坏卡。
 

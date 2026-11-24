@@ -38,8 +38,9 @@ public final class AgentEventTypes {
 
     /**
      * run-finish 的收口扩载键（#617 五字段骨架）：值为对象 { narrative?,
-     * criteria{buildPassed,previewPassed}, files[{path,added,removed}], durationMs,
-     * durationBreakdown（#111 阶段耗时分布——平台分析口径，前端不渲染） }
+     * criteria{buildPassed,previewPassed}, files[{path,added,removed}],
+     * directories[{path,fileCount,added,removed}]（#620 首建目录汇总，迭代缺省）,
+     * durationMs, durationBreakdown（#111 阶段耗时分布——平台分析口径，前端不渲染） }
      * ——对话史落库（#89）复用同一载荷。判据与清单以平台可观测事实为准（工具
      * 调用/探活），不由模型自报。旧平台句式摘要与「需求文档／系统」判定键已
      * 退役（读侧回落）；version 锚随审查与收口组退役（#605）；modelTier 随

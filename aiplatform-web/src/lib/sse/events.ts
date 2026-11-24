@@ -134,11 +134,20 @@ export type SseClosingFile = {
   patchOmitted?: boolean;
 };
 
+/** 首建目录汇总条目（#620）：目录、文件数、± 行数。 */
+export type SseClosingDirectory = {
+  path: string;
+  fileCount: number;
+  added: number;
+  removed: number;
+};
+
 /**
- * 收口扩载（#617 正本 closing schema，五字段骨架；#619 变更清单改真实 diff）：
- * 收尾卡的服务端权威事实——内核自述（末次文本，空则缺省）/判据逐件（build 与
- * 预览）/变更清单（工作区真实 diff：跑前快照基线 + 收口 numstat）/用时。预览
- * 入口取既有预览查询，不入载荷；旧平台句式摘要与「需求文档／系统」判定键已退役
+ * 收口扩载（#617 正本 closing schema，五字段骨架；#619 变更清单改真实 diff；
+ * #620 首建目录汇总）：收尾卡的服务端权威事实——内核自述（末次文本，空则缺省）/
+ * 判据逐件（build 与预览）/变更清单（工作区真实 diff：跑前快照基线 + 收口
+ * numstat；首建另携 directories 目录汇总、迭代携单文件 patch）/用时。预览入口
+ * 取既有预览查询，不入载荷；旧平台句式摘要与「需求文档／系统」判定键已退役
  * （旧对话史由读侧 toWorkClosing 回落呈现）。判据与清单以平台可观测事实为准，
  * 不由模型自报。
  */
@@ -147,6 +156,8 @@ export type SseClosing = {
   narrative?: string;
   criteria: { buildPassed: boolean; previewPassed: boolean };
   files: SseClosingFile[];
+  /** 首建目录汇总（#620；迭代缺省——缺省时前端按文件级清单呈现）。 */
+  directories?: SseClosingDirectory[];
   /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
   filesUnavailable?: boolean;
   durationMs: number;

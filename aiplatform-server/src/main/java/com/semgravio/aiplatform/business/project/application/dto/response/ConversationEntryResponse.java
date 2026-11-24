@@ -50,6 +50,7 @@ public record ConversationEntryResponse(
                 + "收口扩载原样（#617 五字段收尾卡服务端权威事实；schema 正本＝"
                 + "docs/spec/SSE事件清单·收口扩载节）——{ narrative?, "
                 + "criteria{buildPassed,previewPassed}, files=[{path,added,removed}], "
+                + "directories=[{path,fileCount,added,removed}]（#620 首建目录汇总，迭代缺省）, "
                 + "durationMs, durationBreakdown{llmMs,toolsMs,closingMs,overhead{"
                 + "configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},"
                 + "attempts[]} }（可缺省键＝"

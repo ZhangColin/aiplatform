@@ -736,3 +736,51 @@ describe("toWorkClosing · 变更清单真实 diff 收窄（#619）", () => {
     expect(closing?.narrative).toBe("更新了系统");
   });
 });
+
+describe("toWorkClosing · 首建目录汇总收窄（#620）", () => {
+  it("携 directories：按目录/文件数/± 行数收窄（文件清单照常在场供展开）", () => {
+    const closing = toWorkClosing({
+      criteria: { buildPassed: true, previewPassed: true },
+      files: [
+        { path: "/src/App.jsx", added: 4, removed: 0 },
+        { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+      ],
+      directories: [
+        { path: "/src", fileCount: 1, added: 4, removed: 0 },
+        { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+      ],
+      durationMs: 1,
+    });
+
+    expect(closing?.directories).toEqual([
+      { path: "/src", fileCount: 1, added: 4, removed: 0 },
+      { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+    ]);
+    expect(closing?.files).toHaveLength(2);
+  });
+
+  it("无 directories（迭代/旧载荷）：不凭空造目录", () => {
+    const closing = toWorkClosing({
+      files: [{ path: "/src/App.jsx", added: 4, removed: 0, patch: "diff --git a/src/App.jsx\n+新\n" }],
+      durationMs: 1,
+    });
+
+    expect(closing?.directories).toBeUndefined();
+  });
+
+  it("畸形目录条目（缺 path / 非数字）跳过，不坏整卡", () => {
+    const closing = toWorkClosing({
+      files: [],
+      directories: [
+        { path: "/src", fileCount: 1, added: 2, removed: 0 },
+        { fileCount: 3 },
+        { path: 7, fileCount: 1 },
+      ],
+      durationMs: 1,
+    });
+
+    expect(closing?.directories).toEqual([
+      { path: "/src", fileCount: 1, added: 2, removed: 0 },
+    ]);
+  });
+});

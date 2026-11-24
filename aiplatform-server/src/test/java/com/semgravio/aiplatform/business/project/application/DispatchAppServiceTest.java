@@ -34,9 +34,12 @@ import com.semgravio.aiplatform.base.agentscope.AgentResume;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentSuspension;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
@@ -76,8 +79,18 @@ class DispatchAppServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private ModificationHandoffFacts modificationHandoffs;
+
+    @Autowired
+    private IterationAppService iterationAppService;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
+
+    /** 工作区命令缝（内核收尾判据 build/探活与跑前快照走此面——脚本化返回）。 */
+    @MockitoBean
+    private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     @MockitoBean
     private EventsAppService eventsAppService;
@@ -89,6 +102,12 @@ class DispatchAppServiceTest {
     void ensureChannelKeyForRealResolution() {
         // 真解析链护卫（ADR-0031）：测试环境无 key 注入——幂等补测试 key
         ModelConfigSeed.ensureChannelKey(jdbcTemplate);
+        // 内核收尾判据双件（build 过＋8081 探活）默认成功——修改交接用例会真起内核
+        // 轨道，收口核验走命令缝（#601 口径同 IterationAppServiceTest）
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     @AfterEach
@@ -460,6 +479,89 @@ class DispatchAppServiceTest {
         }
         finally {
             codingRunTrack.end(projectId);
+        }
+    }
+
+    @Test
+    void given_clear_modification_when_dialog_turn_closes_then_exactly_one_kernel_run() {
+        // #623 修改交接：说清一句修改 → 对话面调交指令工具（事实缝模拟）→ 平台恰起
+        // 一场内核重跑；任务提示同时携自足指令与用户原话；空闲直派无在途轻提示
+        Long projectId = persistedGeneratedProject("9865");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith(DialogAppService.SESSION_PREFIX)) {
+                modificationHandoffs.record("9865", new ModificationHandoffFacts.Instruction(
+                        "把首页顶部的搜索按钮改成蓝色，与导航栏一致",
+                        "搜索按钮改成蓝的",
+                        "圈选：文本「搜索」"));
+                return new AgentReply(command.runId(), "好的，这就安排修改。");
+            }
+            return new AgentReply(command.runId(), "修改完成");
+        });
+
+        appService.dispatch(projectId, "搜索按钮改成蓝的");
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any()); // 零分类：对话面 + 内核各一轮
+        AgentCommand dialog = commands.getAllValues().get(0);
+        AgentCommand kernel = commands.getAllValues().get(1);
+        assertThat(dialog.sessionId()).isEqualTo(DialogAppService.sessionIdOf(projectId));
+        assertThat(kernel.sessionId()).startsWith("coder-" + projectId + "-fix-");
+        assertThat(kernel.prompt())
+                .contains("用户原话：搜索按钮改成蓝的")
+                .contains("修改指令：把首页顶部的搜索按钮改成蓝色，与导航栏一致")
+                .contains("定位说明：圈选：文本「搜索」");
+        assertThat(kernel.systemPrompt()).isEqualTo(KernelSystemPrompt.text());
+        assertThat(kernel.kernelForm()).isTrue();
+        // 空闲直派：无「已记下」轻提示
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+    }
+
+    @Test
+    void given_run_in_flight_when_dialog_hands_off_then_queued_with_notice_then_success_drains_one_run() {
+        // #623 在途排队：生成在途再交指令 → 不打断当前 run、起轻提示「已记下，下一轮
+        // 生效」；当前 run 成功收口后排空待办，合并为恰好一场后续 run 补派
+        Long projectId = persistedGeneratedProject("9866");
+        givenSessionExecutorRunsInline();
+        assertThat(codingRunTrack.begin(projectId)).isTrue();
+        try {
+            when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+                AgentCommand command = invocation.getArgument(0);
+                if (command.sessionId().startsWith(DialogAppService.SESSION_PREFIX)) {
+                    modificationHandoffs.record("9866", new ModificationHandoffFacts.Instruction(
+                            "给预约列表加分页", "列表加分页", null));
+                }
+                return new AgentReply(command.runId(), "已记下。");
+            });
+
+            appService.dispatch(projectId, "列表加分页");
+
+            // 当前 run 在途：只对话面一轮，未起第二场 run
+            verify(agentClient, times(1)).converse(any(), any());
+            ArgumentCaptor<Map<String, Object>> notice = ArgumentCaptor.forClass(Map.class);
+            verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                    notice.capture());
+            assertThat(notice.getValue()).containsEntry(AgentEventTypes.GUIDE_TEXT_FIELD,
+                    IterationAppService.MODIFICATION_QUEUED_NOTICE);
+            assertThat(conversationHistory.read(projectId))
+                    .anySatisfy(entry -> assertThat(entry.text())
+                            .isEqualTo(IterationAppService.MODIFICATION_QUEUED_NOTICE));
+
+            // 当前 run 成功收口 → 排空待办，起恰好一场补派
+            codingRunTrack.end(projectId);
+            iterationAppService.drainPendingModificationsAfterSuccess(projectId);
+            ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+            verify(agentClient, times(2)).converse(commands.capture(), any());
+            assertThat(commands.getAllValues().get(1).prompt())
+                    .contains("用户原话：列表加分页")
+                    .contains("修改指令：给预约列表加分页");
+        }
+        finally {
+            if (codingRunTrack.isInFlight(projectId)) {
+                codingRunTrack.end(projectId);
+            }
         }
     }
 

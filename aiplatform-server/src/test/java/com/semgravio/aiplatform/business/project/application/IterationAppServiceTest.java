@@ -283,6 +283,156 @@ class IterationAppServiceTest {
         verify(agentClient, times(2)).converse(any(), any());
     }
 
+    // ---------- 对话面交指令（#623，ADR-0056 修改交接） ----------
+
+    private static ModificationHandoffFacts.Instruction instruction(String userWords,
+            String instruction) {
+        return new ModificationHandoffFacts.Instruction(instruction, userWords, null);
+    }
+
+    @Test
+    void given_idle_generated_when_handoff_then_one_kernel_run_carries_instruction_and_words() {
+        // 说清一句修改 → 空闲即起恰好一场内核重跑；任务提示携自足指令与用户原话；
+        // 空闲直派无在途轻提示、零派发第二场
+        Long projectId = persistedGeneratedProject("9930");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+        Project project = projectRepository.findById(projectId).orElseThrow();
+
+        appService.handOffModification(project,
+                List.of(instruction("列表加分页", "给预约列表加分页")), "dialog-run");
+
+        assertThat(tracks).hasSize(1); // 异步轨道已提交未跑
+        verify(agentClient, never()).converse(any(), any());
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .contains("用户原话：列表加分页")
+                .contains("修改指令：给预约列表加分页");
+        assertThat(command.getValue().systemPrompt()).isEqualTo(KernelSystemPrompt.text());
+        assertThat(command.getValue().kernelForm()).isTrue();
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+    }
+
+    @Test
+    void given_handoffs_while_in_flight_when_run_succeeds_then_merged_into_one_follow_up()
+            throws InterruptedException {
+        // 当前 run 在途再交两条修改 → 各自入待办并轻提示；当前 run 成功收口后合并且仅
+        // 合并为一场后续 run 补派（不逐条烧 run、不漏派）
+        Long projectId = persistedGeneratedProject("9931");
+        List<Runnable> tracks = givenTrackQueued();
+        CountDownLatch runInFlight = new CountDownLatch(1);
+        CountDownLatch releaseRun = new CountDownLatch(1);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            runInFlight.countDown();
+            releaseRun.await();
+            return new AgentReply(command.runId(), "完成");
+        });
+        Project project = projectRepository.findById(projectId).orElseThrow();
+
+        appService.handOffModification(project,
+                List.of(instruction("列表加筛选", "给列表加筛选功能")), "dialog-1");
+        Thread worker = new Thread(tracks.remove(0));
+        worker.start();
+        assertThat(runInFlight.await(5, TimeUnit.SECONDS)).isTrue();
+
+        appService.handOffModification(project,
+                List.of(instruction("按钮改蓝色", "把主按钮改成蓝色")), "dialog-2");
+        appService.handOffModification(project,
+                List.of(instruction("加导出", "增加导出功能")), "dialog-3");
+        verify(eventsAppService, times(2)).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), argThat(payload -> IterationAppService
+                        .MODIFICATION_QUEUED_NOTICE.equals(payload.get("text"))));
+
+        releaseRun.countDown();
+        worker.join(5000);
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any()); // 当前一场 + 合并一场
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("用户原话：按钮改蓝色")
+                .contains("修改指令：把主按钮改成蓝色")
+                .contains("用户原话：加导出")
+                .contains("修改指令：增加导出功能");
+    }
+
+    @Test
+    void given_run_fails_when_handoff_queued_then_no_auto_follow_up_and_user_resay_dispatches() {
+        // 当前 run 失败 → 不自动补派、待办保留；用户重说即起新一轮（待办并入本轮，
+        // 失败那场不重放——失败语义不造第三层重试）
+        Long projectId = persistedGeneratedProject("9932");
+        List<Runnable> tracks = givenTrackQueued();
+        AtomicInteger calls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (calls.getAndIncrement() == 0) {
+                throw new IllegalStateException("第一场失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+        Project project = projectRepository.findById(projectId).orElseThrow();
+
+        appService.handOffModification(project,
+                List.of(instruction("第一件事", "做第一件事")), "dialog-1");
+        // 当前 run 在途（已占轨未跑）：第二条入待办
+        appService.handOffModification(project,
+                List.of(instruction("第二件事", "做第二件事")), "dialog-2");
+        tracks.remove(0).run(); // 第一场失败收口
+
+        verify(agentClient, times(1)).converse(any(), any()); // 失败不自动补派
+
+        // 用户重说第三条 → 空闲直派，待办（第二条）并入本轮
+        appService.handOffModification(project,
+                List.of(instruction("第三件事", "做第三件事")), "dialog-3");
+        assertThat(tracks).hasSize(1);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("用户原话：第二件事")
+                .contains("修改指令：做第二件事")
+                .contains("用户原话：第三件事")
+                .contains("修改指令：做第三件事")
+                .doesNotContain("第一件事"); // 失败那场不自动重放
+    }
+
+    @Test
+    void given_first_build_in_flight_when_handoff_then_after_success_dispatched_as_first_iteration() {
+        // 首建在途提的意见 → 待办保留；首建成功收口后作为第一轮迭代补派（恰好一场）
+        Long projectId = projectRepository.save(Project.create("首建在途项目", null,
+                9933L, OWNER, null)).getId();
+        assertThat(codingRunTrack.begin(projectId)).isTrue();
+        givenConverseSucceeds();
+        List<Runnable> tracks = givenTrackQueued();
+        Project project = projectRepository.findById(projectId).orElseThrow();
+
+        appService.handOffModification(project,
+                List.of(instruction("加导出", "增加导出功能")), "dialog-1");
+        verify(eventsAppService).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), argThat(payload -> IterationAppService
+                        .MODIFICATION_QUEUED_NOTICE.equals(payload.get("text"))));
+        assertThat(tracks).isEmpty(); // 首建在途不另起 run
+
+        // 首建成功收口（generated_at 落位）→ 排空待办作为第一轮迭代补派
+        project.markGenerated();
+        projectRepository.save(project);
+        codingRunTrack.end(projectId);
+        appService.drainPendingModificationsAfterSuccess(projectId);
+
+        assertThat(tracks).hasSize(1);
+        tracks.remove(0).run();
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .contains("用户原话：加导出")
+                .contains("修改指令：增加导出功能");
+    }
+
     @Test
     void given_knowledge_hits_when_fix_then_prefix_injected_before_task_prompt() {
         Long projectId = persistedGeneratedProject("9903");

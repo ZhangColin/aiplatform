@@ -19,6 +19,7 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleApp
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
+import com.semgravio.aiplatform.business.project.application.ModificationHandoffFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.AgentTool;
@@ -62,6 +63,7 @@ class ProfileToolkitSupplierTest {
     private final InterviewToolGate interviewToolGate = mock(InterviewToolGate.class);
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
+    private final ModificationHandoffFacts modificationHandoffs = new ModificationHandoffFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
             mock(WorkspaceLifecycleAppService.class);
@@ -73,7 +75,7 @@ class ProfileToolkitSupplierTest {
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, prdRevisions,
-                fastLaneFacts,
+                fastLaneFacts, modificationHandoffs,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, readinessWaiter);
     }
@@ -104,15 +106,16 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_main_on_dialog_plane_spec_when_toolkit_then_answer_and_read_only_no_write() {
-        // #622 对话面：生成后的独立轻会话——工具面只有答疑与澄清两职能
-        // （ask_user 无额度闸形态 ＋ 只读三件），零写工作区/编码工具
+    void given_main_on_dialog_plane_spec_when_toolkit_then_answer_clarify_and_handoff_no_write() {
+        // #622/#623 对话面：生成后的独立轻会话——答疑、澄清、交修改指令三职能
+        // （ask_user 无额度闸 ＋ 只读三件 ＋ submit_modification），零写工作区/编码工具
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"),
                 AgentConfigAppService.DIALOG_TOOL_SPEC);
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
                 AskUserTool.NAME, ListWorkspaceFilesTool.NAME,
-                ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME);
+                ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
+                SubmitModificationTool.NAME);
         assertThat(toolkit.getToolNames())
                 .doesNotContain(SavePrdTool.NAME, ProposeSkillTool.NAME,
                         ProposeSedimentTool.NAME, FetchUrlTool.NAME, WebSearchTool.NAME);
@@ -209,7 +212,7 @@ class ProfileToolkitSupplierTest {
         RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, prdRevisions,
-                fastLaneFacts, projectRepository, workspaceLifecycleAppService,
+                fastLaneFacts, modificationHandoffs, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
                 readinessWaiter);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
@@ -253,7 +256,7 @@ class ProfileToolkitSupplierTest {
         RecordingProposeAdapter recorder = new RecordingProposeAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, prdRevisions,
-                fastLaneFacts, projectRepository, workspaceLifecycleAppService,
+                fastLaneFacts, modificationHandoffs, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
                 readinessWaiter);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);

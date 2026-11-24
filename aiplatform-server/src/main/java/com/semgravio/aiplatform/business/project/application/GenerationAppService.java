@@ -463,6 +463,15 @@ public class GenerationAppService {
                         // 在途标记已释放（排空补派的更新 run 要占同一轨道）——补派
                         // 是否起跑由排空内按 generated_at 事实判定
                         dispatchFirstDemoTurnOpinions(projectId);
+                        // #623 对话面交指令待办：首建成功收口（generated_at 已落）后
+                        // 作为第一轮迭代补派；失败/停止（generated_at 未落）待办保留
+                        try {
+                            iterationAppService.drainPendingModificationsAfterSuccess(projectId);
+                        }
+                        catch (RuntimeException e) {
+                            log.warn("[generate] 项目 {} 首建收口后补派对话面修改待办失败"
+                                    + "（不反噬收工，用户重说即兜底）：{}", projectId, e.toString());
+                        }
                     }
                 });
     }

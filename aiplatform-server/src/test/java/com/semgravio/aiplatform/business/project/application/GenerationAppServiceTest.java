@@ -143,6 +143,10 @@ class GenerationAppServiceTest {
     @Autowired
     private CodingRunTrack codingRunTrack;
 
+    /** 对话面交指令的派发面（#623 首建在途待办的排空钩子断言）。 */
+    @Autowired
+    private IterationAppService iterationAppService;
+
     /** 两命中的检索桩（下发前置注入 happy path；#466 多类同池：PRD＋沉淀物）。 */
     private void givenKnowledgeHits() {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
@@ -1382,6 +1386,61 @@ class GenerationAppServiceTest {
                 IterationAppService.kernelFixRunPrompt(new IterationAppService.FixHandoff(
                         List.of(new IterationAppService.FixHandoff.Round("列表加筛选", null),
                                 new IterationAppService.FixHandoff.Round("加导出功能", "PRD 已加导出节")))));
+    }
+
+    @Test
+    void given_first_build_in_flight_when_dialog_hands_off_then_dispatched_after_success()
+            throws InterruptedException {
+        // #623 首建在途：对话面交指令进待办＋轻提示（不另起 run）；首建成功后作为第一
+        // 轮迭代补派恰好一场（任务提示携用户原话与自足修改指令）
+        Long projectId = persistedProject("9862");
+        givenWorkspaceExecSucceeds();
+        List<Runnable> tracks = givenTrackCollected();
+        CountDownLatch generating = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch fixDone = new CountDownLatch(1);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().contains("-kernel-")) {
+                generating.countDown();
+                release.await();
+            }
+            if (command.sessionId().contains("-fix-")) {
+                fixDone.countDown();
+                return new AgentReply(command.runId(), "修改完成");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+        Thread generationWorker = new Thread(tracks.remove(0));
+        generationWorker.start();
+        assertThat(generating.await(5, TimeUnit.SECONDS)).isTrue();
+
+        // 首建在途：交指令进待办＋轻提示，不另起 run
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        iterationAppService.handOffModification(project, List.of(
+                new ModificationHandoffFacts.Instruction("给预约列表加分页", "列表加分页", null)),
+                "dialog-run-1");
+        assertThat(tracks).isEmpty();
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> IterationAppService.MODIFICATION_QUEUED_NOTICE
+                        .equals(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))));
+
+        // 首建成功收口 → 待办作为第一轮迭代补派恰好一场
+        release.countDown();
+        generationWorker.join(5000);
+        assertThat(generatedAt(projectId)).isNotNull();
+        assertThat(tracks).hasSize(1);
+        Thread fixWorker = new Thread(tracks.remove(0));
+        fixWorker.start();
+        assertThat(fixDone.await(5, TimeUnit.SECONDS)).isTrue();
+        fixWorker.join(5000);
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("用户原话：列表加分页")
+                .contains("修改指令：给预约列表加分页");
     }
 
     @Test

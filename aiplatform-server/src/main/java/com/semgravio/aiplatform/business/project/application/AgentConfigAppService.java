@@ -34,10 +34,11 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 public class AgentConfigAppService {
 
     /**
-     * 对话面工具面规格（#622）：与主智能体同槽（工具装配按 agentKey=main 寻址），
-     * 以 {@code plane=dialog} 标记收窄工具集——只有答疑与澄清两职能（ask_user ＋
-     * 只读三件），零写工作区/编码工具（无 savePrd、无自荐、无增强工具）。对话面是
-     * 生成后的独立轻会话，与首建访谈链共用主智能体身份但不共用工具面。
+     * 对话面工具面规格（#622/#623）：与主智能体同槽（工具装配按 agentKey=main
+     * 寻址），以 {@code plane=dialog} 标记收窄工具集——答疑、澄清与交指令三职能
+     * （ask_user ＋ 只读三件 ＋ 交修改指令 submit_modification），零写工作区/编码
+     * 工具（无 savePrd、无自荐、无增强工具）。对话面是生成后的独立轻会话，与首建
+     * 访谈链共用主智能体身份但不共用工具面。
      */
     public static final String DIALOG_TOOL_SPEC = "ws=false,fu=false,plane=dialog";
 

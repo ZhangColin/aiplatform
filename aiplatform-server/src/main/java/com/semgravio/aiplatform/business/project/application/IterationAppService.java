@@ -133,6 +133,9 @@ public class IterationAppService {
     /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
     private final KernelClosingCriteria kernelClosingCriteria;
 
+    /** 对话面在途入待办的轻提示落对话史（刷新/回访不丢，#89 闭史口径）。 */
+    private final ConversationHistoryAppService conversationHistory;
+
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
     /**
@@ -150,6 +153,27 @@ public class IterationAppService {
      */
     private final Map<Long, FixHandoff> balanceBlockedFixRuns = new ConcurrentHashMap<>();
 
+    /**
+     * 对话面交指令的待办（#623，projectId → 按到达序待派的自足修改指令）：生成/迭代
+     * run 在途（含首建在途）时先记在此并发轻提示「已记下，下一轮生效」；当前 run
+     * <b>成功</b>收口后由 {@link #drainPendingModificationsAfterSuccess} 合并为恰好
+     * 一场后续 run 补派。失败/停止不自动补派、待办保留，用户重说即触发下一轮。
+     * 进程内态与轨道状态同口径——重启即清，用户重说即恢复。
+     */
+    private final Map<Long, List<ModificationHandoffFacts.Instruction>> pendingModifications =
+            new ConcurrentHashMap<>();
+
+    /**
+     * 段边界余额闸暂存的对话面修改 intent（#537 计费③口径沿用，projectId → 被拦
+     * 指令集）：源池≤0 时起跑被拦、暂存于此，充值回正经 {@link #drainBalanceBlocked}
+     * 自动重派（不手动重试）。多场被拦按到达序合并（不丢条）。进程内态，重启即清。
+     */
+    private final Map<Long, List<ModificationHandoffFacts.Instruction>> balanceBlockedModifications =
+            new ConcurrentHashMap<>();
+
+    /** 对话面交指令在途入待办后的平台轻提示文案（#623，guide-reply 复用）。 */
+    static final String MODIFICATION_QUEUED_NOTICE = "已记下，下一轮生效";
+
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
             AgentEventBridge eventBridge,
@@ -158,7 +182,8 @@ public class IterationAppService {
             PrdVersionAppService prdVersionAppService,
             DemoSeedAppService demoSeed,
             BalanceGateAppService balanceGate,
-            KernelClosingCriteria kernelClosingCriteria) {
+            KernelClosingCriteria kernelClosingCriteria,
+            ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.codingRunDispatcher = codingRunDispatcher;
@@ -169,6 +194,7 @@ public class IterationAppService {
         this.demoSeed = demoSeed;
         this.balanceGate = balanceGate;
         this.kernelClosingCriteria = kernelClosingCriteria;
+        this.conversationHistory = conversationHistory;
     }
 
     /**
@@ -198,6 +224,82 @@ public class IterationAppService {
     FixDispatch startFixRun(Long projectId, FixHandoff handoff) {
         Project project = requireFixableProject(projectId);
         return dispatch(project, handoff);
+    }
+
+    /**
+     * 对话面交指令（#623，ADR-0056 修改交接的唯一出口）：对话面把已说清楚的修改
+     * 蒸馏成自足指令后交来本方法——<b>空闲即起一轮内核重跑</b>；有 run 在途
+     * （含首建在途、或首建失败尚未生成的空闲态）<b>进平台内存待办</b>并发一条
+     * 轻提示「已记下，下一轮生效」（guide-reply 复用），当前生成不打断。当前 run
+     * <b>成功</b>收口后由 {@link #drainPendingModificationsAfterSuccess} 合并为一场
+     * 后续 run 补派；失败/停止不自动补派、待办保留，用户重说即触发下一轮。
+     *
+     * <p><b>段边界余额门照旧</b>（#537 计费③，ADR-0047）：起跑前源池≤0 拦下暂存
+     * 并推余额提醒卡，充值回正自动重派（同 {@link #drainBalanceBlocked}）；在途被
+     * 排队的指令等到真正起跑时再查门。待办是进程内态，平台重启即清——用户重说
+     * 即恢复（与旧队列同口径）。</p>
+     *
+     * @param dialogRunId 对话面本轮 runId（在途轻提示的对话面锚；空闲直接起跑时
+     *                    仅为回执锚，不需提示）
+     */
+    public void handOffModification(Project project,
+            List<ModificationHandoffFacts.Instruction> instructions, String dialogRunId) {
+        if (instructions == null || instructions.isEmpty()) {
+            return;
+        }
+        Long projectId = project.getId();
+        boolean queued = false;
+        synchronized (codingRunTrack) {
+            // 同一临界区内取最新项目事实（对话轮可能跨过首建收口瞬间：陈旧快照会把
+            // 「刚生成完、轨道已释放」误记为未生成而滞留待办——排空钩子已经跑过，
+            // 无人再来取）。取舍：一次主键 SELECT 在轨道锁内，换零滞留窗口。
+            Project current = projectRepository.findById(projectId).orElse(project);
+            if (current.getArchivedAt() != null) {
+                log.info("[modify] 项目 {} 已归档，对话面交指令不收（修改出口关闭）", projectId);
+                return;
+            }
+            // 在途（含首建点火在途）或尚未生成（首建失败空闲态）——进待办：
+            // 前者当前 run 不打断、成功收口后补派；后者待首建成功收口后作第一轮
+            // 迭代补派（首建失败后待办保留，重新点火成功即补派）
+            if (codingRunTrack.isInFlight(projectId) || current.getGeneratedAt() == null) {
+                pendingModifications.computeIfAbsent(projectId, key -> new ArrayList<>())
+                        .addAll(instructions);
+                queued = true;
+            }
+        }
+        if (queued) {
+            log.info("[modify] 项目 {} run 在途（或未生成），修改指令入待办 {} 条（成功收口后"
+                    + "合并补派，对话轮锚 {}）", projectId, instructions.size(), dialogRunId);
+            notifyModificationQueued(project, dialogRunId);
+            return;
+        }
+        dispatchModification(project, instructions, dialogRunId);
+    }
+
+    /**
+     * 当前 run 成功收口后的待办排空（#623）：首建成功（{@code generated_at} 已落）
+     * 或迭代 run 成功后由轨道调用——待办非空且当前无 run 在途，即合并为恰好一场
+     * 后续 run 补派（多轮指令合并进同一场，不逐条烧 run）。失败/停止不调用本
+     * 方法（待办保留，用户重说即触发下一轮）；未生成（首建失败/停止）直接返回。
+     */
+    public void drainPendingModificationsAfterSuccess(Long projectId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null || project.getArchivedAt() != null || project.getGeneratedAt() == null) {
+            return; // 未成功收口（首建失败/停止）或已归档——待办保留
+        }
+        List<ModificationHandoffFacts.Instruction> pending;
+        synchronized (codingRunTrack) {
+            if (codingRunTrack.isInFlight(projectId)) {
+                return; // 仍有 run 在途——等那场成功收口再排空（不并发起轨）
+            }
+            pending = pendingModifications.remove(projectId);
+        }
+        if (pending == null || pending.isEmpty()) {
+            return;
+        }
+        log.info("[modify] 项目 {} 前一场 run 成功收口，排空待办修改指令 {} 条合并补派一轮",
+                projectId, pending.size());
+        dispatchModification(project, pending, null);
     }
 
     /**
@@ -323,6 +425,207 @@ public class IterationAppService {
     }
 
     /**
+     * 对话面修改批次的派发（空闲入口与成功排空共用）：段边界余额门 → 与残留待办
+     * 合并 → 占轨起跑。占轨失败（收口窗口内别处已起跑）即连同已取出的残留待办一起
+     * 回填待办，并给对话轮补轻提示——零丢失；那场 run 成功收口后再排空。
+     */
+    private void dispatchModification(Project project,
+            List<ModificationHandoffFacts.Instruction> incoming, String dialogRunId) {
+        Long projectId = project.getId();
+        BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
+        if (gate.blocked()) {
+            balanceBlockedModifications.merge(projectId, new ArrayList<>(incoming),
+                    (held, fresh) -> {
+                        held.addAll(fresh);
+                        return held;
+                    });
+            String blockedRunId = EventsAppService.newRunId();
+            eventBridge.emitBalanceReminder(project,
+                    BalanceReminderAppService.BalanceReminderCard.forRunBlock(
+                            gate.blockedBalanceFen(), blockedRunId));
+            log.info("[modify] 项目 {} 余额提醒（run 场）：对话面修改 intent 已暂存，充值回正自动重派",
+                    projectId);
+            return;
+        }
+        List<ModificationHandoffFacts.Instruction> batch = new ArrayList<>();
+        String firstRunId = null;
+        synchronized (codingRunTrack) {
+            List<ModificationHandoffFacts.Instruction> retained =
+                    pendingModifications.remove(projectId);
+            if (retained != null) {
+                batch.addAll(retained);
+            }
+            batch.addAll(incoming);
+            if (!codingRunTrack.begin(projectId)) {
+                pendingModifications.merge(projectId, batch, (existing, fresh) -> {
+                    List<ModificationHandoffFacts.Instruction> merged = new ArrayList<>(existing);
+                    merged.addAll(fresh); // 保持到达序：先前待办在前
+                    return merged;
+                });
+            }
+            else {
+                firstRunId = EventsAppService.newRunId();
+            }
+        }
+        if (firstRunId == null) {
+            log.info("[modify] 项目 {} 轨道在收口窗口被占用，修改指令回填待办（成功收口后补派）",
+                    projectId);
+            notifyModificationQueued(project, dialogRunId);
+            return;
+        }
+        log.info("[modify] 项目 {} 起一轮修改 run（{} 条指令合并，runId={}）", projectId,
+                batch.size(), firstRunId);
+        submitModificationTrack(project, firstRunId, batch);
+    }
+
+    /**
+     * 在途入待办的平台轻提示（#623，guide-reply 复用型）：同步落对话史（刷新回访
+     * 不丢）＋发 guide-reply 事件（锚对话面本轮 runId，prompt 不携带——用户气泡已
+     * 自落，平台只补回执一条）。发射失败只记日志不反噬待办事实；无对话轮锚（成功
+     * 排空路径）不提示。
+     */
+    private void notifyModificationQueued(Project project, String dialogRunId) {
+        if (dialogRunId == null) {
+            return;
+        }
+        try {
+            conversationHistory.recordGuideNotice(project.getId(), dialogRunId,
+                    MODIFICATION_QUEUED_NOTICE);
+            eventBridge.emitGuideReply(project, dialogRunId, /* prompt= */ null,
+                    DispatchAppService.GUIDE_LABEL, MODIFICATION_QUEUED_NOTICE);
+        }
+        catch (RuntimeException e) {
+            log.warn("[modify] 项目 {} 在途修改回执发射失败（不反噬待办）：{}",
+                    project.getId(), e.toString());
+        }
+    }
+
+    /** 修改轨道提交（异步，与修正轨同执行器/同停止登记面）。 */
+    private void submitModificationTrack(Project project, String firstRunId,
+            List<ModificationHandoffFacts.Instruction> firstBatch) {
+        Future<?> trackTask = sessionExecutor.submitGeneration(
+                CodingRunDispatcher.SESSION_PREFIX + project.getId(),
+                () -> {
+                    try {
+                        runModificationTrack(project, firstRunId, firstBatch);
+                    }
+                    catch (RunShutdownException e) {
+                        // 关停收口（#477）：排队残局是进程内态（重启即清），在途场保持
+                        // 待跑（中断可续跑态，不发终态事件）
+                        log.info("[modify] 项目 {} 修改轨道因平台关停中断（runId={}）——待办保留",
+                                project.getId(), e.runId());
+                    }
+                });
+        codingRunTrack.registerTask(project.getId(), trackTask);
+    }
+
+    /**
+     * 修改轨道（#623）：整场内核重跑至收尾判据双件全过（与修正轨同装配、同收口
+     * 回调）。成功后若待办非空，合并为<b>恰好一场</b>后续 run 续派（多轮待办合并，
+     * 不逐条烧 run）；失败/停止即终态——不自动补派、待办保留（用户重说即新一轮，
+     * 不造第三层重试）。在途标记的释放与待办排空同临界区（同修正轨锁序）。
+     */
+    private void runModificationTrack(Project project, String firstRunId,
+            List<ModificationHandoffFacts.Instruction> firstBatch) {
+        Long projectId = project.getId();
+        boolean released = false;
+        try {
+            List<ModificationHandoffFacts.Instruction> batch = firstBatch;
+            String runId = firstRunId;
+            while (true) {
+                List<ModificationHandoffFacts.Instruction> current = batch;
+                // Demo 类 run 起跑自动记行（#462 去门化口径沿用，随旧版本表归 #625 清场）
+                try {
+                    prdVersionAppService.recordOnDemoRunStart(projectId, runId);
+                }
+                catch (RuntimeException e) {
+                    log.warn("[modify] 项目 {} run {} 起跑记行失败（不反噬本场）：{}",
+                            projectId, runId, e.toString());
+                }
+                Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
+                CodingRunDispatcher.RunResult result;
+                try {
+                    result = codingRunDispatcher.run(project, runId,
+                            fixSession(projectId, runId),
+                            modificationRunPrompt(current),
+                            (attemptRunId, attemptChanges) -> closeKernelFix(project,
+                                    attemptRunId, prdVersionNo, attemptChanges),
+                            "fix", true, CodingRunDispatcher.RunSeat.kernel(),
+                            RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
+                            /* includePatch= */ true);
+                }
+                catch (RunStoppedException e) {
+                    synchronized (codingRunTrack) {
+                        codingRunTrack.end(projectId);
+                        released = true;
+                    }
+                    eventBridge.emitRunStopped(project, e.runId(), e.failure());
+                    return;
+                }
+                if (!result.succeeded()) {
+                    synchronized (codingRunTrack) {
+                        codingRunTrack.end(projectId);
+                        released = true;
+                    }
+                    eventBridge.emitRunFailed(project, runId, result.failure());
+                    return;
+                }
+                // 成功收口：待办（含收口窗口内新到的交指令）合并为恰好一场后续 run
+                List<ModificationHandoffFacts.Instruction> pending;
+                boolean done;
+                synchronized (codingRunTrack) {
+                    pending = pendingModifications.remove(projectId);
+                    done = pending == null || pending.isEmpty();
+                    if (done) {
+                        codingRunTrack.end(projectId);
+                        released = true;
+                    }
+                }
+                if (done) {
+                    return;
+                }
+                log.info("[modify] 项目 {} 修改 run 成功收口，合并待办 {} 条续派一场", projectId,
+                        pending.size());
+                batch = pending;
+                runId = EventsAppService.newRunId();
+            }
+        }
+        finally {
+            if (!released) {
+                synchronized (codingRunTrack) {
+                    codingRunTrack.end(projectId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 修改 run 任务提示（#623）：逐条携<b>用户原话＋平台整理的自足修改指令</b>（附件
+     * 定位说明有则附），要求内核在现有工作区完成修改、其余部分保持可用；需求正本
+     * 引用工作区 PRD、收口判据句同内核口径（{@code pnpm build}＋8081 探活双件）。
+     */
+    static String modificationRunPrompt(List<ModificationHandoffFacts.Instruction> instructions) {
+        StringBuilder prompt = new StringBuilder(
+                "系统修改：系统已生成并可操作，用户提出了如下修改要求（每条含用户的原始说法"
+                        + "与平台整理出的自足修改指令），请在现有工作区内完成修改（系统的其余"
+                        + "部分保持可用）：");
+        for (int index = 0; index < instructions.size(); index++) {
+            ModificationHandoffFacts.Instruction instruction = instructions.get(index);
+            prompt.append("\n").append(index + 1).append(". 用户原话：")
+                    .append(instruction.userWords())
+                    .append("\n   修改指令：").append(instruction.instruction());
+            if (instruction.location() != null && !instruction.location().isBlank()) {
+                prompt.append("\n   定位说明：").append(instruction.location());
+            }
+        }
+        prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
+                .append("，以正本与上述修改要求为准。");
+        prompt.append("\n完成后用 pnpm build 验证可构建、用 curl http://localhost:8081 "
+                + "确认有响应——双件全过本轮修改才算完成。");
+        return prompt.toString();
+    }
+
+    /**
      * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
      * 余额闸暂存的修正 intent 逐项目重派（触发时门已过〔入账事件〕，重派自然再守
      * 全守卫与在途口径）。重派失败（项目已归档等）intent 丢弃并记日志——用户重提
@@ -351,6 +654,32 @@ public class IterationAppService {
                         projectId, e.toString());
             }
         }
+        // 对话面修改 intent 的余额暂存同面排空（#623；同口径——回正即重派，失败丢弃）
+        for (Map.Entry<Long, List<ModificationHandoffFacts.Instruction>> entry
+                : balanceBlockedModifications.entrySet()) {
+            Long projectId = entry.getKey();
+            if (balanceGate.assess(projectId).blocked()) {
+                continue;
+            }
+            if (!balanceBlockedModifications.remove(projectId, entry.getValue())) {
+                continue;
+            }
+            try {
+                Project project = projectRepository.findById(projectId)
+                        .orElseThrow(() -> new ApplicationException(
+                                ProjectMessage.PROJECT_NOT_FOUND));
+                if (project.getArchivedAt() != null) {
+                    continue;
+                }
+                log.info("[modify] 项目 {} 余额回正：暂存对话面修改 intent 自动重派（{} 条）",
+                        projectId, entry.getValue().size());
+                dispatchModification(project, entry.getValue(), null);
+            }
+            catch (RuntimeException e) {
+                log.warn("[modify] 项目 {} 余额回正排空重派失败（intent 丢弃，重提即新段）：{}",
+                        projectId, e.toString());
+            }
+        }
     }
 
     /**
@@ -369,6 +698,8 @@ public class IterationAppService {
     private void runFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
         Long projectId = project.getId();
         boolean released = false;
+        // 成功收工后排空对话面待办修改指令（#623）——失败/停止不排（待办保留）
+        boolean drainModificationsAfterSuccess = false;
         try {
             FixHandoff handoff = firstHandoff;
             String runId = firstRunId;
@@ -455,6 +786,7 @@ public class IterationAppService {
                         // 无账」的假 PRJ_026 窗口，也不被先收工的旧轨覆盖
                         if (result.succeeded()) {
                             terminallyFailedHandoffs.remove(projectId);
+                            drainModificationsAfterSuccess = true; // 成功收工才排空对话面待办
                         }
                         else {
                             terminallyFailedHandoffs.put(projectId, handoff);
@@ -484,6 +816,15 @@ public class IterationAppService {
             if (!released) {
                 synchronized (codingRunTrack) {
                     codingRunTrack.end(projectId);
+                }
+            }
+            if (drainModificationsAfterSuccess) {
+                try {
+                    drainPendingModificationsAfterSuccess(projectId);
+                }
+                catch (RuntimeException e) {
+                    log.warn("[modify] 项目 {} 成功收工后排空修改待办失败（不反噬收工）：{}",
+                            projectId, e.toString());
                 }
             }
         }

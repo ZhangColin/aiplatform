@@ -33,13 +33,15 @@ import lombok.extern.slf4j.Slf4j;
  * 访谈链（{@code main-{projectId}}）分开，用户看到的仍是一根连续线程（对话史按
  * 项目全量落库，会话切换对用户不可见）。
  *
- * <p><b>只做两件事</b>：①<b>答疑</b>——只读查工作区、PRD、项目事实后据实回答，
+ * <p><b>做三件事</b>：①<b>答疑</b>——只读查工作区、PRD、项目事实后据实回答，
  * 不触发任何生成；②<b>澄清</b>——修改/需求说得不清楚时，用 ask_user 出带选项与
- * 推荐项的问答卡先问清（复用现有问答卡/作答通道）。工具面＝ask_user ＋文件清单／
- * 文件内容／项目事实只读三件（{@link AgentConfigAppService#DIALOG_TOOL_SPEC}
- * 收窄装配）——<b>零写工作区/编码工具</b>，本票不提供修改触发出口（修改交接归
- * #623，任务句与派发由平台在执行面完成）。SSE 复用 run-start/run-finish/
- * question-raised/error，零新增事件类型。
+ * 推荐项的问答卡先问清（复用现有问答卡/作答通道）；③<b>修改交接</b>（#623）——
+ * 说得清楚后调用交指令工具（{@code submit_modification}），交出「自足指令＋用户
+ * 原话（＋附件定位说明）」，平台据此恰起一轮内核重跑（空闲即起、在途进待办并轻
+ * 提示「已记下，下一轮生效」，成功收口后合并补派）。工具面＝ask_user ＋文件清单／
+ * 文件内容／项目事实只读三件 ＋ 交修改指令（{@link AgentConfigAppService#DIALOG_TOOL_SPEC}
+ * 收窄装配）——<b>零写工作区/编码工具</b>，工作区变更只经生成内核。SSE 复用
+ * run-start/run-finish/question-raised/guide-reply/error，零新增事件类型。
  *
  * <p><b>只读面口径（#622）</b>：文件内容放开 {@code .env} 与 seed/脚本（账号密码
  * 类问题查证），仍拒绝 {@code data/pg}、{@code node_modules}、{@code .git} 等
@@ -63,12 +65,13 @@ public class DialogAppService {
     public static final String SESSION_PREFIX = "dialog-";
 
     /**
-     * 对话面工作协议（#622）：两职能——答疑（只读查证后据实作答）与澄清（不清楚
-     * 先问，一次一问、2-4 选项、推荐项）。无写面、无派发、无额度；本票不承诺动手
-     * 修改（修改交接归 #623）。
+     * 对话面工作协议（#622/#623）：三职能——答疑（只读查证后据实作答）、澄清
+     * （不清楚先问，一次一问、2-4 选项、推荐项）与修改交接（已说清即调
+     * {@code submit_modification} 交出**自足指令＋用户原话**，平台据此恰起一轮
+     * 内核重跑）。无写工作区/编码工具、无额度；修改的唯一出口是交指令工具。
      */
     public static final String DIALOG_SYSTEM_PROMPT =
-            "你是平台的对话面，负责系统生成之后的对话，只做两件事：答疑与澄清。\n"
+            "你是平台的对话面，负责系统生成之后的对话，做三件事：答疑、澄清、交修改指令。\n"
                     + "【答疑】用户问项目情况（系统怎么用、某个功能在哪、后台地址、账号密码等"
                     + "事实问题）时，先查证再答：用 query_project_facts 查项目事实（含系统访问"
                     + "地址）、用 list_workspace_files 看工作区文件清单、用 read_workspace_file "
@@ -78,9 +81,18 @@ public class DialogAppService {
                     + "【澄清】用户提出修改或需求、但说得不清楚时，先用 ask_user 提问澄清："
                     + "一次只问一个问题，给出 2-4 个候选选项，并在有把握时用 recommended 标出"
                     + "推荐项（让用户检查并改，而不是从零写答案）。答复到达后继续判断：仍不清楚"
-                    + "就再问，直到能明确说出要改什么；拿不准宁可多问一句，不要猜着往下走。\n"
-                    + "【边界】你没有任何写工作区或编码工具，也不发起系统修改或生成——工作区一切"
-                    + "变更只经平台生成内核。本阶段只做答疑与澄清，不承诺马上动手修改。\n"
+                    + "就再问；已经能明确说出要改什么了，就进入修改交接。\n"
+                    + "【修改交接】要改什么已经清楚时，调用 submit_modification：instruction "
+                    + "传一条自足的修改指令（把「还是不行」「那个再调大一点」这类指代解析成"
+                    + "完整句，写清改什么、改成什么样，含讨论里确定的要点与验收口径）；"
+                    + "userWords 传用户本轮的原始说法（原话，不改写）；如果随话带了圈注或"
+                    + "图片物料等附件，把附件里的定位说明（圈注的选择器/元素文本/页面区域、"
+                    + "物料的工作区路径）写进 instruction 或 location，让生成能精确改到那一处。"
+                    + "调用后平台会据此恰起一轮系统修改，你只回用户一句简短确认（如「好的，"
+                    + "这就安排修改」），真正的修改过程由随后出现的工作消息承载。拿不准就先"
+                    + "追问，不要猜着交指令；纯答疑、寒暄不交指令。\n"
+                    + "【边界】你没有任何写工作区或编码工具，也不直接改代码——工作区一切"
+                    + "变更只经平台生成内核（你只交指令，代码改动由内核完成）。\n"
                     + "【术语】对话与回答里对用户定制的目标统一称「系统」，不用 Demo、原型、"
                     + "样品等字眼。\n"
                     + "全程使用中文。";
@@ -93,6 +105,8 @@ public class DialogAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final MainAgentProperties mainAgentProperties;
     private final SegmentSettlementAppService segmentSettlement;
+    private final ModificationHandoffFacts modificationHandoffs;
+    private final IterationAppService iterationAppService;
 
     /** 挂起问答的会合锚（sessionId → 最近一次 ask_user 挂起事实），同主智能体口径。 */
     private final Map<String, SuspendedQuestion> suspendedQuestions = new ConcurrentHashMap<>();
@@ -113,7 +127,9 @@ public class DialogAppService {
             ModelConfigAppService modelConfigs,
             ConversationHistoryAppService conversationHistory,
             MainAgentProperties mainAgentProperties,
-            SegmentSettlementAppService segmentSettlement) {
+            SegmentSettlementAppService segmentSettlement,
+            ModificationHandoffFacts modificationHandoffs,
+            IterationAppService iterationAppService) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.sessionExecutor = sessionExecutor;
@@ -122,6 +138,8 @@ public class DialogAppService {
         this.conversationHistory = conversationHistory;
         this.mainAgentProperties = mainAgentProperties;
         this.segmentSettlement = segmentSettlement;
+        this.modificationHandoffs = modificationHandoffs;
+        this.iterationAppService = iterationAppService;
     }
 
     /**
@@ -153,6 +171,9 @@ public class DialogAppService {
         conversationHistory.recordUserUtterance(projectId, runId, prompt, attachments);
         AgentCommand command = command(project, runId, annotated);
         sessionExecutor.submit(sessionId, () -> {
+            // 交指令事实清残留放在会话执行体内（同会话串行）：REST 起跑线程上清会把
+            // 上一回合尚未收口消费的工具事实抢清（连发两条时丢上一条指令）
+            clearHandoffFacts(project);
             ConversationHistoryAppService.TurnRecorder recorder =
                     conversationHistory.recorder(projectId, eventBridge.sink(project));
             AgentReply reply;
@@ -162,6 +183,7 @@ public class DialogAppService {
                 recorder.settle(runId, reply);
             }
             catch (RuntimeException e) {
+                clearHandoffFacts(project); // 回合失败：交指令事实不越过失败的对话轮下发
                 dialogRuns.remove(runId);
                 settleTurn(projectId, runId); // 失败也扣（用量已实耗，同主智能体口径）
                 throw e;
@@ -169,6 +191,7 @@ public class DialogAppService {
             if (reply.suspension() == null) {
                 dialogRuns.remove(runId);
                 settleTurn(projectId, runId); // 真收口结算；挂起轮等答复续跑再结算
+                handOffRecordedInstruction(project, runId);
             }
         });
         return runId;
@@ -210,6 +233,8 @@ public class DialogAppService {
         ConversationHistoryAppService.TurnRecorder recorder =
                 conversationHistory.recorder(projectId, eventBridge.sink(project));
         sessionExecutor.submit(sessionId, () -> {
+            // 同首轮：清残留放在会话执行体内（串行安全，不抢清上一回合事实）
+            clearHandoffFacts(project);
             AgentReply reply;
             try {
                 reply = agentClient.resume(resume, recorder);
@@ -217,6 +242,7 @@ public class DialogAppService {
                 recorder.settle(runId, reply);
             }
             catch (RuntimeException e) {
+                clearHandoffFacts(project); // 回合失败：交指令事实不越过失败的对话轮下发
                 dialogRuns.remove(runId);
                 settleTurn(projectId, runId); // 失败也扣（同主智能体口径）
                 throw e;
@@ -224,6 +250,7 @@ public class DialogAppService {
             if (reply.suspension() == null) {
                 dialogRuns.remove(runId);
                 settleTurn(projectId, runId);
+                handOffRecordedInstruction(project, runId);
             }
         });
     }
@@ -239,6 +266,32 @@ public class DialogAppService {
     }
 
     // ---------- 内部 ----------
+
+    /** 交指令事实清残留（回合起跑/失败；指令不跨回合泄漏）。 */
+    private void clearHandoffFacts(Project project) {
+        modificationHandoffs.clear(Long.toString(project.getWorkspaceId()));
+    }
+
+    /**
+     * 回合正常收口后消费交指令事实（#623）：模型本轮若调过 {@code submit_modification}，
+     * 自足指令即交 {@link IterationAppService#handOffModification}——空闲即起一轮
+     * 内核重跑；有 run 在途进待办并轻提示「已记下，下一轮生效」。派发故障只记日志，
+     * 不反噬对话轮收口。
+     */
+    private void handOffRecordedInstruction(Project project, String runId) {
+        List<ModificationHandoffFacts.Instruction> instructions =
+                modificationHandoffs.consume(Long.toString(project.getWorkspaceId()));
+        if (instructions.isEmpty()) {
+            return;
+        }
+        try {
+            iterationAppService.handOffModification(project, instructions, runId);
+        }
+        catch (RuntimeException e) {
+            log.warn("[dialog] 项目 {} 交指令派发失败（不反噬对话轮收口，用户重说即兜底）：{}",
+                    project.getId(), e.toString());
+        }
+    }
 
     /** 对话面命令：主智能体配置的模型档与通道，系统提示与工具面换对话面形态。 */
     private AgentCommand command(Project project, String runId, String prompt) {

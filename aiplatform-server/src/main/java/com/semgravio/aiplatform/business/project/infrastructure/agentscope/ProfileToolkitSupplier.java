@@ -9,6 +9,7 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleApp
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
+import com.semgravio.aiplatform.business.project.application.ModificationHandoffFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetcher;
@@ -62,6 +63,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final InterviewToolGate interviewToolGate;
     private final PrdRevisionFacts prdRevisions;
     private final FastLaneFacts fastLaneFacts;
+    private final ModificationHandoffFacts modificationHandoffs;
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final ExternalContentFetcher externalContentFetcher;
@@ -73,6 +75,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts,
             InterviewToolGate interviewToolGate,
             PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
+            ModificationHandoffFacts modificationHandoffs,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
@@ -81,6 +84,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.interviewToolGate = interviewToolGate;
         this.prdRevisions = prdRevisions;
         this.fastLaneFacts = fastLaneFacts;
+        this.modificationHandoffs = modificationHandoffs;
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.externalContentFetcher = externalContentFetcher;
@@ -95,10 +99,11 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         Toolkit toolkit = new Toolkit();
         if (AgentProfile.MAIN.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {
-            // 对话面装配（#622）：生成后的独立轻会话——只有答疑与澄清两职能
-            // （ask_user 无五问额度闸 ＋ 只读三件：文件清单/文件内容/项目事实），
-            // 零写工作区/编码工具（无 savePrd、无自荐、无增强工具）。工具名与主智能体
-            // 同槽同源（AgentTool.ofSlot("main") 的子集），装配以规格串放行面收窄。
+            // 对话面装配（#622）：生成后的独立轻会话——只有答疑、澄清与交指令三类职能
+            // （ask_user 无五问额度闸 ＋ 只读三件：文件清单/文件内容/项目事实 ＋
+            // 交修改指令，#623）——零写工作区/编码工具（无 savePrd、无自荐、无增强
+            // 工具）。工具名与主智能体同槽同源（AgentTool.ofSlot("main") 的子集），
+            // 装配以规格串放行面收窄；交指令工具是对话面独有件（访谈面不装）。
             if (AgentConfigAppService.isDialogPlane(toolSpec)) {
                 toolkit.registerAgentTool(new AskUserTool(ro.workspaceId(), true));
                 toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.workspaceId(),
@@ -107,6 +112,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                         ro.containerName(), readinessWaiter, true));
                 toolkit.registerAgentTool(new ProjectFactsTool(ro.workspaceId(),
                         projectRepository, workspaceLifecycleAppService));
+                toolkit.registerAgentTool(new SubmitModificationTool(ro.workspaceId(),
+                        modificationHandoffs));
                 return toolkit;
             }
             toolkit.registerAgentTool(new AskUserTool(ro.workspaceId(), interviewToolGate));

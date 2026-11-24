@@ -33,6 +33,18 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 @Service
 public class AgentConfigAppService {
 
+    /**
+     * 对话面工具面规格（#622）：与主智能体同槽（工具装配按 agentKey=main 寻址），
+     * 以 {@code plane=dialog} 标记收窄工具集——只有答疑与澄清两职能（ask_user ＋
+     * 只读三件），零写工作区/编码工具（无 savePrd、无自荐、无增强工具）。对话面是
+     * 生成后的独立轻会话，与首建访谈链共用主智能体身份但不共用工具面。
+     */
+    public static final String DIALOG_TOOL_SPEC = "ws=false,fu=false,plane=dialog";
+
+    /** 规格串面标记键（对话面装配判据；编解码同 {@link #toolEnabled} 的宽容腿）。 */
+    private static final String DIALOG_PLANE_KEY = "plane";
+    private static final String DIALOG_PLANE_VALUE = "dialog";
+
     private final AgentConfigStore configStore;
 
     public AgentConfigAppService(AgentConfigStore configStore) {
@@ -98,5 +110,23 @@ public class AgentConfigAppService {
             }
         }
         return true;
+    }
+
+    /**
+     * 对话面标记判据（#622，{@link #DIALOG_TOOL_SPEC} 对偶）：规格串显式含
+     * {@code plane=dialog} 即对话面装配——工具集收窄为答疑与澄清两职能。缺省/坏
+     * 规格＝非对话面（主智能体全工具面，行为不变）。
+     */
+    public static boolean isDialogPlane(String toolSpec) {
+        if (toolSpec == null || toolSpec.isBlank()) {
+            return false;
+        }
+        for (String facet : toolSpec.split(",")) {
+            String[] pair = facet.split("=", 2);
+            if (pair.length == 2 && pair[0].trim().equals(DIALOG_PLANE_KEY)) {
+                return DIALOG_PLANE_VALUE.equals(pair[1].trim());
+            }
+        }
+        return false;
     }
 }

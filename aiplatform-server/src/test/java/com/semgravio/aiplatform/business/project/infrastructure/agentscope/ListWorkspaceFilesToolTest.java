@@ -78,6 +78,21 @@ class ListWorkspaceFilesToolTest {
     }
 
     @Test
+    void given_dialog_plane_when_call_then_dialog_list_command_and_env_visible() {
+        // #622 对话面：清单用对话面视图——含 .env 与 seed/脚本、只排 data/pg
+        ScriptedExec exec = new ScriptedExec(ok(
+                "18\t.env\n64\tdata/seed.sql\n24\tscripts/schema.sql\n"));
+        ListWorkspaceFilesTool tool = new ListWorkspaceFilesTool(exec, true);
+
+        ToolResultBlock result = call(tool);
+
+        assertThat(exec.command).isEqualTo(ProjectFiles.dialogListCommand());
+        assertThat(resultText(result)).contains(".env（18 字节）")
+                .contains("data/seed.sql（64 字节）")
+                .contains("scripts/schema.sql（24 字节）");
+    }
+
+    @Test
     void given_empty_workspace_when_call_then_stated_as_empty() {
         ToolResultBlock result = call(toolOf(ok("")));
 

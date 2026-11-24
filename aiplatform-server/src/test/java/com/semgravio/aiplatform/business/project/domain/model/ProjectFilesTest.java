@@ -47,6 +47,63 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.isViewable(null)).isFalse();
     }
 
+    // ---------- 对话面只读视图（#622：.env / seed 可读，data/pg 等仍拒） ----------
+
+    @Test
+    void given_secret_and_seed_paths_when_dialog_viewable_then_true() {
+        // 账号密码类问题查证面：根级 .env、seed 脚本、data 下非 pg 文件、scripts 可读
+        assertThat(ProjectFiles.isDialogViewable(".env")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("data/seed.sql")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("scripts/schema.sql")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("docs/PRD.md")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("src/app/page.tsx")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("README.md")).isTrue();
+    }
+
+    @Test
+    void given_non_readable_paths_when_dialog_viewable_then_false() {
+        // 仍拒绝：pg 活数据目录、依赖/构建产物、版本元数据、平台产物、外部仓库、逃逸
+        assertThat(ProjectFiles.isDialogViewable("data/pg")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("data/pg/base/123")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("node_modules/react/index.js")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".git/config")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".pnpm-store/v10/files/x")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".next/trace")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".platform/logs/run.log")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("agents/helper/report.md")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("external/some-repo/README.md")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("../etc/passwd")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("docs/../../etc")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("/workspace/.env")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("   ")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(null)).isFalse();
+    }
+
+    @Test
+    void when_dialog_list_command_then_prunes_non_deliverables_but_keeps_env_and_data() {
+        // 对话面清单：不排 .env、只排 data/pg（其余 data 保留）；其余非交付根目录照排
+        assertThat(ProjectFiles.dialogListCommand()).isEqualTo(
+                "find /workspace \\( -path /workspace/node_modules -o -path /workspace/.pnpm-store"
+                        + " -o -path /workspace/.next -o -path /workspace/.platform"
+                        + " -o -path /workspace/agents -o -path /workspace/external"
+                        + " -o -path /workspace/.git -o -path /workspace/data/pg \\) -prune -o"
+                        + " -type f -printf '%s\\t%P\\n'");
+    }
+
+    @Test
+    void given_dialog_secret_when_dialog_content_command_then_guarded_cat() {
+        // 判定面换成对话面视图：.env 可构造读取命令（交付视图同路径仍拒绝）
+        assertThat(ProjectFiles.dialogContentCommand(".env")).isEqualTo(
+                "if ! test -f '/workspace/.env'; then exit 1; fi;"
+                        + " s=$(stat -c %s '/workspace/.env');"
+                        + " if [ $s -gt " + ProjectFiles.MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
+                        + " printf '%s\\n' $s; cat '/workspace/.env'");
+        assertThatThrownBy(() -> ProjectFiles.dialogContentCommand("data/pg/base/1"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> ProjectFiles.contentCommand(".env"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     // ---------- 路径形归一（锚定侧——#306 两形归一） ----------
 
     @Test

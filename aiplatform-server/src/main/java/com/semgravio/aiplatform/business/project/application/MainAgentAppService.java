@@ -119,6 +119,8 @@ public class MainAgentAppService {
     private final SegmentSettlementAppService segmentSettlement;
     private final InterviewQuotaAppService interviewQuota;
     private final BillingAppService billingAppService;
+    /** 对话面引擎（#622）：对话面问答卡的作答续跑回对话面会话。 */
+    private final DialogAppService dialogAppService;
 
     /** 快道事实（#542）：savePrd 的 fastLane 工具调用事实——收口观测分岔快道直派/自然收口。 */
     private final FastLaneFacts fastLaneFacts;
@@ -249,7 +251,8 @@ public class MainAgentAppService {
             MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
             SegmentSettlementAppService segmentSettlement,
             InterviewQuotaAppService interviewQuota, BillingAppService billingAppService,
-            FastLaneFacts fastLaneFacts, BuildGateAppService buildGateService) {
+            FastLaneFacts fastLaneFacts, BuildGateAppService buildGateService,
+            DialogAppService dialogAppService) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -269,6 +272,7 @@ public class MainAgentAppService {
         this.billingAppService = billingAppService;
         this.fastLaneFacts = fastLaneFacts;
         this.buildGateService = buildGateService;
+        this.dialogAppService = dialogAppService;
     }
 
     /**
@@ -398,6 +402,21 @@ public class MainAgentAppService {
      */
     public void answerQuestion(Long projectId, String runId, String replyId,
             List<Map<String, Object>> pendingToolCalls, String answerText) {
+        // 对话面路由（#622）：哪座会话发起的问答卡，答复就续回哪座——对话面卡
+        // （进程内登记 / 对话史 sessionId=dialog-{projectId}）回对话面会话、零派发；
+        // 访谈卡（main-{projectId}）走下方主智能体原路径（首建访谈链原样不动）。
+        Project routed = requireProject(projectId);
+        if (routed.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        boolean dialogRun = dialogAppService.ownsRun(runId)
+                || conversationHistory.questionSessionOf(projectId, runId)
+                        .filter(session -> session.startsWith(DialogAppService.SESSION_PREFIX))
+                        .isPresent();
+        if (dialogRun) {
+            dialogAppService.answerQuestion(routed, runId, replyId, pendingToolCalls, answerText);
+            return;
+        }
         Project project = requireUpdatableProject(projectId);
         String sessionId = sessionIdOf(projectId);
         conversationHistory.recordAnswer(projectId, runId, answerText);

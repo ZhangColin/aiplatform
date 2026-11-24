@@ -42,6 +42,12 @@ import lombok.extern.slf4j.Slf4j;
  * 意见与咨询同一 {@code main-{projectId}} 会话连续（#86）——分岔只是车道语义
  * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
  *
+ * <p><b>生成后对话面（#622，ADR-0056 两平面）</b>：项目已生成或编码 run 在途时，
+ * 发言在分类前直接分岔到对话面（{@link DialogAppService}）——独立轻会话
+ * （{@code dialog-{projectId}}）、只读答疑与澄清、零派发；生成前的首建访谈链
+ * （分类/答询/兜底）原样不动。旧迭代受理链与其上的试用拦截/余额留存不接本面
+ * （商业面代码保留，归 #625 清场）。</p>
+ *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
  * 一次性会话（{@code classify-{runId}}，模型档走边缘点配置链——classification
  * 配置库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
@@ -137,6 +143,8 @@ public class DispatchAppService {
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     private final MainAgentAppService mainAgentAppService;
+    private final DialogAppService dialogAppService;
+    private final CodingRunTrack codingRunTrack;
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
     private final AgentConfigAppService agentConfigs;
@@ -147,7 +155,9 @@ public class DispatchAppService {
     private final BalanceGateAppService balanceGate;
     private final BalanceReminderAppService balanceReminderService;
 
-    public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
+    public DispatchAppService(MainAgentAppService mainAgentAppService,
+            DialogAppService dialogAppService, CodingRunTrack codingRunTrack,
+            AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
             ModelConfigAppService modelConfigs,
             ConversationHistoryAppService conversationHistory,
@@ -156,6 +166,8 @@ public class DispatchAppService {
             BalanceGateAppService balanceGate,
             BalanceReminderAppService balanceReminderService) {
         this.mainAgentAppService = mainAgentAppService;
+        this.dialogAppService = dialogAppService;
+        this.codingRunTrack = codingRunTrack;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.agentConfigs = agentConfigs;
@@ -183,6 +195,14 @@ public class DispatchAppService {
      */
     public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
+        // 对话面（#622，ADR-0056 两平面）：项目已生成或首建/迭代在途——对话区发言
+        // 走生成后的独立轻会话（答疑与澄清两职能），零派发、零写面、零生成触发；
+        // 生成前的首建访谈链、答询与兜底分类原样不动（下方既有派发面）。旧迭代
+        // 受理链与其上的试用拦截/余额留存不接本面（商业面代码保留，归 #625 清场）。
+        if (dialogPlaneApplies(project, codingRunTrack)) {
+            return new DispatchRun(
+                    dialogAppService.turn(project, prompt, attachments));
+        }
         // 悬空接管（ADR-0032，#373）：访谈悬空标记在场即绕过入口三分类直达意见轮
         // ——悬空期短确认（「OK」「可以」）不再被无状态分类吃进兜底、回与项目状态
         // 无关的定型文案（「装忙复读」症状面）；宁进意见链有主智能体把关（既有定向
@@ -238,6 +258,15 @@ public class DispatchAppService {
                 yield guideReply(project, prompt, classified.classification().orderIntent(), attachments);
             }
         };
+    }
+
+    /**
+     * 对话面适用范围（#622）：项目已生成，或首建/迭代编码 run 在途——两者都是
+     * 「系统已存在/正在成形」的生成后时段，对话区发言走对话面。未生成且无在途
+     * （首建访谈期）走既有入口分类链（原样不动）。
+     */
+    static boolean dialogPlaneApplies(Project project, CodingRunTrack codingRunTrack) {
+        return project.isGenerated() || codingRunTrack.isInFlight(project.getId());
     }
 
     /**

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatState, ChatMessage, ProjectChat } from "@/lib/store/chat";
 import type { PrdNoticesState } from "@/lib/store/prd-notices";
@@ -13,6 +13,7 @@ const seed = vi.hoisted(() => ({
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   works: {} as Record<string, unknown>,
+  quota: null as { answered: number; total: number } | null,
 }));
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
@@ -55,7 +56,7 @@ vi.mock("@/hooks/use-balance-reminder", () => ({
   usePendingBalanceReminder: () => ({ data: null }),
 }));
 vi.mock("@/hooks/use-interview-quota", () => ({
-  useInterviewQuota: () => ({ data: null }),
+  useInterviewQuota: () => ({ data: seed.quota }),
 }));
 vi.mock("@/hooks/use-build-gate", () => ({
   useBuildGate: () => ({ data: null }),
@@ -90,6 +91,10 @@ vi.mock("@/hooks/use-version", () => ({
     finish: vi.fn(),
   }),
 }));
+
+afterEach(() => {
+  seed.quota = null;
+});
 
 function question(overrides: Partial<Extract<ChatMessage, { kind: "question" }>> = {}) {
   return {
@@ -373,6 +378,19 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     const iterated = renderToStaticMarkup(<CommandArea projectId="p1" stage="iterate" />);
     expect(iterated).toContain("迭代中");
     expect(iterated).not.toContain("访谈中");
+  });
+
+  it("生成后（stage=iterate）不显示五问额度 chip、问答卡不标「第 N 问」（#622）", () => {
+    seedChat([question({ ordinal: 2, id: "q2" })]);
+    seed.quota = { answered: 1, total: 5 };
+
+    const interview = renderToStaticMarkup(<CommandArea projectId="p1" stage="interview" />);
+    expect(interview).toContain("已答 1/5 问");
+    expect(interview).toContain("第 2 问");
+
+    const iterated = renderToStaticMarkup(<CommandArea projectId="p1" stage="iterate" />);
+    expect(iterated).not.toContain("已答");
+    expect(iterated).not.toContain("第 2 问");
   });
 
   it("发送框 = 共享 Composer（立体卡片）——首页/项目页同一组件", () => {

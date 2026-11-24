@@ -76,6 +76,33 @@ public final class ProjectFiles {
     }
 
     /**
+     * 对话面只读视图（#622）：生成后问答查证面——比交付视图宽。放开根级
+     * {@code .env} 与 seed/脚本（{@code data/} 下非 pg 部分、{@code scripts/} 等），
+     * 供账号密码类问题查证；仍拒绝非交付根目录（{@code node_modules}／{@code .git}
+     * ／{@code .pnpm-store}／{@code .next}／{@code .platform}／{@code agents}／
+     * {@code external}）与 pg 数据目录 {@code data/pg}。逃逸／空白／锚定形照旧拒绝
+     * ——读取不越界。
+     */
+    public static boolean isDialogViewable(String path) {
+        if (path == null || path.isBlank() || path.startsWith("/")) {
+            return false;
+        }
+        String[] segments = path.split("/");
+        for (String segment : segments) {
+            if (segment.isBlank() || "..".equals(segment)) {
+                return false;
+            }
+        }
+        if (WorkspaceLayout.PG_DATA_DIR.equals(path)
+                || path.startsWith(WorkspaceLayout.PG_DATA_DIR + "/")) {
+            return false;
+        }
+        String first = segments[0];
+        return !(WorkspaceLayout.NON_DELIVERABLE_DIRS.contains(first)
+                && !WorkspaceLayout.DATA_DIR.equals(first));
+    }
+
+    /**
      * 路径是否可浏览：工作区锚定形（相对根、无 {@code ..} 逃逸、非空白）且首段
      * 不是根级非交付目录、路径不是根级 {@code .env} 机密。
      */
@@ -117,6 +144,44 @@ public final class ProjectFiles {
     public static String contentCommand(String path) {
         if (!isViewable(path)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
+        }
+        return ContainerCommands.existenceGuard(path)
+                + " s=$(stat -c %s " + ContainerCommands.quoted(path) + ");"
+                + " if [ $s -gt " + MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
+                + " printf '%s\\n' $s; cat " + ContainerCommands.quoted(path);
+    }
+
+    /**
+     * 对话面树列表命令（#622）：与交付视图同构（根级非交付目录在遍历源头 prune、
+     * 每行 {@code 大小\t相对路径}），但<b>不排除</b>根级 {@code .env}，且只排
+     * {@code data/pg}（{@code data/} 下其余文件如 seed 脚本保留可查）——对话面
+     * 只读视图的清单面（口径与 {@link #isDialogViewable} 一致）。命令全常量，无
+     * 用户可控片段。
+     */
+    public static String dialogListCommand() {
+        List<String> prunes = new ArrayList<>();
+        for (String dir : WorkspaceLayout.NON_DELIVERABLE_DIRS) {
+            if (!WorkspaceLayout.DATA_DIR.equals(dir)) {
+                prunes.add(dir);
+            }
+        }
+        prunes.add(WorkspaceLayout.PG_DATA_DIR);
+        String pruneExpr = prunes.stream()
+                .map(dir -> "-path " + WorkspaceLayout.ROOT + "/" + dir)
+                .collect(java.util.stream.Collectors.joining(" -o "));
+        return "find " + WorkspaceLayout.ROOT + " \\( " + pruneExpr + " \\)"
+                + " -prune -o -type f -printf '%s\\t%P\\n'";
+    }
+
+    /**
+     * 对话面内容读取命令（#622；path 须先过 {@link #isDialogViewable}，此处不
+     * 代偿）：守卫结构与 {@link #contentCommand} 同（1 = 不存在、2 = 超限、
+     * 0 = 大小首行 + 正文），判定面换成对话面只读视图（{@code .env}／seed/脚本
+     * 可读）。路径经单引号包裹 + 转义，无注入面。
+     */
+    public static String dialogContentCommand(String path) {
+        if (!isDialogViewable(path)) {
+            throw new IllegalArgumentException("非对话面可读路径，命令构造拒绝: " + path);
         }
         return ContainerCommands.existenceGuard(path)
                 + " s=$(stat -c %s " + ContainerCommands.quoted(path) + ");"

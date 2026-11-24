@@ -36,20 +36,37 @@ public class ReadWorkspaceFileTool extends ToolBase {
     private static final int MAX_OUTPUT_CHARS = 32_000;
 
     private final DockerExecFilesystem.ExecCommand exec;
+    /** 对话面只读视图（#622）：.env 与 seed/脚本可读，data/pg 等仍拒。 */
+    private final boolean dialogPlane;
 
     public ReadWorkspaceFileTool(String workspaceId, String containerName,
             WorkspaceReadinessWaiter readinessWaiter) {
+        this(workspaceId, containerName, readinessWaiter, false);
+    }
+
+    /** 对话面形态（#622）：生成后问答查证面——.env 与 seed/脚本可读。 */
+    public ReadWorkspaceFileTool(String workspaceId, String containerName,
+            WorkspaceReadinessWaiter readinessWaiter, boolean dialogPlane) {
         this(ReadinessAwaitingExecCommand.dockerExec(containerName,
-                WorkspaceId.of(workspaceId), readinessWaiter));
+                WorkspaceId.of(workspaceId), readinessWaiter), dialogPlane);
     }
 
     /** 执行缝注入构造（单测替身 ExecCommand）。 */
     ReadWorkspaceFileTool(DockerExecFilesystem.ExecCommand exec) {
+        this(exec, false);
+    }
+
+    ReadWorkspaceFileTool(DockerExecFilesystem.ExecCommand exec, boolean dialogPlane) {
         super(ToolBase.builder()
                 .name(NAME)
-                .description("读取项目工作区一个交付文件的文本内容（path 用 list_workspace_files "
-                        + "清单里的相对路径）。查证说明文档、初始数据代码等文件内容时调用；"
-                        + "非交付物（.env、data/ 等）不可读。")
+                .description(dialogPlane
+                        ? "读取项目工作区一个文件的文本内容（path 用 list_workspace_files "
+                                + "清单里的相对路径）。查证说明文档、初始数据种子、配置"
+                                + "（含 .env 里的连接串/凭据）等文件内容时调用；"
+                                + "pg 数据目录（data/pg）、依赖目录、版本库不可读。"
+                        : "读取项目工作区一个交付文件的文本内容（path 用 list_workspace_files "
+                                + "清单里的相对路径）。查证说明文档、初始数据代码等文件内容时调用；"
+                                + "非交付物（.env、data/ 等）不可读。")
                 .inputSchema(Map.of(
                         "type", "object",
                         "properties", Map.of(
@@ -60,6 +77,7 @@ public class ReadWorkspaceFileTool extends ToolBase {
                 .readOnly(true)
                 .concurrencySafe(true));
         this.exec = exec;
+        this.dialogPlane = dialogPlane;
     }
 
     @Override
@@ -76,11 +94,17 @@ public class ReadWorkspaceFileTool extends ToolBase {
             return Mono.just(ToolResultBlock.error("path 不能为空：传 list_workspace_files 清单里的相对路径"));
         }
         String relative = String.valueOf(path).strip();
-        if (!ProjectFiles.isViewable(relative)) {
-            return Mono.just(ToolResultBlock.error(
-                    "该路径不可读（非交付物/机密/非法路径）: " + relative));
+        boolean viewable = dialogPlane
+                ? ProjectFiles.isDialogViewable(relative)
+                : ProjectFiles.isViewable(relative);
+        if (!viewable) {
+            return Mono.just(ToolResultBlock.error(dialogPlane
+                    ? "该路径不可读（pg 数据/依赖/版本库/非法路径）: " + relative
+                    : "该路径不可读（非交付物/机密/非法路径）: " + relative));
         }
-        DockerExecFilesystem.ExecOutput out = exec.run(ProjectFiles.contentCommand(relative), null);
+        DockerExecFilesystem.ExecOutput out = exec.run(dialogPlane
+                ? ProjectFiles.dialogContentCommand(relative)
+                : ProjectFiles.contentCommand(relative), null);
         if (out.exitCode() == 1) {
             return Mono.just(ToolResultBlock.error("文件不存在: " + relative));
         }

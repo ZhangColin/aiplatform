@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -205,6 +206,26 @@ public class ConversationHistoryAppService {
      */
     public void recordQuote(Long projectId, Long orderId, String event) {
         quietly(() -> entries.save(ConversationEntry.quote(projectId, orderId, event)));
+    }
+
+    /**
+     * 问答卡的会话标识读口（#622 作答路由的持久信号）：该 run 落过的问答卡
+     * （question-raised payload 原样）里携带的 sessionId——对话面卡为
+     * {@code dialog-{projectId}}、访谈卡为 {@code main-{projectId}}。作答端点据此在
+     * 进程内登记丢失（重启）后仍把答复续回正确的会话。无卡/载荷无 sessionId 返回空。
+     */
+    public Optional<String> questionSessionOf(Long projectId, String runId) {
+        if (runId == null || runId.isBlank()) {
+            return Optional.empty();
+        }
+        return entries.findFirstByProjectIdAndRunIdAndKindOrderByIdDesc(projectId, runId,
+                        ConversationEntryKind.QUESTION)
+                .map(ConversationEntry::getQuestion)
+                .filter(question -> question != null) // 残档防御：坏行不炸作答路由
+                .map(question -> question.get(AgentEventTypes.SESSION_FIELD))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .filter(sessionId -> !sessionId.isBlank());
     }
 
     /**

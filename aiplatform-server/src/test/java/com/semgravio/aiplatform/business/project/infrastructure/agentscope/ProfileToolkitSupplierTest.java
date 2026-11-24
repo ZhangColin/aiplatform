@@ -104,6 +104,30 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
+    void given_main_on_dialog_plane_spec_when_toolkit_then_answer_and_read_only_no_write() {
+        // #622 对话面：生成后的独立轻会话——工具面只有答疑与澄清两职能
+        // （ask_user 无额度闸形态 ＋ 只读三件），零写工作区/编码工具
+        var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"),
+                AgentConfigAppService.DIALOG_TOOL_SPEC);
+        assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
+                AskUserTool.NAME, ListWorkspaceFilesTool.NAME,
+                ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME);
+        assertThat(toolkit.getToolNames())
+                .doesNotContain(SavePrdTool.NAME, ProposeSkillTool.NAME,
+                        ProposeSedimentTool.NAME, FetchUrlTool.NAME, WebSearchTool.NAME);
+        for (String name : toolkit.getToolNames()) {
+            assertThat(toolkit.getTool(name).isReadOnly()).as(name).isTrue();
+        }
+        // 对话面标记只认显式 plane=dialog；缺省/坏规格仍主智能体全工具面
+        assertThat(AgentConfigAppService.isDialogPlane(AgentConfigAppService.DIALOG_TOOL_SPEC))
+                .isTrue();
+        assertThat(AgentConfigAppService.isDialogPlane(null)).isFalse();
+        assertThat(AgentConfigAppService.isDialogPlane("ws=true,fu=true")).isFalse();
+        assertThat(AgentConfigAppService.isDialogPlane("plane=other")).isFalse();
+    }
+
+    @Test
     void given_main_on_dev_workspace_when_toolkit_then_empty() {
         // 对话资产只随只读面发放（配置 × 工作区形态双锚，防误配——读写面上的主
         // 智能体是配置漂移，不发放）

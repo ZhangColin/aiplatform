@@ -95,6 +95,20 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         Toolkit toolkit = new Toolkit();
         if (AgentProfile.MAIN.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {
+            // 对话面装配（#622）：生成后的独立轻会话——只有答疑与澄清两职能
+            // （ask_user 无五问额度闸 ＋ 只读三件：文件清单/文件内容/项目事实），
+            // 零写工作区/编码工具（无 savePrd、无自荐、无增强工具）。工具名与主智能体
+            // 同槽同源（AgentTool.ofSlot("main") 的子集），装配以规格串放行面收窄。
+            if (AgentConfigAppService.isDialogPlane(toolSpec)) {
+                toolkit.registerAgentTool(new AskUserTool(ro.workspaceId(), true));
+                toolkit.registerAgentTool(new ListWorkspaceFilesTool(ro.workspaceId(),
+                        ro.containerName(), readinessWaiter, true));
+                toolkit.registerAgentTool(new ReadWorkspaceFileTool(ro.workspaceId(),
+                        ro.containerName(), readinessWaiter, true));
+                toolkit.registerAgentTool(new ProjectFactsTool(ro.workspaceId(),
+                        projectRepository, workspaceLifecycleAppService));
+                return toolkit;
+            }
             toolkit.registerAgentTool(new AskUserTool(ro.workspaceId(), interviewToolGate));
             toolkit.registerAgentTool(new SavePrdTool(prdArtifacts.workspacePath(),
                     ro.workspaceId(), ro.containerName(), readinessWaiter, prdArtifacts,

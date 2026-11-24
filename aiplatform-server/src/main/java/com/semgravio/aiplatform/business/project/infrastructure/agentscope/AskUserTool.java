@@ -46,16 +46,33 @@ public class AskUserTool extends ToolBase {
     public static final String NAME = AgentscopeAgentClient.ASK_USER_TOOL_NAME;
 
     private final String workspaceId;
+    /** 访谈提问侧额度闸；null ＝ 对话面形态（#622：不带五问额度闸）。 */
     private final InterviewToolGate quotaGate;
 
     public AskUserTool(String workspaceId, InterviewToolGate quotaGate) {
+        this(workspaceId, quotaGate, false);
+    }
+
+    /**
+     * 对话面形态（#622）：生成后的澄清提问——复用同一问答卡/作答通道，但不带
+     * 五问额度闸（{@code quotaGate = null}：恒挂起、不出「已答 N/5」拒因）。
+     */
+    public AskUserTool(String workspaceId, boolean dialogPlane) {
+        this(workspaceId, null, dialogPlane);
+    }
+
+    private AskUserTool(String workspaceId, InterviewToolGate quotaGate, boolean dialogPlane) {
         super(ToolBase.builder()
                 .name(NAME)
-                .description("向用户提问并等待答复（访谈式收集信息；一次一个问题，选项可选）。"
-                        + "调用后会挂起等待用户回答，答复将作为本工具的结果返回。"
-                        + "试用访谈固定五问：第五问答复后额度即用尽，此后调用本工具会被"
-                        + "平台拒绝（错误结果可见、提问不生效也不会呈现给用户）——收到拒绝"
-                        + "结果即停止提问，按收口指令以推荐补全剩余缺口并调用 savePrd。")
+                .description(dialogPlane
+                        ? "向用户提问并等待答复（澄清式提问；一次一个问题，可给 2-4 个候选选项与"
+                                + "推荐项）。调用后会挂起等待用户回答，答复将作为本工具的结果返回。"
+                                + "用户说得不清楚、需要先问清楚时调用；不涉及任何写操作。"
+                        : "向用户提问并等待答复（访谈式收集信息；一次一个问题，选项可选）。"
+                                + "调用后会挂起等待用户回答，答复将作为本工具的结果返回。"
+                                + "试用访谈固定五问：第五问答复后额度即用尽，此后调用本工具会被"
+                                + "平台拒绝（错误结果可见、提问不生效也不会呈现给用户）——收到拒绝"
+                                + "结果即停止提问，按收口指令以推荐补全剩余缺口并调用 savePrd。")
                 .inputSchema(Map.of(
                         "type", "object",
                         "properties", Map.of(
@@ -93,6 +110,9 @@ public class AskUserTool extends ToolBase {
         // 的形状——重演 ALLOWED 不经此引擎，无需 input 键判据）。异常 fail-open。
         // 注意：fromCallable 的 callable 不得返回 null（空序列会让 map 不执行、
         // block() 得 null）——ASK/PASSTHROUGH 判定必须在 callable 内完成
+        if (quotaGate == null) {
+            return Mono.just(PermissionDecision.ask("向用户提问，等待答复"));
+        }
         return Mono.fromCallable(() -> {
                     String reason = quotaGate.questionBlockReason(workspaceId);
                     return reason == null
@@ -117,8 +137,9 @@ public class AskUserTool extends ToolBase {
             return Mono.just(ToolResultBlock.text(String.valueOf(answer)));
         }
         // 闸拒的新调用（自检 PASSTHROUGH）：执行体权威再判一次，回模型可见拒因——
-        // 不挂起、不出卡；闸已放开（状态翻转竞态等）回落空串异常面
-        String blocked = quotaGate.questionBlockReason(workspaceId);
+        // 不挂起、不出卡；闸已放开（状态翻转竞态等）回落空串异常面。对话面形态
+        // 无额度闸（quotaGate=null）——直接回落空串（恒挂起在自检面）。
+        String blocked = quotaGate == null ? null : quotaGate.questionBlockReason(workspaceId);
         if (blocked != null) {
             return Mono.just(ToolResultBlock.error(blocked));
         }

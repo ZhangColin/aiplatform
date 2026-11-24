@@ -159,8 +159,11 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/messages")
-    @Operation(summary = "对话区发言（入口三分类派发：意见/咨询/兜底）",
-            description = "content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用"
+    @Operation(summary = "对话区发言（生成前入口三分类派发；生成后/在途走对话面）",
+            description = "content 即用户在对话区输入的这句话。项目已生成或首建/迭代在途时，"
+                    + "发言走<b>对话面</b>（生成后的独立轻会话）：只读查工作区/PRD/项目事实后"
+                    + "答疑，或对说不清的修改先出带选项的问答卡澄清——不触发任何生成、不起"
+                    + "更新 run。生成前（首建访谈期）平台先经智能体边界上的轻量分类调用"
                     + "三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一"
                     + "主智能体单会话（main-{projectId}）连续："
                     + "意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台"
@@ -295,6 +298,8 @@ public class ProjectController {
                     + "待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本"
                     + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
                     + "上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。"
+                    + "哪座会话发起的问答卡答复就续回哪座——生成后的对话面卡回 dialog-{projectId}"
+                    + " 轻会话，访谈卡回 main-{projectId}。"
                     + "空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<Void> answerQuestion(@PathVariable String id, @PathVariable String qid,

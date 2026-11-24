@@ -124,6 +124,21 @@ class AskUserToolTest {
     }
 
     @Test
+    void given_dialog_plane_when_check_permissions_then_always_ask_without_quota_gate() {
+        // #622 对话面：不带五问额度闸——恒挂起出卡（不查闸、不出「已答 N/5」拒因）
+        AskUserTool dialog = new AskUserTool("42", true);
+
+        var decision = dialog.checkPermissions(Map.of("question", "你想改的是哪一块？"), null)
+                .block();
+        ToolResultBlock result = Mono.from(dialog.callAsync(
+                param(Map.of("question", "你想改的是哪一块？"), null))).block();
+
+        assertThat(decision.getBehavior()).isEqualTo(PermissionBehavior.ASK);
+        assertThat(gate.questionChecks).hasValue(0); // 对话面不触访谈额度闸
+        assertThat(resultText(result)).isEmpty();
+    }
+
+    @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
         assertThat(tool.getName()).isEqualTo("ask_user");
         assertThat(tool.getParameters()).containsKeys("type", "properties", "required");

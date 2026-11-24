@@ -82,6 +82,22 @@ class ReadWorkspaceFileToolTest {
     }
 
     @Test
+    void given_dialog_plane_when_read_env_then_allowed_but_pg_rejected() {
+        // #622 对话面只读面：.env 可读（账号密码类问题查证），data/pg 仍拒（不触容器）
+        ScriptedExec exec = new ScriptedExec(new DockerExecFilesystem.ExecOutput(0,
+                "18\nPGPASSWORD=truth\n".getBytes(StandardCharsets.UTF_8), ""));
+        ReadWorkspaceFileTool tool = new ReadWorkspaceFileTool(exec, true);
+
+        ToolResultBlock env = call(tool, ".env");
+
+        assertThat(exec.command).isEqualTo(ProjectFiles.dialogContentCommand(".env"));
+        assertThat(env.getState()).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(resultText(env)).isEqualTo("PGPASSWORD=truth\n");
+        assertThat(call(tool, "data/pg/base/1").getState()).isEqualTo(ToolResultState.ERROR);
+        assertThat(call(tool, "../etc/passwd").getState()).isEqualTo(ToolResultState.ERROR);
+    }
+
+    @Test
     void given_missing_or_oversized_or_broken_when_call_then_error_semantics() {
         assertThat(call(toolOf(1, ""), "README.md").getState())
                 .isEqualTo(ToolResultState.ERROR); // 不存在

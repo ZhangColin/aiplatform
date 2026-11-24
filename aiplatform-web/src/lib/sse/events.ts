@@ -122,7 +122,7 @@ type AgentPayload = {
 
 /** 收口扩载的文件条目（正本 closing.files 元素）：path = write_file/edit_file
  *  参数原形（提示词示例为相对形、模型可携锚定形——两形自选，呈现面纯文本零语义
- *  消费；稿清单 drafts.path 才是归一锚定形，#306），行数为活动量口径。 */
+ *  消费），行数为活动量口径。 */
 export type SseClosingFile = {
   path: string;
   added: number;
@@ -142,47 +142,8 @@ export type SseClosing = {
   systemNote?: string;
   files: SseClosingFile[];
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。
-   * 设计会话（#289）的候选产出轮（首产/改稿，#291）不携带——设计候选不自动成版
-   * （ADR-0025，只有定稿成版）；定稿收尾卡（#291）例外：显式动作收口即成版，
-   * 携带本键（「查看当时」即见定稿稿）。 */
+  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。 */
   version?: string;
-  /** 稿清单（#289 设计会话收尾卡扩载，closing 复用先例对偶 version）：本轮落进
-   * design/ 的稿——item＝设计物、media＝形态（html 界面类 / image 平面类）、
-   * path＝去向（工作区锚定形）。编码 run 不携带。 */
-  drafts?: SseClosingDraft[];
-  /** 设计规范扫描（#296 遵守三件套③）：带规范项目编码 run 的「按稿对齐」叙事与
-   *  lint 结果——status＝passed（样式合规）/ violations（违规清单随附，曾自动修
-   *  一轮则 retried）/ unavailable（扫描未执行，如实呈现）。无规范项目与设计
-   *  会话不携带。 */
-  designLint?: SseDesignLint;
-};
-
-/** 收尾卡设计规范扫描载荷（#296）：违规条目＝文件+行号+规则+诊断原文。 */
-export type SseDesignLint = {
-  status: "passed" | "violations" | "unavailable";
-  /** 曾发现违规并自动修一轮（修净后仍携 passed+retried——纠偏过程如实）。 */
-  retried?: boolean;
-  /** 违规总数（violations 时在场；清单截 20、total 如实）。 */
-  total?: number;
-  violations?: SseDesignLintViolation[];
-};
-
-export type SseDesignLintViolation = {
-  file: string;
-  line: number;
-  rule: string;
-  message: string;
-};
-
-/** 收尾卡稿条目（#289 设计会话；#291 定稿收尾卡扩 triggers）：item＝本场设计物、
- * media＝稿形态、path＝去向；triggers＝定稿后续触发事实（仅定稿收尾卡携带——
- * 已按稿对齐/已开始生成/下单开放，用户语言；候选产出轮缺省）。 */
-export type SseClosingDraft = {
-  item: string;
-  media: "html" | "image";
-  path: string;
-  triggers?: string[];
 };
 
 /**
@@ -207,18 +168,16 @@ export type PlatformAgentEvent =
         engine?: string;
         /**
          * 智能体配置键（引擎信息归一：业务侧 AgentProfile 稳定键——main 主智能体
-         * 对话轮 / executor 编码 run / designer 设计会话（#289——事件封闭集零新增、
-         * agent 扩值即达）；无配置语境的一次性调用不携带）——呈现形态的登记锚：
-         * executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有主智能体
-         * 一座）、designer 同构直播卡（agent 标识区分，呈现归 #290）。字面量联合
-         * 即后端正本键值的镜像（AgentProfile.key()）。
+         * 对话轮 / executor 编码 run；无配置语境的一次性调用不携带）——呈现形态的
+         * 登记锚：executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有主
+         * 智能体一座）。字面量联合即后端正本键值的镜像（AgentProfile.key()）。
          */
-        agent?: "main" | "executor" | "designer";
+        agent?: "main" | "executor";
         /**
          * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成轨道 = 切片
-         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、设计轨道 = 设计物
-         * 标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based——头部
-         * 「{title}（{index}/{total}）」）；阶段 0 与更新 run 只携 title（无进度）；
+         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」），
+         * `index`/`total` 仅生成轨道切片携带（1-based——头部「{title}（{index}/{total}）」）；
+         * 阶段 0 与更新 run 只携 title（无进度）；
          * 主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。
          */
         slice?: {
@@ -322,7 +281,7 @@ export type PlatformAgentEvent =
        * 余额提醒卡（#537 计费③段间硬门，ADR-0047「段间硬门段中自由」）：付费
        * 项目段边界源池≤0 被拦的平台侧卡——显当前负额＋充值入口（到账自动放行
        * 不手动重试）；被拦输入留存 bil_balance_holds（`holdId` 可空＝run 场拦截
-       * 〔生成/修正/设计派发〕——intent 进程内暂存＋充值回正排空重派，无留存）。
+       * 〔生成/修正〕——intent 进程内暂存＋充值回正排空重派，无留存）。
        * 段内绝不检查绝不中断——本卡只在段边界出现。卡可回读面＝GET
        * /projects/{id}/balance-reminder（同形）。
        */
@@ -330,12 +289,10 @@ export type PlatformAgentEvent =
       payload: AgentPayload & {
         /** 留存 id（卡锚；run 场拦截无留存缺省不携带）。 */
         holdId?: string;
-        /** 被拦车道：OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿。 */
+        /** 被拦车道：OPINION=意见 / INQUIRY=咨询。 */
         lane?: string;
         /** 被拦输入原文（卡上引用呈现；run 场拦截缺省不携带）。 */
         prompt?: string;
-        /** 作用域改稿目标件序（仅 DESIGN_REVISION）。 */
-        designItem?: number;
         /** 源池余额快照（分；显负额素材）。 */
         sourcePoolBalance?: number;
       };

@@ -3,8 +3,6 @@
 import {
   ArrowUp,
   Braces,
-  Check,
-  ChevronDown,
   FileText,
   Image as ImageIcon,
   MessageSquarePlus,
@@ -12,7 +10,6 @@ import {
   MousePointer2,
   Paperclip,
   Send,
-  Sparkles,
   SquareDashed,
   TriangleAlert,
   Upload,
@@ -21,12 +18,6 @@ import {
 import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import {
@@ -49,7 +40,6 @@ import {
 import { errorText } from "@/lib/api/api-error";
 import { annotationLabel, annotationSummary, type AnnotationKind } from "@/lib/preview/annotation";
 import type { AnnotationItem } from "@/lib/store/annotation";
-import { PLATFORM_MODES, type EntryMode } from "@/lib/modes";
 
 /**
  * 共享发送框（#72 定稿 / #76 落地）：首页 hero 与项目页同一组件的立体卡片
@@ -61,9 +51,7 @@ import { PLATFORM_MODES, type EntryMode } from "@/lib/modes";
  * 工作区物料目录），chip 经附件组件族呈现上传中/失败/完成态、上传中或失败阻塞
  * 发送（不静默丢弃）；无上传管道（首页——归 #280 入口票）维持本地挂载态：选即
  * 挂 chip、可删可加，随 onSubmit 一并交出、发出即清。圈注附件归 store 持态、
- * 同行呈现。类型下拉＝入口两档（做系统/做设计，#299 收编两档 live——ADR-0029）：
- * 受控件（传 {@link onModeChange} 才呈现——首页 hero 与切换件状态同源；项目页
- * 不传＝不呈现，模式位是一次性分流语义、项目内终点变更唯一位＝设置 tab）。
+ * 同行呈现。
  */
 
 /** 附件条目（物料区与 chip 行共用形状）。state 缺省 = 本地挂载态（无上传管道）。 */
@@ -113,8 +101,6 @@ export function Composer({
   annotations,
   onAnnotationRemove,
   inputRef,
-  mode,
-  onModeChange,
   placeholder = "说说你想做什么…",
   submitLabel,
   onDataTemplate,
@@ -143,10 +129,6 @@ export function Composer({
   onAnnotationRemove?: (id: string) => void;
   /** 输入框外接 ref（项目页：问题到达自动聚焦）。 */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
-  /** 当前入口档（类型下拉受控显示；仅 onModeChange 在场才有意义）。 */
-  mode?: EntryMode;
-  /** 类型下拉切换（传＝呈现下拉——首页 hero 分流位；不传＝不呈现，项目页口径）。 */
-  onModeChange?: (mode: EntryMode) => void;
   placeholder?: string;
   /** 澄清形（#346 需求分析页澄清输入，照原型）：文本发送键（如「提交澄清」）＋
    *  工具行序换 语音/附件/数据模板；不传＝缺省形（圆形发送键）。 */
@@ -157,8 +139,6 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const fileInputId = useId();
-  // 下拉触发面显示档（受控缺省＝首档做系统）
-  const activeMode = mode ?? PLATFORM_MODES[0].label;
   /** 澄清形（#346）：submitLabel 在场即澄清形态——工具行序与发送键形换原型位。 */
   const clarify = submitLabel !== undefined;
   /** 语音钮（占位未开通——两形共用，澄清形居左/缺省形居右）。 */
@@ -434,36 +414,12 @@ export function Composer({
               />
               <p className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
                 {uploadFile
-                  ? "png / jpg / webp / gif / svg，单张不超过 10MB，智能体会参考它做设计与系统。"
+                  ? "png / jpg / webp / gif / svg，单张不超过 10MB，智能体会参考它做系统。"
                   : "照片、价目表、旧系统截图都可以传，做系统时智能体会参考。"}
               </p>
             </div>
           </PopoverContent>
         </Popover>
-        ) : null}
-        {onModeChange ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label={activeMode}
-            disabled={disabled}
-          >
-            <Sparkles className="size-3.5" /> {activeMode} <ChevronDown className="size-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {PLATFORM_MODES.map((m) => (
-              <DropdownMenuItem
-                key={m.label}
-                disabled={!m.live}
-                onClick={() => m.live && onModeChange(m.label)}
-              >
-                <span className="flex-1">{m.label}</span>
-                {m.label === mode ? <Check className="size-3.5" /> : null}
-                {!m.live ? <span className="text-xs text-muted-foreground/60">敬请期待</span> : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
         ) : null}
         {/* 数据模板钮（澄清形照原型位：语音/附件/数据模板居左成组） */}
         {clarify && onDataTemplate ? (

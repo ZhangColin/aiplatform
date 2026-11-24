@@ -59,14 +59,14 @@ describe("ProjectCard · P08 阶段与字段（#349）", () => {
 });
 
 describe("ProjectCard · 终点弱标识（#299，ADR-0029）", () => {
-  it("设计项目显「设计」文字级小标签（与首页最近项目卡同口径）", () => {
-    const html = renderCard({ endpointType: 1, endpointTypeName: "设计" });
-    expect(html).toContain("设计");
-    expect(html).toContain('data-endpoint-type="1"');
+  it("项目显「系统」文字级小标签（与首页最近项目卡同口径）", () => {
+    const html = renderCard({ endpointType: 2, endpointTypeName: "系统" });
+    expect(html).toContain("系统");
+    expect(html).toContain('data-endpoint-type="2"');
   });
 
   it("弱标识不加颜色强调（不抢四态徽标焦点——纯 muted 文字）", () => {
-    const html = renderCard({ endpointType: 1, endpointTypeName: "设计" });
+    const html = renderCard({ endpointType: 2, endpointTypeName: "系统" });
     expect(html).toContain("text-muted-foreground/80");
     expect(html).not.toContain("bg-primary");
   });

@@ -91,7 +91,7 @@ describe("isImagePath · 点看判定（#283 图片放行）", () => {
   it("五格式大小写不敏感放行；文本/无扩展名/二进制非图片不在面内", () => {
     expect(isImagePath("materials/ref.png")).toBe(true);
     expect(isImagePath("materials/ref.PNG")).toBe(true);
-    expect(isImagePath("design/poster.Jpg")).toBe(true);
+    expect(isImagePath("assets/poster.Jpg")).toBe(true);
     expect(isImagePath("a/b/c.webp")).toBe(true);
     expect(isImagePath("logo.svg")).toBe(true);
     expect(isImagePath("anim.gif")).toBe(true);
@@ -115,11 +115,10 @@ describe("rawFileUrl · 图片直出 URL（#283）", () => {
     );
   });
 
-  it("工作区锚定形（前导 /）归一为相对形——收尾卡稿清单/画布稿卡携锚定形直取", () => {
-    // #293 画布取件暴露的 #290 遗留缝：drafts.path 是锚定形「/design/x.png」，
+  it("工作区锚定形（前导 /）归一为相对形——工作区锚定路径单点归一", () => {
     // 后端 isViewable 拒绝对路径——单点归一（两形同收，消费面不再各自转换）
-    expect(rawFileUrl("p1", "/design/home-1.html")).toBe(
-      "/api/projects/p1/files/raw?path=design%2Fhome-1.html",
+    expect(rawFileUrl("p1", "/assets/home-1.html")).toBe(
+      "/api/projects/p1/files/raw?path=assets%2Fhome-1.html",
     );
   });
 });
@@ -136,8 +135,8 @@ describe("downloadFileUrl · 单文件下载 URL（#287 支付门）", () => {
       `/api/projects/p1/files/download?path=${encodeURIComponent("exports/海报-终稿.png")}`,
     );
     // 锚定形归一同 rawFileUrl
-    expect(downloadFileUrl("p1", "/design/home-1.html")).toBe(
-      "/api/projects/p1/files/download?path=design%2Fhome-1.html",
+    expect(downloadFileUrl("p1", "/assets/home-1.html")).toBe(
+      "/api/projects/p1/files/download?path=assets%2Fhome-1.html",
     );
   });
 });

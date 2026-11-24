@@ -39,13 +39,11 @@ export type InterceptCardFact = {
 export type BalanceReminderCardFact = {
   /** 留存 id（卡锚；run 场拦截无留存缺省）。 */
   holdId?: string;
-  /** 被拦车道：OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿。 */
+  /** 被拦车道：OPINION=意见 / INQUIRY=咨询。 */
   lane?: string;
   /** 被拦输入原文（卡上引用呈现；用户气泡由恢复受理的 run-start 落——卡不
    *  重建气泡，避免双写）。 */
   prompt?: string;
-  /** 作用域改稿目标件序（仅 DESIGN_REVISION）。 */
-  designItem?: number;
   /** 源池余额快照（分；显负额素材——卡显当前负额）。 */
   sourcePoolBalance?: number;
   /** 余额提醒卡事件锚。 */
@@ -81,19 +79,6 @@ export type BalanceReminderCardFact = {
 export const DEFAULT_GUIDE_LABEL = "平台";
 
 /**
- * 收尾卡稿条目（#289 设计会话收尾卡扩载，#290 呈现）：item＝本场设计物、media＝
- * 稿形态（html＝界面稿 / image＝图像稿）、path＝去向（工作区锚定形——文件区可见
- * 可下载）。编码 run 不携带。
- */
-export type ClosingDraft = {
-  item: string;
-  media: "html" | "image";
-  path: string;
-  /** 定稿后续触发事实（#291 定稿收尾卡；候选产出轮缺省）——呈现「已触发」行。 */
-  triggers?: string[];
-};
-
-/**
  * 收尾卡权威事实（#88 收口扩载的载荷形状，#89 起归对话流）：四要素 = 摘要
  * （summary）/判定行（prd 与 system 两组布尔+说明——服务端权威值）/变更清单
  * （files，文件级）/轮末统计（durationMs；文件数与变更行数由 files 派生）。
@@ -109,20 +94,6 @@ export type WorkClosing = {
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
   version?: string;
-  /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
-   *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
-  drafts?: ClosingDraft[];
-  /** 设计规范扫描（#296 遵守三件套③）：可缺省——带规范项目编码 run 携带（收尾卡
-   *  「按稿对齐」行的呈现源）；无规范项目与设计会话不携带。 */
-  designLint?: DesignLintClosing;
-};
-
-/** 收尾卡设计规范扫描事实（#296）：status 三态＋违规清单（file/line/rule/message）。 */
-export type DesignLintClosing = {
-  status: "passed" | "violations" | "unavailable";
-  retried?: boolean;
-  total?: number;
-  violations?: { file: string; line: number; rule: string; message: string }[];
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -914,64 +885,7 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
       : [],
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
-    drafts: toClosingDrafts(record.drafts),
-    designLint: toDesignLint(record.designLint),
   };
-}
-
-/**
- * designLint 载荷容错收窄（#296）：非对象或缺有效 status 回落 undefined（不出
- * 坏行——收尾卡「按稿对齐」行随在场呈现）；违规清单条目缺 file 剔除（行呈现
- * 依赖文件定位），status＝violations 而清单空照收（total 仍在——如实）。
- */
-function toDesignLint(raw: unknown): DesignLintClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  if (record.status !== "passed" && record.status !== "violations"
-      && record.status !== "unavailable") {
-    return undefined;
-  }
-  return {
-    status: record.status,
-    retried: record.retried === true,
-    total: typeof record.total === "number" ? record.total : undefined,
-    violations: Array.isArray(record.violations)
-      ? record.violations.flatMap((violation) => {
-          const entry = asRecord(violation);
-          return entry && typeof entry.file === "string"
-            ? [{
-                file: entry.file,
-                line: typeof entry.line === "number" ? entry.line : 0,
-                rule: typeof entry.rule === "string" ? entry.rule : "",
-                message: typeof entry.message === "string" ? entry.message : "",
-              }]
-            : [];
-        })
-      : undefined,
-  };
-}
-
-/**
- * drafts 载荷容错收窄（#289/#290）：非数组回落 undefined（编码 run 不携带）；
- * 条目缺 path / media 非二值剔除（不出坏行——稿条目的呈现依赖 path 与形态），
- * item 缺失回落空串（行仍可按 path 呈现）。全空数组照收（收口判据过而清单
- * 被裁的防御面，卡面零稿行）。
- */
-function toClosingDrafts(raw: unknown): ClosingDraft[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  return raw.flatMap((draft): ClosingDraft[] => {
-    const entry = asRecord(draft);
-    if (!entry || typeof entry.path !== "string" || !entry.path) return [];
-    if (entry.media !== "html" && entry.media !== "image") return [];
-    return [{
-      item: typeof entry.item === "string" ? entry.item : "",
-      media: entry.media,
-      path: entry.path,
-      triggers: Array.isArray(entry.triggers)
-        ? entry.triggers.filter((trigger): trigger is string => typeof trigger === "string")
-        : undefined,
-    }];
-  });
 }
 
 /**

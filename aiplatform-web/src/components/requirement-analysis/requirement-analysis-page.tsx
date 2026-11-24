@@ -12,8 +12,6 @@ import { useProject } from "@/hooks/use-project";
 import { usePrd, usePrdVersions } from "@/hooks/use-prd";
 import { errorText } from "@/lib/api/api-error";
 import { prdBadgeOf } from "@/lib/projects/prd-badge";
-import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
-import { planAreaOfDesignItems } from "@/lib/projects/detail";
 import { lockRowOf } from "@/lib/orders/lock";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
@@ -137,10 +135,6 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
       projectId={projectId}
       lock={lock}
       stage={chatOnly ? "interview" : "iterate"}
-      // 常驻文案轨道（#299）：设计主线＝设计形；系统/系统＋设计＝系统形
-      track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
-      plan={detail?.segments}
-      designPlan={planAreaOfDesignItems(detail?.designItems)}
       variant="stage"
       inputRef={chatInputRef}
       // 报价卡「查看订单详情」（#203）：签约域在 Demo/签约阶段页——过渡期归

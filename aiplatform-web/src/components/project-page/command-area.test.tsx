@@ -376,20 +376,6 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     expect(iterated).not.toContain("访谈中");
   });
 
-  it("轨道变体（#299 设计主线）：track=design 梳设计物清单、迭代即改稿；缺省系统形", () => {
-    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
-
-    const system = renderToStaticMarkup(<CommandArea projectId="p1" />);
-    expect(system).toContain("把要点整理成需求文档");
-
-    const design = renderToStaticMarkup(<CommandArea projectId="p1" track="design" />);
-    expect(design).toContain("把要点整理成设计物清单");
-    const designIterated = renderToStaticMarkup(
-      <CommandArea projectId="p1" track="design" stage="iterate" />,
-    );
-    expect(designIterated).toContain("改稿与定稿都在这里聊");
-  });
-
   it("发送框 = 共享 Composer（立体卡片）——首页/项目页同一组件", () => {
     seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
 

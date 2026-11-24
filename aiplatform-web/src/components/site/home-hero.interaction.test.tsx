@@ -8,8 +8,8 @@ import { HomeHero } from "./home-hero";
  * 首页 Hero 接线契约（#345，spec #320 ⑥ 首页 P01 照原型）：示例 chip 一点即填
  * 全文、空输入 CTA 不可用、提交中防重复、一句话提交建项目（POST /api/projects，
  * 主链路载荷零变化、无终点字段）直进项目空间新壳；草稿恢复横幅取真会话数据
- * （有效访客/账号会话最近未归档项目，无会话不呈现）；模式切换 pill 已删（回单
- * 档呈现，PLATFORM_MODES 机制保留在 lib/modes）。
+ * （有效访客/账号会话最近未归档项目，无会话不呈现）；模式切换 pill 不存在
+ * （回单档呈现）。
  */
 
 const push = vi.fn();
@@ -102,7 +102,7 @@ describe("HomeHero（首页 P01 照原型）", () => {
     expect(screen.queryByText("继续梳理")).toBeNull();
   });
 
-  it("模式切换 pill 已删：无「先做设计」次入口（回单档呈现，PLATFORM_MODES 机制保留）", () => {
+  it("模式切换 pill 不存在：无设计/系统次入口（回单档呈现）", () => {
     render(<HomeHero credentialPresent />);
     expect(screen.queryByRole("button", { name: "先做设计" })).toBeNull();
     expect(screen.queryByRole("button", { name: "先做系统" })).toBeNull();

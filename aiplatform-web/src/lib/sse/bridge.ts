@@ -7,7 +7,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore, toWorkPlanSteps, DRAFT_WRITING_TOOLS } from "@/lib/store/work-message";
+import { useWorkMessageStore, toWorkPlanSteps } from "@/lib/store/work-message";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { orderStatusToastText, REPRICED_TOAST_TEXT } from "@/lib/orders/status";
 
@@ -171,25 +171,6 @@ function epochMsOf(ts: string): number | undefined {
   return Number.isNaN(ms) ? undefined : ms;
 }
 
-/** 该 run 是否锚定的设计会话（#290）：工作消息座席＋runId 双锚——designer 收口的
- * 失效面判定（件状态落轨道表，重拉进计划区）；生成面（generation store）不涉。 */
-function isDesignerWork(projectId: string, runId: string): boolean {
-  const work = useWorkMessageStore.getState().works[projectId];
-  return work?.seat === "designer" && work.runId === runId;
-}
-
-/** 该部件事件是否设计轨的稿落盘完成（#294）：designer 锚定＋写动作族＋completed
- * ——文件树失效的窄条件（编码轨照旧 run-finish 才失效、读类与失败动作不触发）。 */
-function isDesignerDraftWritten(projectId: string, runId: string, toolName: unknown,
-    state: unknown): boolean {
-  return (
-    isDesignerWork(projectId, runId)
-    && typeof toolName === "string"
-    && DRAFT_WRITING_TOOLS.has(toolName)
-    && state === "completed"
-  );
-}
-
 /**
  * 智能体事件 → chat store + generation store + 工作消息 store 分发（事件 id =
  * SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键（引擎信息归一）
@@ -213,8 +194,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         // 配置键 = 呈现形态的登记锚（引擎信息归一，#82 起 run-start 唯一携带）：
         // executor → 编码 run（生成面登记 + 工作消息起锚）；main → 对话面 run
-        // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）；
-        // designer → 设计会话（#290 同构直播卡：座席落锚，计划区＝设计物清单）
+        // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
         if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
           // run 级时钟起锚（#225）：run-start 信封 ts——单一 run 起点锚
@@ -228,12 +208,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // 失效与记行存在竞态（savePrd 通知早于记行落库），阶段门「首个 Demo 在途」
           // 事实源（prdVersions 非空）随本失效即时解锁，不卡到刷新
           void queryClient.invalidateQueries({ queryKey: queryKeys.documents.all });
-        } else if (payload.agent === "designer") {
-          // 设计会话起锚（#290）：座席＝designer（计划区/活性行的呈现分岔锚）；
-          // 起跑即失效项目域——清单落表（收口自动起设计的清单章解析）晚于
-          // document-updated 失效，重拉才带设计物清单进计划区
-          work.startWork(payload.projectId, payload.runId, payload.slice, epochMsOf(envelope.ts), "designer");
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
           chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
@@ -256,10 +230,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         // 编码 run 的 error = 事件序异常（#84：尝试环内中间错误不出用户面事件流，
         // 服务端投影失守的防御位）——不写任何 UI（中途闪错即本票防的回归），
-        // run 层唯一失败终态仍归 run-failed；设计会话同款（#290：重试全程静默，
-        // 中间错误不进对话面）
+        // run 层唯一失败终态仍归 run-failed
         if (isCoderRun(generation, payload.projectId, payload.runId)) return;
-        if (isDesignerWork(payload.projectId, payload.runId)) return;
         // 对话轮失败（非重试族）：对话面收轮 + 失败气泡；生成面不写状态（#84）
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
         // 受理卡落定不死转（#87）：受理轮炸——中断提示已是兜底呈现，卡不悬转
@@ -276,10 +248,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           generation.noteCoderFailed(payload.projectId, payload.message, payload.stopped);
           // 终态收口即失效项目域（#222）：服务端在途标记已清——未生成的项目投影
           // 回「从未生成」（#604 起失败不落投影，失败档只由本事件的会话态呈现）
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-        } else if (isDesignerWork(payload.projectId, payload.runId)) {
-          // 设计轨失败终态（#289 失败不跳件）：件状态落轨道表 → 失效项目域
-          //（计划区 ✗ 推进；恢复出口＝用户重提意见走收口链，无前端按钮）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
         // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）；
@@ -306,12 +274,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           generation.noteCoderFinish(payload.projectId, event.id);
           // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
           // 预览地址域随之刷新；预览重挂由 generation store 纪元驱动）
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-        } else if (isDesignerWork(payload.projectId, payload.runId) || closing?.drafts) {
-          // 设计会话收口（#290）：件状态落轨道表 → 失效项目域（计划区 ✓ 推进
-          //——逐件收口即逐件亮灯，对偶编码 run 收口失效）；closing.drafts 在场
-          //（#291 定稿收尾卡——平台侧发射、无锚定直播卡）同判：件状态转已定稿
-          //（finalized_path 透出）也经项目域重拉进计划区
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
         // 轮收口即对话史有新条目（发言+回复 / 收尾卡落库）——失效对话域，水合增量
@@ -380,7 +342,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             holdId: payload.holdId,
             lane: payload.lane,
             prompt: payload.prompt,
-            designItem: payload.designItem,
             sourcePoolBalance: payload.sourcePoolBalance,
             runId: payload.runId,
           },
@@ -415,14 +376,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "part-action": {
         const { payload } = platform;
-        // 设计轨稿落盘完成 → 失效文件树（#294 渐进长出：画布在途稿随写随显——
-        // 树是新稿的存在性正本，窄条件只作用 designer 锚定的写动作收口）
-        if (isDesignerDraftWritten(payload.projectId, payload.runId,
-            payload.toolName, payload.state)) {
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.projects.files(payload.projectId),
-          });
-        }
         work.notePart(
           payload.projectId,
           { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,

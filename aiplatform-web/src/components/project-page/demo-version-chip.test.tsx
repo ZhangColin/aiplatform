@@ -52,7 +52,7 @@ describe("DemoVersionChip · 版本 chip 呈现（#333）", () => {
     expect(html).toContain("已确认");
   });
 
-  it("无确认版起跑（legacy/设计类）：锚空只出版本号，不虚构 PRD 关联", () => {
+  it("无确认版起跑（legacy）：锚空只出版本号，不虚构 PRD 关联", () => {
     givenVersions([{ versionNo: 1, prdVersionNo: null, runId: "r-1" }]);
 
     const html = renderToStaticMarkup(<DemoVersionChip projectId="p1" />);

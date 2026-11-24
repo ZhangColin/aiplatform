@@ -12,8 +12,8 @@ import { useM01Store } from "@/lib/store/m01";
  * 余额提醒卡（#537 计费③段间硬门，ADR-0047「段间硬门段中自由」）：付费项目
  * 段边界源池≤0 被拦的平台侧卡——显当前负额＋充值入口（到账自动放行，不手动
  * 重试——区别于拦截卡的「确认扣减」动作，本卡只有「去充值」引导）。有留存的卡
- * （意见/咨询/作用域改稿车道）引用被拦原文；run 场拦截（生成/修正/设计派发）
- * 无留存——只有负额与暂停事实。中途关闭＝本地面移除（有留存的卡可回：GET 读面
+ * （意见/咨询车道）引用被拦原文；run 场拦截（生成/修正）无留存——只有负额与
+ * 暂停事实。中途关闭＝本地面移除（有留存的卡可回：GET 读面
  * 重载重建；run 场卡一次性呈现）。文案为平台定型文案（代码承载，非 LLM 产）。
  */
 
@@ -23,7 +23,6 @@ type BalanceReminderMessage = Extract<ChatMessage, { kind: "balance-reminder" }>
 const LANE_LABELS: Record<string, string> = {
   OPINION: "修改意见",
   INQUIRY: "咨询",
-  DESIGN_REVISION: "设计改稿",
 };
 
 /** 分 → 元呈现（负额显欠费形：-¥5.00）。 */
@@ -43,7 +42,7 @@ export function BalanceReminderCard({
   const me = useMe();
   const loggedIn = me.data != null;
   const dismiss = () => useChatStore.getState().dismissBalanceReminder(projectId);
-  /** run 场拦截（生成/修正/设计派发）——无留存无原文，只报暂停事实。 */
+  /** run 场拦截（生成/修正）——无留存无原文，只报暂停事实。 */
   const runBlocked = !card.holdId;
   const quoted = card.lane ? LANE_LABELS[card.lane] : undefined;
 

@@ -14,8 +14,8 @@ type GenerationStartResponse = components["schemas"]["GenerationStartResponse"];
  * 重跑（#604 失败新语义＝明确展示＋重跑即恢复：服务端续跑机器已退役，不带断点、
  * 不携错误现场）。成功即乐观登记编码 run 在途（SSE run-start 随后到，重放/回声
  * 幂等）＋失效项目域（生成态投影回「生成中」档——服务端在途标记已先落）。正常流
- * 生成由点火入口发起（岔路口「立即生成」／PRD 确认；快道与设计定稿由收口观测
- * 直派），本 mutation 只服务未起跑/会话内失败的恢复出口（岔路口卡面「立即生成」
+ * 生成由点火入口发起（岔路口「立即生成」／PRD 确认），本 mutation 只服务
+ * 未起跑/会话内失败的恢复出口（岔路口卡面「立即生成」
  * 与本钩同端点，共用本 mutation）。
  */
 export function useResumeGeneration(projectId: string) {

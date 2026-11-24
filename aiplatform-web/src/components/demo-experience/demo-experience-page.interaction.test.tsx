@@ -96,11 +96,6 @@ function seedReadyProject() {
     prdProducedAt: "2026-10-18T01:00:00Z",
     generatedAt: "2026-10-18T02:00:00Z",
     generationState: "generated",
-    segments: [
-      { ord: 1, description: "客户在线预约日历排班引擎", status: "closed" },
-      { ord: 2, description: "智能技工时间冲突自动检测与拦截", status: "closed" },
-      { ord: 3, description: "工单多状态联动与流转 (待签/执行/归档)", status: "closed" },
-    ],
   } as ProjectDetail;
   seed.demoVersions = [
     {
@@ -137,7 +132,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Demo 体验页 P05 · 原型结构（#347）", () => {
-  it("项目横幅与右栏三段式照原型落位，基准和流水吃真实版本/切片记录", () => {
+  it("项目横幅与右栏三段式照原型落位，基准和流水吃真实版本记录", () => {
     renderPage();
 
     expect(screen.getByText("PROJECT")).toBeTruthy();
@@ -149,7 +144,6 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
 
     expect(screen.getByText("版本交付基准")).toBeTruthy();
     expect(screen.getByText("PRD v2 对齐")).toBeTruthy();
-    expect(screen.getByText("客户在线预约日历排班引擎")).toBeTruthy();
     expect(screen.getByText("历史版本生成流流水")).toBeTruthy();
     expect(screen.getByText("ALL GREEN")).toBeTruthy();
     expect(screen.getByText("演示数据")).toBeTruthy();

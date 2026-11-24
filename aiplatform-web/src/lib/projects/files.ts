@@ -109,8 +109,8 @@ export function isImagePath(path: string): boolean {
 /**
  * 图片点看的 raw 直出 URL：同源 `/api/*` 直链（会话 cookie 自动携带，对偶
  * source-package 下载链接先例）——二进制不走 api client（其响应一律按 JSON 解包）。
- * 路径形归一：前导斜杠剥掉（收尾卡稿清单等携工作区锚定形「/design/x.png」，
- * 后端只收相对形——两形同收，消费面不再各自转换）。
+ * 路径形归一：前导斜杠剥掉（工作区锚定形「/x.png」与相对形两形同收，后端只收
+ * 相对形——消费面不再各自转换）。
  */
 export function rawFileUrl(projectId: string, path: string): string {
   return `/api/projects/${projectId}/files/raw?path=${encodeURIComponent(relativeFormOf(path))}`;

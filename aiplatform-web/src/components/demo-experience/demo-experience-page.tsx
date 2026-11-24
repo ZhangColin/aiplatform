@@ -17,8 +17,6 @@ import { useProject } from "@/hooks/use-project";
 import { errorText } from "@/lib/api/api-error";
 import { isBindingGateError } from "@/lib/orders/binding-gate";
 import { confirmOrderVisible } from "@/lib/projects/confirm-order";
-import { planAreaOfDesignItems } from "@/lib/projects/detail";
-import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
 import { lockRowOf } from "@/lib/orders/lock";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
@@ -192,7 +190,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
             <Skeleton className="h-72 w-full rounded-2xl" />
           ) : (
             <DeliveryBaselineCard
-              segments={detail?.segments}
               versions={versions}
               prdVersionNo={latest ? latest.prdVersionNo : prdVersions?.[0]?.versionNo}
               generating={generating}
@@ -213,9 +210,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
                 projectId={projectId}
                 lock={lock}
                 stage="iterate"
-                track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
-                plan={detail?.segments}
-                designPlan={planAreaOfDesignItems(detail?.designItems)}
                 variant="stage"
               />
             </div>

@@ -27,7 +27,7 @@ export type ProjectSummary = {
   demoConfirmed?: boolean;
   /** 项目级「需用户补充」标志（P08 待用户处理事项优先项）。 */
   needsUserSupplement?: boolean;
-  /** 终点类型 code（#299 项目卡弱标识取数面：1=设计 2=系统 3=系统＋设计；缺省 =
+  /** 终点类型 code（#299 项目卡弱标识取数面：2=系统；#612 收窄为系统单值；缺省 =
    * 旧后端，弱标识不出）。 */
   endpointType?: number;
   /** 终点类型名（后端 *Name 随行——弱标识文字直取）。 */

@@ -152,7 +152,7 @@ describe("VersionRecordDrawer · 分组（PRD 组＋Demo 组）", () => {
     // 迭代成版链：v2 锚旧 PRD v1（改动 PRD 出新版后旧 Demo 关联如实呈现）
     expect(within(demoGroup).getByText(/基于 PRD v1 快照/)).toBeTruthy();
     expect(within(demoGroup).getByText("已确认")).toBeTruthy();
-    // 无确认版起跑（legacy/设计类）：不虚构 PRD 关联——Demo v1 行无「基于」
+    // 无确认版起跑（legacy）：不虚构 PRD 关联——Demo v1 行无「基于」
     const legacyRow = within(demoGroup).getByText("Demo v1").closest("button")!;
     expect(legacyRow.textContent).not.toContain("基于 PRD");
   });

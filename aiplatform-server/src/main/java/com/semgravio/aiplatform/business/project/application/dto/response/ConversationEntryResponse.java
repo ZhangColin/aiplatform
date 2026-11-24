@@ -50,7 +50,7 @@ public record ConversationEntryResponse(
                 + "收口扩载原样（#88 收尾卡服务端权威事实；schema 正本＝"
                 + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
                 + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
-                + "designLint?, modelTier?, "
+                + "modelTier?, "
                 + "durationBreakdown{llmMs,toolsMs,closingMs,overhead{"
                 + "configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},"
                 + "attempts[]} }（可缺省键＝"

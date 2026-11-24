@@ -35,8 +35,8 @@ import { formatRelativeTime } from "@/lib/utils/time";
  *
  * 一句话提交照旧建项目（POST /api/projects，项目名后端 LLM 取）→ 直进项目空间
  * 新壳（#343）。主链路载荷零变化——本票删除模式切换 pill/模板卡/最近项目卡区
- * 三件（#310 设计收起），回单档（做系统）呈现、不再携终点字段；PLATFORM_MODES
- * 注册表/live 位（lib/modes）机制保留不动。
+ * 三件（#310 设计收起），回单档（做系统）呈现、不再携终点字段；入口模式位随
+ * #612 设计线退役整体拆除。
  *
  * <p>{@code credentialPresent}＝服务端 cookie 面判定的凭证存在性：匿名首访不发
  * 最近项目背景查询（只逛零足迹——横幅无数据自然不呈现），也不因背景 401 弹 M01。</p>

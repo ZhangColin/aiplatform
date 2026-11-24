@@ -57,7 +57,6 @@
 | `EMBEDDING_URL` | 是 | 指向 embedding 服务（同机 `http://127.0.0.1:9091`） |
 | `VOLCENGINE_API_KEY`、`DEEPSEEK_API_KEY` | 是 | 对话主通道（V44 迁移期注入库） |
 | `BOCHA_API_KEY` | 是 | 外部资料搜索 |
-| `IMAGE_GEN_PROVIDER`＋`ZHIPU_API_KEY`/`ARK_API_KEY`/`OPENAI_IMAGE_API_KEY`/`DASHSCOPE_API_KEY` | 视选型 | 出图 |
 | `VERIFICATION_*` | 默认即可 | 勿全关通道 |
 | `REDIS_HOST/PORT`、`OPENAPI_*`、`SSO_*` | 不配 | 核心不依赖／不启用／不接 |
 | 前端 `BACKEND_URL` | 是（**构建期**） | 同机部署给 `http://127.0.0.1:8888`；换后端地址需重建 |

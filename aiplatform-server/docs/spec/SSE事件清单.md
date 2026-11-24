@@ -4,6 +4,8 @@
 > 事件只让 UI「活」，不承担正确性：断线丢失可接受，状态以 REST 查询为准（通知族口径；智能体事件族另有断线补发，对话史以 REST 水合收敛，[#89](https://github.com/ZhangColin/aiplatform/issues/89)）。
 >
 > **治理**：eventhub 是唯一 SSE 管道、单端点单流（平台通知 + 智能体事件共用一条流，合并通道不合并语义——词汇表归 eventhub，智能体事件由 base.agentscope 的 mapper 翻译填充）。新增顶层 type 必须先进本清单再上线（code review 检查）；代码侧只允许引用 `XxxEventTypes` 常量类，禁止字符串字面量散落。
+>
+> **改记（2026-11-24，设计线整条退役，#610／#613）**：本文中 `agent=designer`、设计会话/定稿收尾卡（`closing.drafts`、`triggers`）、`generate_image` 工具动作、`designLint` 收口扫描、设计轨逐尝试失败与稿序等相关描述均为历史记录；现行事件面不含设计座，事件名册与载荷以代码与 swagger 为准。
 
 ## 信封（单端点单流）
 

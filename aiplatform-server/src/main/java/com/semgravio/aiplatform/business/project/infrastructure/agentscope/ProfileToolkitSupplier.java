@@ -4,14 +4,11 @@ import org.springframework.stereotype.Component;
 
 import com.semgravio.aiplatform.base.agentscope.AgentToolkitSupplier;
 import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
-import com.semgravio.aiplatform.base.agentscope.LandedFileFacts;
 import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWaiter;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
-import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
-import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetcher;
@@ -37,11 +34,6 @@ import io.agentscope.core.tool.Toolkit;
  * 均不落工作区文件）；{@link AgentProfile#EXECUTOR run 执行体} = 空集（#604 拆
  * run 尝试体旧机制：finish_edit／update_plan／自荐 executor 槽／构建轨出图 gi 件
  * 随旧执行协议退役——生成/更新 run 工具面＝内核恰四件经 {@code KernelTools} 装配）；
- * {@link AgentProfile#DESIGNER 设计执行体} = generate_image（出图工具件，#288
- * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由；骨架件
- * 恒挂载不读 gi 件），随设计面
- * 工作区注册（写文件件是 harness 内建、经 ProjectDesign 形态自带——shell 与
- * 委派在工厂结构性关闭）；
  * verify 子键（#352，历史面——#604 子智能体委派退役后无运行时消费）=
  * report_verification＋subagent 槽自荐两件（#263/#460 血统实例）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
@@ -50,7 +42,8 @@ import io.agentscope.core.tool.Toolkit;
  * 执行体槽（finish_edit/update_plan/技能与沉淀自荐 executor 槽/构建轨出图 gi 件）
  * 与 verify 子键视图（report_verification＋subagent 槽自荐两件）随子智能体委派
  * 与旧执行协议一并退役——生成/更新 run 经内核装配形态派发（工具面＝恰四件经
- * {@code KernelTools} 装配结构性兑现，本装配面零注册），设计执行体槽不受影响。
+ * {@code KernelTools} 装配结构性兑现，本装配面零注册）。<b>#610 设计线整条退役</b>：
+ * 设计执行体槽及其 generate_image 出图件一并拆除。
  *
  * <p><b>增强工具开关（#252，ADR-0021 窄幅开关）</b>：fetch_url / web_search 两件
  * 按 {@code toolSpec}（工具面规格串，{@code AgentConfigAppService} 编码——运营
@@ -75,9 +68,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final WebSearchProvider webSearchProvider;
     private final SkillProposalAdapter skillProposals;
     private final SedimentProposalAdapter sedimentProposals;
-    private final ImageGenerationAppService imageGeneration;
-    private final LandedFileFacts landedFiles;
-    private final DesignSpecAppService designSpecs;
     private final WorkspaceReadinessWaiter readinessWaiter;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts,
@@ -86,8 +76,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
-            ImageGenerationAppService imageGeneration,
-            LandedFileFacts landedFiles, DesignSpecAppService designSpecs,
             WorkspaceReadinessWaiter readinessWaiter) {
         this.prdArtifacts = prdArtifacts;
         this.interviewToolGate = interviewToolGate;
@@ -99,9 +87,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.webSearchProvider = webSearchProvider;
         this.skillProposals = skillProposals;
         this.sedimentProposals = sedimentProposals;
-        this.imageGeneration = imageGeneration;
-        this.landedFiles = landedFiles;
-        this.designSpecs = designSpecs;
         this.readinessWaiter = readinessWaiter;
     }
 
@@ -140,15 +125,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             // 是采集层草稿库（经适配器），不写工作区文件
             toolkit.registerAgentTool(new ProposeSedimentTool(ro.workspaceId(),
                     SkillSlot.MAIN.key(), sedimentProposals));
-        }
-        // #289 设计执行体（设计面工作区）：出图工具件（#288 立内核、本票发放——
-        // 档位表落提示词层，执行体按设计物语义自选；#292 落盘事实报进变更事实流，
-        // 收口判据与稿清单看得见图片模型路的稿）；写文件件是 harness 内建、
-        // 经 ProjectDesign 形态自带（shell/委派在工厂结构性关闭——本面零注册即无）
-        if (AgentProfile.DESIGNER.key().equals(agentKey)
-                && workspace instanceof AgentWorkspace.ProjectDesign design) {
-            toolkit.registerAgentTool(GenerateImageTool.forDesign(design.workspaceId(),
-                    imageGeneration, landedFiles, designSpecs));
         }
         return toolkit;
     }

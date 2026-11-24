@@ -41,9 +41,6 @@ import org.springframework.stereotype.Component;
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
  * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具
  * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）；
- * {@link AgentWorkspace.ProjectDesign ProjectDesign} 项目工作区设计面（#289
- * 设计执行体姿态，ADR-0025 无 shell）——文件工具保留、另关内核 shell
- * （写文件件在、命令执行结构性不存在）；
  * {@link AgentWorkspace.ProjectKernel ProjectKernel} 项目工作区生成内核形态
  * （#595 内核装配，ADR-0054）——容器/内脏关/memory 关同 ProjectDev，提示词＝
  * {@link KernelSystemPrompt} 权威版本（经 {@link #obtainKernel} 装配，直携外来
@@ -231,12 +228,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 : streamLayer(
                         ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
                         modelString, vendorOf(modelChannel), properties);
-        // 项目工作区容器文件面（ProjectDev/ProjectReadOnly/ProjectDesign/ProjectKernel 共用；
-        // 子智能体同面，#260）
+        // 项目工作区容器文件面（ProjectDev/ProjectReadOnly/ProjectKernel 共用；子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
             case AgentWorkspace.ProjectReadOnly ro -> new DockerExecFilesystem(ro.containerName());
-            case AgentWorkspace.ProjectDesign design -> new DockerExecFilesystem(design.containerName());
             case AgentWorkspace.ProjectKernel kernel -> new DockerExecFilesystem(kernel.containerName());
             case AgentWorkspace.Local ignored -> null;
         };
@@ -355,12 +350,6 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     // （ProfileToolkitSupplier）；委派是 run 内机制（#95 委派位只开在
                     // ProjectDev），主智能体永不委派——子智能体一并关闭
                     .disableFilesystemTools()
-                    .disableShellTool()
-                    .disableSubagents();
-            case AgentWorkspace.ProjectDesign design -> projectSandbox(builder, containerFs)
-                    // 设计面（#289 设计执行体姿态，ADR-0025 无 shell）：内核文件
-                    // 工具（写文件件）保留——设计稿落工作区；shell 与委派结构性
-                    // 关闭——写稿无需命令、设计会话不委派（信任面收窄同主智能体）
                     .disableShellTool()
                     .disableSubagents();
             case AgentWorkspace.ProjectKernel kernel -> projectSandbox(builder, containerFs)
@@ -499,7 +488,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 模型按描述省略参数即 {@code ToolValidator} 参数校验失败（错误以
      * {@code ToolResultBlock.error} 回模型、日志仅 debug 级——#480 同族形态，取证
      * 依赖读码实证）。内核件经 {@code HarnessAgent.Builder.build()} 内置件面进入
-     * （messageBus 非空即注册，与 {@code disableSubagents()} 无关——只读/设计面同在），
+     * （messageBus 非空即注册，与 {@code disableSubagents()} 无关——只读面同在），
      * 声明 allowlist 管不到它的 schema 面（#260 遗留口径）。
      *
      * <p>修法＝构建后 schema 覆写（镜像 {@link #realignBuiltinWebTools}/#266 后置校正

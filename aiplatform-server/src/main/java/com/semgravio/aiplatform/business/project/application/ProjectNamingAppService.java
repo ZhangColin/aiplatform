@@ -183,7 +183,6 @@ public class ProjectNamingAppService implements DisposableBean {
                 /* toolSilenceTimeout= */ null,
                 null, // 一次性判定无配置语境：空工具面
                 /* workspaceReadOnly= */ false,
-                /* workspaceNoShell= */ false,
                 /* heading= */ null,
                 /* toolSpec= */ null,
                 // #557 候选队列（failover 装配面）

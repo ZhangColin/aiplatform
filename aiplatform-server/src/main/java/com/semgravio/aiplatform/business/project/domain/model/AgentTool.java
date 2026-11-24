@@ -13,7 +13,8 @@ import com.cartisan.core.domain.BaseEnum;
  * 注册集与枚举该槽位集合必须一致，改一头不改另一头测试即红）。<b>#604 拆
  * run 尝试体旧机制</b>：executor 槽（finish_edit/update_plan/自荐两件/构建轨
  * 出图 gi 件）与 subagent 槽（report_verification）随旧执行协议与子智能体
- * 委派一并退役——现存槽位＝main（主智能体）＋designer（设计执行体）。
+ * 委派一并退役；<b>#610 设计线整条退役</b>：designer 槽与 generate_image 件
+ * 一并拆除——现存槽位＝main（主智能体）。
  *
  * <p><b>骨架 / 增强</b>（ADR-0021：编排权不下放配置）：骨架＝编排链路工具
  * （问答、PRD 落库）＋项目事实只读件——结构性锁死不开放关停（接口层拒绝，
@@ -43,13 +44,7 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     PROPOSE_SKILL_MAIN(12, "propose_skill", "main", AgentToolKind.SKELETON,
             "技能草稿自荐（需求侧梳理经验沉淀待审——过程知识沉淀链，#263 三槽位齐开）"),
     PROPOSE_SEDIMENT_MAIN(15, "propose_sediment", "main", AgentToolKind.SKELETON,
-            "沉淀物草稿自荐（需求案例/功能模块/业务规则沉淀待审——数据飞轮采集层，#460）"),
-
-    // ---------- designer 槽位（设计执行体：设计过程的执行侧，写文件无 shell——#289） ----------
-
-    GENERATE_IMAGE(13, "generate_image", "designer", AgentToolKind.SKELETON,
-            "图片生成模型出位图设计稿（写实光影/插画氛围向；档位表落提示词层——文字排版"
-                    + "海报写 HTML，ADR-0026 不做代码级硬路由）");
+            "沉淀物草稿自荐（需求案例/功能模块/业务规则沉淀待审——数据飞轮采集层，#460）");
 
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */

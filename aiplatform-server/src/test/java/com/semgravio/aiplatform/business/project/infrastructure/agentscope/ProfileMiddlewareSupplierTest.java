@@ -29,7 +29,7 @@ class ProfileMiddlewareSupplierTest {
         ProfileMiddlewareSupplier supplier = new ProfileMiddlewareSupplier(mock(SkillStore.class));
 
         for (String agentKey : List.of(AgentProfile.MAIN.key(), AgentProfile.EXECUTOR.key(),
-                AgentProfile.DESIGNER.key(), "generation-kernel")) {
+                "generation-kernel")) {
             List<MiddlewareBase> middlewares = supplier.middlewaresFor(
                     agentKey, new AgentWorkspace.Local(Path.of("ws")));
 

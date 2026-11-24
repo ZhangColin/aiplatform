@@ -12,7 +12,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
-import com.semgravio.aiplatform.base.agentscope.HarnessBuiltinTools;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileToolkitSupplier;
@@ -32,8 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>五面钉死（#252 验收面；#604 起槽位只余两槽——executor 槽随 run 尝试体旧机制
  * 退役、subagent 槽随委派机制退役）：</p>
  * <ul>
- * <li><b>清单可观测</b>：两槽位分组（main/designer，#289 designer 槽——平台件
- * generate_image＋harness 内建文件工具呈现、无 execute）——main 平台九件
+ * <li><b>清单可观测</b>：唯一槽位 main（#610 起 designer 槽随设计线整条退役）——
+ * 平台九件
  * （骨架七＋增强两，含 propose_skill #263 与 propose_sediment #460 自荐）；
  * 增强 enabled 按生效开关、骨架/内建恒 true；</li>
  * <li><b>开关生效装配断言</b>：PUT 关 web_search → 清单 enabled=false ＋ 真装配链
@@ -84,18 +83,17 @@ class BackofficeAgentToolSeamTest {
     // ---------- 清单可观测：两槽位分组、类别与挂载态 ----------
 
     @Test
-    void given_defaults_when_signed_get_inventory_then_two_slots_with_expected_tools()
+    void given_defaults_when_signed_get_inventory_then_main_slot_with_expected_tools()
             throws Exception {
         signedGet()
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                // 两槽位键序（与技能槽位同键）：#604 起 executor 槽随 run 尝试体旧机制
-                // 退役——生成/更新 run 经内核装配形态派发，工具恰四件由装配结构性兑现、
-                // 不进本清单（subagent 槽随委派机制退役）
-                .andExpect(jsonPath("$.data", hasSize(2)))
+                // #604 起 executor 槽随 run 尝试体旧机制退役、subagent 槽随委派机制
+                // 退役；#610 designer 槽随设计线整条退役——现存唯一槽位＝main
+                .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].slot").value("main"))
-                .andExpect(jsonPath("$.data[1].slot").value("designer"))
                 .andExpect(jsonPath("$.data[?(@.slot == 'executor')]").isEmpty())
+                .andExpect(jsonPath("$.data[?(@.slot == 'designer')]").isEmpty())
                 // main：平台九件（#602 saveBuildPlan 随切片机器出局；骨架七恒挂载——
                 // 含 propose_skill #263 与 propose_sediment #460 自荐两槽位齐开＋
                 // 增强两件按生效开关缺省开）
@@ -113,17 +111,7 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].enabled").value(true))
-                // designer（#289）：平台件 generate_image（骨架，ADR-0026 档位表落
-                // 提示词层）＋harness 内建文件工具（写文件件——注册自省，含
-                // write_file）；无 shell——execute 不在设计面（结构性关闭的呈现同源）
-                .andExpect(jsonPath("$.data[1].slotName").value("设计执行体"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'write_file')].kind")
-                        .value("HARNESS_BUILTIN"))
-                .andExpect(jsonPath("$.data[1].tools.length()").value(
-                        1 + fileBuiltinCount()))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'execute')]").doesNotExist());
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'generate_image')]").doesNotExist());
     }
 
     // ---------- 开关生效：关→退出装配面、开→回归（装配断言） ----------
@@ -269,11 +257,6 @@ class BackofficeAgentToolSeamTest {
     }
 
     // ---------- 夹具 ----------
-
-    /** harness 内建文件工具件数（#289 designer 槽呈现口径——不含 shell，自省单源）。 */
-    private static int fileBuiltinCount() {
-        return HarnessBuiltinTools.fileTools().size();
-    }
 
     private ResultActions signedGet() throws Exception {
         String path = "/api/backoffice/agent-tools";

@@ -105,7 +105,7 @@ class AgentCommandTest {
     @Test
     void given_canonical_form_when_construct_then_workspace_read_only_kept() {
         AgentCommand command = new AgentCommand("run-1", "咨询", null, MODEL, null, "s-1", null,
-                null, "42", Map.of(), null, null, null, "ASSISTANT", true, false, null, null);
+                null, "42", Map.of(), null, null, null, "ASSISTANT", true, null, null);
 
         assertThat(command.workspaceReadOnly()).isTrue(); // 主智能体对话姿态：写面结构性关闭
     }
@@ -115,7 +115,7 @@ class AgentCommandTest {
     void given_heading_when_construct_then_kept() {
         RunHeading heading = RunHeading.slice("商品浏览", 2, 5);
         AgentCommand command = new AgentCommand("run-1", "做系统", null, MODEL, null, "s-1", null,
-                null, null, Map.of(), null, null, null, "executor", false, false, heading, null);
+                null, null, Map.of(), null, null, null, "executor", false, heading, null);
 
         assertThat(command.heading()).isEqualTo(heading);
     }

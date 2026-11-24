@@ -32,8 +32,8 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
 
 /**
- * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：三座智能体（main/
- * executor/designer——{@link AgentProfile#byKey} 单点寻址）的覆盖态读／全量写／
+ * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：两座智能体（main/
+ * executor——{@link AgentProfile#byKey} 单点寻址）的覆盖态读／全量写／
  * 变更留痕读，＋边缘调用点四件（取名/压缩/分类/预检，#366 同表收编——值面仅
  * 模型配置，{@link AgentEdgePoint#byKey} 寻址）的配置读／写／留痕读。装配读腿
  * （库值优先、缺省回落）在 {@link AgentConfigAppService}（运行面），本服务只做

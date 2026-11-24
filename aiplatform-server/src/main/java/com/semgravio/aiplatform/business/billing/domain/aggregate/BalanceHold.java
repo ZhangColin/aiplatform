@@ -25,11 +25,11 @@ import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 
 /**
  * 余额提醒留存聚合根（{@code bil_balance_holds}，#537 计费③，ADR-0047 段间硬门）：
- * 付费项目段边界余额检查≤0 时被拦输入（意见/咨询/作用域改稿——兜底零调用天然
- * 免费永不入拦）原文＋附件随留存落库——充值回正自动放行（恢复受理不重输，「充值
- * 到账后下一段自动放行〔不手动重试〕」）；新拦取代旧待决（一项目至多一条待决，
- * 部分唯一索引 uk_bil_balance_holds_pending）。受理前的拦下不进对话面（原文随卡
- * 呈现），卡可回（GET 读面）。
+ * 付费项目段边界余额检查≤0 时被拦输入（意见/咨询——兜底零调用天然免费永不入拦）
+ * 原文＋附件随留存落库——充值回正自动放行（恢复受理不重输，「充值到账后下一段
+ * 自动放行〔不手动重试〕」）；新拦取代旧待决（一项目至多一条待决，部分唯一索引
+ * uk_bil_balance_holds_pending）。受理前的拦下不进对话面（原文随卡呈现），卡可回
+ * （GET 读面）。#610 设计线整条退役：作用域改稿车道与件序/发散度列已拆。
  *
  * <p><b>状态机</b>：待决 → 已放行（{@link #resume}——充值回正自动恢复受理的
  * 落定点，非待决放行＝BILL_027）／被取代（{@link #supersede}——更新的拦提醒
@@ -68,14 +68,6 @@ public class BalanceHold extends Auditable implements AggregateRoot<BalanceHold,
     @Column(name = "attachments", columnDefinition = "jsonb", updatable = false)
     private List<Map<String, Object>> attachments;
 
-    /** 作用域改稿目标件序（仅 DESIGN_REVISION 车道；其余车道 null）。 */
-    @Column(name = "design_item", updatable = false)
-    private Integer designItem;
-
-    /** 作用域改稿发散度档位名（仅 DESIGN_REVISION 车道可空；其余车道 null）。 */
-    @Column(name = "divergence", updatable = false, length = 20)
-    private String divergence;
-
     /** 留存状态（1=待决 2=已放行 3=被取代）。 */
     @Column(name = "status", nullable = false)
     private BalanceHoldStatus status;
@@ -88,29 +80,23 @@ public class BalanceHold extends Auditable implements AggregateRoot<BalanceHold,
     }
 
     private BalanceHold(Long projectId, BalanceHoldLane lane, String prompt,
-            List<Map<String, Object>> attachments, Integer designItem, String divergence,
-            String runId) {
+            List<Map<String, Object>> attachments, String runId) {
         if (projectId == null || lane == null || prompt == null || prompt.isBlank()
-                || runId == null || runId.isBlank()
-                || (lane == BalanceHoldLane.DESIGN_REVISION && designItem == null)) {
+                || runId == null || runId.isBlank()) {
             throw new DomainException(BillingMessage.BALANCE_HOLD_FIELDS_INCOMPLETE);
         }
         this.projectId = projectId;
         this.lane = lane;
         this.prompt = prompt;
         this.attachments = attachments == null || attachments.isEmpty() ? null : List.copyOf(attachments);
-        this.designItem = lane == BalanceHoldLane.DESIGN_REVISION ? designItem : null;
-        this.divergence = lane == BalanceHoldLane.DESIGN_REVISION && divergence != null
-                && !divergence.isBlank() ? divergence : null;
         this.runId = runId;
         this.status = BalanceHoldStatus.PENDING;
     }
 
     /** 落一条待决留存（被拦输入不丢失——充值回正自动恢复受理面）。 */
     public static BalanceHold pendingOf(Long projectId, BalanceHoldLane lane, String prompt,
-            List<Map<String, Object>> attachments, Integer designItem, String divergence,
-            String runId) {
-        return new BalanceHold(projectId, lane, prompt, attachments, designItem, divergence, runId);
+            List<Map<String, Object>> attachments, String runId) {
+        return new BalanceHold(projectId, lane, prompt, attachments, runId);
     }
 
     /** 是否待决（卡可回读面单点）。 */

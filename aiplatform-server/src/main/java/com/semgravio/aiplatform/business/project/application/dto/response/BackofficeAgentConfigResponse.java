@@ -16,7 +16,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * 覆盖标记（运营要看到「现在跑的是覆盖还是默认」）＋枚举默认预览（清空回落
  * 即落此值——回复默认前可先看落点）＋增强工具开关生效态（#252 起生效装配）＋
  * 模型路由策略生效态（#354，仅 run 执行体消费）＋最近
- * 写者。全库三座智能体（main/executor/designer）各自寻址读写。
+ * 写者。全库两座智能体（main/executor）各自寻址读写。
  *
  * @param agentKey                智能体稳定键（寻址腿）
  * @param agentName               展示名
@@ -53,7 +53,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param updatedAt               最近写入时刻（null＝从未配置）
  */
 public record BackofficeAgentConfigResponse(
-        @Schema(description = "智能体稳定键（main=主智能体 / executor=run 执行体 / designer=设计执行体）",
+        @Schema(description = "智能体稳定键（main=主智能体 / executor=run 执行体）",
                 example = "main")
         String agentKey,
         @Schema(description = "展示名", example = "主智能体")

@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
 /**
- * 智能体的工作区锚定：HarnessAgent 的文件面落点，三形态——
+ * 智能体的工作区锚定：HarnessAgent 的文件面落点，四形态——
  *
  * <ul>
  *   <li>{@link Local}：平台本地目录（配置兜底，如取名轻调用）——HarnessAgent 默认
@@ -15,9 +15,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  *   <li>{@link ProjectReadOnly}：项目工作区只读面（#86 主智能体对话姿态）——同一
  *       dev 容器同一根，但不挂内核文件/命令工具（写面结构性关闭；业务侧以只读
  *       工具集自查自答，见 {@code ProfileToolkitSupplier}）</li>
- *   <li>{@link ProjectDesign}：项目工作区设计面（#289 设计执行体姿态，ADR-0025
- *       「无 shell」）——容器与内核文件工具同 {@link ProjectDev}（写文件件在：
- *       界面稿 HTML 落工作区），另关内核 shell 与委派（命令执行结构性不存在）</li>
  *   <li>{@link ProjectKernel}：项目工作区生成内核形态（#595 内核装配，ADR-0054）
  *       ——容器与根同 {@link ProjectDev}，差异在装配面：系统提示＝
  *       {@link KernelSystemPrompt} 权威版本、工具面＝内核四件（{@link KernelTools}）、
@@ -77,26 +74,6 @@ public sealed interface AgentWorkspace {
         @Override
         public String identity() {
             return "project-ro:" + containerName;
-        }
-    }
-
-    /**
-     * 项目工作区设计面（#289 设计执行体姿态，ADR-0025 无 shell）：容器与内核文件
-     * 工具同 {@link ProjectDev}（写文件件在——设计稿落工作区），差异在工具面——
-     * 工厂对本形态关闭内核 shell 与委派（命令执行结构性不存在，写稿无需命令）。
-     */
-    record ProjectDesign(String workspaceId, String containerName) implements AgentWorkspace {
-
-        public ProjectDesign {
-            if (workspaceId == null || workspaceId.isBlank()
-                    || containerName == null || containerName.isBlank()) {
-                throw new IllegalArgumentException("ProjectDesign 工作区需要 workspaceId 与 containerName");
-            }
-        }
-
-        @Override
-        public String identity() {
-            return "project-design:" + containerName;
         }
     }
 

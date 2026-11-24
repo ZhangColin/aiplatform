@@ -66,7 +66,6 @@ import com.semgravio.aiplatform.business.order.application.dto.response.OrderBri
 import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
 import com.semgravio.aiplatform.business.project.application.dto.response.DesignScopeResponse;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
@@ -443,25 +442,30 @@ class ProjectControllerTest {
     void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
         // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一
         // code——1=user 3=question 5=closing 7=quote）、question/closing/quote
-        // 载荷原样、id 升序（写入序 = 对话序）；sessionSource 会话来源标识
-        // （#298，null＝主会话缺省）随面携带
+        // 载荷原样、id 升序（写入序 = 对话序）
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
-                new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
+                new ConversationEntryResponse(1L, 1, "用户发言",
+                        "run-1", "做一个官网",
                         null, null, null, null, null, null, false,
                         LocalDateTime.of(2026, 9, 5, 10, 0)),
-                new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
-                        Map.of("engineRef", "reply-1", "data", Map.of()),
-                        1, null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
-                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null, null,
+                new ConversationEntryResponse(2L, 3, "问答卡",
+                        "run-1", null,
+                        Map.of("engineRef", "reply-1", "data", Map.of()), 1,
+                        null, null, null, null, false,
+                        LocalDateTime.of(2026, 9, 5, 10, 1)),
+                new ConversationEntryResponse(3L, 5, "收尾卡",
+                        "run-2", null, null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
-                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
-                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null, null,
-                        null, null,
+                        null, null, null, false,
+                        LocalDateTime.of(2026, 9, 5, 10, 9)),
+                new ConversationEntryResponse(4L, 7, "报价卡",
+                        null, null, null, null, null, null,
                         Map.of("orderId", "900123", "event", "quoted"),
-                        null, false, LocalDateTime.of(2026, 9, 6, 9, 0)),
-                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null, null,
-                        null, null, null,
+                        null, false,
+                        LocalDateTime.of(2026, 9, 6, 9, 0)),
+                new ConversationEntryResponse(5L, 8, "失败留账",
+                        "run-3", null, null, null, null, null, null,
                         Map.of("error", "模型响应超时", "durationMs", 61200, "attempts",
                                 List.of(Map.of("round", 1, "attempt", 1, "durationMs", 61200,
                                         "modelId", "deepseek-v4-flash", "llmMs", 58000,
@@ -1082,7 +1086,7 @@ class ProjectControllerTest {
     @Test
     void given_message_when_post_then_run_id_returned() throws Exception {
         // #47 入口三分类：/messages 走派发入口（runId = 所派运行，分支归应用层测试）
-        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户", null, null, null))
+        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户", null))
                 .thenReturn(new DispatchAppService.DispatchRun("run-9"));
 
         performAsUser(post("/api/projects/100/messages")
@@ -1094,29 +1098,12 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_scoped_message_with_divergence_when_post_then_enum_code_bound() throws Exception {
-        // #294 作用域发言携发散度：BaseEnum Integer code 双向（endpointType 先例）——
-        // 3=REIMAGINE 绑定到枚举后透传派发
-        when(dispatchAppService.dispatch(eq(100L), eq("换个方向"), any(), eq(1),
-                eq(DesignDivergence.REIMAGINE)))
-                .thenReturn(new DispatchAppService.DispatchRun("run-11"));
-
-        performAsUser(post("/api/projects/100/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"content\":\"换个方向\",\"designItem\":1,\"divergence\":3}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.runId").value("run-11"));
-        verify(dispatchAppService).dispatch(eq(100L), eq("换个方向"), any(), eq(1),
-                eq(DesignDivergence.REIMAGINE));
-    }
-
-    @Test
     void given_message_with_two_form_attachments_when_post_then_both_bound_and_dispatched() throws Exception {
         // #286 附件两形态（圈注 + 图片物料）在 REST 契约层绑定并透传派发——
         // image 形态载荷＝工作区路径引用、不带字节
         AtomicReference<List<MessageAttachment>> dispatched =
                 new AtomicReference<>();
-        when(dispatchAppService.dispatch(any(), any(), any(), any(), any()))
+        when(dispatchAppService.dispatch(any(), any(), any()))
                 .thenAnswer(invocation -> {
                     dispatched.set(invocation.getArgument(2));
                     return new DispatchAppService.DispatchRun("run-10");
@@ -1148,23 +1135,18 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\" \"}"))
                 .andExpect(status().isBadRequest());
-        // #294 发散度非法档位码：BaseEnum Integer code 绑定面 400（零派发调用）
-        performAsUser(post("/api/projects/100/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"content\":\"改稿\",\"designItem\":1,\"divergence\":9}"))
-                .andExpect(status().isBadRequest());
-        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any());
         performAsUser(post("/api/projects/100/messages")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))
                 .andExpect(status().isBadRequest());
-        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any());
     }
 
     @Test
     void given_archived_project_when_post_message_then_prj_013_as_409() throws Exception {
         // 归档即指令区关闭（只读终态）
-        when(dispatchAppService.dispatch(100L, "再改改", null, null, null))
+        when(dispatchAppService.dispatch(100L, "再改改", null))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
 
         performAsUser(post("/api/projects/100/messages")
@@ -1180,7 +1162,7 @@ class ProjectControllerTest {
         // 挂起问答守卫的 REST 契约（#40 / ADR-0005）：问答待答期间 /messages 同步
         // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
         // 行为由应用层守卫测试驱动）
-        when(dispatchAppService.dispatch(100L, "测试：请继续", null, null, null))
+        when(dispatchAppService.dispatch(100L, "测试：请继续", null))
                 .thenThrow(new ApplicationException(ProjectMessage.QUESTION_PENDING));
 
         performAsUser(post("/api/projects/100/messages")
@@ -1193,7 +1175,7 @@ class ProjectControllerTest {
 
     @Test
     void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
-        when(dispatchAppService.dispatch(404L, "你好", null, null, null))
+        when(dispatchAppService.dispatch(404L, "你好", null))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
 
         performAsUser(post("/api/projects/404/messages")
@@ -1232,7 +1214,7 @@ class ProjectControllerTest {
         when(dispatchAppService.pendingBalanceReminder(100L)).thenReturn(Optional.of(
                 new BalanceReminderAppService.BalanceReminderCard(
                         "8890123456789", "OPINION", "把报表加个导出",
-                        null, -500L, "run-b")));
+                        -500L, "run-b")));
 
         performAsUser(get("/api/projects/100/balance-reminder"))
                 .andExpect(status().isOk())

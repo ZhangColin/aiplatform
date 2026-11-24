@@ -39,7 +39,7 @@ public final class AgentEventTypes {
     /**
      * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
      * systemChanged, systemNote?, files[{path,added,removed}], durationMs,
-     * designLint?, drafts?, modelTier?, durationBreakdown（#111 阶段耗时分布——
+     * designLint?, modelTier?, durationBreakdown（#111 阶段耗时分布——
      * 平台分析口径，前端不渲染） }——对话史落库（#89）复用同一载荷。判定与
      * 清单以平台可观测事实为准（工具调用/探活），不由模型自报。验证统计与
      * version 锚随审查与收口组退役（#605）。
@@ -67,13 +67,11 @@ public final class AgentEventTypes {
 
     /**
      * 编码 run 终态失败收口（#56；#604 起生成/更新 run 单发无重试——失败/停止即
-     * 终态；设计轨重试耗尽即终态）：轨道层在
-     * 真终态落定点发射——修正轨道与终态账（恢复出口的重派依据）同事实点，排队
-     * 合并续派的中途超限不是终态、不发；生成轨道失败/停止即终态（#604 失败新
-     * 语义＝明确展示＋重跑即恢复，本事件即「明确展示」的发射点）。runId = 该场
-     * run 的<b>用户面标识</b>（生成/更新 run 单发：无静默重试；设计轨中间重试的
-     * 失败信号不出用户面——事件序上 run-failed 前无任何失败/重试信号）。前端恢复
-     * 出口（继续生成 / 继续更新）只认本事件——run 失败
+     * 终态）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口的重派依据）
+     * 同事实点，排队合并续派的中途超限不是终态、不发；生成轨道失败/停止即终态
+     * （#604 失败新语义＝明确展示＋重跑即恢复，本事件即「明确展示」的发射点）。
+     * runId = 该场 run 的<b>用户面标识</b>（单发：无静默重试——run-failed 前无任何
+     * 失败/重试信号）。前端恢复出口（继续生成 / 继续更新）只认本事件——run 失败
      * 为唯一失败终态。
      */
     public static final String RUN_FAILED = "run-failed";
@@ -204,14 +202,11 @@ public final class AgentEventTypes {
     /** 余额提醒卡的留存 id 键（卡锚；run 场拦截不留存，缺省不携带）。 */
     public static final String BALANCE_HOLD_ID_FIELD = "holdId";
 
-    /** 余额提醒卡的被拦车道键（OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿）。 */
+    /** 余额提醒卡的被拦车道键（OPINION=意见 / INQUIRY=咨询）。 */
     public static final String BALANCE_LANE_FIELD = "lane";
 
     /** 余额提醒卡的被拦输入原文键（卡上引用呈现；run 场拦截不携带）。 */
     public static final String BALANCE_PROMPT_FIELD = "prompt";
-
-    /** 余额提醒卡的作用域改稿目标件序键（仅 DESIGN_REVISION 车道携带）。 */
-    public static final String BALANCE_DESIGN_ITEM_FIELD = "designItem";
 
     /** 余额提醒卡的源池余额快照键（分；显负额素材——负额渲染客户端分转元）。 */
     public static final String BALANCE_POOL_BALANCE_FIELD = "sourcePoolBalance";

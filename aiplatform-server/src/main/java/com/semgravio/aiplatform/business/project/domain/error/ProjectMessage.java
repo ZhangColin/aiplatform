@@ -76,7 +76,7 @@ public enum ProjectMessage implements CodeMessage {
     // ========== 智能体运营配置（#251，ADR-0021 修订 ADR-0006 边界——身份与配置分治） ==========
 
     /** 配置面智能体寻址守卫：未知/空键 404——配置面只有 main/executor 两座（classify/naming 一次性判定不进配置面）。 */
-    AGENT_CONFIG_NOT_FOUND(404, "PRJ_033", "智能体不存在（运营配置面只有 main/executor/designer 三座智能体）"),
+    AGENT_CONFIG_NOT_FOUND(404, "PRJ_033", "智能体不存在（运营配置面只有 main/executor 两座智能体）"),
 
     /** 配置写操作者留痕守卫（缺 X-User-Id/X-User-Name 透传头即拦，知识治理/技能库同款无落空通道）。 */
     AGENT_CONFIG_OPERATOR_REQUIRED(400, "PRJ_034", "操作者不能为空"),
@@ -119,29 +119,7 @@ public enum ProjectMessage implements CodeMessage {
     /** 物料上传守卫：格式不符（只收 png/jpg/webp/gif/svg 五格式，按扩展名判定）。 */
     MATERIAL_UPLOAD_FORMAT_INVALID(400, "PRJ_044", "只支持 png、jpg、webp、gif、svg 格式的图片"),
 
-    // ========== 出图工具件内核（#288，ADR-0026/27——四家供数方＋按张计量＋转存） ==========
-
-    /** 出图守卫：图片生成供应商未配置（无 active 适配器——运营侧配 app.image-generation.provider
-     *  与对应 key 环境变量后即恢复，平台照常起不静默降级）。 */
-    IMAGE_PROVIDER_UNCONFIGURED(503, "PRJ_045", "图片生成供应商未配置，暂时无法出图"),
-
-    /** 定稿守卫（#291 定稿机制）：设计/更新轨在途——工作区正被执行体读写，定稿
-     * 成版（全量提交）会卷入在途未完成改动，收口后再定稿。 */
-    DESIGN_FINALIZE_IN_FLIGHT(409, "PRJ_046", "设计或系统产出进行中，请稍后再定稿"),
-
-    /** 定稿守卫（#291）：设计物不存在（清单章无此序号——或清单已随 PRD 演进重产）。 */
-    DESIGN_ITEM_NOT_FOUND(404, "PRJ_047", "设计物不存在"),
-
-    /** 定稿/改稿守卫（#291）：件状态不可定稿——尚未产出设计稿（待跑/失败）无稿可选。 */
-    DESIGN_ITEM_NOT_READY(409, "PRJ_048", "该设计物还没有产出设计稿，无法定稿"),
-
-    /** 定稿守卫（#291）：选定的稿在工作区不存在（候选可被悬卡删除——定稿对象以
-     * 容器事实为准）。 */
-    DESIGN_DRAFT_NOT_FOUND(404, "PRJ_049", "选定的设计稿不存在，请在现有稿中定稿"),
-
-    /** 悬卡删除守卫（#293 画布整理）：已定稿的稿是成版锚与交付物包成员，不可删除
-     * ——候选稿（未定稿）可删，画布整理不动定稿事实。 */
-    DESIGN_DRAFT_FINALIZED(409, "PRJ_050", "已定稿的设计稿不能删除"),
+    // 出图工具件与设计定稿/设计稿守卫（PRJ_045–PRJ_050）随 #610 设计线整条退役拆除。
 
     /** 设计资产包取件（#297）：下单冻结件在工作区不存在——冻结未发生或导出物已被
      *  外部清理，不以空产物顶替（对偶封存包 WSP_016 口径）。 */

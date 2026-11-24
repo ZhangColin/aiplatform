@@ -115,7 +115,6 @@ public class MainAgentAppService {
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
-    private final DesignProcessAppService designProcessAppService;
     private final PrdRevisionFacts prdRevisions;
     private final ConversationHistoryAppService conversationHistory;
     private final MainAgentProperties mainAgentProperties;
@@ -259,7 +258,6 @@ public class MainAgentAppService {
             AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             OrderQueryAppService orderQueryAppService,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
-            DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions,
             ConversationHistoryAppService conversationHistory,
             MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals,
@@ -276,7 +274,6 @@ public class MainAgentAppService {
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
-        this.designProcessAppService = designProcessAppService;
         this.prdRevisions = prdRevisions;
         this.conversationHistory = conversationHistory;
         this.mainAgentProperties = mainAgentProperties;
@@ -439,7 +436,6 @@ public class MainAgentAppService {
                 usageContextOf(projectId, sessionId),
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
-                /* workspaceNoShell= */ false,
                 main.toolSpec(),
                 // #371 续跑与 converse 同口径：与首轮命令同源阈值（活超时接管续跑流）
                 mainAgentProperties.getSilenceTimeout(),
@@ -783,7 +779,6 @@ public class MainAgentAppService {
                 mainAgentProperties.getToolSilenceTimeout(), // #355 工具执行窗延长预算
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
-                /* workspaceNoShell= */ false,
                 /* heading= */ null,
                 main.toolSpec(),
                 // #557 候选队列（续跑与首轮同队列——多候选＝failover 装配面）
@@ -892,12 +887,10 @@ public class MainAgentAppService {
                 return;
             }
             if (project.getGeneratedAt() == null) {
-                // 未生成：PRD 已产出即平台自动派首次产出轨（轨内无门——终点类型定轨：
-                // 系统终点派生成 #101、设计类终点起设计过程 #289 同律）；未产出
-                // PRD 静默止于对话（访谈期常态：生成前意见链终点）。#602 起切片
-                // 计划机器整体退役——生成无计划交接物，PRD 正本即全部输入
-                // 意见锚取出（#291）：设计类终点的设计派发消费意见原文（在途排队/
-                // 改稿受理）；生成路径不需要（生成读工作区 PRD 正本）——其余锚照
+                // 未生成：PRD 已产出即平台自动派首次生成轨（轨内无门——系统终点）；
+                // 未产出 PRD 静默止于对话（访谈期常态：生成前意见链终点）。#602 起
+                // 切片计划机器整体退役——生成无计划交接物，PRD 正本即全部输入
+                // 意见锚取出：生成路径不需要（生成读工作区 PRD 正本）——锚照
                 // 「收口即消费」清掉
                 String opinion = opinionExchanges.remove(sessionId);
                 String prdRevisionSummary = prdRevisions.consume(workspaceId);
@@ -930,31 +923,15 @@ public class MainAgentAppService {
                 danglingInterviews.remove(sessionId);
                 quotaCorrectiveRounds.remove(sessionId); // #538：收口即清纠偏推进账
                 sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
-                if (project.getEndpointType().designInvolved()
-                        && !designProcessAppService.designFinalized(project)) {
-                    // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
-                    // 设计过程（轨内无门，设计先行——设计主线与系统＋设计同律，
-                    // ADR-0025）；意见原文随派发（#291：在途即排队、清单全收口
-                    // 即改稿——改稿同会话继续）
-                    DesignProcessAppService.DesignRun run =
-                            designProcessAppService.dispatchDesignOnTurnClose(projectId,
-                                    opinion);
-                    if (run != null) {
-                        log.info("[main-close] 项目 {} 意见轮收口，平台自动起设计过程（{}）",
-                                projectId, run.runId());
-                    }
-                    return;
-                }
                 // 首建派发门（#542 访谈②，ADR-0048/0049——自动派发两入口整体退役）：
-                // 系统终点 PRD 已产出的收口按<b>快道事实</b>分岔——快道（savePrd 的
+                // PRD 已产出的收口按<b>快道事实</b>分岔——快道（savePrd 的
                 // fastLane 工具调用事实：用户明确收敛令〔试用态未问满五问唯一合法的
                 // 提前收口形〕/付费态零必答首轮直产与「直接开始做」视同确认）
                 // 直派首个构建 run（急着要的给快的——不出卡不确认，在途撞车静默跳过
                 // ＋意见载荷按 #360 入队不静默丢）；自然收口（判定明确含提前明确）
                 // <b>不派发</b>——试用态置岔路口状态位（三选卡持久可回，「立即生成」
                 // 即点火）、付费态确认门读面在场（PRD 文档面按钮确认即派发）——点火
-                // 归用户，全域无无条件自动路径。设计类终点（含全部定稿）保持原触发律
-                // （上方设计轨分岔已收口，设计定稿构建归 DesignProcessAppService）。
+                // 归用户，全域无无条件自动路径。
                 if (fastLaneFacts.consume(workspaceId)) {
                     GenerationAppService.GenerationRun run =
                             generationAppService.dispatchGenerationOnTurnClose(projectId,
@@ -995,20 +972,6 @@ public class MainAgentAppService {
             // run 留痕兜底），悬空标记随清（迭代期无访谈悬空态）
             danglingInterviews.remove(sessionId);
             sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
-            if (project.getEndpointType().designInvolved()
-                    && !designProcessAppService.designFinalized(project)) {
-                // 已生成＋设计类终点＋设计未定稿完（#291 系统中途切换的设计轨承接）：
-                // 意见进设计轨（在途排队/改稿/续跑）——系统迭代让位（设计先行；
-                // 全部定稿后回更新 lane，按稿对齐经定稿触发）
-                String designOpinion = opinionExchanges.remove(sessionId);
-                DesignProcessAppService.DesignRun run =
-                        designProcessAppService.dispatchDesignOnTurnClose(projectId, designOpinion);
-                if (run != null) {
-                    log.info("[main-close] 项目 {} 意见轮收口，平台起设计过程（{}，系统中途切换承接）",
-                            projectId, run.runId());
-                }
-                return;
-            }
             String task = opinionExchanges.remove(sessionId);
             if (task == null || task.isBlank()) {
                 return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
@@ -1139,7 +1102,6 @@ public class MainAgentAppService {
                 usageContextOf(projectId, sessionId),
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
-                /* workspaceNoShell= */ false,
                 main.toolSpec(),
                 // 续跑与 converse 同口径：同源静默判死阈值（#371 活超时接管续跑流）
                 mainAgentProperties.getSilenceTimeout(),

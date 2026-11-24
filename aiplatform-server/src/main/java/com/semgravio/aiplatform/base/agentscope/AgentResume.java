@@ -33,8 +33,6 @@ import io.agentscope.core.event.ConfirmResult;
  *                         续跑构建 agent 时按配置发放工具集，与首轮命令同键
  * @param workspaceReadOnly 项目工作区是否解析为只读面（#86 起续跑与首轮同面——
  *                         主智能体挂起续跑不漂移成读写面）
- * @param workspaceNoShell 项目工作区是否解析为设计面（#289——续跑与首轮同面：
- *                         designer 会话若有挂起续跑，不漂移成带 shell 的读写面）
  * @param toolSpec          工具面规格串（#252，可空——语义同 {@link AgentCommand#toolSpec()}）：
  *                         续跑与首轮同规格（业务侧从同一运营配置解析重建，不信挂起载荷）
  * @param silenceTimeout   活超时判死阈值（可空，语义同 {@link AgentCommand#silenceTimeout()}
@@ -61,7 +59,6 @@ public record AgentResume(
         UsageContext usageContext,
         String agentKey,
         boolean workspaceReadOnly,
-        boolean workspaceNoShell,
         String toolSpec,
         Duration silenceTimeout,
         Duration toolSilenceTimeout) {

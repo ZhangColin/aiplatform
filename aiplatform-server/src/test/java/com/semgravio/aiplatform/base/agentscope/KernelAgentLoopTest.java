@@ -185,7 +185,10 @@ class KernelAgentLoopTest {
         return new AgentWorkspace.ProjectKernel("42", "ws-42-loop");
     }
 
-    /** 跑一次生成：注入用户消息，收集模型文本增量（收尾内容观察面），返回拼接文本。 */
+    /** 跑一次生成：注入用户消息，收集模型文本增量（收尾内容观察面），返回拼接文本。
+     *  读超时 600s：护栏到顶用例跑满 301 轮（每轮一次脚本化模型调用＋工具校验），
+     *  Windows 本机实测约 188s——旧 120s 在此环境恒红（#610 实测基线 #605 同红，
+     *  非本票引入；放宽只影响上限，不改变断言）。 */
     private static String runGeneration(HarnessAgent agent) {
         List<String> texts = new ArrayList<>();
         agent.streamEvents(List.of(new UserMessage("开始")), RuntimeContext.empty())
@@ -194,7 +197,7 @@ class KernelAgentLoopTest {
                         texts.add(delta.getDelta());
                     }
                 })
-                .blockLast(Duration.ofSeconds(120));
+                .blockLast(Duration.ofSeconds(600));
         return String.join("", texts);
     }
 

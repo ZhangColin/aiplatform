@@ -130,9 +130,8 @@ public class GenerationAppService {
     static final String STAGE0_TITLE = "系统初始化";
 
     /**
-     * 任务级解说约定（#225 叙说密度放宽的拼装单点；设计轨 prompt 与执行体
-     * systemPrompt 协议条同向引用——{@link DesignProcessAppService} 两处措辞
-     * 独立拼接）。
+     * 任务级解说约定（#225 叙说密度放宽的拼装单点；执行体 systemPrompt 协议条
+     * 同向引用）。
      */
     static final String NARRATION_CONVENTION =
             "过程解说只在关键节点（开工、重大转向、失败、收口）用一两句平实中文说明，"
@@ -764,8 +763,8 @@ public class GenerationAppService {
                         .toList());
         CodingRunDispatcher.RunResult result = codingRunDispatcher.run(project, firstRunId,
                 kernelSession(projectId, firstRunId),
-                // 单发提示（内核座无续作提示——#604 失败即终态、不自动重试）
-                CodingRunDispatcher.Prompts.single(designContext + KERNEL_FIRST_RUN_PROMPT),
+                // 单发提示（#604 失败即终态、不自动重试）
+                designContext + KERNEL_FIRST_RUN_PROMPT,
                 (attemptRunId, attemptChanges) -> closeKernelGeneration(project),
                 CodingRunDispatcher.GENERATE_LABEL, true, CodingRunDispatcher.RunSeat.kernel(),
                 RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN);

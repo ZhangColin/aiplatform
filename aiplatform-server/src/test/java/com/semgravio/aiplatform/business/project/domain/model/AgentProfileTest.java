@@ -23,7 +23,7 @@ class AgentProfileTest {
         assertThat(AgentProfile.byKey("main")).contains(AgentProfile.MAIN);
         assertThat(AgentProfile.byKey("EXECUTOR")).contains(AgentProfile.EXECUTOR);
         assertThat(AgentProfile.byKey("  Main ")).contains(AgentProfile.MAIN);
-        assertThat(AgentProfile.byKey("designer")).contains(AgentProfile.DESIGNER); // #289 designer 座
+        assertThat(AgentProfile.byKey("designer")).isEmpty(); // #610 设计执行体座随设计线退役
     }
 
     @Test
@@ -49,16 +49,8 @@ class AgentProfileTest {
                 .contains("推荐答案")
                 .contains("recommended");
         // EXECUTOR 座的协议锚点断言随 #604 删除（13 条执行协议正文退役——缺省提示
-        // 只作退役占位，见 given_executor_when_prompt_then_retired_placeholder_without_legacy_protocol）
-        // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
-        // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
-        // 运营配置面可覆盖（ADR-0021）
-        assertThat(AgentProfile.DESIGNER.systemPrompt())
-                .contains(":root")
-                .contains("--primary")
-                .contains("--brand-1")
-                .contains("palette")
-                .contains("定稿时转正");
+        // 只作退役占位，见 given_executor_when_prompt_then_retired_placeholder_without_legacy_protocol）；
+        // #610 设计执行体（DESIGNER）座随设计线整条退役删除。
     }
 
     @Test
@@ -72,13 +64,12 @@ class AgentProfileTest {
     }
 
     @Test
-    void given_seats_when_model_config_then_independent_per_seat() {
-        // #341 首 Demo/迭代任务模型档可独立于正式生产档配置：三座智能体各持自身
-        // 缺省配置（运营配置面按 agentKey 各自覆盖——改一座不牵连他座），Demo 阶段
-        // 缺省快模型档（本票），设计执行体不在本票范围（设计线独立、配置另配）。
-        assertThat(AgentProfile.DESIGNER.modelConfigKey()).isEqualTo("pro");
-        assertThat(AgentProfile.EXECUTOR.modelConfigKey())
-                .isNotEqualTo(AgentProfile.DESIGNER.modelConfigKey());
+    void given_designer_seat_retired_when_lookup_then_absent() {
+        // #610 设计线整条退役：设计执行体座（designer）与出图档位配置一并拆除——
+        // 配置面只余 main/executor 两座
+        assertThat(AgentProfile.byKey("designer")).isEmpty();
+        assertThat(AgentProfile.values())
+                .noneMatch(profile -> "designer".equals(profile.key()));
     }
 
     @Test

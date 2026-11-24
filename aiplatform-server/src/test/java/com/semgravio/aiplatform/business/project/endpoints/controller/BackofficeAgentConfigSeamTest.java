@@ -294,15 +294,15 @@ class BackofficeAgentConfigSeamTest {
 
     @Test
     void given_unknown_agent_key_when_any_endpoint_then_404() throws Exception {
-        // 三座端点只认三座智能体：边缘调用点（naming 等）走 /edge/{edgeKey} 面配置
-        // 端点（#366），三座端点照 404；任意未知键同语义（含 verify 子智能体——
-        // 配置面只有三座智能体，#289 designer 座齐）
+        // 两座端点只认两座智能体：边缘调用点（naming 等）走 /edge/{edgeKey} 面配置
+        // 端点（#366），两座端点照 404；任意未知键同语义（含 verify 子智能体——
+        // 配置面只有 main/executor 两座，#610 起 designer 座随设计线退役）
         for (String badKey : new String[]{"classify", "naming", "reviewer", "verify"}) {
             signedGet(badKey)
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value(AGENT_CONFIG_NOT_FOUND_CODE))
                     .andExpect(jsonPath("$.message").value(
-                            "智能体不存在（运营配置面只有 main/executor/designer 三座智能体）"));
+                            "智能体不存在（运营配置面只有 main/executor 两座智能体）"));
             signedGet(badKey + "/traces")
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value(AGENT_CONFIG_NOT_FOUND_CODE));

@@ -93,7 +93,7 @@ class AgentscopeMeteringReconcileTest {
         properties.setDefaultSystemPrompt("你是平台智能体。");
         properties.setTimeout(Duration.ofSeconds(60));
         client = new AgentscopeAgentClient(factory, properties, workspaceLifecycleAppService,
-                inMemoryStateStore(), sink, new LandedFileFacts(), CLOCK);
+                inMemoryStateStore(), sink, CLOCK);
     }
 
     /**

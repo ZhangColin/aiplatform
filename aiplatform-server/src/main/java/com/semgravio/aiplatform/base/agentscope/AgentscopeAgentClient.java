@@ -128,7 +128,6 @@ public class AgentscopeAgentClient {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final AgentStateStore stateStore;
     private final UsageEventSink usageEventSink;
-    private final LandedFileFacts landedFiles;
     private final Clock clock;
 
     @Autowired
@@ -136,22 +135,21 @@ public class AgentscopeAgentClient {
             AgentscopeProperties properties,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentStateStore stateStore,
-            UsageEventSink usageEventSink, LandedFileFacts landedFiles) {
+            UsageEventSink usageEventSink) {
         this(factory, properties, workspaceLifecycleAppService, stateStore, usageEventSink,
-                landedFiles, Clock.systemUTC());
+                Clock.systemUTC());
     }
 
     AgentscopeAgentClient(AgentscopeHarnessAgentFactory factory,
             AgentscopeProperties properties,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentStateStore stateStore,
-            UsageEventSink usageEventSink, LandedFileFacts landedFiles, Clock clock) {
+            UsageEventSink usageEventSink, Clock clock) {
         this.factory = factory;
         this.properties = properties;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.stateStore = stateStore;
         this.usageEventSink = usageEventSink;
-        this.landedFiles = landedFiles;
         this.clock = clock;
     }
 
@@ -174,11 +172,9 @@ public class AgentscopeAgentClient {
         result = reaskBlankQuestion(prepared, result, command.runId(),
                 USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
                 command.timeout(), command.silenceTimeout(), command.toolSilenceTimeout(), sink);
-        // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
-        // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
-        // 是真实工作区事实，外层尝试环据此留账）
+        // 流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写是真实
+        // 工作区事实，外层据此留账）
         List<FileChange> changes = new ArrayList<>(result.changes());
-        changes.addAll(landedFiles.drain(command.runId()));
         if (result.error() != null) {
             throw new AgentTurnFailure("智能体调用失败（runId=" + command.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
@@ -225,10 +221,8 @@ public class AgentscopeAgentClient {
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
                 resume.usageContext(), /* timeout= */ null, resume.silenceTimeout(),
                 resume.toolSilenceTimeout(), sink);
-        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
-        // 同携部分观察上浮（#323 失败留账，converse 同口径）
+        // 失败分支同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
-        changes.addAll(landedFiles.drain(resume.runId()));
         if (result.error() != null) {
             throw new AgentTurnFailure("智能体续跑失败（runId=" + resume.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
@@ -302,7 +296,7 @@ public class AgentscopeAgentClient {
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
             ModelChannel modelChannel, ModelCandidateQueue modelQueue, String systemPrompt,
             String workspaceId, String agentKey,
-            boolean workspaceReadOnly, boolean workspaceNoShell, String toolSpec,
+            boolean workspaceReadOnly, String toolSpec,
             boolean kernelForm) {
 
         static TurnSpec of(AgentCommand command) {
@@ -310,7 +304,7 @@ public class AgentscopeAgentClient {
                     command.modelString(), command.modelChannel(), command.modelQueue(),
                     command.systemPrompt(),
                     command.workspaceId(), command.agentKey(), command.workspaceReadOnly(),
-                    command.workspaceNoShell(), command.toolSpec(), command.kernelForm());
+                    command.toolSpec(), command.kernelForm());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
@@ -318,7 +312,7 @@ public class AgentscopeAgentClient {
                     resume.modelString(), resume.modelChannel(), resume.modelQueue(),
                     resume.systemPrompt(),
                     resume.workspaceId(), resume.agentKey(), resume.workspaceReadOnly(),
-                    /* noShell= */ false, resume.toolSpec(), /* kernelForm= */ false);
+                    resume.toolSpec(), /* kernelForm= */ false);
         }
     }
 
@@ -356,7 +350,7 @@ public class AgentscopeAgentClient {
         String sysPrompt = spec.systemPrompt() != null
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly(),
-                spec.workspaceNoShell(), spec.kernelForm());
+                spec.kernelForm());
         HarnessAgent agent = spec.kernelForm()
                 ? factory.obtainKernel(modelRef.toModelString(), spec.modelChannel(),
                         spec.modelQueue(), (AgentWorkspace.ProjectKernel) workspace,
@@ -616,10 +610,9 @@ public class AgentscopeAgentClient {
      * 工作区解析：带 workspaceId → 项目工作区（kernelForm 命令解析为生成内核形态
      * #601——装配面差异（提示词权威版本/工具四件/循环语义）由工厂内核分支结构性
      * 兑现；只读标记则解析为只读面——#86 起主智能体的对话姿态：写面结构性关闭；
-     * noShell 标记则解析为设计面——#289 设计执行体姿态：文件工具保留、shell/委派
-     * 关闭，内核形态与只读标记优先）；缺省 → 本地工作区。
+     * 内核形态优先）；缺省 → 本地工作区。
      */
-    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly, boolean noShell,
+    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly,
             boolean kernelForm) {
         if (workspaceId == null || workspaceId.isBlank()) {
             return new AgentWorkspace.Local(properties.getWorkspace());
@@ -631,9 +624,7 @@ public class AgentscopeAgentClient {
         if (readOnly) {
             return new AgentWorkspace.ProjectReadOnly(workspaceId, handle.containerName());
         }
-        return noShell
-                ? new AgentWorkspace.ProjectDesign(workspaceId, handle.containerName())
-                : new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
+        return new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
     }
 
     private RuntimeContext runtimeContext(String sessionId, String userId, String runId,

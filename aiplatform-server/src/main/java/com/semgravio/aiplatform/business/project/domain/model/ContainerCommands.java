@@ -6,10 +6,9 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 容器 shell 命令构造的公共骨架（#284 抽取，承 #283 备案触发器「第三处出现」）：
  * 字面量进 shell 命令的共用件——单引号转义（工作区路径经 {@link #quoted} 绝对
  * 形化，任意字面量如 URL 经 {@link #quotedLiteral}）与存在守卫。消费方
- * （{@link ProjectFiles} 文件读、{@link WorkspaceRenders} 位图出口、
- * {@link ImageTransfers} 出图转存）各自命令形制不同（大小限读、stat 回执、渲染器
- * 载荷），骨架只收<strong>字面相同</strong>的部分，不为「将来统一的命令构造器」
- * 预铸结构。纯函数无依赖。
+ * （{@link ProjectFiles} 文件读、{@link WorkspaceRenders} 位图出口）各自命令
+ * 形制不同（大小限读、stat 回执、渲染器载荷），骨架只收<strong>字面相同</strong>
+ * 的部分，不为「将来统一的命令构造器」预铸结构。纯函数无依赖。
  *
  * <p><b>命令书写纪律（#401，#399 家族）</b>：命令不得内嵌双引号——Windows JVM→
  * docker.exe 的 argv 编码链会剥内嵌双引号，{@code runCapture} 缝已 fail-fast 防呆

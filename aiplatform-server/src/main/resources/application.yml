@@ -18,8 +18,8 @@ spring:
     # （缺失即空、装配明确报错）。VOLCENGINE_API_KEY 已退场（#556/V79，ADR-0053
     # ④——火山下线收尾）：placeholder 仅为 V44 重放保留（Flyway 只增不改，全新库
     # V44 仍引用；V79 随即清火山行＝净效果 deepseek 单通道），环境里可删。
-    # DEEPSEEK_API_KEY 是现役种子（deepseek 官方通道）。ARK_API_KEY 是图片域名
-    # （image-generation），对话线独立成对。
+    # DEEPSEEK_API_KEY 是现役种子（deepseek 官方通道）。图片域名 key（ARK 等）随
+    # #610 设计线整条退役拆除。
     placeholders:
       volcengineApiKey: ${VOLCENGINE_API_KEY:}
       deepseekApiKey: ${DEEPSEEK_API_KEY:}
@@ -124,12 +124,9 @@ app:
   # 片2-1 · business.project 编码 run：单次尝试的活超时判死阈值（#322——纯静默
   # 超限才判死，持续产出事件/工具动作的活跃段不掐；取代旧一次性 30m 总墙钟）。
   # 生成/更新 run 单发无重试——判死即终态失败（明确展示＋重跑即恢复，#604：重试层
-  # 只余供给链 failover 与内核 maxAttempts=1）。max-attempts 自 #604 起只服务设计轨
-  # （设计线原样保留的有界重试——失败/零稿收口后带续作提示重试，耗尽转终态）。
-  # 单条模型流总时长上限另配 app.agentscope.model-stream-max-duration。
+  # 只余供给链 failover 与内核 maxAttempts=1；设计座有界重试随设计线整条退役拆除，
+  # #610）。单条模型流总时长上限另配 app.agentscope.model-stream-max-duration。
   generation:
-    # 设计轨单场会话的尝试次数上界（含首试）；生成/更新 run 不读本键
-    max-attempts: 3
     silence-timeout: 10m
     # 工具执行窗的活超时预算（#355）：长命令（依赖安装/测试）执行中引擎无事件，
     # 给延长预算防静默阈值误杀；任何事件到达即回落 silence-timeout
@@ -178,32 +175,7 @@ app:
   web-search:
     base-url: https://api.bocha.cn
     api-key: ${BOCHA_API_KEY:}
-  # #288 · business.project 出图工具件内核（ADR-0026/27）：图片生成供数方四家全接、
-  # 按供应商选适配器（provider 键＝zhipu/volcano/openai/dashscope，词表与计量
-  # UsageEvent.provider 同源）；空＝未配置（出图如实 PRJ_045，平台照常起）。key
-  # 只落环境变量（.env.local，gitignored）不进 git；model 各家可换（计量随改走
-  # 适配器自报）。技术失败有限自动重试（含首次，对偶 #63 置备重试上界）。
-  image-generation:
-    provider: ${IMAGE_GEN_PROVIDER:}
-    max-attempts: 3
-    zhipu:
-      base-url: https://open.bigmodel.cn
-      api-key: ${ZHIPU_API_KEY:}
-      # #545 快档起步（ADR-0052）：cogview-4-250304 0.06 元/张、生成快——构建轨
-      # 演示配图与设计线共用 active 供应商；质量不满运营升档＝单价表换行/改此键，零机制
-      model: ${ZHIPU_IMAGE_MODEL:cogview-4-250304}
-    volcano:
-      base-url: https://ark.cn-beijing.volces.com
-      api-key: ${ARK_API_KEY:}
-      model: doubao-seedream-5-0-260128
-    openai:
-      base-url: https://api.openai.com
-      api-key: ${OPENAI_IMAGE_API_KEY:}
-      model: gpt-image-2.5-sunburst
-    dashscope:
-      base-url: https://dashscope.aliyuncs.com
-      api-key: ${DASHSCOPE_API_KEY:}
-      model: qwen-image-3.0
+  # 出图（图片生成供数方四家＋按张计量）随 #610 设计线整条退役拆除。
   # #327 · business.identity 验证码登录（M01）：频控/有效期/试错上限全参数化（上线
   # 参数）；通道机制双开、上线先邮箱（手机开关位在，翻配置即开）。发送服务商＝上线
   # 参数——接口位在 VerificationCodeSender，#376 起 Resend 真发信落地（key 配了走

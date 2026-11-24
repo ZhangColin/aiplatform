@@ -74,8 +74,8 @@ public final class ProjectFiles {
     /**
      * 工作区相对形 → 锚定形（补前导 /）；锚定形/null 原样（null 透传——调用侧
      * 守卫在后）。{@link #relativeFormOf} 的对偶：落稿变更两形并存的事实面
-     * （write_file 件上报相对形、GenerateImageTool 落盘补锚定形，#306）在消费
-     * 边界归一到锚定形单一形——稿清单/定稿锚/比较先过本归一，下游免形差。
+     * （write_file 件上报相对形、平台工具落盘补锚定形，#306）在消费边界归一到
+     * 锚定形单一形——稿清单/定稿锚/比较先过本归一，下游免形差。
      */
     public static String anchoredFormOf(String path) {
         return path != null && !path.startsWith("/")

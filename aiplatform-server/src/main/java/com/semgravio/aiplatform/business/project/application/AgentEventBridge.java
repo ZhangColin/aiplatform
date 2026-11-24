@@ -57,7 +57,7 @@ public class AgentEventBridge {
 
     /**
      * run-failed 发射（编码 run 终态失败收口，#56；#604 起生成/更新 run 单发无重试
-     * ——失败/停止即终态；设计轨重试耗尽即终态）：轨道层在真终态落定点
+     * ——失败/停止即终态）：轨道层在真终态落定点
      * 调用——修正轨道与终态账（恢复出口 {@code restartFixRun} 的重派依据）同
      * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道失败/停止即终态。
      * runId = 该场 run 的用户面标识。前端恢复出口只认本事件，run 失败为唯一
@@ -249,9 +249,6 @@ public class AgentEventBridge {
         if (card.prompt() != null) {
             payload.put(AgentEventTypes.BALANCE_PROMPT_FIELD, card.prompt());
         }
-        if (card.designItem() != null) {
-            payload.put(AgentEventTypes.BALANCE_DESIGN_ITEM_FIELD, card.designItem());
-        }
         if (card.sourcePoolBalance() != null) {
             payload.put(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD, card.sourcePoolBalance());
         }
@@ -272,29 +269,6 @@ public class AgentEventBridge {
                 EventsAppService.OWNER_GUEST_FIELD,
                 EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId));
-    }
-
-    /**
-     * 定稿收尾卡发射（#291 定稿机制——平台侧显式动作的收口呈现）：定稿不是智能体
-     * run（无 run-start、无过程事件），收尾卡经 {@code run-finish} 载 closing 直达
-     * 对话流——事件封闭集零新增（收口即 run-finish 的既有语义，#88 收尾卡复用）。
-     * runId ＝ 定稿锚（Run-Id 成版提交已随审查与收口组退役，#605——本卡不再有版本锚）
-     * 对话史 closing 条目同锚）；sessionId 携该设计物的设计会话标识（归属可读，
-     * 非续跑锚）。发射走 {@link #publishQuietly}——呈现面失败不牵连定稿事实
-     * （件状态与成版已落定，回访经对话史水合）。
-     */
-    public void emitClosingCard(Project project, String runId,
-            String sessionId, Map<String, Object> closing) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
-        payload.put(EventsAppService.OWNER_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerAccountId()));
-        payload.put(EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerGuestId()));
-        payload.put(EventsAppService.RUN_FIELD, runId);
-        payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
-        payload.put(AgentEventTypes.CLOSING_FIELD, closing);
-        publishQuietly(AgentEventTypes.RUN_FINISH, payload);
     }
 
     /**

@@ -41,9 +41,6 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * 为空 = 无配置语境，空工具面），并随 run-start 载荷透出（前端登记锚）；
  * {@code workspaceReadOnly}——项目工作区解析为只读面（#86 主智能体姿态：
  * 不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）；
- * {@code workspaceNoShell}——项目工作区解析为设计面（#289 设计执行体姿态，
- * ADR-0025 无 shell）：内核文件工具（写文件件）保留、shell 与委派结构性关闭；
- * 只读标记优先（readOnly=true 恒只读面，本标记不生效）；
  * {@code heading} 可空——工作消息头部标题（#118：用户语言标题 + 生成轨道切片
  * 进度），底座不解释，随 run-start 载荷透出（{@code slice} 字段，前端工作消息
  * 头部呈现源）；{@code toolSpec} 可空——工具面规格串（#252 增强工具开关的
@@ -74,7 +71,6 @@ public record AgentCommand(
         Duration toolSilenceTimeout,
         String agentKey,
         boolean workspaceReadOnly,
-        boolean workspaceNoShell,
         RunHeading heading,
         String toolSpec,
         ModelCandidateQueue modelQueue,
@@ -87,7 +83,7 @@ public record AgentCommand(
             String workspaceId, Map<String, Object> streamCorrelation) {
         this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, null, null, null, null,
-                false, false, null, null, null, false);
+                false, null, null, null, false);
     }
 
     /** 无逐轮超时、带配置键的对话形（主智能体对话轮调用面：配置键穿透工具装配）。 */
@@ -96,7 +92,7 @@ public record AgentCommand(
             String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
         this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, null, null, null, agentKey,
-                false, false, null, null, null, false);
+                false, null, null, null, false);
     }
 
     /** 既有规范形（#557 前无队列形态）：兼容不携队列的调用面/测试形。 */
@@ -104,11 +100,11 @@ public record AgentCommand(
             ModelChannel modelChannel, String sessionId, String userId,
             UsageContext usageContext, String workspaceId, Map<String, Object> streamCorrelation,
             Duration timeout, Duration silenceTimeout, Duration toolSilenceTimeout,
-            String agentKey, boolean workspaceReadOnly, boolean workspaceNoShell,
+            String agentKey, boolean workspaceReadOnly,
             RunHeading heading, String toolSpec) {
         this(runId, prompt, systemPrompt, modelString, modelChannel, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, timeout, silenceTimeout,
-                toolSilenceTimeout, agentKey, workspaceReadOnly, workspaceNoShell, heading,
+                toolSilenceTimeout, agentKey, workspaceReadOnly, heading,
                 toolSpec, null, false);
     }
 
@@ -117,11 +113,11 @@ public record AgentCommand(
             ModelChannel modelChannel, String sessionId, String userId,
             UsageContext usageContext, String workspaceId, Map<String, Object> streamCorrelation,
             Duration timeout, Duration silenceTimeout, Duration toolSilenceTimeout,
-            String agentKey, boolean workspaceReadOnly, boolean workspaceNoShell,
+            String agentKey, boolean workspaceReadOnly,
             RunHeading heading, String toolSpec, ModelCandidateQueue modelQueue) {
         this(runId, prompt, systemPrompt, modelString, modelChannel, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, timeout, silenceTimeout,
-                toolSilenceTimeout, agentKey, workspaceReadOnly, workspaceNoShell, heading,
+                toolSilenceTimeout, agentKey, workspaceReadOnly, heading,
                 toolSpec, modelQueue, false);
     }
 

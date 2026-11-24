@@ -5,14 +5,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.UnaryOperator;
 
 import org.springframework.stereotype.Component;
 
@@ -31,7 +28,6 @@ import com.semgravio.aiplatform.base.agentscope.UsageContext;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
-import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.semgravio.aiplatform.business.billing.application.SegmentSettlementAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -41,7 +37,7 @@ import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 编码/设计 run 派发器（生成与更新共用，#22 落位 / #26 迭代环复用——所有编码
+ * 编码 run 派发器（生成与更新共用，#22 落位 / #26 迭代环复用——所有编码
  * run 同机制；<b>#604 尝试环对生成/更新 run 整体退役</b>，ADR-0055 #580-13 失败
  * 语义落地）：生成与更新 run（内核座）一场 run <b>一次尝试</b>——内核循环（ReAct
  * 轮次＋护栏三数值＋循环五条语义中间件）在底座内跑到自然终止，平台侧不再叠
@@ -50,13 +46,8 @@ import lombok.extern.slf4j.Slf4j;
  * failover 归供给链（#321/#557）——<b>不造第三层重试</b>）。失败＝唯一失败终态
  * {@code run-failed}（明确展示：失败面落库＋SSE 扩载，#418），恢复＝用户在点火
  * 入口重跑（<b>重跑即续</b>：内核自见工作区现状、不重做已对的工作，#577——不
- * 携带错误现场、无断点续跑机器，ADR-0055 续跑机器出局，#604）。
- *
- * <p><b>设计座例外（设计线原样保留）</b>：失败语义决议（#580-13）的对象是生成链；
- * 设计线按总 spec「原样保留、一行不动」——设计座沿用原有的<b>有界重试</b>：失败／
- * 零稿收口后带续作提示（错误现场＋平台可观测的进展现场，#323）重试，至多
- * {@code max-attempts} 次；通道级秒败另有免预算重试账（#477）。相关配置键自 #604
- * 起只服务设计轨。</p>
+ * 携带错误现场、无断点续跑机器，ADR-0055 续跑机器出局，#604）。#610 设计线整条
+ * 退役：设计执行体座与有界重试分支一并拆除。</p>
  *
  * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}——systemPrompt/
  * 模型配置经运营配置读面 {@link AgentConfigAppService} 取生效值，#251 库值优先、
@@ -88,14 +79,11 @@ class CodingRunDispatcher {
     public static final String SESSION_PREFIX = "coder-";
 
     /**
-     * 尝试环的执行体座席（#289 designer 座并入，两座共用同一派发器）：模型配置寻址
-     * （{@link AgentProfile#EXECUTOR} / {@link AgentProfile#DESIGNER}——systemPrompt
-     * 与模型配置经运营配置读面取生效值、计量 dims agentKind 同键）、工作区面
-     * （designer 无 shell——ProjectDesign 形态，写文件件在、命令执行结构性关闭）、
-     * 收尾卡稿清单开关（designer 会话扩载「本轮稿清单与去向」——条目随判定事实由
-     * 轨道层拼装，#292；null = 非设计会话不扩载）。<b>收口自动成版（Run-Id trailer）
-     * 随审查与收口组退役（#605）</b>：run 收口不再提交 git 版本，版本语义归阶段四
-     * 重建；设计定稿的成版提交同步出局（设计线整条退役另开新票）。
+     * 尝试环的执行体座席：模型配置寻址（{@link AgentProfile#EXECUTOR}——systemPrompt
+     * 与模型配置经运营配置读面取生效值、计量 dims agentKind 同键）。<b>收口自动
+     * 成版（Run-Id trailer）随审查与收口组退役（#605）</b>：run 收口不再提交 git
+     * 版本，版本语义归阶段四重建。#610 设计执行体座（designer）随设计线整条退役
+     * 拆除。
      *
      * <p>{@code kernelForm}（#601 接线，ADR-0054/0055）：<b>生成内核形态座席</b>——
      * 命令按内核装配形态构建（系统提示＝{@link KernelSystemPrompt} 权威版本、
@@ -105,8 +93,7 @@ class CodingRunDispatcher {
      * {@link AgentProfile#EXECUTOR} 座（供给链照现路径——模型配置→候选队列→
      * 通道行，#601 供给链不绕开）。</p>
      */
-    record RunSeat(AgentProfile profile, boolean workspaceNoShell,
-            String draftsItem, boolean kernelForm) {
+    record RunSeat(AgentProfile profile, boolean kernelForm) {
 
         /**
          * 生成内核座席（#601 接线）：首建与迭代重建派发走新内核装配——profile 仍
@@ -114,12 +101,7 @@ class CodingRunDispatcher {
          * kernelForm 分叉（提示词权威版本／内核装配键／无工具面规格）。
          */
         static RunSeat kernel() {
-            return new RunSeat(AgentProfile.EXECUTOR, false, null, true);
-        }
-
-        /** 设计执行体座（#289 设计过程轨道）：无 shell、收尾卡带稿清单。 */
-        static RunSeat designer(String draftsItem) {
-            return new RunSeat(AgentProfile.DESIGNER, true, draftsItem, false);
+            return new RunSeat(AgentProfile.EXECUTOR, true);
         }
     }
 
@@ -127,50 +109,33 @@ class CodingRunDispatcher {
      * 收口判定的权威事实（#88 判定行）：PRD 改没改（生成轮恒未动；更新轮 = 交接物
      * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = 平台可观测文件改动
      * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本层
-     * 只拼装不判定。设计轨道另携 {@code drafts} 稿清单（#292：轨道层在收口点拼装
-     * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）；编码轨道
-     * 另携 {@code designLint} 设计规范扫描事实（#296：token 合规是机器可判的
-     * <b>验证事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
-     * 项目的编码 run 在场，非规范项目/设计会话恒 null）。验证统计／基座 lint 两档／
-     * 已知缺陷清单随审查与收口组退役（#605）。
+     * 只拼装不判定。编码轨道另携 {@code designLint} 设计规范扫描事实（#296：
+     * token 合规是机器可判的<b>验证事实</b>不是判定分类——判定出口零改，仅随
+     * 收尾卡如实呈现；带规范项目的编码 run 在场，非规范项目恒 null）。验证统计／
+     * 基座 lint 两档／已知缺陷清单随审查与收口组退役（#605）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
-            String systemNote, List<Map<String, Object>> drafts,
-            Map<String, Object> designLint) {
+            String systemNote, Map<String, Object> designLint) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本场叙事，进收尾卡
          * summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null, null);
+            return new ClosingJudgment(false, null, true, note, null);
         }
 
         /**
-         * 设计轨道的分段判定（#289）：PRD 未动、系统未动（设计稿不是系统——两套
-         * 产出逻辑，ADR-0024）；note = 本场设计物叙事（完成设计物：X），进收尾卡
-         * summary；drafts = 本轮稿清单与去向（#292 轨道层拼装——渲成的平面稿以
-         * PNG 为正身；relaxed 改稿收口 0 稿即空清单，如实）。
-         */
-        static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
-            return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts, null);
-        }
-
-        /**
-         * 修正轨道的分段判定（#26）：判定事实随交接物与平台可观测文件改动事实直拼
-         * （稿清单恒无——设计会话才有）。
+         * 修正轨道的分段判定（#26）：判定事实随交接物与平台可观测文件改动事实直拼。
          */
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote,
-                    null, null);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null);
         }
 
         /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    lint);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, lint);
         }
     }
 
@@ -236,27 +201,10 @@ class CodingRunDispatcher {
     }
 
     /**
-     * 一场 run 的提示词（{@link #run} 入参）：{@code first}＝首试提示；{@code retry}
-     * ＝续作提示函数（入参＝重试现场——错误事实＋平台可观测的进展事实，#323）。
-     *
-     * <p>#604 起续作提示<b>只服务设计座</b>：设计线按总 spec「原样保留」沿用有界
-     * 重试（失败／零稿收口后带续作提示重试）；生成/更新 run（内核座）单发无重试，
-     * 只携首试提示（{@link #single}）。</p>
+     * 一场 run 的跨尝试共享账（{@link #run} 开场建）：本场起跑时刻、累计文件变更
+     * （成果面——收口清单的事实源）、耗时账（#111）、计量锚（#537）。
      */
-    record Prompts(String first, UnaryOperator<String> retry) {
-
-        /** 单发提示（内核座——无续作提示）。 */
-        static Prompts single(String prompt) {
-            return new Prompts(prompt, null);
-        }
-    }
-
-    /**
-     * 一场 run 的跨尝试共享账（{@link #run} 开场建、各尝试累加）：本场起跑时刻、
-     * 累计文件变更（成果面——收口清单的事实源，#323 失败尝试的部分观察不清零）、
-     * 逐尝试耗时账（#111）、计量锚（#537）。
-     */
-    private record RunState(Project project, String firstRunId, String sessionId, Prompts prompts,
+    private record RunState(Project project, String firstRunId, String sessionId, String prompt,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
             RunSeat seat, RunHeading heading, List<String> meterRunIds, String knowledgePrefix,
             Instant runStartedAt, List<FileChange> runChanges,
@@ -283,15 +231,12 @@ class CodingRunDispatcher {
      * 跑一场编码/设计 run（座席 {@link RunSeat} 定配置与工具面）：成功收口即
      * {@code onSuccess}（收口回调携该次 run 的 runId 与本场累计文件变更事实——
      * 对偶 8081 探活看的是工作区累计状态；返回收口判定的权威事实——#88 判定行；
-     * 回调抛异常即该次尝试失败——收口判据不满足的既有口径，如生成 8081 核验 /
-     * 设计会话落稿核验）。项目事实（工作区 / owner）从聚合派生。
+     * 回调抛异常即该次尝试失败——收口判据不满足的既有口径，如生成 8081 核验）。
+     * 项目事实（工作区 / owner）从聚合派生。
      *
      * <p><b>尝试口径（#604）</b>：生成与更新 run（内核座）<b>单发</b>——一次尝试
      * 即终态，失败语义＝明确展示＋重跑即恢复、不自动重跑（ADR-0055 #580-13：不造
-     * 第三层重试）。<b>设计座保留有界重试环</b>（设计线按总 spec 原样保留，失败
-     * 语义决议的对象是生成链）：失败／零稿收口后带续作提示重试，至多
-     * {@code max-attempts} 次；通道级秒败（未发生真实模型调用）另有免预算重试账
-     * （#477——不烧尝试预算，额度尽回落正常预算，终态兜底不变）。</p>
+     * 第三层重试）。#610 设计座与有界重试环随设计线整条退役拆除。</p>
      *
      * <p><b>收口扩载（#88）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
      * 载荷——摘要（判定事实的合并叙事）/ 判定行（onSuccess 返回的权威事实）/ 变更
@@ -299,77 +244,48 @@ class CodingRunDispatcher {
      * 收口）/ 阶段耗时分布（#111 durationBreakdown——平台分析口径、前端不渲染）。
      * 咨询/纯追问轮不经本层，run-finish 无扩载（无收尾卡）。</p>
      *
-     * @param what           日志标签（generate / fix / design）
+     * @param what           日志标签（generate / fix）
      * @param firstRunId     run 的 runId（调用方预生成随响应回 = 用户面 run 身份，全程
-     *                       不变；设计轨重试的中间尝试用内部 runId，事件投影归锚到本值）
+     *                       不变）
      * @param sessionId      本场 run 的会话寻址（#114 每 run 换会话，会话标识由轨道层
-     *                       按寻址规则拼装传入，不再固定 {@code coder-{projectId}}；
-     *                       设计轨重试续同一场会话）
-     * @param injectKnowledge 是否做知识命中前置注入（#24/#114「一次切入一次注入」：
-     *                       只随首试提示注入——一次下发一次注入）
+     *                       按寻址规则拼装传入，不再固定 {@code coder-{projectId}}）
+     * @param prompt         本场提示词（单发；知识命中前置注入只随本提示一次下发）
+     * @param injectKnowledge 是否做知识命中前置注入（#24/#114「一次切入一次注入」）
      * @param heading        工作消息头部标题（#118：标题 + 生成轨道进度；可空——
      *                       主智能体对话轮不经本层）——随 run-start 的 slice 字段
      *                       透出
      * @return               收场事实（成败 + 收口终文）；失败转终态后的兜底归轨道层
      *                       ——终态收口事件 run-failed 锚 runId，用户侧重跑即恢复
-     *                       （#604 失败新语义：生成/更新走点火入口／「继续生成」，
-     *                       设计轨重提意见，ADR-0055 #580-13）
+     *                       （#604 失败新语义：生成/更新走点火入口「继续生成」，
+     *                       ADR-0055 #580-13）
      */
-    RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
+    RunResult run(Project project, String firstRunId, String sessionId, String prompt,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
             boolean injectKnowledge, RunSeat seat, RunHeading heading,
             SegmentType segmentType) {
         Long projectId = project.getId();
         List<String> meterRunIds = new ArrayList<>();
         try {
-            boolean boundedRetries = seat.profile() == AgentProfile.DESIGNER;
-            int maxAttempts = boundedRetries ? properties.getMaxAttempts() : 1;
-            RunState state = new RunState(project, firstRunId, sessionId, prompts, onSuccess,
+            RunState state = new RunState(project, firstRunId, sessionId, prompt, onSuccess,
                     what, seat, heading, meterRunIds,
-                    injectKnowledge ? knowledgeAppService.dispatchInjection(prompts.first()) : "",
+                    injectKnowledge ? knowledgeAppService.dispatchInjection(prompt) : "",
                     Instant.now(), new ArrayList<>(), new ArrayList<>());
-            String previousError = null;
-            int channelInstantRetries = 0;
-            int iteration = 0;
-            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-                iteration++;
-                AttemptOutcome outcome =
-                        attempt(state, attempt, maxAttempts, iteration, previousError);
-                if (outcome.terminal() != null) {
-                    return outcome.terminal();
-                }
-                RuntimeException cause = outcome.cause();
-                if (boundedRetries && isChannelInstant(cause)
-                        && channelInstantRetries < properties.getChannelInstantRetryMax()) {
-                    // 通道级秒败免预算（#477）：llmMs=0＝未发生真实模型调用（连接拒绝/
-                    // 凭证失效类通道错误）——不消耗正常尝试预算，免预算账内同尝试序
-                    // 干净重发（不升档、无错误现场可携——previousError 不刷新）；额度尽
-                    // 回落正常预算（防通道长期故障无限循环）
-                    channelInstantRetries++;
-                    log.warn("[{}] 项目 {} 第 {}/{} 次尝试通道级秒败（未发生真实模型调用）：{}"
-                                    + "——不烧尝试预算，免预算重试 {}/{}（退避 {}）",
-                            what, projectId, attempt, maxAttempts, cause.toString(),
-                            channelInstantRetries, properties.getChannelInstantRetryMax(),
-                            channelBackoffOf(channelInstantRetries));
-                    sleepBackoff(channelBackoffOf(channelInstantRetries));
-                    attempt--; // 同尝试序重试（for 自增抵消）——起跑闸（停/关停）重查
-                    continue;
-                }
-                previousError = errorScene(cause);
-                log.warn("[{}] 项目 {} 第 {}/{} 次尝试失败：{}",
-                        what, projectId, attempt, maxAttempts, previousError);
+            AttemptOutcome outcome = attempt(state);
+            if (outcome.terminal() != null) {
+                return outcome.terminal();
             }
-            // 终态留档（#323 失败留账）：尝试耗尽转终态失败时，耗时账与观察面仍随
-            // 终态日志留档（平台观测面）——累计墙钟＋逐尝试账＋已落盘文件清单，
-            // 失败看得见成本。失败面（#418 落库面）随 RunResult 回传轨道层——经
-            // 事件桥与 run-failed SSE 扩载同载荷落库（失败不再只看日志）
-            log.error("[{}] 项目 {} 尝试耗尽（{} 次）转终态失败——本场留账：累计 {}、已落盘"
-                            + "文件变更 {}。用户侧兜底（#604：生成/更新走点火入口重跑即恢复、"
-                            + "设计轨重提意见续跑）",
-                    what, projectId, maxAttempts,
+            RuntimeException cause = outcome.cause();
+            String reason = errorScene(cause);
+            // 终态留档（#323 失败留账）：转终态失败时，耗时账与观察面仍随终态日志
+            // 留档（平台观测面）——累计墙钟＋尝试账＋已落盘文件清单，失败看得见
+            // 成本。失败面（#418 落库面）随 RunResult 回传轨道层——经事件桥与
+            // run-failed SSE 扩载同载荷落库（失败不再只看日志）
+            log.error("[{}] 项目 {} 尝试失败转终态——本场留账：累计 {}、已落盘文件变更 {}。"
+                            + "用户侧兜底（#604：生成/更新走点火入口重跑即恢复）",
+                    what, projectId,
                     humanDuration(Duration.between(state.runStartedAt(), Instant.now()).toMillis()),
                     filePayloads(state.runChanges()));
-            return RunResult.failed(failureFace(false, previousError, state.attemptDurations(),
+            return RunResult.failed(failureFace(false, reason, state.attemptDurations(),
                     state.runStartedAt()));
         }
         finally {
@@ -392,19 +308,11 @@ class CodingRunDispatcher {
     }
 
     /**
-     * 单次尝试本体（{@link #run} 的内层——生成/更新 run 只跑一次；设计座失败后由
-     * {@link #run} 带续作提示再调）：成功收口返回终态；失败返回可重试原因（尝试账
-     * 已记、部分观察已并入本场累计）。停止／关停旁路直接抛出。
-     *
-     * @param attempt      尝试序（1 起）
-     * @param maxAttempts  本场尝试上界（内核座恒 1；设计座＝max-attempts）
-     * @param iteration    迭代序（免预算重试的 firstRunId 判据：只有首迭代沿用首试
-     *                     runId，其后一律新内部 runId——计量幂等键不撞、重试投影滤
-     *                     run-start 不重复）
-     * @param previousError 此前尝试的错误现场（首试为 null；续作提示的携带物）
+     * 单次尝试本体（{@link #run} 的内层——生成/更新 run 只跑一次）：成功收口返回
+     * 终态；失败返回失败原因（尝试账已记、部分观察已并入本场累计）。停止／关停
+     * 旁路直接抛出。
      */
-    private AttemptOutcome attempt(RunState state, int attempt, int maxAttempts, int iteration,
-            String previousError) {
+    private AttemptOutcome attempt(RunState state) {
         Project project = state.project();
         Long projectId = project.getId();
         Long workspaceId = project.getWorkspaceId();
@@ -414,9 +322,8 @@ class CodingRunDispatcher {
         List<FileChange> runChanges = state.runChanges();
         List<AttemptDuration> attemptDurations = state.attemptDurations();
         Instant runStartedAt = state.runStartedAt();
-        // 起跑闸（每次尝试起跑前重查）。停止旁路（#359 生成取消）：停止不走重试
-        // （一次尝试即收场），直抛轨道层停止收口；停止失败面（#418）随异常携出
-        // （此前尝试的账在场——跨尝试累计）
+        // 起跑闸（起跑前重查）。停止旁路（#359 生成取消）：停止不走重试（一次尝试
+        // 即收场），直抛轨道层停止收口；停止失败面（#418）随异常携出
         if (codingRunTrack.stopRequested(projectId)) {
             throw new RunStoppedException(firstRunId,
                     failureFace(true, null, attemptDurations, runStartedAt));
@@ -428,12 +335,10 @@ class CodingRunDispatcher {
                     failureFace(false, null, attemptDurations, runStartedAt));
         }
         Instant attemptStartedAt = Instant.now();
-        // 首次尝试沿用首试 runId（用户面 run 身份），其后一律新内部 runId（计量
-        // 幂等键不撞、重试投影滤 run-start 不重复）
-        String attemptRunId = attempt == 1 && iteration == 1
-                ? firstRunId : EventsAppService.newRunId();
-        // 段计量锚收集（#537 段收口接线）：每次尝试的全场合锚随收——成败/停止/
-        // 异常全扣（「失败也扣、停止也扣」，结算挂 run finally）
+        // 单发：本场唯一尝试即用户面 run 身份
+        String attemptRunId = firstRunId;
+        // 段计量锚收集（#537 段收口接线）：本场 run 的全场合锚——成败/停止/异常
+        // 全扣（「失败也扣、停止也扣」，结算挂 run finally）
         state.meterRunIds().add(attemptRunId);
         AgentConfigAppService.EffectiveConfig agent = agentConfigs.effectiveOf(seat.profile());
         // 模型路由判定（#354）：只对 run 执行体座生效（Demo 阶段模型档＝run
@@ -452,12 +357,8 @@ class CodingRunDispatcher {
         String attemptModelConfigKey = config != null ? config.modelConfigKey() : agent.modelConfigKey();
         // #557 整候选队列（多候选＝failover 装配面，五个 resolve 面之一）
         ModelCandidateQueue model = modelConfigs.resolveQueue(attemptModelConfigKey);
-        // 提示：首试＝首试提示（知识命中前置注入只进首试）；重试＝续作提示（设计座，
-        // 入参＝重试现场：错误事实＋平台可观测的进展事实）
-        String prompt = attempt == 1
-                ? state.knowledgePrefix() + state.prompts().first()
-                : state.prompts().retry().apply(retryScene(previousError, attempt - 1, maxAttempts,
-                        Duration.between(runStartedAt, Instant.now()).toMillis(), runChanges));
+        // 提示：单发提示＋知识命中前置注入（一次下发一次注入）
+        String prompt = state.knowledgePrefix() + state.prompt();
         // #601 内核形态分叉：内核座席的命令按生成内核装配形态构建——系统提示
         // ＝KernelSystemPrompt 权威版本（住代码、调用方不可覆盖）、装配键＝内核
         // 键（不带 executor——平台中间件按配置键挂、不看工作区形态）、工具面
@@ -483,7 +384,6 @@ class CodingRunDispatcher {
                         ? AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME
                         : seat.profile().key(),
                 /* workspaceReadOnly= */ false,
-                seat.workspaceNoShell(),
                 state.heading(),
                 seat.kernelForm() ? null : agent.toolSpec(),
                 // #557 候选队列（生成尝试同获链式切换——多候选＝failover）
@@ -520,7 +420,7 @@ class CodingRunDispatcher {
             runChanges.addAll(attemptChanges);
             // 本尝试账先记——核验/收口段抛错不重记。配置随账留档（#354 路由
             // 可观测——收尾卡 attempts[].modelId）；尝试墙钟止于核验前
-            attemptDurations.add(new AttemptDuration(attempt,
+            attemptDurations.add(new AttemptDuration(1,
                     Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                     reply.durations(), attemptModelConfigKey, /* channelInstant= */ false));
             attemptAccounted = true;
@@ -534,18 +434,14 @@ class CodingRunDispatcher {
                 judgment = state.onSuccess().apply(attemptRunId, runChanges);
             }
             catch (RuntimeException e) {
-                // 核验未过＝该次尝试失败。单发（内核座）：❌ 直接落定（不悬挂
-                // 「检查中」）；设计座重试环：尝试间不出 ❌（静默重试信号不外泄，
-                // 部件停「检查中」），末次尝试落定
-                if (attempt == maxAttempts) {
-                    emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_FAILED);
-                }
+                // 核验未过＝本次尝试失败：❌ 直接落定（不悬挂「检查中」）
+                emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_FAILED);
                 throw e;
             }
             emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
             if (pendingFinish.get() != null) {
                 Map<String, Object> closing = closingPayload(judgment, runChanges,
-                        runStartedAt, what, seat.draftsItem(), config);
+                        runStartedAt, what, config);
                 // 阶段耗时分布（#111）：收口尾序止表于载荷定型（落库自指不可测——
                 // 载荷先于落库定型，量级极小忽略）；三桶齐备 + 逐尝试分布
                 closing.put(CLOSING_BREAKDOWN_FIELD, durationBreakdown(attemptDurations,
@@ -562,7 +458,7 @@ class CodingRunDispatcher {
             // 关停旁路（#477，先于停止处置——进程正死时事件面无意义）：宽限窗内
             // 的一切失败按关停中断收场——不重试、不发终态事件
             if (AgentShutdownGate.isShuttingDown() || AgentShutdownGate.causedByShutdown(e)) {
-                recordInterrupted(state, e, attempt, attemptStartedAt, attemptModelConfigKey,
+                recordInterrupted(state, e, attemptStartedAt, attemptModelConfigKey,
                         attemptAccounted);
                 throw new RunShutdownException(firstRunId,
                         failureFace(false, null, attemptDurations, runStartedAt));
@@ -573,7 +469,7 @@ class CodingRunDispatcher {
             // ——中断尝试的部分观察面与终态日志不弃置；已耗计量另由 MeteredModel
             // 流收口直报，不重复）
             if (codingRunTrack.stopRequested(projectId)) {
-                recordInterrupted(state, e, attempt, attemptStartedAt, attemptModelConfigKey,
+                recordInterrupted(state, e, attemptStartedAt, attemptModelConfigKey,
                         attemptAccounted);
                 log.info("[{}] 项目 {} 用户停止收场（runId={}）——本场留账：累计 {}、"
                                 + "文件变更 {}",
@@ -589,7 +485,7 @@ class CodingRunDispatcher {
             // 阶段耗时）计入本场累计——收口清单与耗时分布含失败 run 的部分观察，
             // 不清零弃置（已落盘的写是真实工作区事实）
             if (e instanceof AgentTurnFailure failure) {
-                attemptDurations.add(new AttemptDuration(attempt,
+                attemptDurations.add(new AttemptDuration(1,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                         failure.durations(), attemptModelConfigKey, isChannelInstant(e)));
                 runChanges.addAll(failure.changes());
@@ -597,7 +493,7 @@ class CodingRunDispatcher {
             else if (!attemptAccounted) {
                 // 非客户端失败（前段失败）：无可携事实仍零桶——观察面口径见
                 // StageDurationFacts
-                attemptDurations.add(new AttemptDuration(attempt,
+                attemptDurations.add(new AttemptDuration(1,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                         StageDurations.zero(), attemptModelConfigKey, /* channelInstant= */ false));
             }
@@ -611,19 +507,19 @@ class CodingRunDispatcher {
      * 尝试尚无账则记一条（无可携事实仍零桶——失败面 attempts 缺省出一条，schema
      * 与终态失败面同形）。
      */
-    private static void recordInterrupted(RunState state, RuntimeException e, int attempt,
+    private static void recordInterrupted(RunState state, RuntimeException e,
             Instant attemptStartedAt, String attemptModelConfigKey, boolean attemptAccounted) {
         if (e instanceof AgentTurnFailure failure) {
             state.runChanges().addAll(failure.changes());
             if (!attemptAccounted) {
-                state.attemptDurations().add(new AttemptDuration(attempt,
+                state.attemptDurations().add(new AttemptDuration(1,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                         failure.durations(), attemptModelConfigKey, /* channelInstant= */ false));
             }
             return;
         }
         if (!attemptAccounted) {
-            state.attemptDurations().add(new AttemptDuration(attempt,
+            state.attemptDurations().add(new AttemptDuration(1,
                     Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                     StageDurations.zero(), attemptModelConfigKey, /* channelInstant= */ false));
         }
@@ -640,84 +536,10 @@ class CodingRunDispatcher {
     /**
      * 通道级秒败判式（#477 单点）：{@link AgentTurnFailure} 且 {@code llmMs=0}——
      * 未发生真实模型调用（连接拒绝/凭证失效类通道错误；裸异常＝前段/环境失败，
-     * 不是通道级）。#604 起两处消费：设计座的免预算重试判据；失败面逐尝试标注
-     * （内核座单发无免预算重试，仅标注）。
+     * 不是通道级）。#604 起只作失败面逐尝试标注（内核座单发无免预算重试）。
      */
     private static boolean isChannelInstant(Throwable failure) {
         return failure instanceof AgentTurnFailure instant && instant.durations().llmMs() == 0;
-    }
-
-    /** 通道级秒败免预算重试的退避上限（#477）：指数翻倍封顶，通道故障给上游喘息。 */
-    private static final Duration CHANNEL_BACKOFF_CAP = Duration.ofSeconds(30);
-
-    /** 免预算重试第 {@code retry} 次的退避时长（设计座）：起始值指数翻倍、封顶 30s。 */
-    private Duration channelBackoffOf(int retry) {
-        Duration backoff = properties.getChannelInstantRetryBackoff();
-        for (int i = 1; i < retry && backoff.compareTo(CHANNEL_BACKOFF_CAP) < 0; i++) {
-            backoff = backoff.multipliedBy(2);
-        }
-        return backoff.compareTo(CHANNEL_BACKOFF_CAP) > 0 ? CHANNEL_BACKOFF_CAP : backoff;
-    }
-
-    /**
-     * 退避等待（#477）：可中断——中断（停止面 cancel/关停）不吞，恢复中断标志后
-     * 返回，由下一轮起跑闸（停止/关停旁路）收口；非正时长直过。
-     */
-    private static void sleepBackoff(Duration backoff) {
-        if (backoff == null || backoff.isZero() || backoff.isNegative()) {
-            return;
-        }
-        try {
-            Thread.sleep(backoff.toMillis());
-        }
-        catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    /** 进展现场列出的文件上限（防长清单刷屏——完整清单以工作区现状为准）。 */
-    private static final int SCENE_FILES_LISTED = 15;
-
-    /**
-     * 重试现场（#323 重试携进展现场，{@link Prompts#retry} 的入参拼装单点——只服务
-     * 设计座的续作提示）：错误事实＋平台可观测的进展事实——已干多久（本场累计
-     * 墙钟＋已失败尝试计数）/ 干到哪（跨尝试〔含失败尝试〕已落盘的文件变更）。
-     * 事实源全在本层（墙钟 / 累计变更账），不由模型自报。
-     */
-    private static String retryScene(String errorScene, int failedAttempts, int maxAttempts,
-            long elapsedMs, List<FileChange> changes) {
-        return "错误现场：" + errorScene
-                + "\n进展现场（平台可观测事实）：本场已累计用时 " + humanDuration(elapsedMs)
-                + "（已失败 " + failedAttempts + '/' + maxAttempts + " 次尝试）"
-                + "；已落盘文件变更 " + sceneFiles(changes);
-    }
-
-    /** 进展现场的文件清单：同路径合并行数（活动量口径同收口清单），截 {@link SCENE_FILES_LISTED} 件。 */
-    private static String sceneFiles(List<FileChange> changes) {
-        Map<String, int[]> merged = new TreeMap<>();
-        for (FileChange change : changes) {
-            int[] lines = merged.computeIfAbsent(change.path(), key -> new int[2]);
-            lines[0] += change.added();
-            lines[1] += change.removed();
-        }
-        if (merged.isEmpty()) {
-            return "尚无";
-        }
-        StringBuilder files = new StringBuilder().append(merged.size()).append(" 件：");
-        int listed = 0;
-        for (Map.Entry<String, int[]> entry : merged.entrySet()) {
-            if (listed == SCENE_FILES_LISTED) {
-                files.append("…共 ").append(merged.size()).append(" 件（其余见工作区现状）");
-                break;
-            }
-            if (listed > 0) {
-                files.append("、");
-            }
-            files.append(entry.getKey()).append("（+").append(entry.getValue()[0])
-                    .append("/-").append(entry.getValue()[1]).append("）");
-            listed++;
-        }
-        return files.toString();
     }
 
     /** 人读时长（终态留档）：秒 → 分秒 → 时分，向下取整。 */
@@ -735,9 +557,6 @@ class CodingRunDispatcher {
 
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
     static final String GENERATE_LABEL = "generate";
-
-    /** 设计轨日志标签（#289 设计过程轨道）：收口摘要口径分岔用。 */
-    static final String DESIGN_LABEL = "design";
 
     /** 收口扩载载荷的摘要键（对话史收尾卡叙事）。 */
     static final String CLOSING_SUMMARY_FIELD = "summary";
@@ -757,18 +576,16 @@ class CodingRunDispatcher {
      * schema 见 SSE事件清单·收口扩载（对话史落库 #89 复用同一载荷，
      * 拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径行数
-     * 合并——用户面一场 run 的活动量口径）；时长 = 起跑到本收口。设计会话
-     * （#289）另扩 {@code drafts} 稿清单（#292 起随判定事实由轨道层拼装——平面稿
-     * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。验证统计／
+     * 合并——用户面一场 run 的活动量口径）；时长 = 起跑到本收口。验证统计／
      * 基座 lint／已知缺陷清单随审查与收口组退役（#605）。模型路由（#354）另扩
      * {@code modelTier}——收口 run 的路由判定（哪场用了哪档、为什么：配置 + 来源
      * + 升档理由 + 判定依据快照）；{@code config} 非空才携带（run 执行体座的编码
-     * run；设计/其余会话缺省不携带，平台分析口径、前端不渲染——逐尝试配置另见
+     * run，平台分析口径、前端不渲染——逐尝试配置另见
      * durationBreakdown.attempts[].modelId）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
-            String draftsItem, ModelRoutingAppService.ConfigSelection config) {
+            ModelRoutingAppService.ConfigSelection config) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -781,9 +598,6 @@ class CodingRunDispatcher {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        if (draftsItem != null) {
-            closing.put(CLOSING_DRAFTS_FIELD, judgment.drafts());
-        }
         if (judgment.designLint() != null) {
             closing.put(CLOSING_LINT_FIELD, judgment.designLint());
         }
@@ -792,9 +606,6 @@ class CodingRunDispatcher {
         }
         return closing;
     }
-
-    /** 收口扩载的稿清单键（#289 设计会话扩载——本轮稿清单与去向）。 */
-    static final String CLOSING_DRAFTS_FIELD = "drafts";
 
     /**
      * 收口扩载的设计规范扫描键（#296：{@code { status, retried?, total?, violations? }}
@@ -809,52 +620,6 @@ class CodingRunDispatcher {
      * 可查留档；逐尝试配置见 {@code durationBreakdown.attempts[].modelId}）。
      */
     static final String CLOSING_MODEL_CONFIG_FIELD = "modelTier";
-
-    /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本
-     *  = 工作区布局常量表）。 */
-    private static final String DESIGN_DIR_PREFIX = "/" + WorkspaceLayout.DESIGN_DIR + "/";
-    /** 同上相对形前缀（write_file 件上报工作区相对形——#306 两形兼容）。 */
-    private static final String DESIGN_DIR_RELATIVE_PREFIX =
-            WorkspaceLayout.DESIGN_DIR + "/";
-
-    /**
-     * design/ 锚定判定（#289 单点——稿清单派生与设计会话收口判据共用，两处口径
-     * 不许漂移）：path 两形兼容——锚定形（{@code /design/home-1.html}）与工作区
-     * 相对形（{@code design/home-1.html}——write_file 件落稿变更的逐字上报形；
-     * 平面类 GenerateImageTool 落盘才显式补锚定形），大小写不敏感（文件系统侧无
-     * 大小写约定）。谓词只判锚定、不归一——清单与锚的归一在
-     * {@code DesignProcessAppService.designAnchoredPaths}（ProjectFiles.
-     * anchoredFormOf），消费面单一锚定形不变。相对形同律判定在
-     * {@code ProjectFiles.isDraftHtml}（#293 稿伺服面——domain 层不可上引本包，
-     * 同律互指为约）。
-     */
-    static boolean designAnchored(String path) {
-        if (path == null) {
-            return false;
-        }
-        String lower = path.toLowerCase(Locale.ROOT);
-        return lower.startsWith(DESIGN_DIR_PREFIX)
-                || lower.startsWith(DESIGN_DIR_RELATIVE_PREFIX);
-    }
-
-    /** 界面类稿扩展名（media 形态判据——平面类位图同目录落盘）。 */
-    private static final String HTML_MEDIA = "html";
-
-    /** 平面类稿扩展名集合（#292 双路位图：图片模型直出与代码出图渲成的 PNG 同集）。 */
-    private static final Set<String> IMAGE_MEDIA_EXTENSIONS =
-            Set.of("png", "jpg", "jpeg", "webp", "gif", "svg");
-
-    /** 稿形态（按扩展名派生：html＝界面类可交互轻量实现；图片＝平面类位图——
-     * 代码出图路渲成的 PNG 同此派生）——首产/改稿收尾卡与定稿收尾卡（#291）
-     * 同源派生。 */
-    static String mediaOf(String path) {
-        int dot = path.lastIndexOf('.');
-        String extension = dot >= 0 ? path.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
-        if (IMAGE_MEDIA_EXTENSIONS.contains(extension)) {
-            return "image";
-        }
-        return HTML_MEDIA;
-    }
 
     /**
      * 阶段耗时分布装配（#111；#417 口径修真；#453 增每迭代平台开销归因桶）：
@@ -974,13 +739,12 @@ class CodingRunDispatcher {
         return new AgentEvent(finish.type(), payload);
     }
 
-    /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成/
-     * 设计轨道按段叙事。 */
+    /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成
+     * 轨道按段叙事。 */
     private static String closingSummary(ClosingJudgment judgment, String what) {
-        if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)) {
-            // 生成轨道（#104）：summary = 本场叙事；设计轨道（#289）：summary = 本场
-            // 设计物叙事（完成设计物：X）——note 恒非空（轨道层 ClosingJudgment.
-            // generation 同形拼装）
+        if (GENERATE_LABEL.equals(what)) {
+            // 生成轨道（#104）：summary = 本场叙事（note 恒非空——轨道层
+            // ClosingJudgment.generation 同形拼装）
             return judgment.systemNote();
         }
         if (judgment.prdChanged() && judgment.systemChanged()) {
@@ -1026,31 +790,15 @@ class CodingRunDispatcher {
     /**
      * 用户面投影（#84：底座逐次失败补的 {@code error} 事件是失败族的过程事实——
      * 滤掉，用户面只见工作消息正常生长或（失败后）唯一的失败终态
-     * {@code run-failed}）。设计轨的中间重试尝试（{@code attemptRunId} 非首试
-     * runId）：run-start 不出用户面（重试信号不外泄——用户面 run 身份恒为首试
-     * runId）、其余事件归锚到首试 runId。内核座单发恒首试，无归锚需求。
+     * {@code run-failed}）。单发后本场唯一尝试即用户面 run 身份，无归锚需求。
      */
     private static Consumer<AgentEvent> userFacingProjection(String firstRunId,
             String attemptRunId, Consumer<AgentEvent> sink) {
-        boolean retryAttempt = !attemptRunId.equals(firstRunId);
         return event -> {
             if (AgentEventTypes.ERROR.equals(event.type())) {
                 return;
             }
-            if (retryAttempt && AgentEventTypes.RUN_START.equals(event.type())) {
-                return;
-            }
-            sink.accept(retryAttempt ? reanchor(event, firstRunId) : event);
+            sink.accept(event);
         };
-    }
-
-    /** 事件归锚：payload 的 runId 换成用户面标识（首试 runId）；其余字段原样。 */
-    private static AgentEvent reanchor(AgentEvent event, String firstRunId) {
-        if (firstRunId.equals(event.payload().get(AgentEventTypes.RUN_FIELD))) {
-            return event;
-        }
-        Map<String, Object> payload = new LinkedHashMap<>(event.payload());
-        payload.put(AgentEventTypes.RUN_FIELD, firstRunId);
-        return new AgentEvent(event.type(), payload);
     }
 }

@@ -92,7 +92,7 @@ class AgentscopeConverseSmokeTest {
                         "deepseek:deepseek-flash", channel,
                         "smoke-session", "smoke-user",
                         new UsageContext("smoke-prj", Map.of("scene", "agentscope-smoke")),
-                        null, Map.of(), null, null, null, null, false, false, null, null),
+                        null, Map.of(), null, null, null, null, false, null, null),
                 frames::add);
 
         // 事件序与锚定（#45 事件桥验收：流事件经端口可观测、文本增量连续）

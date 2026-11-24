@@ -410,8 +410,8 @@ public class IterationAppService {
                     // 无 finish_edit／验证在场／产出证明／终验复走旧验收链（段四技术债）
                     result = codingRunDispatcher.run(project, runId,
                             fixSession(projectId, runId),
-                            // 单发提示（内核座无续作提示——#604 失败即终态、不自动重试）
-                            CodingRunDispatcher.Prompts.single(kernelFixRunPrompt(handoff)),
+                            // 单发提示（#604 失败即终态、不自动重试）
+                            kernelFixRunPrompt(handoff),
                             (attemptRunId, attemptChanges) -> closeKernelFix(project, attemptRunId,
                                     currentHandoff, prdVersionNo, attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),

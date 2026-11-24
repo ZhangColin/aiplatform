@@ -26,8 +26,8 @@ import com.semgravio.aiplatform.business.project.domain.model.Operator;
 
 /**
  * 后台智能体运营配置 REST 面（#251，机机签名——五头 HMAC 强制闸，见
- * {@link com.semgravio.aiplatform.config.WebMvcConfig}）：三座智能体（main/
- * executor/designer）的 systemPrompt／模型配置后台可维护＋变更留痕可查（ADR-0021
+ * {@link com.semgravio.aiplatform.config.WebMvcConfig}）：两座智能体（main/
+ * executor）的 systemPrompt／模型配置后台可维护＋变更留痕可查（ADR-0021
  * 身份与配置分治——AgentProfile 枚举仍是身份与缺省正本，装配库值优先、缺省
  * 回落）；边缘调用点四件（naming/compaction/classification/precheck，#366）的
  * 模型配置同面维护（/edge/{edgeKey} 三端点——值面仅配置，提示词不属配置面）。
@@ -56,9 +56,9 @@ public class BackofficeAgentConfigController {
                     + "（webSearchEnabled/fetchUrlEnabled，#252 起生效装配——工具面"
                     + "清单与窄幅开关另见 /agent-tools 两端点）＋最近写者。无覆盖行＝"
                     + "全回落（覆盖标记 false、写者 null）。"
-                    + "寻址稳定键三把：main=主智能体 / executor=run 执行体 / "
-                    + "designer=设计执行体；边缘调用点（naming 等）走 /edge/"
-                    + "{edgeKey} 配置端点，三座端点对边缘键 404 PRJ_033。需要机机"
+                    + "寻址稳定键两把：main=主智能体 / executor=run 执行体；"
+                    + "边缘调用点（naming 等）走 /edge/"
+                    + "{edgeKey} 配置端点，两座端点对边缘键 404 PRJ_033。需要机机"
                     + "签名（五头 HMAC），无签名 401")
     @ErrorCodes({"PRJ_033"})
     public ApiResponse<BackofficeAgentConfigResponse> config(@PathVariable String agentKey) {

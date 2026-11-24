@@ -7,7 +7,6 @@ import java.util.Map;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
-import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessionSource;
 
 /**
  * 对话史条目读面（#89 水合载荷）：kind 为 Integer code + kindName 中文名随行
@@ -16,22 +15,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessio
  * 6=guide 7=quote 8=run_failure），question / closing 为事件载荷 JSON 原样；attachments（#97
  * 圈注 B 档、#286 扩图片物料）= 用户发言随带的消息附件 JSON 数组（回显重建附件 chip 用）；
  * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）；
- * failure（#418 失败留账）= run 失败终态失败面（与 run-failed SSE 扩载同载荷）；
- * sessionSource（#298 会话来源标识）= 2=设计会话（设计收尾卡携 drafts 判据），
- * null＝主会话缺省（含无结构标记的改稿发言——存储不同构降级口径，见
- * {@link ConversationSessionSource}）。
+ * failure（#418 失败留账）= run 失败终态失败面（与 run-failed SSE 扩载同载荷）。
+ * #610 设计线整条退役：会话来源标识（sessionSource/sessionSourceName）拆除。
  */
 public record ConversationEntryResponse(
         Long id,
         Integer kind,
         String kindName,
-        @Schema(description = "会话来源标识（#298）：2=设计会话（每设计物一个——判据＝收尾卡携 "
-                + "drafts 稿清单：首产/改稿/定稿收尾卡）、null=主会话缺省（作用域改稿发言无"
-                + "结构标记不标注、设计会话完整稿本在智能体会话存储——存储不同构降级口径）。"
-                + "后台对话史按来源分组或标注；用户面前端可忽略",
-                example = "2")
-        Integer sessionSource,
-        String sessionSourceName,
         String runId,
         String text,
         @Schema(description = "问答卡载荷（kind=3 question 携带，其余 kind 为 null）："
@@ -60,7 +50,7 @@ public record ConversationEntryResponse(
                 + "收口扩载原样（#88 收尾卡服务端权威事实；schema 正本＝"
                 + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
                 + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
-                + "designLint?, drafts?, modelTier?, "
+                + "designLint?, modelTier?, "
                 + "durationBreakdown{llmMs,toolsMs,closingMs,overhead{"
                 + "configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},"
                 + "attempts[]} }（可缺省键＝"
@@ -101,17 +91,14 @@ public record ConversationEntryResponse(
         boolean answered,
         LocalDateTime at) {
 
-    /** 实体 → 读面（kind 出 Integer code + kindName 中文名；sessionSource 可空
-     *  ——设计会话收尾卡才携带，null＝主会话缺省，判定归读口单点；questionOrdinal
-     *  仅问答卡携带——「第 N 问」序号，读口重算）。 */
+    /** 实体 → 读面（kind 出 Integer code + kindName 中文名；questionOrdinal 仅问答卡
+     *  携带——「第 N 问」序号，读口重算）。 */
     public static ConversationEntryResponse of(ConversationEntry entry,
-            ConversationSessionSource sessionSource, Integer questionOrdinal) {
+            Integer questionOrdinal) {
         return new ConversationEntryResponse(
                 entry.getId(),
                 entry.getKind().getCode(),
                 entry.getKind().getName(),
-                sessionSource == null ? null : sessionSource.getCode(),
-                sessionSource == null ? null : sessionSource.getName(),
                 entry.getRunId(),
                 entry.getText(),
                 entry.getQuestion(),

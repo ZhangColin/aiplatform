@@ -100,7 +100,7 @@ class AgentscopeAgentClientTest {
         properties.setDefaultSystemPrompt("你是平台智能体。");
         properties.setTimeout(Duration.ofSeconds(30));
         client = new AgentscopeAgentClient(factory, properties, workspaceLifecycleAppService,
-                stateStore, usageEventSink, new LandedFileFacts(), CLOCK);
+                stateStore, usageEventSink, CLOCK);
     }
 
     private AgentCommand command(String modelString, UsageContext usage) {
@@ -226,7 +226,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
-                null, "42", Map.of(), null, null, null, "ASSISTANT", true, false, null, null), event -> {
+                null, "42", Map.of(), null, null, null, "ASSISTANT", true, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(), any(), any(),
@@ -254,7 +254,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
-                null, "42", Map.of(), null, null, null, "main", false, false, null, null), event -> {
+                null, "42", Map.of(), null, null, null, "main", false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(), any(), any(),
@@ -493,7 +493,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
-                null, null, Map.of(), null, null, null, "CODER", false, false, null, null), frames::add);
+                null, null, Map.of(), null, null, null, "CODER", false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -512,7 +512,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
-                null, null, Map.of(), null, null, null, "CODER", false, false,
+                null, null, Map.of(), null, null, null, "CODER", false,
                 RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
@@ -689,7 +689,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, null, null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, false, null, null, null), frames::add);
+                "approved", null, null, false, null, null, null), frames::add);
 
         // 恢复消息带 ConfirmResult metadata（AgentScope 挂起恢复口）；续跑流正常收口
         verify(agent).streamEvents(messages.capture(), any(RuntimeContext.class));
@@ -716,7 +716,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, null, null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, false, null, null, null), frames::add))
+                "approved", null, null, false, null, null, null), frames::add))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(frames.stream().map(AgentEvent::type))
@@ -750,7 +750,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, null, null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, false, null, silence, null);
+                "approved", null, null, false, null, silence, null);
     }
 
     @Test
@@ -832,7 +832,7 @@ class AgentscopeAgentClientTest {
     /** 带静默判死阈值的生成形命令（timeout 不设总墙钟——活超时接管）。 */
     private AgentCommand commandWithSilence(Duration silence) {
         return new AgentCommand("run-1", "生成", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
-                null, null, Map.of(), null, silence, null, null, false, false, null, null);
+                null, null, Map.of(), null, silence, null, null, false, null, null);
     }
 
     @Test
@@ -941,7 +941,7 @@ class AgentscopeAgentClientTest {
     /** 带静默判死阈值与工具窗预算的生成形命令（#355）。 */
     private AgentCommand commandWithSilence(Duration silence, Duration toolSilence) {
         return new AgentCommand("run-1", "生成", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
-                null, null, Map.of(), null, silence, toolSilence, null, false, false, null, null);
+                null, null, Map.of(), null, silence, toolSilence, null, false, null, null);
     }
 
     /** 工具执行窗剧本（#355 长命令现场）：参数落定→执行窗零事件→结果返回。 */

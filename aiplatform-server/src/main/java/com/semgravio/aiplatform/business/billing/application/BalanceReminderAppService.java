@@ -26,9 +26,9 @@ import com.semgravio.aiplatform.business.billing.domain.repository.BalanceHoldRe
  *
  * <p><b>放行（{@link #claimPassable}）</b>：入账事件（{@code PoolToppedUp}，
  * AFTER_COMMIT 编排监听）触发全待决重判门——过门即认领（落定已放行）并返回
- * 载荷供编排按车道恢复受理（意见回意见轮/咨询回答询轮/作用域改稿回设计会话，
- * 各恢复受理的天然守卫照拦不误）；恢复受理失败的留存由编排调 {@link #discard}
- * 退场（用户重发即新段）。</p>
+ * 载荷供编排按车道恢复受理（意见回意见轮/咨询回答询轮，各恢复受理的天然守卫
+ * 照拦不误）；恢复受理失败的留存由编排调 {@link #discard} 退场（用户重发即新段）。
+ * #610 设计线整条退役：作用域改稿车道与件序/发散度留存列拆除。</p>
  *
  * <p>与 {@link TrialInterceptAppService} 对偶同构：拦截拦「未付费」（确认＝
  * 用户点确认扣减），本服务拦「已欠费」（确认＝充值到账）。</p>
@@ -64,8 +64,7 @@ public class BalanceReminderAppService {
      */
     @Transactional
     public BalanceReminderCard hold(Long projectId, BalanceHoldLane lane, String prompt,
-            List<Map<String, Object>> attachments, Integer designItem, String divergence,
-            String runId) {
+            List<Map<String, Object>> attachments, String runId) {
         // 旧待决先冲刷落库再插新行：同 flush 内 insert 先于 update，部分唯一索引
         // （uk_bil_balance_holds_pending）会在旧行仍 PENDING 时撞新行 insert
         pendingOf(projectId).ifPresent(old -> {
@@ -73,7 +72,7 @@ public class BalanceReminderAppService {
             holdRepository.saveAndFlush(old);
         });
         BalanceHold saved = holdRepository.save(BalanceHold.pendingOf(
-                projectId, lane, prompt, attachments, designItem, divergence, runId));
+                projectId, lane, prompt, attachments, runId));
         return cardOf(saved, billingAppService.trackOf(projectId));
     }
 
@@ -96,7 +95,7 @@ public class BalanceReminderAppService {
                     hold.getId() == null ? null : hold.getId().toString(),
                     hold.getProjectId(),
                     hold.getLane(), hold.getPrompt(), hold.getAttachments(),
-                    hold.getDesignItem(), hold.getDivergence(), hold.getRunId()));
+                    hold.getRunId()));
         }
         return claimed;
     }
@@ -127,7 +126,6 @@ public class BalanceReminderAppService {
                 hold.getId() == null ? null : hold.getId().toString(),
                 hold.getLane().name(),
                 hold.getPrompt(),
-                hold.getDesignItem(),
                 track.sourcePoolBalance(),
                 hold.getRunId());
     }
@@ -137,39 +135,35 @@ public class BalanceReminderAppService {
      * 口径）。
      *
      * @param holdId            留存 id（卡锚）
-     * @param lane              被拦车道（OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿）
+     * @param lane              被拦车道（OPINION=意见 / INQUIRY=咨询）
      * @param prompt            被拦输入原文（卡上引用呈现）
-     * @param designItem        作用域改稿目标件序（仅 DESIGN_REVISION；其余 null）
      * @param sourcePoolBalance 源池余额快照（分；显负额素材——读面现取，卡显当前负额）
      * @param runId             余额提醒卡事件锚（挂 /api/events?runId=）
      */
     public record BalanceReminderCard(String holdId, String lane, String prompt,
-            Integer designItem, Long sourcePoolBalance, String runId) {
+            Long sourcePoolBalance, String runId) {
 
         /**
-         * run 场拦截卡面（#537——生成/修正/设计会话等 run 场派发被段边界门拦下）：
+         * run 场拦截卡面（#537——生成/修正等 run 场派发被段边界门拦下）：
          * run intent 走编排侧进程内暂存＋充值回正排空（不留存 bil_balance_holds），
-         * 故 holdId/lane/prompt/designItem 全空——卡面只携当前负额＋事件锚。
+         * 故 holdId/lane/prompt 全空——卡面只携当前负额＋事件锚。
          */
         public static BalanceReminderCard forRunBlock(Long sourcePoolBalance, String runId) {
-            return new BalanceReminderCard(null, null, null, null, sourcePoolBalance, runId);
+            return new BalanceReminderCard(null, null, null, sourcePoolBalance, runId);
         }
     }
 
     /**
-     * 已认领放行载荷（恢复受理的原被拦输入：车道＋原文＋附件＋作用域锚）。
+     * 已认领放行载荷（恢复受理的原被拦输入：车道＋原文＋附件）。
      *
      * @param holdId      留存 id（退场锚——恢复受理失败时编排调 {@link #discard})
      * @param projectId   项目（编排恢复受理的寻址——billing 弱引用透传）
      * @param lane        被拦车道（恢复受理的分岔）
      * @param prompt      被拦输入原文（不重输的恢复面）
      * @param attachments 随拦附件载荷原样（可空）
-     * @param designItem  作用域改稿目标件序（仅 DESIGN_REVISION；其余 null）
-     * @param divergence  作用域改稿发散度档位名（仅 DESIGN_REVISION；其余 null）
      * @param runId       余额提醒卡事件锚（旧卡的链路锚）
      */
     public record ResumableHold(String holdId, Long projectId, BalanceHoldLane lane, String prompt,
-            List<Map<String, Object>> attachments, Integer designItem, String divergence,
-            String runId) {
+            List<Map<String, Object>> attachments, String runId) {
     }
 }

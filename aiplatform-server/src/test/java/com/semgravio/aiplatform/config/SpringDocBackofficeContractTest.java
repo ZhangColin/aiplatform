@@ -219,25 +219,6 @@ class SpringDocBackofficeContractTest {
     }
 
     @Test
-    void given_conversation_entry_schema_when_read_group_then_session_source_coded() throws Exception {
-        // #298 会话来源标识：type=integer＋设计会话判据与降级口径自描述——admin
-        // 对话史 tab 按来源分组消费，null 语义（主会话缺省）不得漂移
-        JsonNode sessionSource = property(fetchGroup("project"), "ConversationEntryResponse",
-                "sessionSource");
-        assertThat(sessionSource.path("type").asText(null))
-                .as("sessionSource 应渲染 type=integer（BaseEnum 房规）")
-                .isEqualTo("integer");
-        assertThat(sessionSource.path("description").asText(""))
-                .as("sessionSource 应自描述设计会话判据与降级口径")
-                .contains("2=设计会话")
-                .contains("null=主会话缺省");
-        assertThat(property(fetchGroup("project"), "ConversationEntryResponse", "sessionSourceName")
-                .isMissingNode())
-                .as("sessionSourceName 中文名随行（#186 枚举出口配 *Name）")
-                .isFalse();
-    }
-
-    @Test
     void given_skill_schemas_when_read_group_then_id_is_opaque_string_and_source_coded() throws Exception {
         // #247：技能柄是 opaque 串两形制（builtin:<技能名>／TSID 十进制串）——
         // 消费方不得做数值假设，type=string 钉死＋柄形制自描述（#242 口径）

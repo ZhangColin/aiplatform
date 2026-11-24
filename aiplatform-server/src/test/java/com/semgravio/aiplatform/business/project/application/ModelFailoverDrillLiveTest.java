@@ -135,7 +135,7 @@ class ModelFailoverDrillLiveTest {
                         queue.modelString(), queue.channel(),
                         "smoke-fo-session", "smoke-fo-user",
                         new UsageContext("smoke-fo-prj", Map.of("scene", "failover-drill")),
-                        null, Map.of(), null, null, null, null, false, false, null, null,
+                        null, Map.of(), null, null, null, null, false, null, null,
                         queue),
                 frames::add);
 

@@ -73,12 +73,14 @@ public class PrdVersionAppService {
      * 唯一约束竞态败者回读比对，同文即幂等返回。
      *
      * @param runId 起跑 run（来源锚——落版本行 run_id 列）
+     * @return 起跑时读到的 PRD 全文（#624 迭代收口比对基准）；读不出/项目不存在时
+     *         null——调用方据此保守判「未变」，不误发 document-updated
      */
-    public void recordOnDemoRunStart(Long projectId, String runId) {
+    public String recordOnDemoRunStart(Long projectId, String runId) {
         Project project = projectRepository.findById(projectId).orElse(null);
         if (project == null) {
             log.warn("[prd-version] 项目 {} 记版时记录已不存在——跳过记行", projectId);
-            return;
+            return null;
         }
         final String draft;
         try {
@@ -87,9 +89,32 @@ public class PrdVersionAppService {
         catch (RuntimeException e) {
             log.warn("[prd-version] 项目 {} run {} 起跑记行但 PRD 读不出（{}）——跳过"
                     + "（下轮起跑补位）", projectId, runId, e.toString());
-            return;
+            return null;
         }
         snapshot(project, draft, runId);
+        return draft;
+    }
+
+    /**
+     * 迭代收口 PRD 变化判定（#624）：把当前工作区 PRD 全文与起跑快照
+     * （{@link #recordOnDemoRunStart} 的返回值）比对，不同即变化。快照缺失或收口
+     * 读取失败一律保守判「未变」——不误发 document-updated，run 照常成功（平台不写
+     * PRD，变化只由内核整合动作带来）。
+     *
+     * @param baseline 起跑快照全文（null = 起跑时未读到）
+     */
+    public boolean changedSince(Long projectId, String baseline) {
+        if (baseline == null) {
+            return false;
+        }
+        try {
+            return !baseline.equals(projectQueryAppService.prd(projectId).content());
+        }
+        catch (RuntimeException e) {
+            log.warn("[prd-version] 项目 {} 收口 PRD 读取失败（判未变，不误发 "
+                    + "document-updated）：{}", projectId, e.toString());
+            return false;
+        }
     }
 
     /** 成行（短事务：最新版比对→同文跳过或插新行；唯一约束竞态败者幂等回读）。 */

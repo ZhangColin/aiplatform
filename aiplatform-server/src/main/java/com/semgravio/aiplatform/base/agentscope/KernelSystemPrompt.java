@@ -84,7 +84,8 @@ public final class KernelSystemPrompt {
      *   <li>并入——data/ 持久化、external/ 外部仓库、.platform/ 不写、.env 只读
      *       （含变量名 DATABASE_URL／REDIS_URL）</li>
      *   <li>已被覆盖不重复——基座技术栈／8081 常驻／起服节奏（环境句、起服句）、
-     *       docs/PRD.md 只读（任务句：需求正本与实现依据，需求修订归主智能体对话面）</li>
+     *       docs/PRD.md 是需求正本与实现依据（任务句；首建只按 PRD 实现，迭代时
+     *       内核按迭代任务提示把需求并入 PRD 对应章节——#624，平台不写 PRD）</li>
      *   <li>平台侧保证、不需模型动作——external/ 不进交付源码包/文件树/版本正本、
      *       node_modules 打包排除</li>
      *   <li>删除——AGENTS.md 自述（平台不再写该文件）、依赖安装提示（环境句已述

@@ -296,6 +296,47 @@ class PrdVersionAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PRD_VERSION_NOT_FOUND.message());
     }
 
+    // ---------- 迭代收口 PRD 变化判定（#624） ----------
+
+    @Test
+    void given_prd_snapshot_when_record_then_returns_baseline_content() {
+        Long projectId = persistedPrdProject(PRD_V1);
+
+        // 起跑快照的全文即迭代收口比对基准（#624 返回给轨道层）
+        assertThat(appService.recordOnDemoRunStart(projectId, "run-001")).isEqualTo(PRD_V1);
+    }
+
+    @Test
+    void given_prd_changed_after_baseline_when_changed_since_then_true() {
+        Long projectId = persistedPrdProject(PRD_V1);
+        String baseline = appService.recordOnDemoRunStart(projectId, "run-001");
+
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100099\n" + PRD_V2, "", 0));
+
+        assertThat(appService.changedSince(projectId, baseline)).isTrue();
+    }
+
+    @Test
+    void given_prd_same_as_baseline_when_changed_since_then_false() {
+        Long projectId = persistedPrdProject(PRD_V1);
+        String baseline = appService.recordOnDemoRunStart(projectId, "run-001");
+
+        assertThat(appService.changedSince(projectId, baseline)).isFalse();
+    }
+
+    @Test
+    void given_no_baseline_or_unreadable_prd_when_changed_since_then_false() {
+        // 快照缺失（记行失败）或收口读取失败＝保守判未变，不误发 document-updated
+        Long projectId = persistedPrdProject(PRD_V1);
+
+        assertThat(appService.changedSince(projectId, null)).isFalse();
+
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "stat: 无法取文件状态", 1));
+        assertThat(appService.changedSince(projectId, PRD_V1)).isFalse();
+    }
+
     // ---------- 辅件 ----------
 
     /** 已产出 PRD 的项目＋工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文）。 */

@@ -1295,4 +1295,105 @@ class IterationAppServiceTest {
                 .doesNotContain("本轮需求基准");
     }
 
+    // ---------- 迭代后 PRD 仍是完整文档（#624） ----------
+
+    /** 工作区 PRD 读取桩（PRD 读端点同形；按调用序返回——起跑快照在前、收口比对在后）。 */
+    private void givenWorkspacePrdReads(String... prdMarkdowns) {
+        ExecResultResponse[] responses = new ExecResultResponse[prdMarkdowns.length];
+        for (int index = 0; index < prdMarkdowns.length; index++) {
+            responses[index] = new ExecResultResponse("1756100000\n" + prdMarkdowns[index], "", 0);
+        }
+        org.mockito.stubbing.OngoingStubbing<ExecResultResponse> stub =
+                when(workspaceLifecycleAppService.exec(any(),
+                        argThat(cmd -> cmd != null && cmd.command().contains("stat -c %Y"))));
+        if (responses.length == 1) {
+            stub.thenReturn(responses[0]);
+        }
+        else {
+            stub.thenReturn(responses[0],
+                    java.util.Arrays.copyOfRange(responses, 1, responses.length));
+        }
+    }
+
+    @Test
+    void given_fix_handoff_when_prompt_then_requires_merge_requirement_into_prd_sections() {
+        // 迭代任务提示明确要求并入 PRD 对应章节、保持完整；不要求平台固定章节
+        String prompt = IterationAppService.kernelFixRunPrompt(singleHandoff("列表加导出", null));
+
+        assertThat(prompt)
+                .contains("docs/PRD.md")
+                .contains("对应章节")
+                .contains("完整文档")
+                .contains("留痕")
+                .doesNotContain("迭代节");
+    }
+
+    @Test
+    void given_modification_instructions_when_prompt_then_requires_merge_requirement_into_prd_sections() {
+        // 对话面交指令的迭代 run 同口径：内核把需求整合进 PRD 对应章节
+        String prompt = IterationAppService.modificationRunPrompt(
+                List.of(instruction("列表加导出", "把订单列表增加导出按钮")));
+
+        assertThat(prompt)
+                .contains("docs/PRD.md")
+                .contains("对应章节")
+                .contains("完整文档")
+                .contains("留痕")
+                .doesNotContain("迭代节");
+    }
+
+    @Test
+    void given_prd_changed_after_fix_when_closes_then_document_updated_emitted() {
+        // 迭代收口对比工作区 PRD 与起跑快照：变了才发既有 document-updated
+        Long projectId = persistedGeneratedProject("9975");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspacePrdReads("# PRD\n\n## 功能清单\n\n1. 首页\n",
+                "# PRD\n\n## 功能清单\n\n1. 首页\n2. 导出\n");
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
+
+        appService.startFixRun(projectId, "列表加导出", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), payload.capture());
+        assertThat(payload.getValue())
+                .containsEntry(ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString())
+                .containsEntry(ProjectEventTypes.DOCUMENT_TYPE_FIELD,
+                        ProjectEventTypes.DOCUMENT_TYPE_PRD);
+    }
+
+    @Test
+    void given_prd_unchanged_after_fix_when_closes_then_no_document_updated() {
+        // 无变化不发（避免右栏无意义重拉）
+        Long projectId = persistedGeneratedProject("9976");
+        List<Runnable> tracks = givenTrackQueued();
+        String same = "# PRD\n\n## 功能清单\n\n1. 首页\n";
+        givenWorkspacePrdReads(same, same);
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
+
+        appService.startFixRun(projectId, "列表加导出", null);
+        tracks.remove(0).run();
+
+        verify(eventsAppService, never()).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
+    }
+
+    @Test
+    void given_prd_changed_after_modification_when_closes_then_document_updated_emitted() {
+        // 对话面交指令触发的迭代 run 同口径
+        Long projectId = persistedGeneratedProject("9977");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspacePrdReads("# PRD\n\n## 功能清单\n\n1. 首页\n",
+                "# PRD\n\n## 功能清单\n\n1. 首页\n2. 导出\n");
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
+
+        appService.handOffModification(projectRepository.findById(projectId).orElseThrow(),
+                List.of(instruction("列表加导出", "把订单列表增加导出按钮")), "dialog-run-1");
+        tracks.remove(0).run();
+
+        verify(eventsAppService).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
+    }
+
 }

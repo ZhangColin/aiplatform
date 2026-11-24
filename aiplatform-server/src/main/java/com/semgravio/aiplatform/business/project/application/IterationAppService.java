@@ -84,10 +84,23 @@ import lombok.extern.slf4j.Slf4j;
 public class IterationAppService {
 
     /**
+     * 迭代任务提示的 PRD 维护句（#624）：完成改动后把本轮需求并入 PRD 对应章节，
+     * 让 PRD 始终是一份完整文档——需求写进相应位置、不在文末堆积原始意见；内核
+     * 如需保留历史留痕可自行安排，平台不强制固定章节。平台不写 PRD，本文只是
+     * 对内核的任务要求（修正轨与对话面交指令轨共用）。
+     */
+    static final String PRD_MERGE_INSTRUCTION =
+            "\n完成改动后，把本轮需求并入 " + ProjectArtifacts.PRD
+                    + " 的对应章节，让 PRD 始终是一份完整文档（需求写进相应位置、"
+                    + "不在文末堆积原始意见；如需保留改动留痕可自行安排，平台不要求"
+                    + "固定章节）。";
+
+    /**
      * 内核修正任务 prompt（#601 接线）：交接物三要素结构化拼装同 {@link
      * {@link #kernelFixRunPrompt}（意见原文＋逐轮需求侧判定＋PRD 正本引用），收口判据句换内核
      * 口径——pnpm build 过＋8081 探活有响应双件全过才算完成（无 finish_edit 尾句：
-     * 内核工具面恰四件、收口以平台侧机器判据为准）。
+     * 内核工具面恰四件、收口以平台侧机器判据为准）。#624 起追加 PRD 维护句——内核
+     * 把本轮需求整合进 PRD 对应章节，PRD 恒为完整文档。
      */
     static String kernelFixRunPrompt(FixHandoff handoff) {
         StringBuilder prompt = new StringBuilder(
@@ -103,7 +116,8 @@ public class IterationAppService {
                             : "本轮无修订（未触发 PRD 变更）");
         }
         prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
-                .append("，以正本与上述意见为准。");
+                .append("（本轮完成后要更新的完整文档），以正本与上述意见为准。");
+        prompt.append(PRD_MERGE_INSTRUCTION);
         prompt.append("\n完成后用 pnpm build 验证可构建、用 curl http://localhost:8081 "
                 + "确认有响应——双件全过本轮修正才算完成。");
         return prompt.toString();
@@ -135,6 +149,9 @@ public class IterationAppService {
 
     /** 对话面在途入待办的轻提示落对话史（刷新/回访不丢，#89 闭史口径）。 */
     private final ConversationHistoryAppService conversationHistory;
+
+    /** 通知发射（#624：迭代收口 PRD 变化 → document-updated）。 */
+    private final EventsAppService eventsAppService;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -183,7 +200,8 @@ public class IterationAppService {
             DemoSeedAppService demoSeed,
             BalanceGateAppService balanceGate,
             KernelClosingCriteria kernelClosingCriteria,
-            ConversationHistoryAppService conversationHistory) {
+            ConversationHistoryAppService conversationHistory,
+            EventsAppService eventsAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.codingRunDispatcher = codingRunDispatcher;
@@ -195,6 +213,7 @@ public class IterationAppService {
         this.balanceGate = balanceGate;
         this.kernelClosingCriteria = kernelClosingCriteria;
         this.conversationHistory = conversationHistory;
+        this.eventsAppService = eventsAppService;
     }
 
     /**
@@ -534,22 +553,25 @@ public class IterationAppService {
             String runId = firstRunId;
             while (true) {
                 List<ModificationHandoffFacts.Instruction> current = batch;
-                // Demo 类 run 起跑自动记行（#462 去门化口径沿用，随旧版本表归 #625 清场）
+                // Demo 类 run 起跑自动记行（#462 去门化口径沿用，随旧版本表归 #625 清场）；
+                // 返回值即本场起跑时的 PRD 全文，留作收口变化比对基准（#624）
+                String prdBaseline = null;
                 try {
-                    prdVersionAppService.recordOnDemoRunStart(projectId, runId);
+                    prdBaseline = prdVersionAppService.recordOnDemoRunStart(projectId, runId);
                 }
                 catch (RuntimeException e) {
                     log.warn("[modify] 项目 {} run {} 起跑记行失败（不反噬本场）：{}",
                             projectId, runId, e.toString());
                 }
                 Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
+                String prdSnapshot = prdBaseline;
                 CodingRunDispatcher.RunResult result;
                 try {
                     result = codingRunDispatcher.run(project, runId,
                             fixSession(projectId, runId),
                             modificationRunPrompt(current),
                             (attemptRunId, attemptChanges) -> closeKernelFix(project,
-                                    attemptRunId, prdVersionNo, attemptChanges),
+                                    attemptRunId, prdVersionNo, prdSnapshot, attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
                             /* includePatch= */ true);
@@ -603,6 +625,7 @@ public class IterationAppService {
      * 修改 run 任务提示（#623）：逐条携<b>用户原话＋平台整理的自足修改指令</b>（附件
      * 定位说明有则附），要求内核在现有工作区完成修改、其余部分保持可用；需求正本
      * 引用工作区 PRD、收口判据句同内核口径（{@code pnpm build}＋8081 探活双件）。
+     * #624 起追加 PRD 维护句——内核把需求整合进 PRD 对应章节，PRD 恒为完整文档。
      */
     static String modificationRunPrompt(List<ModificationHandoffFacts.Instruction> instructions) {
         StringBuilder prompt = new StringBuilder(
@@ -619,7 +642,8 @@ public class IterationAppService {
             }
         }
         prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
-                .append("，以正本与上述修改要求为准。");
+                .append("（本轮完成后要更新的完整文档），以正本与上述修改要求为准。");
+        prompt.append(PRD_MERGE_INSTRUCTION);
         prompt.append("\n完成后用 pnpm build 验证可构建、用 curl http://localhost:8081 "
                 + "确认有响应——双件全过本轮修改才算完成。");
         return prompt.toString();
@@ -708,9 +732,11 @@ public class IterationAppService {
                 FixHandoff currentHandoff = handoff;
                 // Demo 类 run 起跑自动记行（#462 去门化，ADR-0039）：快照当时工作区
                 // PRD 全文为构建基准（同文幂等跳过）——记行先行，随后锚捕获读到的
-                // 「最新版」即本场基准；best-effort：失败只记日志不反噬本场
+                // 「最新版」即本场基准；best-effort：失败只记日志不反噬本场。返回值
+                // 即本场起跑时的 PRD 全文，留作收口变化比对基准（#624）
+                String prdBaseline = null;
                 try {
-                    prdVersionAppService.recordOnDemoRunStart(projectId, runId);
+                    prdBaseline = prdVersionAppService.recordOnDemoRunStart(projectId, runId);
                 }
                 catch (RuntimeException e) {
                     log.warn("[fix] 项目 {} run {} 起跑记行失败（不反噬本场）：{}",
@@ -719,6 +745,7 @@ public class IterationAppService {
                 // Demo 版本锚捕获（#333；#462 读法顺延）：本场起跑时最新 PRD 版本——
                 // 在途场照跑完收口绑起跑时版本
                 Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
+                String prdSnapshot = prdBaseline;
                 CodingRunDispatcher.RunResult result;
                 try {
                     // 内核装配形态（#601 接线，ADR-0054/0055）：系统提示权威版本＋工具
@@ -730,7 +757,7 @@ public class IterationAppService {
                             // 单发提示（#604 失败即终态、不自动重试）
                             kernelFixRunPrompt(handoff),
                             (attemptRunId, attemptChanges) -> closeKernelFix(project, attemptRunId,
-                                    prdVersionNo, attemptChanges),
+                                    prdVersionNo, prdSnapshot, attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
                             /* includePatch= */ true); // 迭代清单携单文件只读 diff（#619）
@@ -837,9 +864,13 @@ public class IterationAppService {
      * 系统改没改以派发器的平台可观测文件改动事实为准（{@code attemptChanges} 非空——
      * 不依赖模型自报）；实动即 Demo 迭代轮成版（#333 同口径）＋演示种子补位（#340）。
      * 逐件判据结果（#617）随收口判据回给派发器，进收尾卡「判据结果」。
+     *
+     * <p>#624：收口对比工作区 PRD 与起跑快照（{@code prdBaseline}），有变化才发既有
+     * document-updated（右栏按现有失效逻辑刷新）；平台自己不写 PRD，变化只由内核按
+     * 任务提示整合带来。失败判据先抛——PRD 变化通知只在 run 成功后发。</p>
      */
     private CodingRunDispatcher.ClosingJudgment closeKernelFix(Project project, String attemptRunId,
-            Integer prdVersionNo, List<FileChange> attemptChanges) {
+            Integer prdVersionNo, String prdBaseline, List<FileChange> attemptChanges) {
         KernelClosingCriteria.KernelClosingResult closing =
                 kernelClosingCriteria.assess(project.getWorkspaceId());
         if (!closing.complete()) {
@@ -858,11 +889,35 @@ public class IterationAppService {
                         project.getId(), e.toString());
             }
         }
+        // 迭代后 PRD 仍是完整文档（#624）：内核按任务提示把需求整合进 PRD 对应章节，
+        // 收口比对起跑快照——变了才发既有 document-updated；无变化不发（不误刷新右栏）。
+        emitDocumentUpdatedIfPrdChanged(project, prdBaseline);
         // 演示种子预置（#340）：迭代收口补位——系统实动后可能有新空表（幂等引擎
         // 只补空表）；失败不阻断收工。
         demoSeed.seedSandbox(project);
         return new CodingRunDispatcher.ClosingJudgment(
                 closing.buildPassed(), closing.probePassed());
+    }
+
+    /**
+     * 迭代收口 PRD 变化通知（#624）：工作区 PRD 与起跑快照不同即发既有
+     * document-updated（载荷与 savePrd 同源，前端失效文档域重拉 PRD 全文）；
+     * 无变化/读取失败保守不发，通知发射失败不反噬收口。
+     */
+    private void emitDocumentUpdatedIfPrdChanged(Project project, String prdBaseline) {
+        try {
+            if (!prdVersionAppService.changedSince(project.getId(), prdBaseline)) {
+                return;
+            }
+            eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED,
+                    ProjectEventTypes.documentUpdatedPayload(project,
+                            ProjectEventTypes.DOCUMENT_TYPE_PRD));
+            log.info("[fix] 项目 {} 迭代收口 PRD 已变化，发 document-updated", project.getId());
+        }
+        catch (RuntimeException e) {
+            log.warn("[fix] 项目 {} PRD 变化通知发射失败（不反噬收口）：{}",
+                    project.getId(), e.toString());
+        }
     }
 
     /**

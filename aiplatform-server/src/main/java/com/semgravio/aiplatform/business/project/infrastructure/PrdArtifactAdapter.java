@@ -1,7 +1,5 @@
 package com.semgravio.aiplatform.business.project.infrastructure;
 
-import java.util.Map;
-
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -55,11 +53,8 @@ public class PrdArtifactAdapter {
             loaded.markPrdProduced();
             return projectRepository.save(loaded);
         });
-        eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED, Map.of(
-                ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
-                ProjectEventTypes.DOCUMENT_TYPE_FIELD, ProjectEventTypes.DOCUMENT_TYPE_PRD,
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
-                        EventsAppService.OWNER_GUEST_FIELD,
-                        EventsAppService.ownerPayload(project.getOwnerGuestId())));
+        eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED,
+                ProjectEventTypes.documentUpdatedPayload(project,
+                        ProjectEventTypes.DOCUMENT_TYPE_PRD));
     }
 }

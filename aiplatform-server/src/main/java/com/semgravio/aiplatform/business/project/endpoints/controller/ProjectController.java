@@ -33,8 +33,6 @@ import com.semgravio.aiplatform.business.project.application.GenerationAppServic
 import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
-import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
-import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.BuildGateResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ContinueDiscussionResponse;
 import com.semgravio.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
@@ -51,9 +49,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Interc
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -73,8 +68,9 @@ import com.semgravio.aiplatform.support.Tsid;
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（生成前入口
  * 三分类派发 / 生成后对话面）/ 问答卡作答 / 生成点火（岔路口「立即生成」与前端
  * 「继续生成」恢复出口共用——#604 起重发即在既有工作区重跑）→ 归档 / 改名 / 详情
- * / 列表 / 用量 / PRD 读 / PRD 确认成版与版本清单详情（#330 确认即成版）/ 文件树
- * 只读浏览 → 源码包下载 → 预览 → 删除真删级联。
+ * / 列表 / 用量 / PRD 读 / PRD 确认点火（#542） / 文件树只读浏览 → 源码包下载 →
+ * 预览 → 删除真删级联。版本面（用户面 git 单轴）归 {@code ProjectVersionController}
+ * ——旧 PRD/Demo 双轴版本端点随 #630 退场。
  *
  * <p>#325 owner 守卫：{@code /api/projects/{id}/**} 单项目寻址统一过归属判定
  * （{@code ProjectOwnerInterceptor} 先于控制器）——非本人项目与不存在项目同 404
@@ -83,7 +79,7 @@ import com.semgravio.aiplatform.support.Tsid;
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（生成前三分类派发、生成后对话面）/ 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / Demo 版本与确认标记 / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（生成前三分类派发、生成后对话面）/ 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认点火 / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -93,8 +89,6 @@ public class ProjectController {
     private final GenerationAppService generationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
     private final InterviewQuotaAppService interviewQuotaAppService;
-    private final PrdVersionAppService prdVersionAppService;
-    private final DemoVersionAppService demoVersionAppService;
     private final BuildGateAppService buildGateAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
@@ -104,8 +98,6 @@ public class ProjectController {
                              GenerationAppService generationAppService,
                              ConversationHistoryAppService conversationHistoryAppService,
                              InterviewQuotaAppService interviewQuotaAppService,
-                             PrdVersionAppService prdVersionAppService,
-                             DemoVersionAppService demoVersionAppService,
                              BuildGateAppService buildGateAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
@@ -114,8 +106,6 @@ public class ProjectController {
         this.generationAppService = generationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
         this.interviewQuotaAppService = interviewQuotaAppService;
-        this.prdVersionAppService = prdVersionAppService;
-        this.demoVersionAppService = demoVersionAppService;
         this.buildGateAppService = buildGateAppService;
     }
 
@@ -364,7 +354,7 @@ public class ProjectController {
                     + "与 SSE 会话态无关（刷新/回访后档位仍正确）；从未生成即重跑入口在场的"
                     + "档位（首建未起跑，或失败/停止后——点火入口复现，POST /{id}/generate"
                     + " 重发即在既有工作区重跑），"
-                    + "已生成 = Demo 首版成版锚（v1 随 generated_at 同刻落）")
+                    + "已生成 = 首次生成时点（generated_at）已落")
     public ApiResponse<ProjectDetailResponse> get(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.detail(parseId(id)));
     }
@@ -441,9 +431,9 @@ public class ProjectController {
                     + "＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口"
                     + "三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认"
                     + "（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/"
-                    + "重跑同构）；<b>版本机制零改动</b>——确认不写版本行（旧「确认"
-                    + "即成版」#330 写表语义不复活），记行归 Demo 类 run 起跑单点、版本号"
-                    + "＝构建基准序全域一致。<b>点击幂等</b>＝已点火重复确认 409 PRJ_017"
+                    + "重跑同构）；确认不写任何版本数据——用户面版本由探活通过后自动成版"
+                    + "（#626 git 单轴时间线），旧 PRD/Demo 版本表已随 #630 退场。"
+                    + "<b>点击幂等</b>＝已点火重复确认 409 PRJ_017"
                     + "（不重复派发）；#604 起首建失败/停止收口清点火位——确认按钮复现，"
                     + "重确认即重跑；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经"
                     + "本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable"
@@ -455,60 +445,6 @@ public class ProjectController {
     public ApiResponse<GenerationStartResponse> confirmPrdGeneration(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
                 buildGateAppService.confirmFirstBuild(parseId(id)).runId()));
-    }
-
-    @GetMapping("/{id}/prd/versions")
-    @Operation(summary = "PRD 版本清单（最新在前，轻量形不含全文）",
-            description = "项目内 PRD 版本列表（#330→#462 去门化：Demo 类 run 起跑自动记行，"
-                    + "版本号＝构建基准序）：[{projectId, versionNo, confirmedAt}]，versionNo "
-                    + "倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。"
-                    + "空列表 = 尚无构建基准记行（呈现「草稿」徽章归前端推导）。归档项目照读"
-                    + "（历史可追溯）。项目不存在 404 PRJ_001")
-    public ApiResponse<List<PrdVersionSummaryResponse>> prdVersions(@PathVariable String id) {
-        return ApiResponse.ok(prdVersionAppService.versions(parseId(id)));
-    }
-
-    @GetMapping("/{id}/prd/versions/{versionNo}")
-    @Operation(summary = "PRD 版本详情（含全文快照）",
-            description = "单版详情（#330→#462 去门化）：{projectId, versionNo, content, "
-                    + "confirmedAt, readiness}——content 是成行时工作区 PRD 全文的不可变"
-                    + "快照（Demo 类 run 起跑时点，后续草稿改动不影响）；readiness（#331）"
-                    + "＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手"
-                    + "即解析）。归档项目照读。"
-                    + "版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001")
-    public ApiResponse<PrdVersionResponse> prdVersion(@PathVariable String id,
-            @PathVariable int versionNo) {
-        return ApiResponse.ok(prdVersionAppService.version(parseId(id), versionNo));
-    }
-
-    @GetMapping("/{id}/demo-versions")
-    @Operation(summary = "Demo 版本清单（最新在前）",
-            description = "项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, "
-                    + "prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口"
-                    + "自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口"
-                    + "递增），prdVersionNo＝起跑时最新 PRD 版本锚（「Demo vN（基于 "
-                    + "PRD vM 快照）」式关联；null＝无版本记行起跑——legacy/设计类），runId＝"
-                    + "收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；"
-                    + "confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。"
-                    + "versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = "
-                    + "从未成版（未生成/生成中）。归档项目照读（历史可追溯）。"
-                    + "项目不存在 404 PRJ_001")
-    public ApiResponse<List<DemoVersionSummaryResponse>> demoVersions(@PathVariable String id) {
-        return ApiResponse.ok(demoVersionAppService.versions(parseId(id)));
-    }
-
-    @PostMapping("/{id}/demo-versions/{versionNo}/confirm")
-    @Operation(summary = "确认此版本，准备签约（既有 Demo 版本上打确认标记）",
-            description = "「确认此版本，准备签约」（#333）＝既有版本上打确认标记——选定"
-                    + "动作、<b>不产生新版本号</b>（版本行不可变，标记归项目单指针"
-                    + "confirmed_demo_version_no）；换确认版本＝指针随移（旧标记自然失效，"
-                    + "重复确认同版幂等刷新确认时间）。响应＝所确认版本的清单形（含"
-                    + "confirmedAt）——下单前置「Demo 确认版本在场」的消费面（#335）。"
-                    + "项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；"
-                    + "版本不存在（含非正整数）404 PRJ_054")
-    public ApiResponse<DemoVersionSummaryResponse> confirmDemoVersion(@PathVariable String id,
-            @PathVariable int versionNo) {
-        return ApiResponse.ok(demoVersionAppService.confirm(parseId(id), versionNo));
     }
 
     @GetMapping("/{id}/files")

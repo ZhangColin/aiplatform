@@ -22,9 +22,9 @@ import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 订单 REST 面（#28 交易环①用户面 + #336 合同确认与预览）：下单（过双确认门
- * ——PRD 版本〔最新构建基准，#462 去门化读法顺延〕＋Demo 确认版本，冻结最新版
- * 全文冗余拷贝入单）/ 订单详情（含范围文本三段）/ 取消 /
+ * 订单 REST 面（#28 交易环①用户面 + #336 合同确认与预览）：下单（过确认门
+ * ——PRD 已产出＋已确认用户面版本〔#629，旧 PRD/Demo 版本表随 #630 退场〕，
+ * 冻结当前 PRD 全文冗余拷贝＋单一版本号入单）/ 订单详情（含范围文本三段）/ 取消 /
  * 确认范围并准备合同（范围快照冻结·合同创建口）/ 合同预览（订单名下最近合同）。
  * #611 设计线退役后设计资产包下载端点退场（交付物只剩系统单，取件走源码包，
  * 归后台面）。后台机机面（清单/详情/源码包/报价改价/范围录入）归
@@ -70,18 +70,19 @@ public class OrderController {
     }
 
     @PostMapping("/api/projects/{projectId}/orders")
-    @Operation(summary = "下单（过双确认门冻结 PRD 最新版与交付物类型入单）",
-            description = "纯按钮零输入：下单前置门＝存在 PRD 版本（最新构建基准——Demo 类 run "
-                    + "起跑自动记行，#462 去门化读法顺延）＋Demo 确认版本（缺失如实拦截 "
-                    + "ORD_018/ORD_019），过门即冻结 PRD 最新版全文冗余拷贝＋双版本"
-                    + "引用入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用；冻结字段"
-                    + "结构与既有订单数据不动），待报价起步；交付物类型一律为系统单"
-                    + "（#611 设计线退役后只有系统一种，交付物为源码包）。"
+    @Operation(summary = "下单（过确认门冻结 PRD 快照与已确认用户面版本入单）",
+            description = "纯按钮零输入：下单前置门＝PRD 已产出（缺 PRD 拦截 ORD_018）＋存在"
+                    + "已确认用户面版本（「确认此版本，准备签约」#629；缺确认拦截 ORD_019），"
+                    + "过门即冻结当前工作区 PRD 全文冗余拷贝＋已确认用户面版本号入单（此后"
+                    + " PRD 修订不影响本单，取消再下 = 新单新引用；冻结字段结构与既有订单"
+                    + "数据不动），待报价起步；交付物类型一律为系统单（#611 设计线退役后"
+                    + "只有系统一种，交付物为源码包）。旧 PRD/Demo 版本表已随 #630 退场，"
+                    + "新单只写单一已确认版本号；历史单的旧双版本引用照读。"
                     + "下单即冻结迭代——对话区停止受理意见（409 ORD_006），"
                     + "取消订单即解冻回迭代。同项目至多一张"
                     + "未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落"
-                    + "（#29）。项目不存在 404 PRJ_001；无 PRD 版本 409 ORD_018；无 Demo"
-                    + " 确认版本 409 ORD_019；项目已归档 409 ORD_004")
+                    + "（#29）。项目不存在 404 PRJ_001；无 PRD 快照 409 ORD_018；无已确认"
+                    + "用户面版本 409 ORD_019；项目已归档 409 ORD_004")
     public ApiResponse<OrderResponse> place(@PathVariable String projectId) {
         return ApiResponse.ok(appService.place(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }

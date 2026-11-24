@@ -17,21 +17,11 @@ import { ProjectSpaceShell } from "./project-space-shell";
 
 const seed = vi.hoisted(() => ({
   detail: {} as ProjectDetail,
-  prdVersions: [] as { versionNo?: number }[],
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1" }));
 vi.mock("@/hooks/use-project", () => ({
   useProject: () => ({ data: seed.detail, isPending: false }),
-}));
-vi.mock("@/hooks/use-prd", () => ({
-  usePrdVersions: () => ({ data: seed.prdVersions }),
-  // 版本记录抽屉（#344）条目详情面——壳测试不出条目弹窗，桩空
-  usePrdVersion: () => ({ data: null, isPending: false }),
-}));
-// Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: [] }),
 }));
 // 单轴版本时间线数据/动作面（#626）——壳测试只断言挂载与开合，桩空
 vi.mock("@/hooks/use-version", () => ({
@@ -47,7 +37,6 @@ vi.mock("@/hooks/use-me", () => ({
 
 beforeEach(() => {
   seed.detail = {} as ProjectDetail;
-  seed.prdVersions = [];
 });
 
 afterEach(() => {
@@ -85,8 +74,8 @@ describe("ProjectSpaceShell · 灰置点击说明原因", () => {
     expect(await screen.findByText(/付款完成后开放/)).toBeTruthy();
   });
 
-  it("#343 验收闭合：PRD 已确认（#330 版本列表非空）→ Demo 体验不再灰置、指到阶段页", () => {
-    seed.prdVersions = [{ versionNo: 1 }];
+  it("#343 验收闭合：首个构建已起跑（生成态，旧版本记行随 #630 退场）→ Demo 体验不再灰置、指到阶段页", () => {
+    seed.detail = { generationState: "generated" } as ProjectDetail;
     mountShell();
     const demo = screen.getAllByText("Demo 体验")[0];
     expect(demo.closest("a")?.getAttribute("href")).toBe("/projects/p1/demo");

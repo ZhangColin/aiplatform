@@ -23,10 +23,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: [] }),
-}));
-
 type HappyDOMWindow = Window & {
   happyDOM: { settings: { disableIframePageLoading: boolean } };
 };

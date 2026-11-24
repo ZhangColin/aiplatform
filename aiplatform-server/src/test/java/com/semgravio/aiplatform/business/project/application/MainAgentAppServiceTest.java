@@ -17,7 +17,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -59,7 +58,6 @@ import com.semgravio.aiplatform.business.billing.application.BillingAppService;
 import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
-import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
@@ -68,7 +66,6 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -103,9 +100,6 @@ class MainAgentAppServiceTest {
 
     @Autowired
     private ProjectRepository projectRepository;
-
-    @Autowired
-    private PrdVersionRepository prdVersions;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -151,7 +145,6 @@ class MainAgentAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -913,7 +906,6 @@ class MainAgentAppServiceTest {
         // #601 内核接线：首建直派新内核（权威提示＋generation-kernel 装配键＋
         // kernelForm＋无工具规格）；#602：切片计划交接面随切片机器整体出局
         Long projectId = persistedPrdProject("9731");
-        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -948,7 +940,6 @@ class MainAgentAppServiceTest {
         // 岔路口卡照旧在场（PRD 可看），「立即生成」触发时才点火——不兜假计划。
         // #602：切片计划机器整体出局，「计划缺失」概念随之退役（内核路径无计划判据）
         Long projectId = persistedPrdProject("9730");
-        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -974,7 +965,6 @@ class MainAgentAppServiceTest {
         // 已有生成在途（共用件在途标记 begin 已占位），收口不派
         // 第二场生成，用户新意见照旧随对话收口
         Long projectId = persistedPrdProject("9728");
-        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         codingRunTrack.begin(projectId); // 模拟生成在途
         try {
@@ -1009,7 +999,6 @@ class MainAgentAppServiceTest {
         // 首个构建 run（新草稿＝首个构建基准：版本记行随起跑自动落，无确认动作）；
         // 停驻两列留库不删、无人写
         Long projectId = persistedPrdProject("9764");
-        seedPrdVersionRow(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
         givenSessionExecutorRunsInline();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -1541,19 +1530,11 @@ class MainAgentAppServiceTest {
     }
 
     /** PRD 已产出、未生成的项目（去门化 #462：收口观测派首个构建 run 的判据＝
-     * {@code prdProducedAt}——与版本行无关，版本行见 {@link #seedPrdVersionRow}）。 */
+     * {@code prdProducedAt}——与旧版本行无关，旧版本表已随 #630 退场）。 */
     private Long persistedPrdProject(String workspaceId) {
         Project project = projectRepository.save(Project.create("访谈项目", null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         return projectRepository.save(project).getId();
-    }
-
-    /** PRD 版本行在场（v1 记行形态——Demo 版本锚/读面的取数事实；去门化 #462 后
-     * 不构成任何派发门，仅作 legacy 记行形态夹具）。 */
-    private void seedPrdVersionRow(Long projectId) {
-        Project project = projectRepository.findById(projectId).orElseThrow();
-        prdVersions.save(PrdVersion.recorded(projectId, 1, "# PRD\n\n## 功能清单\n\n1. 首页\n",
-                LocalDateTime.now(), project.getPrdProducedAt(), "run-fixture"));
     }
 
     private Long persistedArchivedProject(String workspaceId) {

@@ -25,7 +25,6 @@ import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppSe
 import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
 import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
-import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -96,14 +95,6 @@ class ProjectOwnerInterceptorMvcTest {
     /** 岔路口与派发门（#542 访谈②）：ProjectController 新增构造依赖——切片装配同补。 */
     @MockitoBean
     private BuildGateAppService buildGateAppService;
-
-    /** #330 起进 ProjectController 构造的 PRD 版本服务（切片装配补齐）。 */
-    @MockitoBean
-    private PrdVersionAppService prdVersionAppService;
-
-    /** #333 起进 ProjectController 构造的 Demo 版本服务（切片装配补齐）。 */
-    @MockitoBean
-    private com.semgravio.aiplatform.business.project.application.DemoVersionAppService demoVersionAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {

@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Sort;
@@ -43,7 +42,6 @@ import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
 
@@ -75,20 +73,17 @@ public class ProjectQueryAppService {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final OrderQueryAppService orderQueryAppService;
     private final CodingRunTrack codingRunTrack;
-    private final PrdVersionRepository prdVersionRepository;
 
     public ProjectQueryAppService(ProjectRepository projectRepository,
                                   UsageQueryPort usageQueryPort,
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                   OrderQueryAppService orderQueryAppService,
-                                  CodingRunTrack codingRunTrack,
-                                  PrdVersionRepository prdVersionRepository) {
+                                  CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.orderQueryAppService = orderQueryAppService;
         this.codingRunTrack = codingRunTrack;
-        this.prdVersionRepository = prdVersionRepository;
     }
 
     /**
@@ -113,7 +108,7 @@ public class ProjectQueryAppService {
         Project project = loadProject(projectId);
         PrdSnapshot snapshot = project.getPrdProducedAt() == null ? null : readPrdSnapshotOrNull(project);
         return new OrderFreezeRefs(snapshot == null ? null : snapshot.content(),
-                project.getConfirmedDemoVersionNo());
+                project.getConfirmedVersionNo());
     }
 
     /**
@@ -208,13 +203,9 @@ public class ProjectQueryAppService {
                 RequestContext.getUserId(), GuestContext.guestId());
         List<Long> projectIds = projects.stream().map(Project::getId).toList();
         Map<Long, OrderBriefResponse> activeOrders = orderQueryAppService.activeOrdersOf(projectIds);
-        Set<Long> prdConfirmedProjectIds = projectIds.isEmpty() ? Set.of()
-                : prdVersionRepository.findProjectIdsByProjectIdIn(projectIds).stream()
-                        .collect(Collectors.toSet());
         return projects.stream()
                 .filter(project -> matches(project, status))
-                .map(project -> toResponse(project, activeOrders.get(project.getId()),
-                        prdConfirmedProjectIds.contains(project.getId())))
+                .map(project -> toResponse(project, activeOrders.get(project.getId())))
                 .toList();
     }
 
@@ -461,8 +452,7 @@ public class ProjectQueryAppService {
      * 摘要（归档终态「完整记录」取单面，#30）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
-                orderQueryAppService.activeOrderOf(project.getId()).orElse(null),
-                prdVersionRepository.existsByProjectId(project.getId()));
+                orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
         GenerationState generationState = generationStateOf(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 project.getEndpointType(), project.getEndpointType().getName(),
@@ -496,9 +486,8 @@ public class ProjectQueryAppService {
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）+ 终点类型（列表卡弱标识）+ 未终结订单摘要
-     * + P08 生命周期阶段与待补事实（PRD 确认集合由列表批量读、详情单点存在性读）。 */
-    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder,
-            boolean prdConfirmed) {
+     * + P08 生命周期阶段与待补事实。 */
+    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder) {
         boolean archived = project.getArchivedAt() != null;
         ProjectStatus status = archived ? ProjectStatus.ARCHIVED : ProjectStatus.IN_PROGRESS;
         return new ProjectResponse(
@@ -515,9 +504,19 @@ public class ProjectQueryAppService {
                 project.getCreatedAt(),
                 project.getUpdatedAt(),
                 activeOrder,
-                prdConfirmed,
-                project.getConfirmedDemoVersionNo() != null,
+                firstBuildStarted(project),
+                project.getConfirmedVersionNo() != null,
                 project.isNeedsUserSupplement());
+    }
+
+    /**
+     * PRD 阶段门事实（#349 P08 生命周期阶段推导）：首个构建 run 已起跑（生成在途或
+     * 已生成）。旧版以「PRD 构建基准记行在场」为据，旧版本表随 #630 退场后改读
+     * 生成态投影（{@link #generationStateOf}——generated_at＋在途标记同源）：
+     * 未生成/失败重待＝PRD 阶段未完成，Demo 阶段保持灰置。
+     */
+    private boolean firstBuildStarted(Project project) {
+        return generationStateOf(project) != GenerationState.NEVER_GENERATED;
     }
 
     private Project loadProject(Long projectId) {

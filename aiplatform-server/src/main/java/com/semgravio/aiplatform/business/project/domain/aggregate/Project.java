@@ -122,19 +122,18 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     private LocalDateTime generationRequestedAt;
 
     /**
-     * 确认用于签约的用户面版本号（#629 改义；单指针，NULL = 未确认任何版本）：
-     * 「确认此版本，准备签约」＝标记当前用户面版本（git 版本号，非旧 Demo/PRD
+     * 确认用于签约的用户面版本号（#629 改义，「确认此版本，准备签约」；单指针，
+     * NULL = 未确认任何版本）：标记当前用户面版本（git 版本号，非旧 Demo/PRD
      * 版本号）——选定动作、不产生新版本号；换选＝指针移动、旧标记随移，重复确认
      * 同版幂等（时间刷新）。下单前置「存在已确认用户面版本」与订单冻结的版本引用
-     * 消费本位。列名 {@code confirmed_demo_version_no} 为历史沿用，#630 迁移改义
-     * 为 {@code confirmed_version_no}。
+     * 消费本位。旧双轴版本表随 #630 退场，本列语义收拢为用户面版本号。
      */
-    @Column(name = "confirmed_demo_version_no")
-    private Integer confirmedDemoVersionNo;
+    @Column(name = "confirmed_version_no")
+    private Integer confirmedVersionNo;
 
-    /** 确认标记落位时点（与 {@link #confirmedDemoVersionNo} 同刻写，随指针移动刷新）。 */
-    @Column(name = "confirmed_demo_at")
-    private LocalDateTime confirmedDemoAt;
+    /** 确认标记落位时点（与 {@link #confirmedVersionNo} 同刻写，随指针移动刷新）。 */
+    @Column(name = "confirmed_version_at")
+    private LocalDateTime confirmedVersionAt;
 
     /**
      * 改需求回路停驻的意见原文（#334；<b>#462 去确认门：停驻读法整段退役</b>——
@@ -284,9 +283,9 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      * （旧标记自然失效），重复确认同版幂等（时间刷新）。目标版本存在性守卫归应用层
      * （#629 起＝用户面版本序列的 PRJ_028）。
      */
-    public void confirmDemoVersion(int versionNo) {
-        this.confirmedDemoVersionNo = versionNo;
-        this.confirmedDemoAt = LocalDateTime.now();
+    public void confirmVersion(int versionNo) {
+        this.confirmedVersionNo = versionNo;
+        this.confirmedVersionAt = LocalDateTime.now();
     }
 
     /**

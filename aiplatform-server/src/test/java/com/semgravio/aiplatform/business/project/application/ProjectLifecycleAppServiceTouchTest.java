@@ -25,8 +25,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,12 +71,6 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private ConversationHistoryAppService conversationHistory;
-
-    @Mock
-    private PrdVersionRepository prdVersions;
-
-    @Mock
-    private DemoVersionRepository demoVersions;
 
     @Mock
     private SkillDraftAppService skillDrafts;
@@ -205,8 +197,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, prdVersions,
-                demoVersions, skillDrafts, sedimentDrafts, orderQueryAppService, guestAppService,
-                transactionTemplate, new CodingRunTrack());
+                conversationHistory, skillDrafts, sedimentDrafts, orderQueryAppService,
+                guestAppService, transactionTemplate, new CodingRunTrack());
     }
 }

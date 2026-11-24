@@ -119,8 +119,6 @@ class BuildGateAppServiceTest {
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
-        jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         jdbcTemplate.update("DELETE FROM bil_balance_holds");
@@ -253,8 +251,8 @@ class BuildGateAppServiceTest {
 
     @Test
     void given_paid_prd_unrequested_when_confirm_then_first_build_dispatched_once() {
-        // 灵魂例（AC②）：确认即派发首建（点火时点落位）＋版本机制零改动——确认
-        // 不写版本行，起跑记行单点照旧（v1＝构建基准序首行）
+        // 灵魂例（AC②）：确认即派发首建（点火时点落位）＋不写任何版本数据（旧
+        // PRD/Demo 版本表已随 #630 退场，用户面版本由探活通过后自动成版 #626）
         Long projectId = persistedPaidPrdProject("9907");
 
         GenerationAppService.GenerationRun run = gateService.confirmFirstBuild(projectId);
@@ -264,18 +262,10 @@ class BuildGateAppServiceTest {
                 "SELECT generation_requested_at, fork_state FROM prj_projects WHERE id = ?",
                 projectId);
         assertThat(row.get("generation_requested_at")).isNotNull(); // 点火事实
-        // 版本表零改动回归：仅起跑记行单行（确认动作本身不写版本行——确认即成版不复活）
-        List<Map<String, Object>> versions = jdbcTemplate.queryForList(
-                "SELECT version_no FROM prj_prd_versions WHERE project_id = ?", projectId);
-        assertThat(versions).hasSize(1);
-        assertThat(versions.get(0).get("version_no")).isEqualTo(1);
         // 幂等（AC②重复点不重复派发）：已点火即拒绝 PRJ_017——不重复确认
         assertThatThrownBy(() -> gateService.confirmFirstBuild(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.GENERATION_ALREADY_REQUESTED.message());
-        assertThat(jdbcTemplate.queryForList(
-                "SELECT version_no FROM prj_prd_versions WHERE project_id = ?", projectId))
-                .hasSize(1); // 拒绝路径不落第二行
     }
 
     @Test

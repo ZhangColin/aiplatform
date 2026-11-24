@@ -41,14 +41,9 @@ export const queryKeys = {
     /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */
     fileContent: (id: string, path: string) => ["projects", "file-content", id, path] as const,
     /**
-     * Demo 构建版本列表（#333；空＝从未成版——版本 chip 与阶段门「Demo 已确认」
-     * 的事实源）。挂 projects 域：编码 run 收口（run-finish）即新版本落库，桥失效
-     * 本域随项目域刷新。
-     */
-    demoVersions: (id: string) => ["projects", "demo-versions", id] as const,
-    /**
      * run 收口版本表（#626：git log 即正本，commitHash×runId 锚）。单轴版本
-     * 时间线的唯一数据源；挂 projects 域随 run-finish 失效刷新。
+     * 时间线的唯一数据源；挂 projects 域随 run-finish 失效刷新。旧 Demo/PRD 双轴
+     * 版本列表（#630 退场）已随版本面收拢为这一条。
      */
     versions: (id: string) => ["projects", "versions", id] as const,
   },
@@ -61,14 +56,6 @@ export const queryKeys = {
     all: ["documents"] as const,
     /** 当前版 PRD（markdown + updatedAt；未产出 404 PRJ_015 在 hook 归一为 null）。 */
     prd: (id: string) => ["documents", "prd", id] as const,
-    /** PRD 版本清单（#330 成行制，#462 语义顺延——空列表＝尚无构建基准记行：阶段门「首个 Demo 在途」事实源）。 */
-    prdVersions: (id: string) => ["documents", "prd-versions", id] as const,
-    /**
-     * 单版 PRD 详情（含全文快照，#330；#462 起＝构建基准记行时点全文）：版本
-     * 记录抽屉条目点开时随用随查（#344）——挂 documents 域随记行失效刷新。
-     */
-    prdVersion: (id: string, versionNo: number) =>
-      ["documents", "prd-version", id, String(versionNo)] as const,
   },
   /**
    * 订单域（#28 交易环①）：订单卡按 id 拉详情；下单/取消动作连带失效

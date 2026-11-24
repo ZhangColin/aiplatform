@@ -32,8 +32,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
 
@@ -70,8 +68,6 @@ public class ProjectLifecycleAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
     private final ConversationHistoryAppService conversationHistory;
-    private final PrdVersionRepository prdVersions;
-    private final DemoVersionRepository demoVersions;
     private final SkillDraftAppService skillDrafts;
     private final SedimentDraftAppService sedimentDrafts;
     private final OrderQueryAppService orderQueryAppService;
@@ -88,8 +84,6 @@ public class ProjectLifecycleAppService {
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
                                       ConversationHistoryAppService conversationHistory,
-                                      PrdVersionRepository prdVersions,
-                                      DemoVersionRepository demoVersions,
                                       SkillDraftAppService skillDrafts,
                                       SedimentDraftAppService sedimentDrafts,
                                       OrderQueryAppService orderQueryAppService,
@@ -105,8 +99,6 @@ public class ProjectLifecycleAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
         this.conversationHistory = conversationHistory;
-        this.prdVersions = prdVersions;
-        this.demoVersions = demoVersions;
         this.skillDrafts = skillDrafts;
         this.sedimentDrafts = sedimentDrafts;
         this.orderQueryAppService = orderQueryAppService;
@@ -295,13 +287,11 @@ public class ProjectLifecycleAppService {
                 destroyWorkspaceForReclaim(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
-        // 派生 deleteBy 是「先查后 remove」，需在事务内执行——对话史/PRD 版本/
-        // Demo 版本行级联收进同一短事务（知识清理自带事务的 JDBC 直删，不在此列）
-        transactionTemplate.executeWithoutResult(status -> {
-            conversationHistory.purgeByProject(projectId);
-            prdVersions.deleteByProjectId(projectId);
-            demoVersions.deleteByProjectId(projectId);
-        });
+        // 派生 deleteBy 是「先查后 remove」，需在事务内执行——对话史行级联收进同一
+        // 短事务（知识清理自带事务的 JDBC 直删，不在此列）；旧 PRD/Demo 版本表随
+        // #630 退场，无版本行需清。
+        transactionTemplate.executeWithoutResult(status ->
+                conversationHistory.purgeByProject(projectId));
         skillDrafts.purgeByProject(projectId);
         // #460 采集层不留僵尸行：未终结沉淀草稿随项目清（只在途——终态留档、已激活
         // 知识素材与来源项目脱钩），对齐技能草稿清理先例

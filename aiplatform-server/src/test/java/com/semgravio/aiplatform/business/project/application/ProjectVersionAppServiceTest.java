@@ -148,8 +148,8 @@ class ProjectVersionAppServiceTest {
         assertThat(confirmed.current()).isTrue();
         assertThat(confirmed.confirmed()).isTrue();
         Project project = projectRepository.findById(projectId).orElseThrow();
-        assertThat(project.getConfirmedDemoVersionNo()).isEqualTo(2);
-        assertThat(project.getConfirmedDemoAt()).isNotNull();
+        assertThat(project.getConfirmedVersionNo()).isEqualTo(2);
+        assertThat(project.getConfirmedVersionAt()).isNotNull();
         // 回执不产生版本行（版本正本＝git log，确认不动它）
         assertThat(recordedCommands).noneMatch(command -> command.contains("git commit"));
     }
@@ -166,7 +166,7 @@ class ProjectVersionAppServiceTest {
 
         // 换选＝指针随移（旧标记自然失效）
         assertThat(projectRepository.findById(projectId).orElseThrow()
-                .getConfirmedDemoVersionNo()).isEqualTo(2);
+                .getConfirmedVersionNo()).isEqualTo(2);
     }
 
     @Test
@@ -179,7 +179,7 @@ class ProjectVersionAppServiceTest {
         appService.confirm(projectId, 1);
 
         assertThat(projectRepository.findById(projectId).orElseThrow()
-                .getConfirmedDemoVersionNo()).isEqualTo(1);
+                .getConfirmedVersionNo()).isEqualTo(1);
     }
 
     @Test
@@ -193,7 +193,7 @@ class ProjectVersionAppServiceTest {
                 .hasMessageContaining(ProjectMessage.VERSION_NOT_FOUND.message());
         // 拦截零副作用：指针不落
         assertThat(projectRepository.findById(projectId).orElseThrow()
-                .getConfirmedDemoVersionNo()).isNull();
+                .getConfirmedVersionNo()).isNull();
     }
 
     @Test
@@ -481,7 +481,7 @@ class ProjectVersionAppServiceTest {
         // 时间线标位：首条＝当前版；confirmed 按项目确认指针映射版本号
         Long projectId = persistedProject("9922");
         Project project = projectRepository.findById(projectId).orElseThrow();
-        project.confirmDemoVersion(1);
+        project.confirmVersion(1);
         projectRepository.save(project);
         stubExec((command, out) -> out.stdout =
                 platformLogLine(HASH_2, 1700000200L, "把按钮改成蓝色", 2, "run-2")

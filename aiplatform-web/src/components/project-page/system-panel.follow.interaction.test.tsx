@@ -33,10 +33,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: [] }),
-}));
-
 function writePart(toolCallId: string, path: string): WorkPart {
   return {
     kind: "action",

@@ -5,18 +5,17 @@ import type { ProjectDetail } from "@/lib/projects/detail";
  * 交付生命周期阶段（#343，spec #320 ⑥ 全局壳 / #318 IA）：项目空间四阶段
  * 的词表与可达性判定单一来源——阶段侧栏与全局顶栏五行导航共用（与侧栏重复
  * 亦保留，原型如此设计）。灰置条件＝「未满足条件的步骤要说明原因」（交接包），
- * 门序＝spec #320 依赖骨架（#462 去确认门语义顺延，ADR-0039——确认动作退役、
- * 「PRD 已确认」读法顺延为「最新构建基准记行在场」）：Demo 前置＝首个构建
- * 基准记行（首次 savePrd 自动触发首个 Demo run）、签约付款前置＝Demo 已确认
- * （Demo 确认门 #333）、生产承接前置＝付款完成（已支付＝开工条件满足，
- * ADR-0002 重对位）。
+ * 门序＝spec #320 依赖骨架（#462 去确认门语义顺延，ADR-0039）：Demo 前置＝
+ * 首个构建 run 已起跑（生成态投影，#630 起旧 PRD 版本记行退场后改读生成态）、
+ * 签约付款前置＝已确认用户面版本（「确认此版本，准备签约」#629）、生产承接
+ * 前置＝付款完成（已支付＝开工条件满足，ADR-0002 重对位）。
  *
  * <p>门事实（{@link StageGateFacts}）是语义正本位；从 REST 事实的投影
- * （{@link stageGateFactsOf}）只接现有事实——PRD 记行＝版本列表非空
- * （GET …/prd/versions，#462 起为构建基准序清单）；Demo 已确认＝用户面版本清单
- * 存在确认标记行（#629 起读 GET …/versions——confirmed 是项目确认指针在版本行
- * 的投影，换选随指针移动）；付款门接现有订单事实。判定函数不动。阶段页路由
- * 约定：需求分析＝项目页本路由，其余阶段页＝项目路由下路径段
+ * （{@link stageGateFactsOf}）只接现有事实——PRD 阶段门＝首个构建已起跑
+ * （项目详情生成态 generating/generated，与旧版本行无关）；Demo 已确认＝
+ * 用户面版本清单存在确认标记行（#629 起读 GET …/versions——confirmed 是项目
+ * 确认指针在版本行的投影，换选随指针移动）；付款门接现有订单事实。判定函数
+ * 不动。阶段页路由约定：需求分析＝项目页本路由，其余阶段页＝项目路由下路径段
  * （/projects/[id]/demo｜contract｜production——#347/#348/#349 各自落页）。</p>
  */
 
@@ -32,9 +31,9 @@ export type DeliveryStage = (typeof DELIVERY_STAGES)[number];
 export type DeliveryStageKey = DeliveryStage["key"];
 
 /**
- * 阶段门事实（推导输入的语义位）：PRD 记行＝存在构建基准快照（#462 语义顺延，
- * Demo 类 run 起跑自动记行）；Demo 已确认＝存在确认标记的 Demo 版本（#333）；
- * 订单已支付＝付款完成（已支付/已归档——已支付即开工条件满足）。
+ * 阶段门事实（推导输入的语义位）：prdConfirmed＝首个构建 run 已起跑（生成态
+ * 投影，旧 PRD 版本记行随 #630 退场）；demoConfirmed＝存在确认标记的用户面版本
+ * （#629）；orderPaid＝付款完成（已支付/已归档——已支付即开工条件满足）。
  */
 export type StageGateFacts = {
   prdConfirmed: boolean;
@@ -49,27 +48,25 @@ const LOCK_REASONS: Partial<Record<DeliveryStageKey, string>> = {
   production: "付款完成后开放：请先完成签约付款",
 };
 
-/** 已确认 PRD 版本列表的最小消费形状（versionNo 只用于存在性，不在此呈现）。 */
-type PrdVersionPresence = readonly { versionNo?: number }[];
-
 /** 用户面版本列表的最小消费形状（确认标记存在性——confirmed 是项目确认指针在行的投影）。 */
 type VersionPresence = readonly { versionNo?: number; confirmed?: boolean }[];
 
 /**
- * REST 事实 → 门事实投影：PRD 记行＝版本列表非空（#462 语义顺延——首个构建
- * run 起跑自动记行：空/缺省即首 Demo 未起）；Demo 已确认＝用户面版本清单存在
- * confirmed=true 行（#629 接用户面版本——换选随指针移动投影自动跟随）；付款门
- * 接现有订单事实——未终结单已支付、或项目/最近单已归档（支付完成归档即终点，
- * 生产承接页仍可回访）。
+ * REST 事实 → 门事实投影：PRD 阶段门＝首个构建 run 已起跑（项目详情生成态
+ * generating/generated；旧 PRD 版本记行随 #630 退场，失败/停止后回到 never＝
+ * 门复灰置、点火入口复现）；Demo 已确认＝用户面版本清单存在 confirmed=true 行
+ * （#629 接用户面版本——换选随指针移动投影自动跟随）；付款门接现有订单事实
+ * ——未终结单已支付、或项目/最近单已归档（支付完成归档即终点，生产承接页仍
+ * 可回访）。
  */
 export function stageGateFactsOf(
   detail: ProjectDetail | undefined | null,
-  prdVersions?: PrdVersionPresence | null,
   versions?: VersionPresence | null,
 ): StageGateFacts {
   const status = detail?.activeOrder?.status ?? detail?.latestOrder?.status;
   return {
-    prdConfirmed: (prdVersions?.length ?? 0) > 0,
+    prdConfirmed:
+      detail?.generationState === "generating" || detail?.generationState === "generated",
     demoConfirmed: (versions ?? []).some((version) => version.confirmed === true),
     orderPaid:
       !!detail?.archived ||

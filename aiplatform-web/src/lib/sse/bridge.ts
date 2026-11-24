@@ -200,14 +200,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // run 级时钟起锚（#225）：run-start 信封 ts——单一 run 起点锚
           // （ADR-0010 窄修订），缺 ts（测试/异常信封）不落锚、时钟不渲染
           work.startWork(payload.projectId, payload.runId, payload.slice, epochMsOf(envelope.ts));
-          // 生成态投影回「生成中」（#222）：起跑即失效项目域——收口观测直派的
-          // 轨道落库无对话面事件可搭，靠本失效收尾（点击路径的失效在 mutation）
+          // 生成态投影回「生成中」（#222）＋首建阶段门解锁（#630 起读生成态）：
+          // 起跑即失效项目域——收口观测直派的轨道落库无对话面事件可搭，靠本失效
+          // 收尾（点击路径的失效在 mutation）。旧 PRD 版本记行随 #630 退场，不再
+          // 连带失效 documents 域（PRD 变更由 document-updated 单路驱动）。
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-          // 构建基准记行失效（#462 去门化）：Demo 类 run 起跑自动记 PRD 版本行
-          // （服务端记行先于 run-start 发出）——documents 域只靠 document-updated
-          // 失效与记行存在竞态（savePrd 通知早于记行落库），阶段门「首个 Demo 在途」
-          // 事实源（prdVersions 非空）随本失效即时解锁，不卡到刷新
-          void queryClient.invalidateQueries({ queryKey: queryKeys.documents.all });
         } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
           chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);

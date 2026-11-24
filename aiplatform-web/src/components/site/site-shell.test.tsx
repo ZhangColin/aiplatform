@@ -25,16 +25,6 @@ vi.mock("@/hooks/use-project", () => ({
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
 }));
-// 阶段门「PRD 已确认」事实源（#330 版本列表）——壳装配只测分流，桩空列表
-vi.mock("@/hooks/use-prd", () => ({
-  usePrdVersions: () => ({ data: [] }),
-  // 版本记录抽屉（#344）条目详情面——壳装配只测分流，桩空
-  usePrdVersion: () => ({ data: null, isPending: false }),
-}));
-// Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: [] }),
-}));
 // 单轴版本时间线数据/动作面（#626）——壳装配只测分流，桩空
 vi.mock("@/hooks/use-version", () => ({
   useGitVersions: () => ({ data: [], isPending: false, isError: false }),

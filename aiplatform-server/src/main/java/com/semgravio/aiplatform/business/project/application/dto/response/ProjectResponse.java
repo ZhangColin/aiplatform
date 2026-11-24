@@ -25,8 +25,9 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
  * @param updatedAt      更新时间（列表卡「更新于」与首页「最近项目」排序的事实源）
  * @param activeOrder    未终结订单摘要（#28：无 = null——锁定式矩阵与列表
  *                      「待报价/待支付」态的推导输入；跨 BC 软引用）
- * @param prdConfirmed   是否存在已确认 PRD 版本（#349 P08 生命周期阶段推导输入）
- * @param demoConfirmed  是否已确认 Demo 版本（项目确认指针是否落位）
+ * @param prdConfirmed   首个构建 run 是否已起跑（#349 P08 生命周期阶段推导输入；
+ *                       #630 起读生成态，旧 PRD 版本记行退场）
+ * @param demoConfirmed  是否已确认用于签约的用户面版本（项目确认指针是否落位）
  * @param needsUserSupplement 是否需用户补充资料或确认事项（#338 项目级标志）
  */
 public record ProjectResponse(

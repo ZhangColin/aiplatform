@@ -11,11 +11,11 @@ import {
 
 /**
  * 交付生命周期阶段可达性判定（#343，spec #320 ⑥ 全局壳；#462 去确认门语义
- * 顺延 ADR-0039）：灰置条件＝「PRD 记行在场 / Demo 已确认 / 订单已支付」三门的
+ * 顺延 ADR-0039）：灰置条件＝「首个构建已起跑 / Demo 已确认 / 订单已支付」三门的
  * 纯函数推导——侧栏与顶栏五行导航共用的单一判定点（#318：未满足条件的步骤
- * 要说明原因）。期望值来自 spec #320 ⑥ 门序：Demo 前置＝首个构建基准记行
- * （首个 Demo 在途）、签约前置＝Demo 确认、生产承接前置＝付款完成；阶段名
- * 逐字照原型（需求分析 (PRD)/Demo 体验/签约付款/生产承接）。
+ * 要说明原因）。期望值来自 spec #320 ⑥ 门序：Demo 前置＝首个构建 run 已起跑
+ * （#630 起读生成态，旧 PRD 版本记行退场）、签约前置＝已确认用户面版本、生产
+ * 承接前置＝付款完成；阶段名逐字照原型（需求分析 (PRD)/Demo 体验/签约付款/生产承接）。
  */
 
 const ALL_OPEN = { prdConfirmed: true, demoConfirmed: true, orderPaid: true };
@@ -93,31 +93,31 @@ describe("currentStageOf（当前阶段＝首个未完成）", () => {
 });
 
 describe("stageGateFactsOf（REST 项目事实 → 门事实投影）", () => {
-  it("PRD 确认接 #330 版本列表：有已确认版本＝门开；空列表/缺省＝未确认", () => {
-    const detail = { prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail;
-    expect(stageGateFactsOf(detail).prdConfirmed).toBe(false);
-    expect(stageGateFactsOf(detail, []).prdConfirmed).toBe(false);
-    expect(stageGateFactsOf(detail, [{ versionNo: 1 }]).prdConfirmed).toBe(true);
+  it("PRD 阶段门接生成态（#630）：生成中/已生成＝门开；从未生成/缺省＝门关", () => {
     expect(
-      stageGateFactsOf(detail, [{ versionNo: 2 }, { versionNo: 1 }]).prdConfirmed,
+      stageGateFactsOf({ generationState: "generating" } as ProjectDetail).prdConfirmed,
     ).toBe(true);
+    expect(
+      stageGateFactsOf({ generationState: "generated" } as ProjectDetail).prdConfirmed,
+    ).toBe(true);
+    // 失败/停止回到从未生成＝门复灰置，点火入口复现
+    expect(
+      stageGateFactsOf({ generationState: "never" } as ProjectDetail).prdConfirmed,
+    ).toBe(false);
+    expect(stageGateFactsOf({} as ProjectDetail).prdConfirmed).toBe(false);
   });
 
   it("Demo 确认接用户面版本确认标记（#629）：有 confirmed 的版本在场＝门开", () => {
-    const detail = { prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail;
-    const prdVersions = [{ versionNo: 1 }];
+    const detail = { generationState: "generated" } as ProjectDetail;
     // 无版本列表/空列表/全未确认＝门关（从未成版或已确认版本但未打确认标记）
-    expect(stageGateFactsOf(detail, prdVersions).demoConfirmed).toBe(false);
-    expect(stageGateFactsOf(detail, prdVersions, []).demoConfirmed).toBe(false);
+    expect(stageGateFactsOf(detail).demoConfirmed).toBe(false);
+    expect(stageGateFactsOf(detail, []).demoConfirmed).toBe(false);
     expect(
-      stageGateFactsOf(detail, prdVersions, [
-        { versionNo: 2 },
-        { versionNo: 1 },
-      ]).demoConfirmed,
+      stageGateFactsOf(detail, [{ versionNo: 2 }, { versionNo: 1 }]).demoConfirmed,
     ).toBe(false);
     // 任一版本带确认标记（confirmed）＝门开——标记归项目单指针、清单投影到行
     expect(
-      stageGateFactsOf(detail, prdVersions, [
+      stageGateFactsOf(detail, [
         { versionNo: 2, confirmed: true },
         { versionNo: 1 },
       ]).demoConfirmed,

@@ -164,8 +164,6 @@ class GenerationAppServiceTest {
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
-        jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -1102,7 +1100,6 @@ class GenerationAppServiceTest {
         // （dispatchGenerationOnTurnClose 只在快道事实/设计定稿在场时被调用）——
         // 直派内核全链（切片/轨道机器已拆，无计划落轨面）
         Long projectId = persistedProject("9880");
-        seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
         givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -1128,7 +1125,6 @@ class GenerationAppServiceTest {
         // PRD，零编码 run、点火不落位（全域无无条件自动路径；点火＝岔路口「立即
         // 生成」/付费确认/快道，另见 MainAgentAppServiceTest 自然收口用例）
         Long projectId = persistedProject("9881");
-        seedConfirmedVersion(projectId);
         Project project = projectRepository.findById(projectId).orElseThrow();
         givenSessionExecutorRunsInline();
         givenWorkspaceExecSucceeds();
@@ -1153,7 +1149,6 @@ class GenerationAppServiceTest {
         // 「继续生成」同口）再触发即新内核 run（既有工作区重跑，收口判据照跑）。首派
         // 走收口观测入口，重跑走点火入口路径
         Long projectId = persistedProject("9883");
-        seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
         givenWorkspaceExecSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -1218,86 +1213,7 @@ class GenerationAppServiceTest {
         assertThat(generationRequestedAt(projectId)).isNull(); // 点火位清——点火入口复现
     }
 
-    // ---------- Demo 版本化（#333）：生成收口自动成版（锚起跑时确认版本） ----------
-
-    @Test
-    void given_confirmed_prd_when_generation_closes_then_demo_v1_persisted() {
-        // 灵魂例（#333 AC①）：构建收口自动成版——首版 v1 随 generated_at 同刻落，
-        // 锚＝起跑时已确认 PRD 版本、run 锚＝末片收口 run（「查看当时」接续缝）。
-        // 首派走收口入口（#462：产 PRD 同转收口携计划交接物直派）
-        Long projectId = persistedProject("9884");
-        seedConfirmedVersion(projectId);
-        givenSessionExecutorRunsInline();
-        givenWorkspaceExecSucceeds();
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            return new AgentReply(command.runId(), "完成");
-        });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        verify(agentClient, times(1)).converse(commands.capture(), any());
-        Map<String, Object> version = jdbcTemplate.queryForMap(
-                "SELECT version_no, prd_version_no, run_id FROM prj_demo_versions"
-                        + " WHERE project_id = ?",
-                projectId);
-        assertThat(version.get("version_no")).isEqualTo(1);
-        assertThat(version.get("prd_version_no")).isEqualTo(1);
-        // run 锚＝内核收口 run（单 run 成版）
-        assertThat(version.get("run_id"))
-                .isEqualTo(commands.getAllValues().get(commands.getAllValues().size() - 1).runId());
-        assertThat(generatedAt(projectId)).isNotNull();
-    }
-
-    @Test
-    void given_prd_v2_confirmed_mid_run_when_closure_then_version_anchors_v1() {
-        // 在途 Demo 照跑完收口绑旧版本（#333 AC③）：起跑后、收口前 PRD 出新版
-        // （converse 侧效插入确认版 v2）——成版仍锚起跑时的 v1，不随后续确认漂移。
-        // 首派走收口入口（#462 触发平移后收口单点直派）
-        Long projectId = persistedProject("9885");
-        seedConfirmedVersion(projectId);
-        givenSessionExecutorRunsInline();
-        givenWorkspaceExecSucceeds();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            // 在途插确认：PRD v2 在生成 run 进行中落库（幂等——阶段 0/切片各跑一
-            // 次 converse，冲突即已插过）
-            jdbcTemplate.update("""
-                    INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
-                        prd_produced_at, created_at, updated_at)
-                    VALUES (?, ?, 2, '# PRD v2', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT (project_id, version_no) DO NOTHING
-                    """, System.nanoTime(), projectId);
-            return new AgentReply(command.runId(), "完成");
-        });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        Map<String, Object> version = jdbcTemplate.queryForMap(
-                "SELECT version_no, prd_version_no FROM prj_demo_versions WHERE project_id = ?",
-                projectId);
-        assertThat(version.get("version_no")).isEqualTo(1);
-        assertThat(version.get("prd_version_no")).isEqualTo(1); // 绑旧版（起跑时 v1）
-    }
-
-    @Test
-    void given_no_confirmed_version_when_generation_closes_then_null_anchor() {
-        // 无确认版起跑（设计类终点承接/legacy）：成版锚空——不虚构 PRD 关联
-        Long projectId = persistedProject("9886");
-        givenSessionExecutorRunsInline();
-        givenWorkspaceExecSucceeds();
-        givenConverseSucceeds("完成");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        Map<String, Object> version = jdbcTemplate.queryForMap(
-                "SELECT version_no, prd_version_no FROM prj_demo_versions WHERE project_id = ?",
-                projectId);
-        assertThat(version.get("version_no")).isEqualTo(1);
-        assertThat(version.get("prd_version_no")).isNull();
-    }
+    // ---------- 生成收口只落 generated_at（旧 Demo/PRD 版本表随 #630 退场） ----------
 
     // ---------- 首 Demo 在途的意见排队补派（#360：不静默丢——入队+明示+收口合并补派） ----------
 
@@ -1396,16 +1312,6 @@ class GenerationAppServiceTest {
             return list.stream().map(GenerationAppServiceTest::normalized).toList();
         }
         return value;
-    }
-
-    /** PRD 版本行在场（legacy 记行形态夹具——#462 起与派发门无关，仅取数事实）。 */
-    private void seedConfirmedVersion(Long projectId) {
-        Project project = projectOf(projectId);
-        jdbcTemplate.update("""
-                INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
-                    prd_produced_at, created_at, updated_at)
-                VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, System.nanoTime(), projectId, project.getPrdProducedAt());
     }
 
     private Long persistedArchivedProject(String workspaceId) {

@@ -93,8 +93,6 @@ class IterationAppServiceTest {
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
-        jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         jdbcTemplate.update("DELETE FROM bil_balance_holds");
@@ -513,7 +511,6 @@ class IterationAppServiceTest {
     @Test
     void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_workspace_draft() {
         Long projectId = persistedGeneratedProject("9960");
-        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
         givenWorkspacePrd(SCOPE_DRAFT);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -531,7 +528,6 @@ class IterationAppServiceTest {
     @Test
     void given_draft_equals_latest_row_when_iteration_runs_then_prompt_reads_workspace() {
         Long projectId = persistedGeneratedProject("9961");
-        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
         givenWorkspacePrd(PRD_V1_ROW);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -651,53 +647,6 @@ class IterationAppServiceTest {
                 eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
     }
 
-    // ---------- Demo 版本化（#333）：迭代轮收口自动成版 ----------
-
-    @Test
-    void given_changed_fix_runs_when_close_then_demo_versions_increment_with_prd_anchor() {
-        // 迭代每轮自动成版：changed=true 收口即递增成版、锚本场起跑时最新 PRD 版本
-        Long projectId = persistedGeneratedProject("9950");
-        seedPrdVersionRow(projectId, 1);
-        givenWorkspacePrd("# PRD");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
-
-        handOff(projectId, "列表按时间倒序");
-        tracks.remove(0).run();
-        // 需求侧修订后的新基准记行——下一场锚 v2
-        seedPrdVersionRow(projectId, 2);
-        handOff(projectId, "加筛选");
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT version_no, prd_version_no, run_id FROM prj_demo_versions"
-                        + " WHERE project_id = ? ORDER BY version_no",
-                projectId);
-        assertThat(rows).extracting(row -> row.get("version_no")).containsExactly(1, 2);
-        assertThat(rows.get(0)).containsEntry("prd_version_no", 1)
-                .containsEntry("run_id", commands.getAllValues().get(0).runId());
-        assertThat(rows.get(1)).containsEntry("prd_version_no", 2)
-                .containsEntry("run_id", commands.getAllValues().get(1).runId());
-    }
-
-    @Test
-    void given_unchanged_fix_run_when_close_then_no_demo_version() {
-        // 系统无改动（平台可观测文件改动为空）＝照常收口、无新版本
-        Long projectId = persistedGeneratedProject("9951");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing();
-
-        handOff(projectId, "列表按时间倒序");
-        tracks.remove(0).run();
-
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_demo_versions WHERE project_id = ?", Integer.class,
-                projectId);
-        assertThat(count).isZero();
-    }
-
     // ---------- 测试数据 ----------
 
     /** 已生成形态的项目（迭代的前提事实）。 */
@@ -706,18 +655,5 @@ class IterationAppServiceTest {
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
-    }
-
-    private void seedPrdVersionRow(Long projectId, int versionNo) {
-        seedPrdVersionRowContent(projectId, versionNo, "# PRD");
-    }
-
-    private void seedPrdVersionRowContent(Long projectId, int versionNo, String content) {
-        jdbcTemplate.update("""
-                INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
-                    prd_produced_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, System.nanoTime(), projectId, versionNo, content);
     }
 }

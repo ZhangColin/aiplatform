@@ -41,15 +41,10 @@ import com.semgravio.aiplatform.business.project.application.ProjectQueryAppServ
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.PrdReadiness;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
-import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
 import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
-import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -120,12 +115,6 @@ class ProjectControllerTest {
 
     @MockitoBean
     private InterviewQuotaAppService interviewQuotaAppService;
-
-    @MockitoBean
-    private PrdVersionAppService prdVersionAppService;
-
-    @MockitoBean
-    private DemoVersionAppService demoVersionAppService;
 
     @MockitoBean
     private BuildGateAppService buildGateAppService;
@@ -723,98 +712,6 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.rechargeRequired").value(false))
                 .andExpect(jsonPath("$.data.deductionSource").value(2))
                 .andExpect(jsonPath("$.data.sourcePoolBalance").value(10000));
-    }
-
-    @Test
-    void given_confirmed_versions_when_list_then_newest_first_without_content() throws Exception {
-        when(prdVersionAppService.versions(100L)).thenReturn(List.of(
-                new PrdVersionSummaryResponse("100", 2,
-                        LocalDateTime.of(2026, 10, 17, 9, 0)),
-                new PrdVersionSummaryResponse("100", 1,
-                        LocalDateTime.of(2026, 10, 16, 12, 0))));
-
-        // 清单轻量形（不含全文——全文走单版详情）；versionNo 是小整数版本号（非 TSID，数值形）
-        performAsUser(get("/api/projects/100/prd/versions"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].versionNo").value(2))
-                .andExpect(jsonPath("$.data[0].confirmedAt").value("2026-10-17T09:00:00"))
-                .andExpect(jsonPath("$.data[1].versionNo").value(1))
-                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T12:00:00"));
-    }
-
-    @Test
-    void given_version_no_when_detail_then_full_text_returned() throws Exception {
-        when(prdVersionAppService.version(100L, 1)).thenReturn(new PrdVersionResponse("100", 1,
-                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
-                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
-
-        performAsUser(get("/api/projects/100/prd/versions/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.versionNo").value(1))
-                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
-                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
-    }
-
-    @Test
-    void given_no_such_version_when_detail_then_prj_052_as_404() throws Exception {
-        when(prdVersionAppService.version(100L, 7))
-                .thenThrow(new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND));
-
-        performAsUser(get("/api/projects/100/prd/versions/7"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4052))
-                .andExpect(jsonPath("$.message").value("PRD 版本不存在"));
-    }
-
-    // ---------- Demo 版本（#333「版本化与确认标记」：清单＋确认动作） ----------
-
-    @Test
-    void given_demo_versions_when_list_then_newest_first_with_anchor_and_marker() throws Exception {
-        when(demoVersionAppService.versions(100L)).thenReturn(List.of(
-                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
-                        LocalDateTime.of(2026, 10, 17, 9, 0), null),
-                new DemoVersionSummaryResponse("100", 1, 1, "r-1",
-                        LocalDateTime.of(2026, 10, 16, 12, 0),
-                        LocalDateTime.of(2026, 10, 16, 13, 0))));
-
-        // 清单最新在前；prdVersionNo＝「Demo vN（基于 PRD vM 快照）」关联锚；confirmedAt
-        // 仅确认标记所在版非空（标记投影到行）
-        performAsUser(get("/api/projects/100/demo-versions"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].versionNo").value(2))
-                .andExpect(jsonPath("$.data[0].prdVersionNo").value(1))
-                .andExpect(jsonPath("$.data[0].runId").value("r-2"))
-                .andExpect(jsonPath("$.data[0].confirmedAt").doesNotExist())
-                .andExpect(jsonPath("$.data[1].versionNo").value(1))
-                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T13:00:00"));
-    }
-
-    @Test
-    void given_version_when_confirm_demo_then_summary_with_confirmed_at() throws Exception {
-        when(demoVersionAppService.confirm(100L, 2)).thenReturn(
-                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
-                        LocalDateTime.of(2026, 10, 17, 9, 0),
-                        LocalDateTime.of(2026, 10, 17, 10, 0)));
-
-        // 「确认此版本，准备签约」：既有版本上打标记——回执＝所确认版本清单形
-        performAsUser(post("/api/projects/100/demo-versions/2/confirm"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.versionNo").value(2))
-                .andExpect(jsonPath("$.data.prdVersionNo").value(1))
-                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-17T10:00:00"));
-    }
-
-    @Test
-    void given_no_such_demo_version_when_confirm_then_prj_054_as_404() throws Exception {
-        when(demoVersionAppService.confirm(100L, 7))
-                .thenThrow(new ApplicationException(ProjectMessage.DEMO_VERSION_NOT_FOUND));
-
-        performAsUser(post("/api/projects/100/demo-versions/7/confirm"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4054))
-                .andExpect(jsonPath("$.message").value("Demo 版本不存在"));
     }
 
     // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------

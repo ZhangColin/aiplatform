@@ -208,7 +208,7 @@ public class ProjectVersionAppService {
         if (index < 0) {
             throw new ApplicationException(ProjectMessage.VERSION_NOT_FOUND);
         }
-        project.confirmDemoVersion(versionNo);
+        project.confirmVersion(versionNo);
         projectRepository.save(project);
         return VersionResponse.of(versions.get(index), index == 0, true);
     }
@@ -227,7 +227,7 @@ public class ProjectVersionAppService {
     /** 确认标记映射（#626/#629）：项目确认指针的版本号＝本用户面版本号即已确认。 */
     private static boolean confirmedOf(Project project, WorkspaceVersion version) {
         return version.versionNo() != null
-                && version.versionNo().equals(project.getConfirmedDemoVersionNo());
+                && version.versionNo().equals(project.getConfirmedVersionNo());
     }
 
     /**

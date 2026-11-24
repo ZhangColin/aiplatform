@@ -74,8 +74,8 @@ public class IterationAppService {
     private final CodingRunDispatcher codingRunDispatcher;
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
-    private final DemoVersionAppService demoVersionAppService;
-    private final PrdVersionAppService prdVersionAppService;
+    /** PRD 起跑快照读取与收口变化比对（#624，读工作区 docs/PRD.md 单点）。 */
+    private final ProjectQueryAppService projectQueryAppService;
     /** 用户面版本自动成版（#626 单轴时间线：探活通过即记录版本）。 */
     private final ProjectVersionAppService projectVersionAppService;
     private final DemoSeedAppService demoSeed;
@@ -114,8 +114,7 @@ public class IterationAppService {
             AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
             AgentEventBridge eventBridge,
             CodingRunTrack codingRunTrack,
-            DemoVersionAppService demoVersionAppService,
-            PrdVersionAppService prdVersionAppService,
+            ProjectQueryAppService projectQueryAppService,
             ProjectVersionAppService projectVersionAppService,
             DemoSeedAppService demoSeed,
             BalanceGateAppService balanceGate,
@@ -127,8 +126,7 @@ public class IterationAppService {
         this.codingRunDispatcher = codingRunDispatcher;
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
-        this.demoVersionAppService = demoVersionAppService;
-        this.prdVersionAppService = prdVersionAppService;
+        this.projectQueryAppService = projectQueryAppService;
         this.projectVersionAppService = projectVersionAppService;
         this.demoSeed = demoSeed;
         this.balanceGate = balanceGate;
@@ -325,18 +323,9 @@ public class IterationAppService {
             String runId = firstRunId;
             while (true) {
                 List<ModificationHandoffFacts.Instruction> current = batch;
-                // Demo 类 run 起跑自动记行（#462 去门化口径沿用）；返回值即本场起跑时
-                // 的 PRD 全文，留作收口变化比对基准（#624）
-                String prdBaseline = null;
-                try {
-                    prdBaseline = prdVersionAppService.recordOnDemoRunStart(projectId, runId);
-                }
-                catch (RuntimeException e) {
-                    log.warn("[modify] 项目 {} run {} 起跑记行失败（不反噬本场）：{}",
-                            projectId, runId, e.toString());
-                }
-                Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
-                String prdSnapshot = prdBaseline;
+                // 起跑 PRD 快照（#624）：读当时工作区 PRD 全文作收口变化比对基准——
+                // 读不出（未产出/环境故障）保守为 null（收口判未变，不误发通知）
+                String prdBaseline = readPrdBaselineQuietly(projectId, runId);
                 // 迭代版本标签（#626）：本轮修改指令的用户原话（多轮合并展示）
                 String versionLabel = modificationVersionLabel(current);
                 CodingRunDispatcher.RunResult result;
@@ -345,7 +334,7 @@ public class IterationAppService {
                             fixSession(projectId, runId),
                             modificationRunPrompt(current),
                             (attemptRunId, attemptChanges) -> closeKernelFix(project,
-                                    attemptRunId, prdVersionNo, prdSnapshot, versionLabel,
+                                    attemptRunId, prdBaseline, versionLabel,
                                     attemptChanges),
                             "fix", true, CodingRunDispatcher.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
@@ -485,7 +474,7 @@ public class IterationAppService {
      * 任务提示整合带来。失败判据先抛——PRD 变化通知只在 run 成功后发。</p>
      */
     private CodingRunDispatcher.ClosingJudgment closeKernelFix(Project project, String attemptRunId,
-            Integer prdVersionNo, String prdBaseline, String versionLabel,
+            String prdBaseline, String versionLabel,
             List<FileChange> attemptChanges) {
         KernelClosingCriteria.KernelClosingResult closing =
                 kernelClosingCriteria.assess(project.getWorkspaceId());
@@ -496,18 +485,9 @@ public class IterationAppService {
                     + "——按完成判据继续修复后再收口");
         }
         // 探活通过＝一次完整交付（#626 自动成版）：run-finish 发出前把工作区记为用户面
-        // 版本 vN（主题＝本轮用户原话）；成版失败降级不反噬收口
+        // 版本 vN（主题＝本轮用户原话）；成版失败降级不反噬收口。旧 Demo 版本行随旧
+        // 版本表退场（#630）——版本序列只此一条（git 单轴）。
         projectVersionAppService.commitUserVersion(project, attemptRunId, versionLabel);
-        boolean systemChanged = attemptChanges != null && !attemptChanges.isEmpty();
-        if (systemChanged) {
-            try {
-                demoVersionAppService.closeOnIteration(project.getId(), attemptRunId, prdVersionNo);
-            }
-            catch (RuntimeException e) {
-                log.warn("[fix] 项目 {} Demo 版本成版失败（不反噬收口，下轮补位）：{}",
-                        project.getId(), e.toString());
-            }
-        }
         // 迭代后 PRD 仍是完整文档（#624）：内核按任务提示把需求整合进 PRD 对应章节，
         // 收口比对起跑快照——变了才发既有 document-updated；无变化不发（不误刷新右栏）。
         emitDocumentUpdatedIfPrdChanged(project, prdBaseline);
@@ -525,7 +505,9 @@ public class IterationAppService {
      */
     private void emitDocumentUpdatedIfPrdChanged(Project project, String prdBaseline) {
         try {
-            if (!prdVersionAppService.changedSince(project.getId(), prdBaseline)) {
+            // 起跑快照缺失即保守判未变（不误发）；收口读取失败同样判未变（run 照常成功）
+            if (prdBaseline == null
+                    || prdBaseline.equals(projectQueryAppService.currentPrdContent(project.getId()))) {
                 return;
             }
             eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED,
@@ -536,6 +518,21 @@ public class IterationAppService {
         catch (RuntimeException e) {
             log.warn("[fix] 项目 {} PRD 变化通知发射失败（不反噬收口）：{}",
                     project.getId(), e.toString());
+        }
+    }
+
+    /**
+     * 起跑 PRD 快照读取（#624）：工作区 {@code docs/PRD.md} 全文；未产出/环境故障
+     * 一律返回 null（best-effort——记行是 run 起跑的次生事实，不反噬本场）。
+     */
+    private String readPrdBaselineQuietly(Long projectId, String runId) {
+        try {
+            return projectQueryAppService.currentPrdContent(projectId);
+        }
+        catch (RuntimeException e) {
+            log.warn("[modify] 项目 {} run {} 起跑读取 PRD 基准失败（本场判未变）：{}",
+                    projectId, runId, e.toString());
+            return null;
         }
     }
 }

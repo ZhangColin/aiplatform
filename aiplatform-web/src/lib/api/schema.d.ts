@@ -436,7 +436,7 @@ export interface paths {
         put?: never;
         /**
          * 下单（过双确认门冻结 PRD 最新版与交付物类型入单）
-         * @description 纯按钮零输入：下单前置门＝存在 PRD 版本（最新构建基准——Demo 类 run 起跑自动记行，#462 去门化读法顺延）＋Demo 确认版本（缺失如实拦截 ORD_018/ORD_019），过门即冻结 PRD 最新版全文冗余拷贝＋双版本引用入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用；冻结字段结构与既有订单数据不动），待报价起步；交付物类型一律为系统单（#611 设计线退役后只有系统一种，交付物为源码包）。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；无 PRD 版本 409 ORD_018；无 Demo 确认版本 409 ORD_019；项目已归档 409 ORD_004
+         * @description 纯按钮零输入：下单前置门＝PRD 已产出（缺 PRD 拦截 ORD_018）＋存在已确认用户面版本（「确认此版本，准备签约」#629；缺确认拦截 ORD_019），过门即冻结当前工作区 PRD 全文冗余拷贝＋已确认用户面版本号入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用；冻结字段结构与既有订单数据不动），待报价起步；交付物类型一律为系统单（#611 设计线退役后只有系统一种，交付物为源码包）。旧 PRD/Demo 版本表已随 #630 退场，新单只写单一已确认版本号；历史单的旧双版本引用照读。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；无 PRD 快照 409 ORD_018；无已确认用户面版本 409 ORD_019；项目已归档 409 ORD_004
          */
         post: operations["place"];
         delete?: never;
@@ -523,7 +523,7 @@ export interface paths {
         put?: never;
         /**
          * 确认 PRD，开始生成（付费轨首建点火——确认即派发首个构建）
-         * @description ADR-0049 恢复 #462 之前的<b>原确认动作形态</b>（PRD 文档面按钮＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/重跑同构）；<b>版本机制零改动</b>——确认不写版本行（旧「确认即成版」#330 写表语义不复活），记行归 Demo 类 run 起跑单点、版本号＝构建基准序全域一致。<b>点击幂等</b>＝已点火重复确认 409 PRJ_017（不重复派发）；#604 起首建失败/停止收口清点火位——确认按钮复现，重确认即重跑；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable（付费态∧PRD 在∧首建未点火）。错误码：PRJ_084 试用项目（岔路口「立即生成」即点火）；PRJ_018 PRD 尚未产出；PRJ_013 已归档；PRJ_017 已点火或生成在途；BILL_025 源池余额不足（充值回正自动重派）。项目不存在 404 PRJ_001
+         * @description ADR-0049 恢复 #462 之前的<b>原确认动作形态</b>（PRD 文档面按钮＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/重跑同构）；确认不写任何版本数据——用户面版本由探活通过后自动成版（#626 git 单轴时间线），旧 PRD/Demo 版本表已随 #630 退场。<b>点击幂等</b>＝已点火重复确认 409 PRJ_017（不重复派发）；#604 起首建失败/停止收口清点火位——确认按钮复现，重确认即重跑；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable（付费态∧PRD 在∧首建未点火）。错误码：PRJ_084 试用项目（岔路口「立即生成」即点火）；PRJ_018 PRD 尚未产出；PRJ_013 已归档；PRJ_017 已点火或生成在途；BILL_025 源池余额不足（充值回正自动重派）。项目不存在 404 PRJ_001
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
@@ -634,26 +634,6 @@ export interface paths {
          * @description #544 访谈③（ADR-0048 切片③——三选上卡压平版）：访客选付费项（source 传 1=由我的账户付费 / 2=由本项目付费——扣减源随选择一次选定；账户源须先登录，访客吃 BILL_009 指路 M01）后按所选池判定——源池余额为正即翻转回访谈（flipped=true：五问额度解除、协议分轨回原归读面派生、卡随GET /build-gate 熄灭）；非正返回 rechargeRequired=true（引导充值——源已一次选定，重选拒绝 BILL_008），到账后经本端点重判（空 source）即翻转、无需重走选择。后台已充项目池的项目源已选定（入账即选择）——空 source 直达翻转判定＝免登录直接翻转（销售演示动线）。中途放弃＝不落翻转、卡留岔路口（试用态持久可回、随时改选「立即生成」）。错误码：PRJ_085 岔路口卡不在场 / BILL_008 改选拒绝（源已随选择一次选定——同源重传容忍＝重判语义）/ BILL_009 账户源须登录 / BILL_010 源未定且未随卡选定 / BILL_012 已是付费态（幂等前置，既往翻转返回 flipped=true 不报错）。项目不存在 404 PRJ_001
          */
         post: operations["continueDiscussion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{id}/demo-versions/{versionNo}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 确认此版本，准备签约（既有 Demo 版本上打确认标记）
-         * @description 「确认此版本，准备签约」（#333）＝既有版本上打确认标记——选定动作、<b>不产生新版本号</b>（版本行不可变，标记归项目单指针confirmed_demo_version_no）；换确认版本＝指针随移（旧标记自然失效，重复确认同版幂等刷新确认时间）。响应＝所确认版本的清单形（含confirmedAt）——下单前置「Demo 确认版本在场」的消费面（#335）。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；版本不存在（含非正整数）404 PRJ_054
-         */
-        post: operations["confirmDemoVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2288,7 +2268,7 @@ export interface paths {
         };
         /**
          * 项目详情
-         * @description status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）。generationState = 生成态投影（#222；#604 四态归一，三档：1=从未生成 2=生成中 4=已生成——「生成中断」档随旧失败语义退役：失败不落投影，只经 run-failed 事件在会话内明确呈现）——generated_at＋在途标记派生、与 SSE 会话态无关（刷新/回访后档位仍正确）；从未生成即重跑入口在场的档位（首建未起跑，或失败/停止后——点火入口复现，POST /{id}/generate 重发即在既有工作区重跑），已生成 = Demo 首版成版锚（v1 随 generated_at 同刻落）
+         * @description status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）。generationState = 生成态投影（#222；#604 四态归一，三档：1=从未生成 2=生成中 4=已生成——「生成中断」档随旧失败语义退役：失败不落投影，只经 run-failed 事件在会话内明确呈现）——generated_at＋在途标记派生、与 SSE 会话态无关（刷新/回访后档位仍正确）；从未生成即重跑入口在场的档位（首建未起跑，或失败/停止后——点火入口复现，POST /{id}/generate 重发即在既有工作区重跑），已生成 = 首次生成时点（generated_at）已落
          */
         get: operations["get_1"];
         put?: never;
@@ -2381,46 +2361,6 @@ export interface paths {
          * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）＝「验收与待确认」章解析投影：{blocking, minor, dimensions}——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。未产出期短路（#478）：prd_produced_at 未落直回 404 PRJ_015（不触工作区，标志落点＝收口点，与前端 prdProducedAt 投影同口径），标志已落才 exec 直读；标志在而工作区无该文件同码兜底——均与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{id}/prd/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * PRD 版本清单（最新在前，轻量形不含全文）
-         * @description 项目内 PRD 版本列表（#330→#462 去门化：Demo 类 run 起跑自动记行，版本号＝构建基准序）：[{projectId, versionNo, confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。空列表 = 尚无构建基准记行（呈现「草稿」徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
-         */
-        get: operations["prdVersions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{id}/prd/versions/{versionNo}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * PRD 版本详情（含全文快照）
-         * @description 单版详情（#330→#462 去门化）：{projectId, versionNo, content, confirmedAt, readiness}——content 是成行时工作区 PRD 全文的不可变快照（Demo 类 run 起跑时点，后续草稿改动不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手即解析）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
-         */
-        get: operations["prdVersion"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2541,26 +2481,6 @@ export interface paths {
          * @description path = 工作区相对路径（文件树条目原样回传）。只收文本且限大小：非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022；非文本（正文含 NUL）400 PRJ_023——图片点看不走本端点（raw 直出，#283）。项目不存在 404 PRJ_001
          */
         get: operations["fileContent"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{id}/demo-versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Demo 版本清单（最新在前）
-         * @description 项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口递增），prdVersionNo＝起跑时最新 PRD 版本锚（「Demo vN（基于 PRD vM 快照）」式关联；null＝无版本记行起跑——legacy/设计类），runId＝收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = 从未成版（未生成/生成中）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
-         */
-        get: operations["demoVersions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4644,26 +4564,6 @@ export interface components {
              */
             sourcePoolBalance?: number;
         };
-        ApiResponseDemoVersionSummaryResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["DemoVersionSummaryResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        DemoVersionSummaryResponse: {
-            projectId?: string;
-            /** Format: int32 */
-            versionNo?: number;
-            /** Format: int32 */
-            prdVersionNo?: number;
-            runId?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            confirmedAt?: string;
-        };
         CheckoutTopupCommand: {
             accessCode?: string;
             /** Format: int64 */
@@ -5690,38 +5590,6 @@ export interface components {
             updatedAt?: string;
             readiness?: components["schemas"]["PrdReadinessResponse"];
         };
-        ApiResponseListPrdVersionSummaryResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["PrdVersionSummaryResponse"][];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        PrdVersionSummaryResponse: {
-            projectId?: string;
-            /** Format: int32 */
-            versionNo?: number;
-            /** Format: date-time */
-            confirmedAt?: string;
-        };
-        ApiResponsePrdVersionResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["PrdVersionResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        PrdVersionResponse: {
-            projectId?: string;
-            /** Format: int32 */
-            versionNo?: number;
-            content?: string;
-            /** Format: date-time */
-            confirmedAt?: string;
-            readiness?: components["schemas"]["PrdReadinessResponse"];
-        };
         ApiResponseInterviewQuotaResponse: {
             /** Format: int32 */
             code?: number;
@@ -5792,14 +5660,6 @@ export interface components {
         ProjectFileContentResponse: {
             path?: string;
             content?: string;
-        };
-        ApiResponseListDemoVersionSummaryResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["DemoVersionSummaryResponse"][];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
         };
         ApiResponseListConversationEntryResponse: {
             /** Format: int32 */
@@ -7963,29 +7823,6 @@ export interface operations {
             };
         };
     };
-    confirmDemoVersion: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-                versionNo: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseDemoVersionSummaryResponse"];
-                };
-            };
-        };
-    };
     topup: {
         parameters: {
             query?: never;
@@ -9772,51 +9609,6 @@ export interface operations {
             };
         };
     };
-    prdVersions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListPrdVersionSummaryResponse"];
-                };
-            };
-        };
-    };
-    prdVersion: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-                versionNo: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
-                };
-            };
-        };
-    };
     interviewQuota: {
         parameters: {
             query?: never;
@@ -9951,28 +9743,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectFileContentResponse"];
-                };
-            };
-        };
-    };
-    demoVersions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListDemoVersionSummaryResponse"];
                 };
             };
         };

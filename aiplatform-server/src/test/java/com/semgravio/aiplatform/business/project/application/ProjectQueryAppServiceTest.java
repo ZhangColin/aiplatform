@@ -2,7 +2,6 @@ package com.semgravio.aiplatform.business.project.application;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.Currency;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +32,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
@@ -41,7 +39,6 @@ import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,9 +65,6 @@ class ProjectQueryAppServiceTest {
     private ProjectRepository projectRepository;
 
     @Autowired
-    private PrdVersionRepository prdVersionRepository;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     /** 计量查询缝：mock 用例本体（MeteringLocalAdapter 是 sink+query 双端口 bean，整替会断 sink 注入）。 */
@@ -85,7 +79,6 @@ class ProjectQueryAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -174,11 +167,12 @@ class ProjectQueryAppServiceTest {
         Project requirement = persistedProject(8118L, "需求分析项目");
         Project demo = persistedProject(8119L, "Demo 体验项目");
         Project supplement = persistedProject(8120L, "待补充项目");
+        // PRD 阶段门事实（#630 起＝首个构建 run 已起跑，读生成态）：demo/supplement 已生成
         for (Project project : List.of(demo, supplement)) {
-            prdVersionRepository.save(PrdVersion.recorded(project.getId(), 1,
-                    "# PRD\n\n已确认范围。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
+            project.markGenerated();
+            projectRepository.save(project);
         }
-        supplement.confirmDemoVersion(1);
+        supplement.confirmVersion(1);
         supplement.flagNeedsUserSupplement(true);
         projectRepository.save(supplement);
 
@@ -217,7 +211,7 @@ class ProjectQueryAppServiceTest {
         // 下单冻结面（#629）：快照源＝当前工作区 PRD 全文（直读 docs/PRD.md）＋
         // 项目确认指针的已确认用户面版本号（不再读旧 PRD/Demo 版本表）
         Project project = prdMarkedProject(8501L, "下单冻结项目");
-        project.confirmDemoVersion(3);
+        project.confirmVersion(3);
         projectRepository.save(project);
         when(workspaceLifecycleAppService.exec(eq("8501"), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("1756100000\n# PRD 正文\n\n下单冻结标的。\n", "", 0));

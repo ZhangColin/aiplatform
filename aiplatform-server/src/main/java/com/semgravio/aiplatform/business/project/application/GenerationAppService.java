@@ -64,9 +64,8 @@ import lombok.extern.slf4j.Slf4j;
  * （{@link #markFirstBuildRequested}——卡/门「首建未派发」呈现条件的事实源）；
  * 终态失败/停止收口清点火位（{@link #reopenFirstBuildRequest}，卡与门复现），
  * 用户重走点火入口重跑即恢复、不重复确认。小迭代照旧无门（受理即派）；
- * 重复触发（已生成或生成在途）按钮路径拒绝 PRJ_017。Demo 类 run 起跑自动记
- * PRD 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，构建基准序
- * ——确认不写版本行，记行归起跑单点）、Demo 版本锚捕获读「最新版」。</p>
+ * 重复触发（已生成或生成在途）按钮路径拒绝 PRJ_017。旧 PRD/Demo 版本行随 #630
+ * 退场——生成收口只落 generated_at，用户面版本由探活通过后自动成版（#626）。</p>
  *
  * <p><b>生成后发言走对话面（#622/#625）</b>：首个构建 run 在途或项目已生成时，对话区
  * 发言先分岔到对话面轻会话（{@link DialogAppService}）；说清的修改经
@@ -137,8 +136,6 @@ public class GenerationAppService {
     private final CodingRunTrack codingRunTrack;
     private final TransactionTemplate transactionTemplate;
     private final BuildDispatchPolicy buildDispatchPolicy;
-    private final DemoVersionAppService demoVersionAppService;
-    private final PrdVersionAppService prdVersionAppService;
     /** 用户面版本自动成版（#626 单轴时间线：探活通过即记录版本）。 */
     private final ProjectVersionAppService projectVersionAppService;
     /** 首建版本标签来源（对话史第一条用户发言）。 */
@@ -170,8 +167,6 @@ public class GenerationAppService {
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
             TransactionTemplate transactionTemplate,
             BuildDispatchPolicy buildDispatchPolicy,
-            DemoVersionAppService demoVersionAppService,
-            PrdVersionAppService prdVersionAppService,
             ProjectVersionAppService projectVersionAppService,
             ConversationHistoryAppService conversationHistory,
             DemoSeedAppService demoSeed,
@@ -188,8 +183,6 @@ public class GenerationAppService {
         this.codingRunTrack = codingRunTrack;
         this.transactionTemplate = transactionTemplate;
         this.buildDispatchPolicy = buildDispatchPolicy;
-        this.demoVersionAppService = demoVersionAppService;
-        this.prdVersionAppService = prdVersionAppService;
         this.projectVersionAppService = projectVersionAppService;
         this.conversationHistory = conversationHistory;
         this.demoSeed = demoSeed;
@@ -311,24 +304,10 @@ public class GenerationAppService {
         // 不刷新；岔路口卡与确认按钮「首建未派发」呈现条件的事实源（BuildGateAppService）
         markFirstBuildRequested(projectId);
         String firstRunId = EventsAppService.newRunId();
-        // Demo 类 run 起跑自动记行（#462 去门化，ADR-0039）：快照当时工作区 PRD 全文
-        // 为构建基准（版本号＝构建基准序，同文幂等跳过）——记行先行，随后锚捕获
-        // 读到的「最新版」即本场基准；best-effort：失败只记日志不反噬 run
-        try {
-            prdVersionAppService.recordOnDemoRunStart(projectId, firstRunId);
-        }
-        catch (RuntimeException e) {
-            log.warn("[generate] 项目 {} run {} 起跑记行失败（不反噬派发）：{}",
-                    projectId, firstRunId, e.toString());
-        }
-        // Demo 版本锚捕获（#333；#462 读法顺延）：起跑时最新 PRD 版本——在途 Demo 照
-        // 跑完收口绑本锚（此后新版记行不漂移旧版关联）；无版本记行（legacy/记行失败）
-        // 为 null
-        Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
         // 首建版本标签（#626）：对话史第一条用户发言（取不到「首次生成」）；成版在
         // 探活通过收口时发生，标签先算定（对话史此后不再改这句）
         String versionLabel = firstRequestLabel(projectId);
-        Future<?> trackTask = submitTrack(project, firstRunId, prdVersionNo, versionLabel);
+        Future<?> trackTask = submitTrack(project, firstRunId, versionLabel);
         codingRunTrack.registerTask(projectId, trackTask);
         return new GenerationRun(firstRunId);
     }
@@ -351,15 +330,14 @@ public class GenerationAppService {
      * 原生成车道的排队/错峰/排空已拆，即交即跑）＋停止/关停收口面装配——内核
      * 轨道正常返回后排空对话面交指令待办（#623）。
      */
-    private Future<?> submitTrack(Project project, String firstRunId, Integer prdVersionNo,
-            String versionLabel) {
+    private Future<?> submitTrack(Project project, String firstRunId, String versionLabel) {
         Long projectId = project.getId();
         return sessionExecutor.submitGeneration(
                 CodingRunDispatcher.SESSION_PREFIX + projectId,
                 () -> {
                     boolean trackReturned = false;
                     try {
-                        runKernelTrack(project, firstRunId, prdVersionNo, versionLabel);
+                        runKernelTrack(project, firstRunId, versionLabel);
                         trackReturned = true;
                     }
                     catch (RunStoppedException e) {
@@ -448,13 +426,12 @@ public class GenerationAppService {
      * 〔决策提示／verify 自决旧中间件结构性挂不上〕）单会话连续驱动，直至收尾判据
      * 双件全过（{@link KernelClosingCriteria}：{@code pnpm build} 过＋8081 探活有
      * 响应——与内核完成判据句同口径）。起服先行由 {@link KernelServingGuard} 尽力
-     * 确保（收敛不成不杀 run——探活仍是收口硬门）。成功：{@code generated_at}/Demo
-     * 首版成版＋preview-ready；失败/停止：终态 run-failed＋清点火位（岔路口卡/确认
+     * 确保（收敛不成不杀 run——探活仍是收口硬门）。成功：{@code generated_at}＋
+     * preview-ready；失败/停止：终态 run-failed＋清点火位（岔路口卡/确认
      * 按钮复现——用户在点火入口重跑即恢复，#604 失败新语义＝明确展示＋重跑即续，
      * ADR-0055 #580-13：不自动重跑、不携错误现场）。
      */
-    private void runKernelTrack(Project project, String firstRunId, Integer prdVersionNo,
-            String versionLabel) {
+    private void runKernelTrack(Project project, String firstRunId, String versionLabel) {
         Long projectId = project.getId();
         // 起手起服（#597 起服守卫，尽力而为）：开发服务器平台起、常驻——内核工具面
         // 恰四件、无杀/起服务路径，探活收口前起服须在
@@ -479,7 +456,7 @@ public class GenerationAppService {
             eventBridge.emitRunFailed(project, firstRunId, result.failure());
             return;
         }
-        markGenerated(projectId, firstRunId, prdVersionNo);
+        markGenerated(projectId);
         // 演示种子预置（#340 口径延续：Demo 将可见前一刻——幂等，失败不阻断收工）
         demoSeed.seedSandbox(project);
         emitPreviewReady(project);
@@ -554,17 +531,20 @@ public class GenerationAppService {
     }
 
     /**
-     * 首次生成时点落位＋Demo 首版成版（#333 同刻原子——{@link
-     * DemoVersionAppService#closeOnGeneration} 短事务）：失败记日志不炸异步轨道
-     * （run 已成功；两落 either-or，下次派发收口自愈）。
+     * 首次生成时点落位（幂等单向，{@link Project#markGenerated}）。旧 Demo 首版成版
+     * 随旧版本表一并退场（#630）——generated_at 与版本创建解耦，只记生成事实。失败
+     * 记日志不炸异步轨道（run 已成功；下次派发收口自愈）。
      */
-    private void markGenerated(Long projectId, String runId, Integer prdVersionNo) {
+    private void markGenerated(Long projectId) {
         try {
-            demoVersionAppService.closeOnGeneration(projectId, runId, prdVersionNo);
+            transactionTemplate.executeWithoutResult(status -> projectRepository
+                    .findById(projectId).ifPresent(current -> {
+                        current.markGenerated();
+                        projectRepository.save(current);
+                    }));
         }
         catch (RuntimeException e) {
-            log.warn("[generate] 项目 {} generated_at/Demo 首版落位失败：{}", projectId,
-                    e.toString());
+            log.warn("[generate] 项目 {} generated_at 落位失败：{}", projectId, e.toString());
         }
     }
 

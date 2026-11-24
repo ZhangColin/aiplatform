@@ -15,7 +15,8 @@ import com.semgravio.aiplatform.business.billing.application.BillingAppService.B
  *
  * <p>消费面（project 编排缝接线）：入口派发（意见/咨询/作用域改稿被拦输入留存
  * ＋充值回正自动放行）、run 派发核心（修正/生成/设计——被拦 intent 暂存＋充值
- * 回正自动补派）、恢复出口（「继续生成/继续更新」按钮路径 409 指路）。</p>
+ * 回正自动补派）、恢复出口（重跑入口——点火入口／「继续生成」「继续更新」按钮
+ * 路径 409 指路）。</p>
  */
 @Service
 public class BalanceGateAppService {

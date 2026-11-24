@@ -213,7 +213,8 @@ class BuildGateAppServiceTest {
 
     @Test
     void given_first_build_requested_when_gate_then_neither_card_nor_button() {
-        // 首建点火后：卡不复现（失败重试走「继续生成」）、确认门不复现（确认不重复）
+        // 首建点火后（在途/已成功）：卡与确认按钮都不呈现（#604 起终态失败/停止
+        // 收口清点火位后的复现见下一例）
         Long trialId = persistedTrialPrdProject("9905");
         gateService.ensureForkPending(trialId);
         Long paidId = persistedPaidPrdProject("9906");
@@ -229,6 +230,40 @@ class BuildGateAppServiceTest {
 
         assertThat(gateService.gateOf(trialId).forkCardPending()).isFalse();
         assertThat(gateService.gateOf(paidId).prdConfirmable()).isFalse();
+    }
+
+    @Test
+    void given_first_build_request_reopened_when_gate_then_card_and_button_reappear() {
+        // #604 失败新语义——重跑走点火入口（「继续生成」断点续跑入口随续跑机器退役）：
+        // 首建终态失败/停止收口清点火位后，岔路口卡与 PRD 确认按钮（「首建未派发」
+        // 呈现条件）复现——用户重走点火入口即重跑（清位动作归生成编排，
+        // 见 GenerationAppServiceTest 的点火位用例；本例钉读面后果）
+        Long trialId = persistedTrialPrdProject("9931");
+        gateService.ensureForkPending(trialId);
+        Long paidId = persistedPaidPrdProject("9932");
+
+        projectRepository.findById(trialId).ifPresent(p -> {
+            p.markFirstBuildRequested();
+            projectRepository.save(p);
+        });
+        projectRepository.findById(paidId).ifPresent(p -> {
+            p.markFirstBuildRequested();
+            projectRepository.save(p);
+        });
+        assertThat(gateService.gateOf(trialId).forkCardPending()).isFalse();
+        assertThat(gateService.gateOf(paidId).prdConfirmable()).isFalse();
+
+        projectRepository.findById(trialId).ifPresent(p -> {
+            p.reopenFirstBuildRequest();
+            projectRepository.save(p);
+        });
+        projectRepository.findById(paidId).ifPresent(p -> {
+            p.reopenFirstBuildRequest();
+            projectRepository.save(p);
+        });
+
+        assertThat(gateService.gateOf(trialId).forkCardPending()).isTrue(); // 卡复现
+        assertThat(gateService.gateOf(paidId).prdConfirmable()).isTrue(); // 确认按钮复现
     }
 
     // ---------- 付费轨 PRD 确认（原动作形态恢复：确认即派发首建） ----------

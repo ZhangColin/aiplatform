@@ -58,7 +58,7 @@ import com.semgravio.aiplatform.web.GuestContext;
  * 项目读侧用例：详情、列表（状态过滤 ACTIVE/ARCHIVED/缺省 all）+ 用量（总量 +
  * 平台成本 + 分模型 + 分智能体）+ PRD 读（直读工作区文件事实源）。写侧（生命周期/
  * 归档/改名）归 {@link ProjectLifecycleAppService}，读拼装集中一处。详情含生成态
- * 四态投影（#222）——轨道表＋generated_at＋在途标记派生，与 SSE 会话态无关。
+ * 投影（#222；#604 四态归一，三档）——generated_at＋在途标记派生，与 SSE 会话态无关。
  */
 @Service
 public class ProjectQueryAppService {
@@ -449,7 +449,7 @@ public class ProjectQueryAppService {
     // ---------- 响应拼装 ----------
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
-     * + 生成态四态投影（#222）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
+     * + 生成态投影（#222；#604 三档）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
      * 摘要（归档终态「完整记录」取单面，#30）+ 生成轨道片清单（#225 计划区）
      * + 设计轨道件清单（#290 计划区，对偶片清单）。 */
     private ProjectDetailResponse toDetail(Project project) {
@@ -496,16 +496,15 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 生成态投影（#222 四态口径的事实源之一〔轨道片表〕已随 #602 拆除——
-     * 「生成中断」档失去判据，整体四态口径的退役/重设归 #604，本处暂并为
-     * 三档：已生成／生成中／从未生成）：
+     * 生成态投影（#222；#604 四态归一——原「生成中断」档的判据〔轨道片表〕随 #602
+     * 拆除，该档随旧失败语义一并退役，只余三档）：
      * <ol>
      * <li>已生成：{@code generated_at} 落位恒赢——迭代/修正 run 在途不改变生成态
      * （生成面的呈现态，生成完成即定格）；</li>
      * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已登记未起跑
      * 段——begin 先于提交）；</li>
-     * <li>从未生成：其余全部（含原「中断」档场景——重启丢标记、失败终态等，
-     * 「继续生成」出口不受投影档位影响）。</li>
+     * <li>从未生成：其余全部——含首建失败/停止收口后待重跑的项目（#604 起失败
+     * 不落投影：失败只经 run-failed 事件在会话内明确呈现，恢复入口＝点火入口）。</li>
      * </ol>
      */
     private GenerationState generationStateOf(Project project) {

@@ -10,11 +10,12 @@ import type { WorkPart } from "@/lib/store/work-message";
 import { SystemPanel, previewFrameKey } from "./system-panel";
 
 // 系统模式主区域（#45 渐进预览第一片 + #48 更新超限终态恢复出口；#222 档位改吃
-// 四态投影）：非「从未生成」即取预览地址；空态两档——无应用随工作消息部件推进
+// 生成态投影）：非「从未生成」即取预览地址；空态两档——无应用随工作消息部件推进
 // 步骤提示（#81 自解说自述优先、动作兜底），有应用保留页面 + 「更新中」轻提示
-// 一套；跨会话/重试不闪断；恢复出口单出口——生成中断（含刷新后，投影派生）与
-// 从未生成（idle 档）给「继续生成」、更新轮失败给「继续更新」；无推倒重来按钮，
-// 正常态全无。预览地址读口 mock 掉（每用例摆 url 有无与 error）。
+// 一套；跨会话/重试不闪断；恢复出口单出口——会话内 run 失败（#604 起失败不落
+// 投影，只由 SSE 会话态呈现）与从未生成（idle 档）给「继续生成」、更新轮失败给
+// 「继续更新」；无推倒重来按钮，正常态全无。预览地址读口 mock 掉（每用例摆 url
+// 有无与 error）。
 let previewResult: {
   data?: { url: string };
   error?: unknown;
@@ -100,7 +101,7 @@ function renderPanel({
   );
 }
 
-describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态投影档位）", () => {
+describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 生成态投影档位）", () => {
   beforeEach(() => {
     useGenerationStore.setState({ generations: {} });
     for (const key of Object.keys(seededWorks)) delete seededWorks[key];
@@ -150,10 +151,21 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
     expect(html).toContain("编写【index.html】");
   });
 
-  // ---------- 生成中断（#222 单出口「继续生成」，刷新后仍在——投影派生） ----------
+  it("从未生成（idle）——首建失败/停止后刷新回访的面（#604 失败不落投影）：回引导占位，「继续生成」出口仍在", () => {
+    // 原「生成中断」投影档随旧失败语义退役：失败档只由会话态（coderStatus=error）呈现，
+    // 刷新后未生成的项目回本档
+    const html = renderPanel({ generationState: "never" });
 
-  it("生成中断（投影，无会话信号——刷新/回访面）：中断提示 + 继续生成入口，无旧词残留", () => {
-    const html = renderPanel({ generationState: "interrupted" });
+    expect(html).toContain("系统生成后，这里会出现可以操作的你的系统");
+    expect(html).toContain("继续生成");
+    expect(html).not.toContain("生成中断了");
+    expect(html).not.toContain("<iframe");
+  });
+
+  // ---------- 会话内 run 失败（#604 失败新语义：明确展示＋重跑即恢复） ----------
+
+  it("会话内 run 失败（error 信号）：失败提示 + 继续生成入口，无旧词残留", () => {
+    const html = renderPanel({ generationState: "generating", coderStatus: "error" });
 
     expect(html).toContain("生成中断了");
     expect(html).toContain("已完成的进度都保留");
@@ -161,13 +173,6 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
     expect(html).not.toContain("重新发起");
     expect(html).not.toContain("推倒重来");
     expect(html).not.toContain("<iframe");
-  });
-
-  it("会话内 run 失败（error 信号，投影未刷新）：同中断口径先行呈现", () => {
-    const html = renderPanel({ generationState: "generating", coderStatus: "error" });
-
-    expect(html).toContain("生成中断了");
-    expect(html).toContain("继续生成");
   });
 
   it("失败原因随 run-failed 载荷呈现（#355 终态零原因补齐）：原因行入失败档，无原因不出行", () => {
@@ -199,9 +204,12 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
     expect(html).not.toContain("正在按您的意见修改系统");
   });
 
-  it("应用可访问且生成中断：细条带「继续生成」，页面保留（部分切片已收口）", () => {
+  it("应用可访问且会话内生成失败：细条带「继续生成」，页面保留（已落盘成果不闪断）", () => {
+    // 页面档「进行中」优先：失败细条待投影收敛（回「从未生成」）后出——#604 起失败
+    // 不落投影，只认会话态 error
     const html = renderPanel({
-      generationState: "interrupted",
+      generationState: "never",
+      coderStatus: "error",
       url: "http://localhost:42659",
     });
 
@@ -237,7 +245,7 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
   });
 
   it("正常态无任何手动触发：生成中 / 已生成均无恢复入口", () => {
-    // 正常流程全自动（#48/#222：恢复入口只在终态/中断档出现）
+    // 恢复入口只在终态出现（会话内 run 失败/更新轮失败）
     const updating = renderPanel({
       generationState: "generated",
       coderStatus: "running",
@@ -400,9 +408,10 @@ describe("SystemPanel · #124 更新提示移出遮挡", () => {
     expect(wrapperOpenTag(html, "正在更新系统，完成后自动刷新")).not.toContain("absolute");
   });
 
-  it("页面可见且生成中断：失败提示为非悬浮顶部占位细条（占自己高度、下推预览）", () => {
+  it("页面可见且会话内 run 失败：失败提示为非悬浮顶部占位细条（占自己高度、下推预览）", () => {
     const html = renderPanel({
-      generationState: "interrupted",
+      generationState: "never",
+      coderStatus: "error",
       url: "http://localhost:42659",
     });
 

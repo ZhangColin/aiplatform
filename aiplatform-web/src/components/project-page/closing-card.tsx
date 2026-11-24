@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  BadgeCheck,
   Check,
   ChevronDown,
   Clock3,
@@ -36,7 +35,6 @@ import type {
   ClosingDraft,
   DesignLintClosing,
   KnownDefectsClosing,
-  ProofOfOutputClosing,
   RobustKitLintClosing,
   RobustLintTier,
   WorkClosing,
@@ -336,25 +334,6 @@ function KnownDefectsArea({ knownDefects }: { knownDefects: KnownDefectsClosing 
 }
 
 /**
- * 产出证明判别标注（#420 空转片防呆的感知面）：豁免依据（验证确认「能力已存在」
- * 的合法收口——活已被前片干完的薄片）与空转拒绝史（曾 N 次被拒、补做后收口）
- * 如实呈现——事后审计每片「干没干活、依据是什么」；正常干活收口（diff＞0 且无
- * 拒绝史）不携带不出。
- */
-function ProofArea({ proof }: { proof: ProofOfOutputClosing }) {
-  return (
-    <div className="mt-1.5 flex items-start gap-2 text-[13px] text-muted-foreground">
-      <BadgeCheck className="mt-0.5 size-3.5 shrink-0" />
-      <span>
-        {proof.exempted ? <>豁免收口——{proof.exemptionBasis ?? "验证确认「能力已存在」"}</> : null}
-        {proof.exempted && proof.idleRejections ? "；" : null}
-        {proof.idleRejections ? <>曾 {proof.idleRejections} 次空转拒绝，补做后收口</> : null}
-      </span>
-    </div>
-  );
-}
-
-/**
  * 定稿后续触发行（#291 定稿收尾卡）：drafts 携 triggers（仅定稿收尾卡——显式
  * 动作收口后的分岔事实：已按稿对齐/已开始构建/下单开放）即出「已触发」一行；
  * 候选产出轮（首产/改稿）不携带、零呈现。定稿稿行在卡内即「锁定那张」的叙事
@@ -411,8 +390,6 @@ export function ClosingCard({
   const designLint = closing.designLint;
   // 基座 lint 两档（#425）：可缺省——新基座工作区编码 run 携带（「基座件使用」行）
   const robustKitLint = closing.robustKitLint;
-  // 产出证明判别标注（#420）：可缺省——豁免收口/空转拒绝史才携带（正常干活不出）
-  const proof = closing.proofOfOutput;
   // 已知缺陷清单（#427）：可缺省——整轨终验修复预算耗尽才携带（版本照成＋如实
   // 呈现，不粉饰「完成」）；终验通过/预算内有修复路径不出
   const knownDefects = closing.knownDefects;
@@ -530,10 +507,6 @@ export function ClosingCard({
           {/* 基座件使用（#425）：新基座工作区的基座 lint 两档事实——预置档余项
               如实标注（不拦收口）；存量工作区不携带不出 */}
           {robustKitLint ? <RobustLintArea lint={robustKitLint} /> : null}
-
-          {/* 产出证明判别标注（#420）：豁免依据/空转拒绝史的如实呈现；正常干活
-              收口不携带不出 */}
-          {proof ? <ProofArea proof={proof} /> : null}
         </>
       )}
 

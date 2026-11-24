@@ -11,10 +11,8 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceReadinessWai
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
-import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
-import com.semgravio.aiplatform.business.project.application.VerificationFacts;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetcher;
 import com.semgravio.aiplatform.business.project.domain.port.WebSearchProvider;
@@ -57,7 +55,11 @@ import io.agentscope.core.tool.Toolkit;
  * （subagent 槽血统实例，沉淀自荐——#460，挂载治理归声明 allowlist）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
- * 工作区 / 无配置语境 = 空集（模型不可见）。
+ * 工作区 / 无配置语境 = 空集（模型不可见）。<b>#604 拆 run 尝试体旧机制</b>：run
+ * 执行体槽（finish_edit/update_plan/技能与沉淀自荐 executor 槽/构建轨出图 gi 件）
+ * 与 verify 子键视图（report_verification＋subagent 槽自荐两件）随子智能体委派
+ * 与旧执行协议一并退役——生成/更新 run 经内核装配形态派发（工具面＝恰四件经
+ * {@code KernelTools} 装配结构性兑现，本装配面零注册），设计执行体槽不受影响。
  *
  * <p><b>增强工具开关（#252，ADR-0021 窄幅开关）</b>：fetch_url / web_search 两件
  * 按 {@code toolSpec}（工具面规格串，{@code AgentConfigAppService} 编码——运营
@@ -71,12 +73,9 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     /** 工具面规格串的件键（与 {@code AgentConfigAppService#toolSpec} 编码对偶）。 */
     private static final String WEB_SEARCH_KEY = "ws";
     private static final String FETCH_URL_KEY = "fu";
-    /** #545 构建轨出图工具件键（run 执行体槽；缺省开，关＝槽位不挂载、回无图现状）。 */
-    private static final String BUILD_IMAGE_KEY = "gi";
 
     private final PrdArtifactAdapter prdArtifacts;
     private final InterviewToolGate interviewToolGate;
-    private final FinishEditFacts finishFacts;
     private final PrdRevisionFacts prdRevisions;
     private final FastLaneFacts fastLaneFacts;
     private final ProjectRepository projectRepository;
@@ -88,23 +87,19 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final ImageGenerationAppService imageGeneration;
     private final LandedFileFacts landedFiles;
     private final DesignSpecAppService designSpecs;
-    private final VerificationFacts verificationFacts;
-    private final AgentConfigAppService agentConfigs;
     private final WorkspaceReadinessWaiter readinessWaiter;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts,
-            InterviewToolGate interviewToolGate, FinishEditFacts finishFacts,
+            InterviewToolGate interviewToolGate,
             PrdRevisionFacts prdRevisions, FastLaneFacts fastLaneFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
             ImageGenerationAppService imageGeneration,
             LandedFileFacts landedFiles, DesignSpecAppService designSpecs,
-            VerificationFacts verificationFacts, AgentConfigAppService agentConfigs,
             WorkspaceReadinessWaiter readinessWaiter) {
         this.prdArtifacts = prdArtifacts;
         this.interviewToolGate = interviewToolGate;
-        this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
         this.fastLaneFacts = fastLaneFacts;
         this.projectRepository = projectRepository;
@@ -116,8 +111,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.imageGeneration = imageGeneration;
         this.landedFiles = landedFiles;
         this.designSpecs = designSpecs;
-        this.verificationFacts = verificationFacts;
-        this.agentConfigs = agentConfigs;
         this.readinessWaiter = readinessWaiter;
     }
 
@@ -157,28 +150,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             toolkit.registerAgentTool(new ProposeSedimentTool(ro.workspaceId(),
                     SkillSlot.MAIN.key(), sedimentProposals));
         }
-        if (AgentProfile.EXECUTOR.key().equals(agentKey)
-                && workspace instanceof AgentWorkspace.ProjectDev dev) {
-            toolkit.registerAgentTool(new FinishEditTool(dev.workspaceId(), finishFacts));
-            // #236 步骤清单：run 级计划的全量快照（呈现面在部件映射表，本工具零副作用）
-            toolkit.registerAgentTool(new UpdatePlanTool());
-            // #259 技能自荐：验证过的编码模式沉淀为草稿（骨架件无开关；软指引在
-            // 工作协议——无模式可沉淀的 run 不调用）
-            toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
-                    SkillSlot.EXECUTOR, skillProposals));
-            // #460 沉淀自荐：可复用功能模块形态/业务规则沉淀为采集层草稿（骨架件
-            // 无开关；软指引在工作协议——不绑时刻，无内容不调用）
-            toolkit.registerAgentTool(new ProposeSedimentTool(dev.workspaceId(),
-                    SkillSlot.EXECUTOR.key(), sedimentProposals));
-            // #545 图片能力下放构建轨（ADR-0052，ADR-0026 备案触发器兑现）：演示
-            // 数据配图（hero/关键实体/空态美化，落 public/、计量归 executor、转存
-            // 沿用既有）——增强件，运营开关关即槽位不挂载（回无图现状）；设计执行体
-            // 同名工具是骨架件、不读本规格件
-            if (AgentConfigAppService.toolEnabled(toolSpec, BUILD_IMAGE_KEY)) {
-                toolkit.registerAgentTool(GenerateImageTool.forBuild(dev.workspaceId(),
-                        imageGeneration, landedFiles));
-            }
-        }
         // #289 设计执行体（设计面工作区）：出图工具件（#288 立内核、本票发放——
         // 档位表落提示词层，执行体按设计物语义自选；#292 落盘事实报进变更事实流，
         // 收口判据与稿清单看得见图片模型路的稿）；写文件件是 harness 内建、
@@ -187,21 +158,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                 && workspace instanceof AgentWorkspace.ProjectDesign design) {
             toolkit.registerAgentTool(GenerateImageTool.forDesign(design.workspaceId(),
                     imageGeneration, landedFiles, designSpecs));
-        }
-        // #352 verify 子键视图：子智能体自有平台工具面（验证结果登记＋技能自荐
-        // subagent 槽血统实例）——平台工厂构建子智能体时按本键取视图合并进子级
-        // 工具面（镜像技能仓库的子键路由先例），声明 allowlist 治理挂载与否。
-        // 轮次预算经供应 lambda 动态读（#424：运营面改预算下一轮登记即生效——
-        // 工具实例随智能体构建长存，不缓存配置值）
-        if (ProfileSubagentSupplier.VERIFY_NAME.equals(agentKey)
-                && workspace instanceof AgentWorkspace.ProjectDev dev) {
-            toolkit.registerAgentTool(new ReportVerificationTool(dev.workspaceId(),
-                    verificationFacts,
-                    () -> agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyRoundBudget()));
-            toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
-                    SkillSlot.SUBAGENT, skillProposals));
-            toolkit.registerAgentTool(new ProposeSedimentTool(dev.workspaceId(),
-                    SkillSlot.SUBAGENT.key(), sedimentProposals));
         }
         return toolkit;
     }

@@ -96,7 +96,7 @@ import lombok.extern.slf4j.Slf4j;
  * 对话史落库的主写口在本编排：用户发言提交侧同步落（守卫全过后——失败上抛撤回
  * REST 面，「落库 ⟺ 说过」不漂移），智能体回复段与问答卡在轮落定点按对话序落
  * （{@link ConversationHistoryAppService.TurnRecorder}——挂起段文本先落、问答卡
- * 随后），收尾卡归编码 run 收口（{@code CoderRunAttempts}）。</p>
+ * 随后），收尾卡归编码 run 收口（{@code CodingRunDispatcher}）。</p>
  */
 @Service
 @Slf4j

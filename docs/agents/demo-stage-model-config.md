@@ -37,20 +37,20 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 
 **边缘调用点同面改配置（#366）**：项目取名（`naming`）、上下文压缩（`compaction`）、入口分类（`classification`）、技能预检（`precheck`）四件一次性轻调用的模型配置收编同一配置面——端点 `/api/backoffice/agent-configs/edge/{edgeKey}`（GET/PUT/traces 同制，值面仅模型配置：`{"modelConfigKey": "pro"}`；缺省一律 `flash`）。改配置下一轮调用即生效（装配动态查库）。
 
-**verify 验证子智能体配置与轮次预算（#424 片轻验常开）**：verify 子智能体（片轻验的执行侧）的配置与单场轮次预算收编在 **executor 行**（同一 PUT 通道）——
+**verify 验证子智能体配置与轮次预算（#424 片轻验常开）**：**#604 起 verify 子智能体的声明与装配已随子智能体委派机制退役，本段配置暂无消费面**（两列随审查与收口组拆除，#605）——原文留作过渡期参照：verify 子智能体（片轻验的执行侧）的配置与单场轮次预算收编在 **executor 行**（同一 PUT 通道）——
 
 1. **缺省＝随执行体档**：`verifyModelConfigKey` 缺省 null＝随执行体**生效档**（含路由升档——重片升强档时 verify 同档跟随，不降；#406 裁决「验证判错代价高于省的秒数」）。
 2. **改配置**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verifyModelConfigKey": "pro"}`（即时校验同 `modelConfigKey`：PRJ_074/075）；null 清空回落随执行体档。改完下一轮命令构建即生效（子智能体档位进智能体实例缓存键指纹）。
 3. **轮次预算**：`{"verifyRoundBudget": 5}`（1-20 整数，越界 PRJ_078；null＝回落代码缺省 3＝首轮验证＋至多两轮修复复验）。预算＝单场防无限复验的护栏：verify 经 report_verification 登记达预算仍有未过项时，登记回执告知「停止修复—复验」，收尾卡验证统计带 `budgetExhausted` 如实标注。动态逐次读——改完下一轮登记即生效。
 4. **查/回滚**：GET 同面（`verifyModelConfigKey`/`verifyModelConfigKeyOverridden`/`verifyRoundBudget`/`defaultVerifyRoundBudget`）；traces 前后快照含验证面两件。
 
-**收口三硬门开关（#433 开关承载面；#435 翻转缺省——#432 Step 1 砍验证税落地态）**：验证在场闸（#424）、空转产出证明闸（#420）、整轨终验拦「生成完成」（#427）三件收口硬门各持独立开关，收编 **executor 行**（同一 PUT 通道）——
+**收口两硬门开关（#433 开关承载面；#435 翻转缺省——#432 Step 1 砍验证税落地态）**：验证在场闸（#424）、整轨终验拦「生成完成」（#427）两件收口硬门各持独立开关，收编 **executor 行**（同一 PUT 通道）。原第三件——空转产出证明闸（#420）——连同开关 `proofOfOutputGateEnabled` 已随 #604 拆除（闸本体退役，字段退出 GET/PUT 面）——
 
-1. **缺省＝闸关（#435 起）**：三开关缺省 false＝#432 Step 1 正式落地——秒级确定性探活（8081 探活＋入口文件完整＋git 成版）是唯一收口要件；#433 的开关机制原样保留（闸代码全留仓）。
-2. **切闸**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verificationPresenceGateEnabled": true, "proofOfOutputGateEnabled": true, "finalVerificationGateEnabled": true}`（三件各自独立，可组合）＝一键切回旧行为（#424/#420/#427 现行为）；false/null＝闸关。留痕前后快照含三闸（回滚腿完整）。
-3. **生效时机＝下一次闸判定**：闸判定处动态查库——在场闸/整轨终验在收口/完成判定时读，产出证明闸在 run 起跑（`forRun`）时读本 run 闸态；改完不发版即生效，进行中 run 不定格（产出证明闸按「起跑时读档」语义——本 run 恒定，对偶模型档）。
-4. **闸开语义**：在场闸开＝本 run 无验证登记不收口；产出证明闸开＝零 diff 且无确认的空转片被拒（记拒绝史、段起点探针跑）；整轨终验开＝轨道完成前以核心旅程为轴终验、fail 拦「生成完成」。秒级确定性探活（8081 探活＋入口文件完整＋git 成版）不受三开关影响，常开。
-5. **查生效值**：GET 同面（`verificationPresenceGateEnabled`/`proofOfOutputGateEnabled`/`finalVerificationGateEnabled` 生效态）。
+1. **缺省＝闸关（#435 起）**：两开关缺省 false＝#432 Step 1 正式落地——秒级确定性探活（8081 探活＋入口文件完整＋git 成版）是唯一收口要件；#433 的开关机制原样保留（闸代码全留仓）。
+2. **切闸**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verificationPresenceGateEnabled": true, "finalVerificationGateEnabled": true}`（两件各自独立，可组合）＝一键切回旧行为（#424/#427 现行为）；false/null＝闸关。留痕前后快照含两闸（回滚腿完整）。
+3. **生效时机＝下一次闸判定**：闸判定处动态查库——在场闸/整轨终验在收口/完成判定时读；改完不发版即生效，进行中 run 不定格。
+4. **闸开语义**：在场闸开＝本 run 无验证登记不收口；整轨终验开＝轨道完成前以核心旅程为轴终验、fail 拦「生成完成」。秒级确定性探活（8081 探活＋入口文件完整＋git 成版）不受两开关影响，常开。
+5. **查生效值**：GET 同面（`verificationPresenceGateEnabled`/`finalVerificationGateEnabled` 生效态）。
 
 **生成会话形态两开关（#436——#432 Step 2 单长会话落地＋切片机器退役）**：Demo 首建的生成会话形态由两开关决定（编排缝动态读档），收编 **executor 行**（同一 PUT 通道）——
 
@@ -60,12 +60,7 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 4. **生效时机＝轨道起跑时读档**：改完不发版即生效，进行中 run 不定格（同模型档语义）。
 5. **查生效值**：GET 同面（`singleSessionGenerationEnabled`/`parallelSliceMachineEnabled` 生效态）；编排行为锚定见 `GenerationAppServiceTest` given_single_session_ 系用例。
 
-**verify 自决开关（#442，#441-1——#439 终裁 verify 窗 20.9min〔真实独占估 12-15min〕的最大单一可收窄面）**：执行体生成过程中自决调用 verify 子智能体（#435 自决化）的提示层收窄开关，收编 **executor 行**（同一 PUT 通道）——
-
-1. **缺省＝自决开（#435 现状维持）**：`verifySelfDecisionEnabled` 缺省 true＝执行体按工作协议第 9 条自决委派 verify 自测（验证不是收口要件）。
-2. **翻转关闭**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verifySelfDecisionEnabled": false}`＝生成过程中不自发委派 verify、不发起修复—复验循环——执行体 ReAct 循环中间件（`VerifySelfDecisionMiddleware`）每迭代动态查库，关闭态注入一条提示层指令（每轮〔派段〕一次——判重载体 ctx 属性袋＋消息列回读兼容源，#481）；**平台驱动验证腿不受影响**（三闸回执／整轨终验编排任务说明要求的验证照常执行），收口唯一硬判据仍是 8081 探活三件套。false/null 归一缺省（null＝开）；留痕前后快照含本开关（回滚腿完整）。
-3. **生效时机＝下一次迭代**：中间件每迭代动态查库、装配不进 agent 实例缓存键——改完不发版即生效；防重灌口径（#481 载体换位）：注入消息不落 state、不随消息列留存（仅注入那一迭代的模型调用可见），同派段后续迭代不重注、新派段首迭代再注入一次。
-4. **查生效值**：GET 同面（`verifySelfDecisionEnabled` 生效态）；中间件行为锚定见 `VerifySelfDecisionMiddlewareTest`。
+**verify 自决开关（#442）与决策时注入四件（#437）——已随 #604 退役**：两者只被按 `executor` 装配键挂载的两个旧中间件（`VerifySelfDecisionMiddleware`／`DecisionHintMiddleware`）消费；生成与更新 run 全部经内核装配形态派发后（装配键 `generation-kernel`，#601），`executor` 键不再进任何派发路径。中间件、配置列（`verify_self_decision_enabled`、`decision_hints_enabled`／`decision_hint_error_streak`／`decision_hint_stack_cap`／`decision_hint_disabled`，V83 迁移拆除）、后台 GET/PUT/留痕面的对应字段与错误码 PRJ_081–083 一并移除——后台配置面不再有这些开关。
 
 ## 四、进行中 run 不定格
 

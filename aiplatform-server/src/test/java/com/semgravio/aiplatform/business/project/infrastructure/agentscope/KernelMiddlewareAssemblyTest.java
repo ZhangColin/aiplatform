@@ -17,7 +17,6 @@ import com.semgravio.aiplatform.base.agentscope.AgentscopeProperties;
 import com.semgravio.aiplatform.base.agentscope.EdgeModelSupplier;
 import com.semgravio.aiplatform.base.agentscope.KernelLoopSemantics;
 import com.semgravio.aiplatform.base.skills.domain.repository.SkillStore;
-import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.TextBlock;
@@ -39,13 +38,12 @@ import reactor.core.publisher.Flux;
  *
  * <ul>
  * <li><b>内核形态</b>（{@code obtainKernel}，装配键 generation-kernel）：循环语义
- * 中间件 {@link KernelLoopSemantics} 在集合内（#596 结构性挂载）；决策时微指令
- * {@link DecisionHintMiddleware} 与 verify 自决 {@link VerifySelfDecisionMiddleware}
- * 不在集合内——两旧中间件按 {@code executor} 配置键挂载（ProfileMiddlewareSupplier
- * 键判别），内核命令携 {@value AgentscopeHarnessAgentFactory#KERNEL_AGENT_NAME}
- * 非 executor 键＝结构性排除（#598 警示第一条：不消费「不可见平台机制」）；</li>
- * <li><b>执行体形态</b>（对照腿，{@code executor} 键）：两旧中间件在集合内、
- * {@link KernelLoopSemantics} 不在——旧形态装配一行不动（铁律：不开拆旧栈）。</li>
+ * 中间件 {@link KernelLoopSemantics} 在集合内（#596 结构性挂载）；平台侧只挂
+ * 全形态共享的技能加载计数（{@link SkillLoadCountMiddleware}，#261）；</li>
+ * <li><b>旧执行体键形态</b>（对照腿，{@code executor} 键）：不挂循环语义、平台侧
+ * 同样只有共享观测件——#604 起按 executor 键挂载的两个旧栈中间件（决策时微指令
+ * #437、verify 自决 #442）已随 run 尝试体旧机制删除（executor 键不再进任何派发
+ * 路径），本腿钉「executor 键也不分叉挂件」。</li>
  * </ul>
  *
  * <p>本测试归 business 测试树：组合 base 工厂与 business 中间件供应商是业务侧
@@ -108,27 +106,20 @@ class KernelMiddlewareAssemblyTest {
             public EdgeModel precheckModel() {
                 return edge;
             }
-
-            @Override
-            public EdgeModel subagentModel() {
-                return null; // 随父级（#424 缺省同执行体档）
-            }
         };
     }
 
-    /** 真装配缝：真 ProfileMiddlewareSupplier（SkillStore/AgentConfigAppService 桩——
-     * 两旧中间件的配置读腿惰性触发，构建期不触库）＋真工厂。 */
+    /** 真装配缝：真 ProfileMiddlewareSupplier（SkillStore 桩）＋真工厂。 */
     private static AgentscopeHarnessAgentFactory realFactory(ProfileMiddlewareSupplier middlewares) {
         return new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(),
                 (agentKey, workspace, toolSpec) -> new Toolkit(),
-                (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
+                (agentKey, workspace) -> List.of(),
                 middlewares, probeEdgeModels(), new AgentscopeProperties(), null);
     }
 
     private static ProfileMiddlewareSupplier realMiddlewareSupplier() {
-        return new ProfileMiddlewareSupplier(mock(SkillStore.class),
-                mock(AgentConfigAppService.class));
+        return new ProfileMiddlewareSupplier(mock(SkillStore.class));
     }
 
     private static List<MiddlewareBase> middlewaresOf(
@@ -147,11 +138,9 @@ class KernelMiddlewareAssemblyTest {
             List<MiddlewareBase> middlewares = middlewaresOf(agent);
             // #596 结构性挂载：内核循环五条语义中间件在集合内
             assertThat(middlewares).anyMatch(middleware -> middleware instanceof KernelLoopSemantics);
-            // #601 内核键结构性排除：按 executor 键挂载的两旧中间件不在集合内
-            assertThat(middlewares)
-                    .noneMatch(middleware -> middleware instanceof DecisionHintMiddleware)
-                    .noneMatch(middleware -> middleware instanceof VerifySelfDecisionMiddleware);
-            // 全形态共享观测件在场（#261 使用计数——装配分野不动它）
+            // 全形态共享观测件在场（#261 使用计数——装配分野不动它）；平台侧再无
+            // 按配置键分叉的旧中间件（决策时微指令/verify 自决已随 #604 删除，
+            // 「executor 键也不挂」见下一例与 ProfileMiddlewareSupplierTest）
             assertThat(middlewares)
                     .anyMatch(middleware -> middleware instanceof SkillLoadCountMiddleware);
         }
@@ -161,9 +150,9 @@ class KernelMiddlewareAssemblyTest {
     }
 
     @Test
-    void given_executor_form_when_obtain_then_legacy_decision_middlewares_present_and_loop_semantics_out() {
-        // 对照腿：执行体形态（executor 键）照旧挂两旧中间件、不挂循环语义——
-        // 旧形态装配一行不动（铁律：不开拆旧栈）
+    void given_legacy_executor_key_when_obtain_then_only_shared_observation_and_no_loop_semantics() {
+        // 对照腿：旧执行体键（executor）不挂循环语义，平台侧只有共享观测件——
+        // #604 起该键不再挂决策时微指令/verify 自决旧中间件（已删除，无派发路径）
         AgentscopeHarnessAgentFactory factory = realFactory(realMiddlewareSupplier());
 
         HarnessAgent agent = factory.obtain("run-executor", "sys", "probe-mw:kernel-stub",
@@ -172,9 +161,16 @@ class KernelMiddlewareAssemblyTest {
         try {
             List<MiddlewareBase> middlewares = middlewaresOf(agent);
             assertThat(middlewares)
-                    .anyMatch(middleware -> middleware instanceof DecisionHintMiddleware)
-                    .anyMatch(middleware -> middleware instanceof VerifySelfDecisionMiddleware)
                     .noneMatch(middleware -> middleware instanceof KernelLoopSemantics);
+            assertThat(middlewares)
+                    .anyMatch(middleware -> middleware instanceof SkillLoadCountMiddleware);
+            // 平台中间件供应商对该键只给一件共享观测件（业务装配面不分叉挂件——
+            // 旧形态另有 harness 内建件，不在本断言面；供应商级断言见
+            // ProfileMiddlewareSupplierTest）
+            assertThat(realMiddlewareSupplier().middlewaresFor("executor",
+                    new AgentWorkspace.ProjectDev("42", "ws-42-dev")))
+                    .hasSize(1)
+                    .allMatch(middleware -> middleware instanceof SkillLoadCountMiddleware);
         }
         finally {
             agent.close();

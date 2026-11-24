@@ -22,9 +22,7 @@ import com.semgravio.aiplatform.business.project.application.AgentConfigAppServi
 import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
 import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
 import com.semgravio.aiplatform.business.project.application.FastLaneFacts;
-import com.semgravio.aiplatform.business.project.application.FinishEditFacts;
 import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
-import com.semgravio.aiplatform.business.project.application.VerificationFacts;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.AgentTool;
 import com.semgravio.aiplatform.business.project.domain.model.AgentToolKind;
@@ -50,23 +48,21 @@ import reactor.core.publisher.Mono;
  * web_search}（答询查证 + 自主调研），
  * 仅随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关，写面结构性不存在——
  * PRD 写入走 savePrd 自带通道）；
- * run 执行体 = {finish_edit}（更新收口结束工具——「要不要动系统」的判定面；
- * 其余编码工具——含内核 shell——由 harness 内核自带）；无配置语境 / 本地兜底
- * 工作区 = 空集。
- *
- * <p>#602：切片计划工具（saveBuildPlan）随切片机器整体出局——主智能体工具面
- * 不再有计划登记件，内核路径不需要切片输入。</p>
+ * run 执行体槽 = 空集（#604 随旧 run 尝试体整体退役——finish_edit/update_plan/自荐
+ * 两件/构建轨出图 gi 件全拆，生成/更新 run 经内核装配形态派发、工具面＝恰四件经
+ * KernelTools 装配结构性兑现，本装配面零注册）；无配置语境 / 本地兜底工作区 = 空集。
  *
  * <p>#252 增强工具开关：fetch_url / web_search 按 {@code toolSpec} 规格串装配——
  * 关＝不注册（退出装配面）、开＝注册（回归）、null/坏规格＝缺省全开（一次性判定
  * 等无规格语境的宽容腿）；骨架工具无开关概念恒注册。装配集与 {@link AgentTool}
- * 枚举（工具面清单正本）的一致性在此钉死——改一头不改另一头即红。</p>
+ * 枚举（工具面清单正本）的一致性在此钉死——改一头不改另一头即红（#604 起枚举
+ * 仅存 main/designer 两槽，executor 槽条目随旧执行协议退役：执行体装配的自荐
+ * 两件无枚举对应项，不走同源断言）。</p>
  */
 class ProfileToolkitSupplierTest {
 
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
     private final InterviewToolGate interviewToolGate = mock(InterviewToolGate.class);
-    private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final FastLaneFacts fastLaneFacts = new FastLaneFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
@@ -80,25 +76,21 @@ class ProfileToolkitSupplierTest {
     private final ImageGenerationAppService imageGeneration = mock(ImageGenerationAppService.class);
     private final LandedFileFacts landedFiles = new LandedFileFacts();
     private final DesignSpecAppService designSpecs = mock(DesignSpecAppService.class);
-    private final VerificationFacts verificationFacts = new VerificationFacts();
-
-    /** 装配读面桩（#424 轮次预算动态供数——仅 verify 工具调用时读，装配不触）。 */
-    private final AgentConfigAppService agentConfigs = mock(AgentConfigAppService.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
+        return new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, prdRevisions,
                 fastLaneFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
-                landedFiles, designSpecs, verificationFacts, agentConfigs, readinessWaiter);
+                landedFiles, designSpecs, readinessWaiter);
     }
 
     @Test
     void given_main_on_read_only_workspace_when_toolkit_then_dialog_prd_and_read_trio() {
         // #86 并轨后的主智能体资产：访谈/判定工具 +
         // 答询查证只读五件同面（单会话连续——追问、答询、受理意见不换工具面）+
-        // 技能自荐（#263 三槽位齐开——需求侧经验不绑时刻，软指引在协议）；
+        // 技能自荐（#263 两槽位齐开——需求侧经验不绑时刻，软指引在协议）；
         // savePrd 锚定项目（经 PrdArtifactAdapter 落盘登记）；无派发工具（链必达收口
         // 在平台代码）；#602：saveBuildPlan 随切片机器出局
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
@@ -130,49 +122,19 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_executor_on_project_dev_when_toolkit_then_finish_edit_update_plan_propose_and_image_tool() {
-        // 执行体的业务工具面 = 结束工具（#46 修正收口判定）+ 步骤清单（#236 run 级
-        // 计划的全量快照观测面——呈现归部件映射表，本工具零副作用）+ 技能自荐
-        // （#259 过程模式沉淀待审——骨架件无开关）＋出图工具件（#545 图片能力下放
-        // 构建轨，ADR-0052——演示数据配图，缺省挂载、运营开关可关）：主智能体资产
-        // 不泄漏（ask_user/savePrd/只读五件都不在执行体面），其余编码工具（含内核
-        // shell，#219 透明面化后破坏性命令直通）由 harness 内核自带
+    void given_executor_key_when_toolkit_then_empty() {
+        // #604 执行体槽整体退役：finish_edit/update_plan 随旧 run 尝试体退役、自荐
+        // 两件与构建轨出图 gi 件随执行协议与开关列一并拆除——生成/更新 run 经内核
+        // 装配形态派发（工具面＝恰四件经 KernelTools 装配结构性兑现），本装配面
+        // 对 executor 键零注册（dev/只读面同空——双锚防误配）
         assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null)
                 .getToolNames())
-                .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME,
-                        ProposeSkillTool.NAME, ProposeSedimentTool.NAME,
-                        GenerateImageTool.NAME);
-    }
-
-    @Test
-    void given_build_image_switch_off_when_executor_toolkit_then_image_absent_but_skeleton_stays() {
-        // #545 开关装配面（沿 #252 增强件先例）：gi=false＝构建轨不挂载 generate_image
-        // （回无图现状），骨架四件不动；gi=true/缺件＝挂载；null/坏规格＝缺省开
+                .isEmpty();
         assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
-                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "gi=false")
+                        new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null)
                 .getToolNames())
-                .doesNotContain(GenerateImageTool.NAME)
-                .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME,
-                        ProposeSkillTool.NAME, ProposeSedimentTool.NAME);
-        assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
-                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "gi=true")
-                .getToolNames())
-                .contains(GenerateImageTool.NAME);
-        assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
-                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "ws=false")
-                .getToolNames())
-                .contains(GenerateImageTool.NAME); // 缺 gi 件＝缺省开（坏规格宽容腿）
-    }
-
-    @Test
-    void given_build_image_switch_off_when_designer_toolkit_then_still_mounted() {
-        // 设计执行体发放面行为不变（#545 回归）：构建轨开关只管 executor 槽——
-        // designer 的 generate_image 是骨架件、不读 toolSpec 的 gi 件，关也照挂
-        assertThat(supplier().toolkitFor(AgentProfile.DESIGNER.key(),
-                        new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), "gi=false")
-                .getToolNames())
-                .containsExactly(GenerateImageTool.NAME);
+                .isEmpty();
     }
 
     @Test
@@ -217,51 +179,21 @@ class ProfileToolkitSupplierTest {
                 .getToolNames()).isEmpty();
     }
 
-    // ---------- #352 verify 子键视图（subagent 槽血统）：验证登记＋技能自荐 ----------
-
     @Test
-    void given_verify_key_on_project_dev_when_toolkit_then_report_verification_and_propose_skill() {
-        // 子智能体自有平台工具面＝验证结果登记（#352 收尾卡验证统计的事实源）＋
-        // 技能自荐（#263 声明白名单接入的本体）——子键视图发 subagent 槽实例，
-        // 执行体资产 finish_edit/update_plan 不泄漏
-        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
-                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null).getToolNames())
-                .containsExactlyInAnyOrder(ReportVerificationTool.NAME, ProposeSkillTool.NAME,
-                        ProposeSedimentTool.NAME);
-    }
-
-    @Test
-    void given_verify_key_on_other_workspaces_when_toolkit_then_empty() {
-        // 子键视图只随项目 dev 面发放（verify 委派位只在 ProjectDev——与声明面同锚）
-        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
-                        new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null)
-                .getToolNames()).isEmpty();
-        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
-                        new AgentWorkspace.Local(null), null).getToolNames()).isEmpty();
-    }
-
-    @Test
-    void given_three_slot_assemblies_when_propose_skill_called_then_lineage_slot_each() {
-        // #263 血统验收：三槽位装配出的 propose_skill 实例各带正确来源槽位——真缝
-        // 走通（装配 → 工具执行 → 适配器血统），草稿落库的槽位血统不串槽
+    void given_main_assembly_when_propose_skill_called_then_lineage_slot_main() {
+        // #263 血统验收的 #604 形态：本装配面自荐仅存 main 槽（executor 槽随旧
+        // run 尝试体退役、内核形态自荐走 KernelTools 装配）——真缝走通（装配 →
+        // 工具执行 → 适配器血统），草稿落库的槽位血统不串槽
         assertProposeLineage(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
-        assertProposeLineage(AgentProfile.EXECUTOR.key(),
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
-        assertProposeLineage(ProfileSubagentSupplier.VERIFY_NAME,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "subagent");
     }
 
     @Test
-    void given_three_slot_assemblies_when_propose_sediment_called_then_lineage_slot_each() {
-        // #460 血统验收：三槽位装配出的 propose_sediment 实例各带正确来源槽位——
-        // 真缝走通（装配 → 工具执行 → 适配器血统），草稿落库的槽位血统不串槽
+    void given_main_assembly_when_propose_sediment_called_then_lineage_slot_main() {
+        // #460 血统验收的 #604 形态：本装配面沉淀自荐仅存 main 槽——真缝走通
+        //（装配 → 工具执行 → 适配器血统），草稿落库的槽位血统不串槽
         assertProposeSedimentLineage(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
-        assertProposeSedimentLineage(AgentProfile.EXECUTOR.key(),
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
-        assertProposeSedimentLineage(ProfileSubagentSupplier.VERIFY_NAME,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "subagent");
     }
 
     /** 适配器替身：记录沉淀自荐的血统调用形状。 */
@@ -285,11 +217,10 @@ class ProfileToolkitSupplierTest {
             String slotKey) {
         RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, prdRevisions,
                 fastLaneFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, skillProposals, recorder,
-                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
-                readinessWaiter);
+                imageGeneration, landedFiles, designSpecs, readinessWaiter);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSedimentTool.NAME);
         String title = "缝测血统-" + slotKey;
@@ -308,34 +239,6 @@ class ProfileToolkitSupplierTest {
                 .block();
         assertThat(result.getState()).as(agentKey).isNotEqualTo(ToolResultState.ERROR);
         assertThat(recorder.calls).containsExactly("42|run-seam|" + slotKey + "|CASE|" + title);
-    }
-
-    @Test
-    void given_verify_key_when_report_verification_called_then_facts_recorded() {
-        // #352 真缝走通：verify 子键装配 → 工具执行 → VerificationFacts 落账
-        // （收尾卡验证统计的事实源链路基座）；#424 登记时读运营面预算（动态供数
-        // 桩缺省 3——未过项为零不打扰回执）
-        when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
-                new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                        true, true, false, true, null, null, null, false, false, null, 3, 2,
-                        true, true, true, false, true));
-        var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
-        Map<String, Object> input = Map.of("checks",
-                List.of(Map.of(
-                        "name", "首页可访问", "face", "browser", "ok", true)));
-        var result = Mono.from(toolkit.getTool(ReportVerificationTool.NAME)
-                .callAsync(ToolCallParam.builder()
-                        .toolUseBlock(new ToolUseBlock("tc-1", ReportVerificationTool.NAME,
-                                input, null))
-                        .input(input)
-                        .runtimeContext(RuntimeContext.builder()
-                                .sessionId("s").userId("u").build())
-                        .build()))
-                .block();
-        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
-        assertThat(verificationFacts.consume("42").lastRound())
-                .containsExactly(new VerificationFacts.Check("首页可访问", "browser", true, null));
     }
 
     /** 适配器替身：记录血统调用形状（SkillProposalAdapter 为具体类，子类覆写）。 */
@@ -358,11 +261,10 @@ class ProfileToolkitSupplierTest {
     private void assertProposeLineage(String agentKey, AgentWorkspace workspace, String slotKey) {
         RecordingProposeAdapter recorder = new RecordingProposeAdapter();
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, finishFacts, prdRevisions,
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, interviewToolGate, prdRevisions,
                 fastLaneFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
-                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs,
-                readinessWaiter);
+                imageGeneration, landedFiles, designSpecs, readinessWaiter);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;
@@ -385,8 +287,8 @@ class ProfileToolkitSupplierTest {
 
     @Test
     void given_main_protocol_when_built_then_soft_guidance_present() {
-        // #263 软指引落位钉死：主智能体协议含自荐指引句（不绑时刻——与 verify
-        // 正文钉死测试对称；执行体对应句 #259 已落）
+        // #263 软指引落位钉死：主智能体协议含自荐指引句（不绑时刻；执行体对应句
+        // #259 已落——verify 正文钉死测试随 #604 委派机制退役）
         assertThat(AgentProfile.MAIN.systemPrompt()).contains("软指引非必做");
     }
 
@@ -408,18 +310,6 @@ class ProfileToolkitSupplierTest {
         String prompt = AgentProfile.MAIN.systemPrompt();
         for (String name : toolkit.getToolNames()) {
             assertThat(prompt).as("主智能体能力清单应点名工具：%s", name).contains(name);
-        }
-    }
-
-    @Test
-    void given_executor_capability_inventory_when_assembled_then_prompt_mentions_every_tool() {
-        // #216 单一事实的执行体镜像：装配的每件业务工具（finish_edit / update_plan）
-        // 都在执行协议里点名（update_plan 的调用纪律 = #236 提示词口径）
-        var toolkit = supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
-        String prompt = AgentProfile.EXECUTOR.systemPrompt();
-        for (String name : toolkit.getToolNames()) {
-            assertThat(prompt).as("执行体执行协议应点名工具：%s", name).contains(name);
         }
     }
 
@@ -476,18 +366,15 @@ class ProfileToolkitSupplierTest {
     @Test
     void given_spec_round_trip_when_encode_then_decode_preserves_all_switches() {
         // 编解码对偶单点：EffectiveConfig.toolSpec() 编码 ⇄ toolEnabled 解码值一致
-        // （规格串是底座不解释的透传串，语义只在这两处——漂移即红）；#545 gi 件同律
+        // （规格串是底座不解释的透传串，语义只在这两处——漂移即红）
         for (boolean ws : new boolean[]{true, false}) {
             for (boolean fu : new boolean[]{true, false}) {
-                for (boolean gi : new boolean[]{true, false}) {
-                    String spec = new AgentConfigAppService.EffectiveConfig(
-                            "prompt", "model", ws, fu,
-                            false, true, null, null, null, false, false, null, 3, 2, true,
-                            true, true, false, gi).toolSpec();
-                    assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
-                    assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
-                    assertThat(AgentConfigAppService.toolEnabled(spec, "gi")).as(spec).isEqualTo(gi);
-                }
+                String spec = new AgentConfigAppService.EffectiveConfig(
+                        "prompt", "model", ws, fu,
+                        false, true, null, null, null, false, false, null, 3, 2, true,
+                        true, true).toolSpec();
+                assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
+                assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
             }
         }
     }
@@ -501,20 +388,13 @@ class ProfileToolkitSupplierTest {
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null);
         assertThat(mainToolkit.getToolNames()).containsExactlyInAnyOrderElementsOf(
                 AgentTool.ofSlot("main").stream().map(AgentTool::toolName).toList());
-        var executorToolkit = supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
-        assertThat(executorToolkit.getToolNames()).containsExactlyInAnyOrderElementsOf(
-                AgentTool.ofSlot("executor").stream().map(AgentTool::toolName).toList());
+        // #604：executor 槽枚举条目随旧执行协议整体退役（AgentTool 仅存 main/
+        // designer 两槽）——执行体装配面（自荐两件）无枚举对应项，不走同源断言
         // #289 designer 槽同源：装配注册集 ≡ 枚举 designer 槽位集合（generate_image）
         var designerToolkit = supplier().toolkitFor(AgentProfile.DESIGNER.key(),
                 new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), null);
         assertThat(designerToolkit.getToolNames()).containsExactlyInAnyOrderElementsOf(
                 AgentTool.ofSlot("designer").stream().map(AgentTool::toolName).toList());
-        // #545 executor 槽同源：构建轨 generate_image 增强件在枚举在册、装配挂载
-        assertThat(AgentTool.ofSlot("executor").stream()
-                .filter(tool -> tool.toolName().equals(GenerateImageTool.NAME)))
-                .singleElement()
-                .satisfies(tool -> assertThat(tool.kind()).isEqualTo(AgentToolKind.ENHANCEMENT));
         assertThat(AgentTool.ofSlot("main").stream().filter(
                         tool -> tool.kind() == AgentToolKind.ENHANCEMENT).map(AgentTool::toolName))
                 .containsExactlyInAnyOrder(WebSearchTool.NAME, FetchUrlTool.NAME);

@@ -205,7 +205,7 @@ public final class ProjectFiles {
      * raw 路由 iframe 直渲；其余 HTML（应用源码等）不开伺服面（raw 只认图片与
      * 本判定）。
      *
-     * <p>design/ 锚定与轨道层 {@code CoderRunAttempts.designAnchored} 同律
+     * <p>design/ 锚定与轨道层 {@code CodingRunDispatcher.designAnchored} 同律
      * （彼两形兼容——write_file 件相对形＋落盘锚定形，#306；本收相对形，取件面
      * 前置 {@link #relativeFormOf} 归一——本类在 domain 层不可上引 application
      * 包，无法共享单点；两处口径同改，互指为约）。</p>

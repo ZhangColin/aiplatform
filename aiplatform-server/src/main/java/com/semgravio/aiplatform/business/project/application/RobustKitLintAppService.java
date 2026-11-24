@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
  * 裸 {@code fetch}。#541 让路缺省＝违规只随收尾卡标注、不喂修轮、不触发失败链
  * （收口链路无分岔）；阻断形态（喂修轮＋结构性拒绝＋段级自愈升档兜底）＝运营
  * 开关 {@code robust_lint_blocking_enabled} 回滚形态，判定归
- * {@code CoderRunAttempts}，本件只出事实。</li>
+ * {@code CodingRunDispatcher}，本件只出事实。</li>
  * <li><b>预置档</b>（{@code preset}）：会话存储件<b>自写</b>——手写 cookie 会话
  * （{@code cookies()} 直用）与裸密码哈希原语（scrypt/bcrypt/pbkdf2）。违规
  * 如实标注收尾卡、不拦收口、<b>不拦不用</b>（未用会话件＝零命中，非违规）
@@ -218,7 +218,7 @@ public class RobustKitLintAppService {
         return path.startsWith("src/lib/robust/") || path.startsWith("src/components/robust/");
     }
 
-    // ---------- 收口回路消费面（载荷形状知识单源——判定归 CoderRunAttempts） ----------
+    // ---------- 收口回路消费面（载荷形状知识单源——判定归 CodingRunDispatcher） ----------
 
     /** 载荷某档违规清单读口（passed/unavailable／档缺席＝空）。 */
     public static List<Map<String, Object>> tierViolationsOf(Map<String, Object> payload,

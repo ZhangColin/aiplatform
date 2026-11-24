@@ -4,22 +4,27 @@ import type { CoderRunStatus } from "@/lib/store/generation";
 import type { WorkPart } from "@/lib/store/work-message";
 
 /**
- * 系统面板呈现态推导（#45 预览门禁解除 + 空态两档；#222 档位改吃四态投影）：
- * 纯函数、无 React——输入 = 生成态四态投影（REST：never/generating/interrupted/
- * generated，与 SSE 会话态无关——刷新/回访后档位仍正确）+ 更新轨会话信号
- * （coderStatus——更新中/更新失败）+ 预览查询结果 +
- * 工作消息部件，输出面板该呈现哪一档。门禁口径：非「从未生成」（起跑/中断/已生成）
- * 即启动预览机制；应用可访问的判据 = REST 探活通过才返回 URL（后端 WSP_012 语义），
- * 有 URL 即上页面。
+ * 系统面板呈现态推导（#45 预览门禁解除 + 空态两档；#222 档位改吃生成态投影）：
+ * 纯函数、无 React——输入 = 生成态投影（REST：never/generating/generated，与 SSE
+ * 会话态无关——刷新/回访后档位仍正确）+ 更新轨会话信号（coderStatus——更新中/
+ * 更新失败）+ 预览查询结果 + 工作消息部件，输出面板该呈现哪一档。门禁口径：非
+ * 「从未生成」（起跑/已生成）即启动预览机制；应用可访问的判据 = REST 探活通过才
+ * 返回 URL（后端 WSP_012 语义），有 URL 即上页面。
  *
  * <p>空态两档（CONTEXT.md「预览」）：无应用 = 占位随工作消息部件推进的步骤
  * 提示（解说自述优先、动作对象兜底，无信号落初始文案）；有应用且 run 中 =
  * 保留页面 +「更新中」轻提示——生成长出与更新同一套，不两套并存。重试静默
  * （#84：run 失败为唯一失败终态）与跨会话不闪断：有 URL 就不退占位。</p>
  *
- * <p><b>「继续生成」单出口（#222，ADR-0020）</b>：生成中断（REST 投影）与从未生成
- * （面板仅存在于 PRD 产出后——含存量无轨道表的中断项目，恢复同走计划重派）都给
- * 出口；无推倒重来按钮（重走对话提意见改 PRD）。更新轮失败仍归「继续更新」
+ * <p><b>失败只走会话态（#604 失败新语义＝明确展示＋重跑即恢复）</b>：原「生成
+ * 中断」投影档随旧失败语义退役——run 失败/停止不落投影，失败档只由 SSE
+ * run-failed（coderStatus=error）在会话内呈现；刷新/回访后未生成的项目回
+ * 「从未生成」（idle 档），恢复出口照常在场。</p>
+ *
+ * <p><b>「继续生成」单出口（#222，ADR-0020）</b>：从未生成（面板仅存在于 PRD
+ * 产出后——未起跑/首建未成）与会话内 run 失败都给出口——重发 POST /generate
+ * 即在既有工作区重跑（#604 起服务端续跑机器退役：不带断点、不携错误现场）；
+ * 无推倒重来按钮（重走对话提意见改 PRD）。更新轮失败仍归「继续更新」
  * （更新轨恢复出口）。</p>
  */
 
@@ -32,7 +37,7 @@ export const TROUBLE_NOTICE = "预览暂时打不开，稍后会自动重试";
 /** 恢复期用户可感知口径（CONTEXT.md「休眠」：可感知的只有「系统启动中」，#170）。 */
 export const STARTING_NOTICE = "系统启动中";
 
-/** 生成中断的呈现口径（#222 四态投影的中断档——失败终态/进程重启/中断同档，不判死）。 */
+/** 生成失败的呈现口径（会话内 run 失败终态——#604 起失败不落投影，只在此呈现；不判死）。 */
 export const INTERRUPTED_NOTICE = "生成中断了，已完成的进度都保留";
 
 /** 用户停止的呈现口径（#359 生成取消：停止是用户动作，不称「中断/失败」）。 */
@@ -51,8 +56,8 @@ const PREVIEW_NOT_SERVING_CODE = 1012;
 const WORKSPACE_STARTING_CODE = 1013;
 
 /**
- * 恢复入口判别（#222 单出口）：resume = 继续生成（生成中断/从未生成——断点续跑
- * 或计划重派）/ restart-update = 继续更新（更新轮失败——重派终态那场的交接物）。
+ * 恢复入口判别（#222 单出口）：resume = 继续生成（从未生成/会话内 run 失败
+ * ——在既有工作区重跑）/ restart-update = 继续更新（更新轮失败——重派终态那场的交接物）。
  */
 export type RecoveryAction = "resume" | "restart-update";
 
@@ -72,7 +77,7 @@ export type SystemPanelPhase =
   | { kind: "idle" }
   /** 第一档（无应用，run 中）：随工作消息部件推进的步骤提示。 */
   | { kind: "hint"; text: string }
-  /** 生成中断（无页面）：中断提示 +「继续生成」入口；更新轮失败给「继续更新」。
+  /** 生成失败（无页面，会话内 run 失败终态）：失败提示 +「继续生成」入口；更新轮失败给「继续更新」。
    * reason = 失败原因行（#355 run-failed 载荷 message，可缺省）。 */
   | { kind: "failed"; text: string; recovery?: RecoveryAction; reason?: string }
   /** 已有生成事实但 URL 未到：接通中；trouble = 真故障（非未就绪）。 */
@@ -81,9 +86,8 @@ export type SystemPanelPhase =
   | { kind: "page"; notice?: PanelNotice };
 
 /**
- * 预览门禁（#45 解除完成门禁；#222 投影口径）：四态投影非「从未生成」即启动预览
- * 机制（生成中/中断——阶段 0 收口后应用可能已在跑/已生成）；更新轨会话信号在场
- * 同样启动。
+ * 预览门禁（#45 解除完成门禁；#222 投影口径）：生成态投影非「从未生成」即启动预览
+ * 机制（生成中/已生成）；更新轨会话信号在场同样启动。
  */
 export function previewActive(
   generationState: GenerationState | undefined,
@@ -167,9 +171,9 @@ function tryUrl(raw: string): URL | undefined {
 
 /** 系统面板呈现档位的唯一推导入口。 */
 export function systemPanelPhase(input: {
-  /** 生成态四态投影（REST 事实；缺省 = 后端未透出，按会话态兜底）。 */
+  /** 生成态投影（REST 事实，三态无中断档；缺省 = 后端未透出，按会话态兜底）。 */
   generationState?: GenerationState;
-  /** 本会话编码 run 状态（更新轨信号——更新中/更新失败；生成档位不依赖它）。 */
+  /** 本会话编码 run 状态（更新中/更新失败/生成失败——会话内失败终态只在此呈现）。 */
   coderStatus?: CoderRunStatus;
   /** 用户停止旗标（#359 run-failed 载荷 stopped；失败档文案分岔「已停止」）。 */
   coderStoppedByUser?: boolean;
@@ -189,8 +193,8 @@ export function systemPanelPhase(input: {
     return { kind: "page", notice: noticeOf(generationState, coderStatus, coderStoppedByUser, failureReason) };
   }
 
-  // 会话内失败终态先行呈现（#56 run 失败为唯一失败终态；REST 投影随失效重拉收敛
-  // ——run-failed 即 invalidate 项目域）：已生成 → 更新失败口径，否则生成中断口径；
+  // 会话内失败终态先行呈现（#56 run 失败为唯一失败终态；#604 起失败不落投影——
+  // 刷新后回 idle 档，恢复出口照常）：已生成 → 更新失败口径，否则生成失败口径；
   // 停止旗标（#359）改走「已停止」口径（用户动作，不称中断/失败）
   if (coderStatus === "error") {
     return { kind: "failed", reason: failureReason,
@@ -207,10 +211,6 @@ export function systemPanelPhase(input: {
       text: hint ?? (generationState === "generated" ? "正在更新系统" : "正在初始化"),
     };
   }
-  if (generationState === "interrupted") {
-    // 生成中断（投影）：刷新/回访后档位仍正确——「继续生成」出口挂本档
-    return { kind: "failed", ...interruptedOutcome() };
-  }
   if (generationState === "generated" || coderStatus === "finished") {
     // 已生成但 URL 未到 = 接通中；未就绪（WSP_012）同接通中。会话内已收口而投影
     // 未刷新（失效重拉在途）也走接通中平滑过渡，不闪回引导占位
@@ -226,7 +226,7 @@ function noticeOf(
   coderStoppedByUser: boolean | undefined,
   failureReason?: string,
 ): PanelNotice | undefined {
-  // 进行中优先（「继续生成」点击后的乐观起跑——投影仍中断时会话信号先行回进行中）
+  // 进行中优先（「继续生成」点击后的乐观起跑——投影未刷成生成中时会话信号先行回进行中）
   if (coderStatus === "running" || generationState === "generating") {
     return { failed: false, text: UPDATING_NOTICE };
   }
@@ -234,21 +234,17 @@ function noticeOf(
     return { failed: true, reason: failureReason,
       ...failedOutcome(generationState, coderStoppedByUser) };
   }
-  if (generationState === "interrupted") {
-    // 中断 + 有页面（部分切片已收口、应用在跑）：细条带「继续生成」，页面保留
-    return { failed: true, ...interruptedOutcome() };
-  }
   return undefined;
 }
 
-/** 生成中断口径（#222 单出口「继续生成」——占位与页面轻提示同源）。 */
+/** 生成失败口径（未生成项目的 run 失败——#222 单出口「继续生成」，占位与页面轻提示同源）。 */
 function interruptedOutcome(): { text: string; recovery: "resume" } {
   return { text: INTERRUPTED_NOTICE, recovery: "resume" };
 }
 
 /**
  * 失败终态文案与恢复入口（占位与页面轻提示同源）：已生成（投影）→ 更新失败口径
- * 「继续更新」（更新轨恢复出口）；否则生成中断口径「继续生成」。停止旗标
+ * 「继续更新」（更新轨恢复出口）；否则生成失败口径「继续生成」。停止旗标
  * （#359 run-failed 载荷 stopped）改走「已停止」口径——停止是用户动作，不称
  * 「中断/失败」，恢复入口不变（继续生成/继续更新照常可达）。
  */

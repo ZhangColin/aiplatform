@@ -1,14 +1,10 @@
 package com.semgravio.aiplatform.business.project.application;
 
-import java.util.HashSet;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintConfig;
-import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
-import com.semgravio.aiplatform.business.project.domain.decisionhint.HintPolicy;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
@@ -17,7 +13,7 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 
 /**
  * 智能体运营配置装配读面（#251，ADR-0021「库值优先、缺省回落」解析单点）：
- * {@code MainAgentAppService}（主智能体命令/续跑构建）与 {@code CoderRunAttempts}
+ * {@code MainAgentAppService}（主智能体命令/续跑构建）与 {@code CodingRunDispatcher}
  * （执行体命令构建）装配 systemPrompt／模型配置键时一律经本服务取<b>生效值</b>
  * ——库有覆盖值用库值，无覆盖（行不存在或列 null）回落 {@link AgentProfile} 枚举
  * 默认。枚举仍是身份与缺省正本，本服务只是覆盖态的读腿；配置键 → 模型串与通道
@@ -31,9 +27,8 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
  * （{@link #effectiveEdgeModelConfigKey}，#366 同表同机制）；其提示词仍不属配置面
  * （一次性判定的编排内建）。</p>
  *
- * <p><b>工具面规格（#252；#545 起三件）</b>：增强工具开关（web_search/fetch_url
- * ＋构建轨出图件 generate_image 的 {@code gi} 件——executor 槽消费，designer 槽
- * 同名件是骨架不读本件）同取生效值，
+ * <p><b>工具面规格（#252；#545 gi 件随 #604 拆除）</b>：增强工具开关
+ * （web_search/fetch_url）同取生效值，
  * {@link EffectiveConfig#toolSpec()} 编成规格串随命令入底座——进工厂实例缓存键
  * （开关变更＝规格变＝新实例新装配）并透传工具装配（{@code ProfileToolkitSupplier}
  * 按规格发放，关即不注册）。规格串编解码都在本类（business 单源，底座不解释）。</p>
@@ -56,20 +51,6 @@ public class AgentConfigAppService {
      */
     public static final int DEFAULT_FINAL_VERIFY_FIX_BUDGET = 2;
 
-    /**
-     * 决策时注入失败止损阈值代码缺省（#437）：同类错误（同工具＋错误首行归一化）
-     * 连续失败 ≥ 此值即注入「换策略」微指令；库覆盖（executor 行
-     * decision_hint_error_streak，2-10）优先于此值。
-     */
-    public static final int DEFAULT_DECISION_HINT_ERROR_STREAK = 3;
-
-    /**
-     * 决策时注入堆叠上限代码缺省（#437）：单轮最多注入几条不同微指令——研究
-     * 口径 ≤3（再堆收益递减转负）；库覆盖（executor 行 decision_hint_stack_cap，
-     * 1-3）优先于此值。
-     */
-    public static final int DEFAULT_DECISION_HINT_STACK_CAP = 3;
-
     private final AgentConfigStore configStore;
 
     public AgentConfigAppService(AgentConfigStore configStore) {
@@ -86,16 +67,13 @@ public class AgentConfigAppService {
      * 生效态、配置覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
      * 结构性信号两开关 #454 同批——文件面/规模标签信号缺省 false＝不参与升档判定
      * （失败重试信号常开不受影响），路由判定处随生效配置同取；verify 配置覆盖与
-     * 轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
-     * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
+     * 轮次预算生效值；收口闸开关 #433 同批——在场闸/整轨终验
+     * 判定处动态读，
      * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
      * 基座 lint 强制档阻断开关 #541 同批——缺省 false＝让路
      * （强制档违规收口照扫、只随收尾卡标注，不喂修轮不触发失败链；true＝恢复
      * #425 原阻断形态＝回滚保险），尝试环收口判定处随每次尝试读取
-     * （{@code CoderRunAttempts}），仅 run 执行体行消费；构建轨出图工具开关 #545
-     * 同批——缺省 true＝下放（run 执行体槽位挂载 generate_image、演示配图落
-     * public/），toolSpec 携 gi 件进装配与实例缓存键，关即槽位不挂载（设计执行体
-     * 同名工具是骨架件、不读本开关）。
+     * （{@code CodingRunDispatcher}），仅 run 执行体行消费。
      */
     public record EffectiveConfig(String systemPrompt, String modelConfigKey,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
@@ -104,16 +82,13 @@ public class AgentConfigAppService {
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
             boolean routingFileCountSignalEnabled, boolean routingSizeLabelSignalEnabled,
             String verifyModelConfigKey, int verifyRoundBudget, int finalVerifyFixBudget,
-            boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
+            boolean verificationPresenceGateEnabled,
             boolean finalVerificationGateEnabled,
-            boolean robustLintBlockingEnabled,
-            boolean generateImageEnabled) {
+            boolean robustLintBlockingEnabled) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
-            // #545 gi＝构建轨出图工具件（run 执行体槽），与 ws/fu 同缝透传装配
-            return "ws=" + webSearchEnabled + ",fu=" + fetchUrlEnabled
-                    + ",gi=" + generateImageEnabled;
+            return "ws=" + webSearchEnabled + ",fu=" + fetchUrlEnabled;
         }
     }
 
@@ -138,10 +113,8 @@ public class AgentConfigAppService {
                 config.finalVerifyFixBudget() != null
                         ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET,
                 config.verificationPresenceGateEnabled(),
-                config.proofOfOutputGateEnabled(),
                 config.finalVerificationGateEnabled(),
-                config.robustLintBlockingEnabled(),
-                config.generateImageEnabled());
+                config.robustLintBlockingEnabled());
     }
 
     /**
@@ -155,52 +128,6 @@ public class AgentConfigAppService {
         AgentOperationalConfig config =
                 override != null ? override : AgentOperationalConfig.defaults(point.key());
         return config.effectiveModelConfigKey(point.modelConfigKey());
-    }
-
-    /**
-     * 决策时注入生效配置（#437 判定读腿——执行体 ReAct 循环中间件每迭代调用；
-     * #453-2 起装配腿经 5s TTL 进程内缓存降频，本服务本身保持动态查库不缓存）：
-     * 库值优先、缺省回落代码缺省（总开关缺省开＝#437 落地态；阈值/上限缺省 3；
-     * 禁用集 null/空＝全启用——逗号串解码宽容坏 token，非法值在写口已被
-     * PRJ_083 拒掉）。运营面改配置经 TTL 窗口（≤5s）即生效，不发版、进行中 run
-     * 不定格；装配不进 agent 实例缓存键（改配置无需重建实例）。
-     */
-    @Transactional(readOnly = true)
-    public DecisionHintConfig decisionHintConfigOf(AgentProfile profile) {
-        AgentOperationalConfig override = configStore.find(profile.key());
-        AgentOperationalConfig config =
-                override != null ? override : AgentOperationalConfig.defaults(profile.key());
-        return new DecisionHintConfig(
-                config.decisionHintsEnabled(),
-                new HintPolicy(
-                        config.decisionHintErrorStreak() != null
-                                ? config.decisionHintErrorStreak()
-                                : DEFAULT_DECISION_HINT_ERROR_STREAK,
-                        config.decisionHintStackCap() != null
-                                ? config.decisionHintStackCap()
-                                : DEFAULT_DECISION_HINT_STACK_CAP,
-                        disabledHintKindsOf(config.decisionHintDisabled())));
-    }
-
-    /** 禁用集逗号串解码（宽容腿）：null/空＝空集；未知 token 跳过（写口 PRJ_083 已拒，读面不炸）。 */
-    private static Set<DecisionHintKind> disabledHintKindsOf(String tokens) {
-        return new HashSet<>(DecisionHintKind.decode(tokens));
-    }
-
-    /**
-     * verify 自决开关生效值（#442 判定读腿——执行体 ReAct 循环中间件每迭代调用；
-     * #453-2 起装配腿经 5s TTL 进程内缓存降频，本服务本身保持动态查库不缓存）：
-     * 库值优先、缺省 true＝自决开（#435 自决化现状维持）；false＝自决关闭——中间件
-     * 注入提示层指令（生成过程中不自发委派 verify，平台驱动验证腿不受影响）。运营
-     * 面改配置经 TTL 窗口（≤5s）即生效，不发版、进行中 run 不定格；装配不进
-     * agent 实例缓存键（改配置无需重建实例，与 #437 决策提示同逻辑）。
-     */
-    @Transactional(readOnly = true)
-    public boolean verifySelfDecisionEnabledOf(AgentProfile profile) {
-        AgentOperationalConfig override = configStore.find(profile.key());
-        AgentOperationalConfig config =
-                override != null ? override : AgentOperationalConfig.defaults(profile.key());
-        return config.verifySelfDecisionEnabled();
     }
 
     /**

@@ -16,7 +16,7 @@ import { systemPanelPhase, UPDATING_NOTICE, type SystemPanelPhase } from "./stat
 
 /**
  * 预览渐进 b 档验收（#90 spec ⑤ → #104/#106 修订刷新单元口径：切片收口取代逐修改
- * 刷新；#222 档位输入改四态投影）：脚本化生成/更新轨道——事件序列喂桥，每拍从
+ * 刷新；#222 档位输入改生成态投影）：脚本化生成/更新轨道——事件序列喂桥，每拍从
  * store 归约呈现档位（systemPanelPhase），断言验收标准的端到端归约：
  *
  * - AC1 生成轨道（多切片）：步骤占位（随解说推进）→ 阶段 0 收口上页面（探活取得
@@ -27,7 +27,7 @@ import { systemPanelPhase, UPDATING_NOTICE, type SystemPanelPhase } from "./stat
  *   双重刷新；
  * - AC4 收口定格：run-finish → 纪元 +1 重挂定格最新态，进行中轻提示退场。
  *
- * URL 与四态投影属 REST 查询面（状态以查询为准，探活通过才返回），本 seam 以查询
+ * URL 与生成态投影属 REST 查询面（状态以查询为准，探活通过才返回），本 seam 以查询
  * 事实注入；URL 事件驱动推送（#105 preview-ready 写缓存）归 bridge.test.ts 覆盖。
  */
 

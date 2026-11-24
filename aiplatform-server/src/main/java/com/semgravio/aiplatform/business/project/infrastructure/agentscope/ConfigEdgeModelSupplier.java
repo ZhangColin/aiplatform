@@ -38,17 +38,6 @@ public class ConfigEdgeModelSupplier implements EdgeModelSupplier {
         return resolve(AgentEdgePoint.PRECHECK);
     }
 
-    @Override
-    public EdgeModel subagentModel() {
-        // #424 片轻验：verify 子智能体配置覆盖在 executor 行（verify_model_config_key 列）
-        // ——null＝随执行体生效档（含路由升档，缺省同档不降），非空才独立解析
-        String configKey = agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyModelConfigKey();
-        if (configKey == null) {
-            return null;
-        }
-        return new EdgeModel(modelConfigs.resolveQueue(configKey));
-    }
-
     private EdgeModel resolve(AgentEdgePoint point) {
         return new EdgeModel(modelConfigs.resolveQueue(
                 agentConfigs.effectiveEdgeModelConfigKey(point)));

@@ -153,10 +153,11 @@ describe("SystemPanel · Demo 原型壳视口工具条（#347）", () => {
     expect(screen.queryByText(/\d+%/)).toBeNull();
   });
 
-  it("生成中断仍在同页给出原因与继续生成出口，等待时钟定格在收口事件", () => {
+  it("生成失败仍在同页给出原因与继续生成出口，等待时钟定格在收口事件", () => {
+    // 失败只认会话态（#604 起失败不落投影）：投影尚未重拉收敛时仍是「生成中」
     renderDemoPanel({
       previewUrl: undefined,
-      generationState: "interrupted",
+      generationState: "generating",
       coderStatus: "error",
       startedAt: Date.now() - 65_000,
       endedAt: Date.now(),

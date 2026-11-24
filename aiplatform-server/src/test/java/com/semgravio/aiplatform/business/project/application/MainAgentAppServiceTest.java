@@ -349,8 +349,9 @@ class MainAgentAppServiceTest {
                 + MainAgentAppService.TRIAL_INTERVIEW_PROTOCOL_TAIL
                 + MainAgentAppService.STYLE_DIRECTION_CATALOG_TAIL);
         assertThat(overridden.getValue().modelString()).isEqualTo("deepseek:deepseek-v4-pro");
-        // 开关库值编入规格串（ws 关、fu 缺省开；#545 gi 件恒随——main 槽不消费）
-        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true,gi=true");
+        // 开关库值编入规格串（ws 关、fu 缺省开；#545 gi 件随 #604 出图开关退役，不再
+        // 编入规格串）
+        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true");
 
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'main'");
         appService.runOpinionTurn(projectId, "再聊聊范围");
@@ -365,7 +366,7 @@ class MainAgentAppServiceTest {
         assertThat(fallback.getAllValues().get(3).modelString())
                 .isEqualTo(ModelConfigSeed.FLASH_MODEL_STRING);
         assertThat(fallback.getAllValues().get(3).toolSpec())
-                .isEqualTo("ws=true,fu=true,gi=true");
+                .isEqualTo("ws=true,fu=true"); // gi 件随 #604 出图开关退役，不再编入规格串
     }
 
     @Test
@@ -1308,7 +1309,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(command.capture(), any());
         assertThat(command.getAllValues())
-                .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+                .noneMatch(c -> c.sessionId().startsWith(CodingRunDispatcher.SESSION_PREFIX));
         // 岔路口状态位落库（持久可回——重读在场；Integer code 落库）
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT fork_state, generation_requested_at FROM prj_projects WHERE id = ?",
@@ -1340,7 +1341,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(2)).converse(command.capture(), any());
         assertThat(command.getAllValues()).anyMatch(
-                c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+                c -> c.sessionId().startsWith(CodingRunDispatcher.SESSION_PREFIX));
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
                 .get("fork_state")).isNull();
@@ -1405,7 +1406,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(command.capture(), any());
         assertThat(command.getAllValues())
-                .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+                .noneMatch(c -> c.sessionId().startsWith(CodingRunDispatcher.SESSION_PREFIX));
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT fork_state FROM prj_projects WHERE id = ?", projectId)
                 .get("fork_state")).isEqualTo(ForkState.PENDING.getCode());

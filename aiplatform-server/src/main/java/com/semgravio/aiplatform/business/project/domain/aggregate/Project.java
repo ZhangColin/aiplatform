@@ -130,7 +130,8 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      * 首个构建派发点火时点（#542，ADR-0049「两轨唯一差异＝触发源」的读点）：
      * 岔路口「立即生成」／付费轨 PRD 确认／快道直生成的共同落位（单向置位，
      * {@link #markFirstBuildRequested}）——岔路口卡与确认按钮「首建未派发」呈现
-     * 条件的事实源（失败重试走「继续生成」不回清：确认不重复、卡不复现）。
+     * 条件的事实源（#604 失败新语义：终态失败/停止收口清位——{@link
+     * #reopenFirstBuildRequest}，卡与确认按钮复现，用户在点火入口重跑即恢复）。
      */
     @Column(name = "generation_requested_at")
     private LocalDateTime generationRequestedAt;
@@ -314,14 +315,26 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     /**
-     * 首个构建派发点火置位（#542）：幂等单向——首次落值后不再刷新（失败重试走
-     * 「继续生成」，确认不重复、卡不复现；对偶 {@link #markGenerated} 的单置位
-     * 语义，两者相差整场生成在途窗口）。
+     * 首个构建派发点火置位（#542）：已置不刷新（一场在途/成功的首建只记首次点火
+     * 时点）；对偶 {@link #markGenerated} 的置位语义，两者相差整场生成在途窗口。
+     * #604 起终态失败/停止收口清位（{@link #reopenFirstBuildRequest}），重跑可再置。
      */
     public void markFirstBuildRequested() {
         if (generationRequestedAt == null) {
             this.generationRequestedAt = LocalDateTime.now();
         }
+    }
+
+    /**
+     * 首建点火位复位（#604 失败新语义——明确展示＋重跑即恢复）：终态失败/停止
+     * 收口时清 {@code generation_requested_at}——岔路口卡/确认按钮「首建未派发」
+     * 呈现条件复现，用户在点火入口重跑即恢复（「继续生成」断点续跑入口随续跑
+     * 机器退役；不携错误现场、不自动重跑，ADR-0055 #580-13）。成功收口不清
+     * （已生成，入口本就不在场）。优雅关停中断不清位（关停期不落库，ADR-0043
+     * ——重启后由 POST /generate 重跑入口恢复）。
+     */
+    public void reopenFirstBuildRequest() {
+        this.generationRequestedAt = null;
     }
 
     /**

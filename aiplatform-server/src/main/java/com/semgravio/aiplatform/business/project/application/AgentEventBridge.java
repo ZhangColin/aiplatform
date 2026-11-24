@@ -56,15 +56,15 @@ public class AgentEventBridge {
     }
 
     /**
-     * run-failed 发射（编码 run 重试超限·终态收口，#56）：轨道层在真终态落定点
+     * run-failed 发射（编码 run 终态失败收口，#56；#604 起生成/更新 run 单发无重试
+     * ——失败/停止即终态；设计轨重试耗尽即终态）：轨道层在真终态落定点
      * 调用——修正轨道与终态账（恢复出口 {@code restartFixRun} 的重派依据）同
-     * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道超限即终态。
-     * runId = 该场 run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚，
-     * 中间尝试的内部标识不出用户面）。前端恢复出口只认本事件，run 失败为唯一
-     * 失败终态（重试全程静默，中间失败不出事件）。
+     * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道失败/停止即终态。
+     * runId = 该场 run 的用户面标识。前端恢复出口只认本事件，run 失败为唯一
+     * 失败终态（#604 明确展示：失败原因与恢复入口随本事件呈现，不自动重跑）。
      *
-     * <p><b>失败原因随事件（#355 机制检查）</b>：失败面的 {@code error}（末次
-     * 尝试的错误现场，原样留档于终态日志/失败留账）经
+     * <p><b>失败原因随事件（#355 机制检查）</b>：失败面的 {@code error}（该场尝试
+     * 的错误现场，原样留档于终态日志/失败留账）经
      * {@link #userFacingRunFailure(String)} 映射为一句用户面原因随
      * {@code message} 键携带（映射不中则截断原文首行；空则缺省不带）——终态
      * 失败不再零原因，用户可分辨「模型没写好」与「服务侧故障」。</p>
@@ -77,7 +77,7 @@ public class AgentEventBridge {
      */
     public void emitRunFailed(Project project, String runId, Map<String, Object> failure) {
         Map<String, Object> payload = runScopedPayload(project, runId);
-        String reason = userFacingRunFailure(CoderRunAttempts.errorOf(failure));
+        String reason = userFacingRunFailure(CodingRunDispatcher.errorOf(failure));
         if (reason != null) {
             payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, reason);
         }
@@ -90,7 +90,7 @@ public class AgentEventBridge {
      * ——事件复用 {@code run-failed}（失败账口径：停止的 run 如实留账计量与终态
      * 状态），载荷加 {@code stopped=true} 标记（前端失败档文案分岔「已停止」）＋
      * 定型一句人话（非错误现场映射——停止是用户动作，无失败原因可报）。runId =
-     * 被停场次的用户面标识（首试 runId），恢复出口（继续生成/继续更新）照常只认
+     * 被停场次的用户面标识，恢复出口（继续生成/继续更新）照常只认
      * 本事件。停止的失败面（#418）同载荷落库与扩载（同 {@link #emitRunFailed}）。
      */
     public void emitRunStopped(Project project, String runId, Map<String, Object> failure) {

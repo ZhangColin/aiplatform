@@ -45,16 +45,16 @@ import { DemoVersionChip } from "./demo-version-chip";
 /**
  * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 更新
  * 超限终态恢复出口；#79 起为成果区「系统」tab，#80 浏览器条定稿；#222 档位改吃
- * 四态投影）：恒为预览的容器。门禁——四态投影非「从未生成」（含中断——阶段 0
- * 收口后应用可能已在跑）即取预览地址并挂机制；后端探活通过才返回 URL，有 URL
+ * 生成态投影）：恒为预览的容器。门禁——生成态投影非「从未生成」（生成中/已生成）
+ * 即取预览地址并挂机制；后端探活通过才返回 URL，有 URL
  * 即上真页面（空白页可接受）。档位推导归 lib/preview/state 纯函数（REST 投影为
  * 主源——刷新/回访后档位仍正确；更新轨会话信号只喂更新中/更新失败两处），
  * 本组件只呈现：无应用 = 占位随工作消息部件推进的步骤
  * 提示；有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联）；
  * 中断/失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话与重试不
  * 闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为 key，手动
- * 刷新的本地节拍并入同 key）。恢复出口单出口（#222，ADR-0020）：生成中断与
- * 从未生成（idle 档）给「继续生成」（断点续跑/计划重派），更新轮失败给「继续
+ * 刷新的本地节拍并入同 key）。恢复出口单出口（#222，ADR-0020）：会话内 run 失败与
+ * 从未生成（idle 档）给「继续生成」（#604 起在既有工作区重跑），更新轮失败给「继续
  * 更新」；无推倒重来按钮。正常态全无手动触发。
  *
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
@@ -77,7 +77,7 @@ export function SystemPanel({
   variant = "default",
 }: {
   projectId: string;
-  /** 生成态四态投影（REST 事实；缺省 = 后端未透出）。 */
+  /** 生成态投影（REST 事实，三态无中断档；缺省 = 后端未透出）。 */
   generationState?: GenerationState;
   /** 本会话编码 run 状态（更新轨信号——更新中/更新失败）。 */
   coderStatus?: CoderRunStatus;
@@ -99,8 +99,7 @@ export function SystemPanel({
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   /** 手动刷新节拍：并入预览纪元的重挂 key（自动刷新外的唯一手动机制）。 */
   const [refreshTick, setRefreshTick] = useState(0);
-  // 门禁（#45 解除；#222 投影口径）：非「从未生成」即取预览地址（中断档的应用
-  // 可能已在跑——阶段 0 收口即起服）
+  // 门禁（#45 解除；#222 投影口径）：非「从未生成」即取预览地址（生成中/已生成）
   const active = previewActive(generationState, coderStatus);
   const preview = useProjectPreview(projectId, active);
   const url = preview.data?.url;
@@ -171,7 +170,7 @@ export function SystemPanel({
   const notice = phase.kind === "page" ? phase.notice : undefined;
   const updatingNotice = notice && !notice.failed ? notice : undefined;
   const failedNotice = notice?.failed ? notice : undefined;
-  // 恢复出口单出口（#222）：生成中断/从未生成 =「继续生成」（断点续跑或计划重派）、
+  // 恢复出口单出口（#222）：会话内 run 失败/从未生成 =「继续生成」（在既有工作区重跑）、
   // 更新轮失败 =「继续更新」（#48，重派终态那场的交接物）
   const resume = <ResumeGenerationButton projectId={projectId} onGenerated={onGenerated} />;
   const restartUpdate = <RestartUpdateButton projectId={projectId} />;
@@ -457,8 +456,8 @@ export function SystemPanel({
                 <p>系统生成后，这里会出现可以操作的你的系统</p>
                 {/* idle 档也挂「继续生成」（#222 单出口；#542 派发门）：面板仅存在
                     于 PRD 产出后——本档 = 岔路口/确认门待点火（试用态卡面「立即生成」
-                    与本键同单出口）或未起跑/存量无轨道（含旧机制卡死项目），重发
-                    /generate 即起跑（计划缺失走补产链自动续派） */}
+                    与本键同单出口）或未起跑/首建未成，重发 /generate 即在既有工作区
+                    重跑（#604 失败新语义：重跑即恢复） */}
                 {resume}
               </PanelHint>
             )}

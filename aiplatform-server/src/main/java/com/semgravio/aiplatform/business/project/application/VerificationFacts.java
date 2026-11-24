@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * 验证事实登记（#352 独立验证子智能体的平台观测面）：verify 子智能体对系统的
  * 三面验证结果（浏览器点流程／查库／看日志）从 report_verification 工具调用事实
  * 观测（不解析自由文本）——工具执行体落事实于此，run 尝试环收口
- * （{@link CoderRunAttempts}）读取拼装收尾卡验证统计。进程内事实（run 无表口径）：
+ * （{@link CodingRunDispatcher}）读取拼装收尾卡验证统计。进程内事实（run 无表口径）：
  * 重启即清，与轨道在途标记同取舍；key = 工作区（#351 切片并行下 fork 副本与主
  * 工作区各跑各的验证，按键隔离不串账）。
  *

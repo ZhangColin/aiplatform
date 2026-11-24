@@ -20,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
  * 模型路由判定（#354，ADR-0030——简单活快模型、难活强模型；信号面 #426 修订）：
  * run 执行体（{@link AgentProfile#EXECUTOR}——Demo 阶段〔首 Demo ＋ 迭代〕全部
  * 任务由其承载，模型配置正本 #341）的模型配置按任务特征可观测信号自动选档。调用
- * 点＝{@code CoderRunAttempts} 每次尝试的命令构建（起跑时读档口径，进行中 run
+ * 点＝{@code CodingRunDispatcher} 每次尝试的命令构建（起跑时读档口径，进行中 run
  * 不定格）。
  *
  * <p><b>协同口径（路由判定优先、人工覆盖兜底）</b>：路由开＝信号升强档优先

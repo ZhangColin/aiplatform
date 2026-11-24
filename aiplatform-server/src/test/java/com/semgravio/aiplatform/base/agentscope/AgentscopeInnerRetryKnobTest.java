@@ -26,7 +26,6 @@ import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.extensions.model.openai.exception.AuthenticationException;
 import io.agentscope.harness.agent.HarnessAgent;
-import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -164,14 +163,10 @@ class AgentscopeInnerRetryKnobTest {
                 return new EdgeModel("volcengine:deepseek-v4-flash", channel());
             }
 
-            @Override
-            public EdgeModel subagentModel() {
-                return null;
-            }
         };
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), (agentKey, workspace, toolSpec) -> new Toolkit(),
-                (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
+                (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(), edges, properties, null);
         return factory.obtain("inner-retry-knob", "sys", "volcengine:deepseek-v4-flash",
                 mainChannel, null, agentWorkspace, null, null);
@@ -320,37 +315,17 @@ class AgentscopeInnerRetryKnobTest {
     }
 
     /**
-     * 内核旋钮读面（两处装配点接线守护）：{@code ReActAgent.assembleModelConfig} 的
+     * 内核旋钮读面（装配点接线守护）：{@code ReActAgent.assembleModelConfig} 的
      * {@code modelConfig.maxRetries} 经 {@code buildGenerateOptions} 烧进每次调用的
-     * callOptions——子智能体工厂（subagentFactory）与主装配（buildAgent）是平台仅有的
-     * 两个构建点，旋钮必须在两处都接线（#555 修法：内核缺省 3）。读公开链
-     * {@code getDelegate().getModelConfig().maxRetries()}（行为级 401 断言见主装配
-     * 用例；子级委派驱动成本过高——WaitBarrierSchemaTest 缝 D 同款权衡，但本用例
+     * callOptions——主装配（buildAgent）是平台唯一的构建点（子智能体工厂缝随 #604
+     * 委派机制退役），旋钮必须在此接线（#555 修法：内核缺省 3）。读公开链
+     * {@code getDelegate().getModelConfig().maxRetries()}（行为级 401 断言见主用例；
      * 读公开面不用反射）。
      */
     @Test
     @Timeout(60)
-    void given_assembly_points_when_built_then_kernel_model_config_max_retries_one(
+    void given_main_assembly_point_when_built_then_kernel_model_config_max_retries_one(
             @TempDir Path tempDir) {
-        // 子智能体工厂构建点（mock 模型——本用例只读装配旋钮，不发请求）
-        SubagentDeclaration declaration = SubagentDeclaration.builder()
-                .name("verify")
-                .description("probe")
-                .inlineAgentsBody("probe body")
-                .build();
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                declaration, new AgentWorkspace.Local(tempDir), null,
-                Mockito.mock(Model.class), Mockito.mock(Model.class),
-                new Toolkit(), (agentKey, workspace, toolSpec) -> new Toolkit(),
-                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-        try {
-            assertThat(kernelMaxRetries(child)).as("子智能体工厂旋钮接线").isEqualTo(1);
-        }
-        finally {
-            child.close();
-        }
-
         // 主装配构建点（工厂 obtain 真构建——同主用例装配面）
         HarnessAgent main = mainAssemblyAgent();
         try {

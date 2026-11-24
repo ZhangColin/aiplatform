@@ -167,7 +167,7 @@ class GenerationEarlyServiceSmokeTest {
         }).when(eventsAppService).publishNotification(any(), any());
         Project project = projectRepository.save(Project.create("渐进起服冒烟", null, null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
-        coderSessionId = CoderRunAttempts.SESSION_PREFIX + projectId;
+        coderSessionId = CodingRunDispatcher.SESSION_PREFIX + projectId;
         placePrd();
         projectRepository.findById(projectId).ifPresent(p -> {
             p.markPrdProduced();

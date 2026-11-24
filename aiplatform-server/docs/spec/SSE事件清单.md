@@ -51,7 +51,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 ### 消息模型（parts 契约）
 
-**消息 = 有序部件集合（parts）**（六源行业同构；词根基准 = agentscope 原生 part 族——文本/推理/工具调用请求/文件，mapper 保持薄翻译层，不强套某家词表）。run 进行中 = 对话区内一条**生长中的工作消息**（解说文本部件 + 工具动作部件，带状态；部件按序竖排，无步骤分组），run 收口 = 消息定格。部件事件（`part-*`）由 base.agentscope 的部件映射表（`AgentscopePartsMapper`）从同一 AgentScope 事件流产出，全事件流恒挂（不限编码 run）——例外：`part-check` 由平台侧收口判据核验产出（自检是平台事实，不经引擎 mapper，[#85](https://github.com/ZhangColin/aiplatform/issues/85)）；`part-plan` 是快照式部件（#236 run 级步骤清单——整表替换、不进部件流水序，工作卡计划区渲染）；思考与代码补丁不进部件（思考与代码流不播——CONTEXT.md「智能体事件」）。`part-hint`（#437 决策时微指令部件）2026-11-12 退役——微指令是模型面指引、不进用户面，注入观测走服务端 INFO 日志，存量事件按未知类型忽略。
+**消息 = 有序部件集合（parts）**（六源行业同构；词根基准 = agentscope 原生 part 族——文本/推理/工具调用请求/文件，mapper 保持薄翻译层，不强套某家词表）。run 进行中 = 对话区内一条**生长中的工作消息**（解说文本部件 + 工具动作部件，带状态；部件按序竖排，无步骤分组），run 收口 = 消息定格。部件事件（`part-*`）由 base.agentscope 的部件映射表（`AgentscopePartsMapper`）从同一 AgentScope 事件流产出，全事件流恒挂（不限编码 run）——例外：`part-check` 由平台侧收口判据核验产出（自检是平台事实，不经引擎 mapper，[#85](https://github.com/ZhangColin/aiplatform/issues/85)）；`part-plan` 是快照式部件（#236 run 级步骤清单——整表替换、不进部件流水序；生产方随 #604 退役，呈现件归 #608）；思考与代码补丁不进部件（思考与代码流不播——CONTEXT.md「智能体事件」）。`part-hint`（#437 决策时微指令部件）2026-11-12 退役——微指令是模型面指引、不进用户面；注入本体已随 #604 退役，存量事件按未知类型忽略。
 
 下表「payload 字段」列的关联字段 = `runId`（必带）+ `projectId`（业务编排桥接注入）+ `sessionId`（会话建立后携带）。三类事件：
 
@@ -63,11 +63,11 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 | type | payload 字段 | 说明 |
 |---|---|---|
-| `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） `slice`（可缺省） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run / `designer` 设计会话（[#289](https://github.com/ZhangColin/aiplatform/issues/289) 设计执行体——事件封闭集零新增、agent 扩值即达，ADR-0025）；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）、designer 同构直播卡（计划区＝设计物清单、agent 标识区分，呈现归 #290）。**工作消息头部标题扩载（[#118](https://github.com/ZhangColin/aiplatform/issues/118)）**：`slice` = `{ title, index?, total? }`——`title` 为用户语言标题（生成轨道 = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、终验 run = 「系统整体验证」（#427——生成轨道末与更新 run 收口后的轨道级验证）、设计轨道 = 设计物标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based 序号与总数，头部呈现「{title}（{index}/{total}）」如「商品浏览（2/5)」）；阶段 0 与更新 run 只携 `title`（无进度）；主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。**一场 run 恰一次**（[#84](https://github.com/ZhangColin/aiplatform/issues/84) 静默重试：编码 run 重试不新发——用户面 run 身份 = 首试 runId 全程不变，重试尝试的内部 runId 不出用户面） |
-| `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口对话轮，如实呈现重提即兜底）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
-| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡。**定稿收尾卡（[#291](https://github.com/ZhangColin/aiplatform/issues/291)）经平台侧直接发射本事件**（无前置 run-start、无过程事件——定稿是用户显式动作收口、非智能体 run）：runId ＝ 定稿锚（成版 commit 的 Run-Id trailer 对偶锚定本卡）、sessionId ＝ 该件设计会话标识、closing 携 version（成版锚）与 drafts 单条（定稿稿＋triggers 后续触发）；回访经对话史水合同载荷 |
+| `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） `slice`（可缺省） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run / `designer` 设计会话（[#289](https://github.com/ZhangColin/aiplatform/issues/289) 设计执行体——事件封闭集零新增、agent 扩值即达，ADR-0025）；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）、designer 同构直播卡（计划区＝设计物清单、agent 标识区分，呈现归 #290）。**工作消息头部标题扩载（[#118](https://github.com/ZhangColin/aiplatform/issues/118)）**：`slice` = `{ title, index?, total? }`——`title` 为用户语言标题（生成轨道 = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、终验 run = 「系统整体验证」（#427——生成轨道末与更新 run 收口后的轨道级验证）、设计轨道 = 设计物标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based 序号与总数，头部呈现「{title}（{index}/{total}）」如「商品浏览（2/5)」）；阶段 0 与更新 run 只携 `title`（无进度）；主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。**一场 run 恰一次**（#604 起编码 run 单发无重试——用户面 run 身份全程不变） |
+| `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口对话轮，如实呈现重提即兜底）。#604 起生成/更新 run 单发无重试（无「尝试环内中间失败」）；设计轨的中间重试失败信号不出用户面——run 级唯一失败终态见 run-failed |
+| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（#604 起生成/更新 run 单发：判据不过 = 该场 run 失败终态、不发 run-finish；设计座重试环尝试间不发、落定才发——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡。**定稿收尾卡（[#291](https://github.com/ZhangColin/aiplatform/issues/291)）经平台侧直接发射本事件**（无前置 run-start、无过程事件——定稿是用户显式动作收口、非智能体 run）：runId ＝ 定稿锚（成版 commit 的 Run-Id trailer 对偶锚定本卡）、sessionId ＝ 该件设计会话标识、closing 携 version（成版锚）与 drafts 单条（定稿稿＋triggers 后续触发）；回访经对话史水合同载荷 |
 | `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（ask_user，唯一挂起源——权限确认机制已随透明面化删除，[#219](https://github.com/ZhangColin/aiplatform/issues/219)；破坏性命令直通、过程经 `part-action` 动作卡透明可见）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面；`data.questionOrdinal`＝「第 N 问」序号（#538/#549，平台转发前注入——缺口首次出现序 1..k，同缺口重派复用旧号，挂起卡也占号；水合读口顶层 `questionOrdinal` 重算为权威，前端仅试用访谈期渲染） |
-| `run-failed` | `projectId` `runId` `message`（可缺省） `stopped`（可缺省） `failure`（可缺省） | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` = 该场 run 的用户面标识（首试 runId——[#84](https://github.com/ZhangColin/aiplatform/issues/84) 重试不换新锚）。**run 失败为唯一失败终态**——重试全程静默（中间错误与重试信号不出用户面：无逐次 `error`、无重试 `run-start`），前端恢复出口只认本事件。`message`（[#355](https://github.com/ZhangColin/aiplatform/issues/355) 机制检查·终态零原因补齐）＝一句用户面失败原因（末次错误现场经桥映射的人话定型，映射不中截首行定宽 120；原样留档归终态日志/失败留账）——前端失败档原因行消费，缺省不携带。`stopped`（[#359](https://github.com/ZhangColin/aiplatform/issues/359) 生成取消）＝`true` 时本终态由用户主动停止收口（失败账口径：计量如实落账、状态如实转中断；停止＝中断口径非判死——已收口成果保留、不回滚，「继续生成/继续更新」照常可达）——前端失败档文案据此分岔「已停止」（不称中断/失败），`message` 携定型人话；缺省＝重试超限的真失败。**失败面扩载**（[#418](https://github.com/ZhangColin/aiplatform/issues/418) 失败片落库面）：`failure` 对象＝逐尝试墙钟/档位/失败原因/本场累计（schema 见[下节](#失败面-failure-schema418)），**与对话史失败留账行同载荷**（同收尾卡「SSE 扩载与落库同载荷」先例；先落库后发事件）——平台分析口径、前端不渲染（同 durationBreakdown），速度观测不再只看成功者 |
+| `run-failed` | `projectId` `runId` `message`（可缺省） `stopped`（可缺省） `failure`（可缺省） | 编码 run 终态失败收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)；#604 起生成/更新 run 单发无重试——失败/停止即终态，失败语义＝明确展示＋重跑即恢复；设计轨保留有界重试，重试耗尽即终态）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道失败/停止即终态。`runId` = 该场 run 的用户面标识。**run 失败为唯一失败终态**（不自动重跑：失败原因与恢复入口随本事件明确展示），前端恢复出口只认本事件。`message`（[#355](https://github.com/ZhangColin/aiplatform/issues/355) 机制检查·终态零原因补齐）＝一句用户面失败原因（末次错误现场经桥映射的人话定型，映射不中截首行定宽 120；原样留档归终态日志/失败留账）——前端失败档原因行消费，缺省不携带。`stopped`（[#359](https://github.com/ZhangColin/aiplatform/issues/359) 生成取消）＝`true` 时本终态由用户主动停止收口（失败账口径：计量如实落账；停止＝中断口径非判死——已落盘成果保留、不回滚，重跑入口照常可达）——前端失败档文案据此分岔「已停止」（不称中断/失败），`message` 携定型人话；缺省＝真失败（#604 单发：一场 run 失败即终态）。**失败面扩载**（[#418](https://github.com/ZhangColin/aiplatform/issues/418) 失败片落库面）：`failure` 对象＝逐尝试墙钟/模型配置/失败原因/本场累计（生成/更新 run 单发：attempts 至多一条；设计轨逐尝试各一条；schema 见[下节](#失败面-failure-schema418)），**与对话史失败留账行同载荷**（同收尾卡「SSE 扩载与落库同载荷」先例；先落库后发事件）——平台分析口径、前端不渲染（同 durationBreakdown），速度观测不再只看成功者 |
 | `guide-reply` | `projectId` `runId` `prompt`（可缺省） `label` `text` | 平台侧定型文案直达对话面（带「平台」标签气泡，非智能体话语）。三类使用：兜底轻引导（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支——非意见非咨询输入的零产物路径，本事件即该次派发的全部）；在途意见回执（[#360](https://github.com/ZhangColin/aiplatform/issues/360)——首个构建 run 在途时意见轮收口的排队事实告知，`runId` 锚该意见轮、`text` 为定型回执文案「生成完成后将自动落实」，事件封闭集零新增·复用本型）；悬空补救（ADR-0032·[#373](https://github.com/ZhangColin/aiplatform/issues/373)——需求梳理期轮悬空收口（无挂起问答且无 PRD，含判死/savePrd 失败形）的平台如实状态，`runId` 锚该轮、`text` 按可观测失败分形且恒带「继续」指路，同型复用零新增）。`prompt` 为锚定的用户输入（事件到达重建对话面用；回访经对话史水合——#89），在途回执与悬空补救不携带（用户气泡已由所属轮自落，不重复重建） |
 | `acceptance-start` | `projectId` `runId` | 受理开始（[#87](https://github.com/ZhangColin/aiplatform/issues/87) 受理动作卡）：受理轮（迭代期意见轮——项目已生成后的意见链轮）开场的受理事实，**对话区受理动作卡的呈现源**——意见已接住、主智能体正在受理（需求不清则追问；需求变更则改 PRD），衔接轮收口自动派的更新 run 工作消息（原派发阶段「更新 PRD 中」呈现位的归位，不设其余阶段事件依赖）。守卫全过后、受理动作前发射，先于该轮 `run-start` 到达（动作卡先出、解说随后，对话区连续可见）；受理落定**不出新事件**——由该轮 `run-finish` / `error` 收口事件推导（挂起-续跑是同一受理轮，不重发）。场景矩阵收口：咨询轮与纯追问轮（访谈期意见轮）不发 |
 | `intercept-card` | `projectId` `runId` `interceptId` `lane` `prompt` `sourceSelected` `deductionSource`（可缺省） `sourcePoolBalance`（可缺省） | 试用拦截卡（[#533](https://github.com/ZhangColin/aiplatform/issues/533) 计费②门②，ADR-0047「试用拦截面＝平台结构闸」）：试用项目（迭代期已生成）的**意见/兜底**输入在入口三分类后、受理前被拦下的事实呈现——平台侧卡片（显源池/随卡首次选源/确认扣减翻转/充值引导），**非智能体 run**（本事件即该次派发的全部，无 `run-start`）；咨询零产物短路天然放行、下单意图维持订单域旧轨（永不入拦）。`prompt`＝被拦输入原文（卡上引用呈现——**不重建用户气泡**：受理前的拦下不进对话面，恢复受理时由该轮 `run-start` / `guide-reply` 落气泡）；`lane` ∈ `OPINION` / `FALLBACK`（确认扣减后按车道恢复受理：意见回意见轮、兜底回定型轻引导——不重输）；`sourceSelected`＝扣减源是否已选定（`false`＝随卡首次选源「本项目余额／我的账户」，第一笔付费选择永远最先选；后台已充项目池＝入账即选择，`true` 免登录直接确认——销售演示动线）；`deductionSource`＝已选定源码位（1=账户余额 2=项目余额，未定为缺省不携带）；`sourcePoolBalance`＝源池余额快照（分；池未建不携带——直确认/充值引导的判定素材）。被拦输入原文随卡留存（`bil_intercepts` 待决行，**不丢失**）——确认扣减＝付费状态翻转（门②，`FlipGate=2` 留痕、不可逆）落定同事务；走充值引导/中途关闭后**卡可回**：读面 `GET /projects/{id}/intercept` 同形载荷（前端重载/回访重建；确认消费后读面归 null——卡随翻转熄灭）。确认与恢复受理的编排归 `POST /projects/{id}/intercept/confirm`（响应 `runId`＝受理运行标识） |
@@ -79,11 +79,11 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `part-text` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `text` | 解说文本部件：`text` 为**完整段非增量**——服务端逐段成型（句读 / 文本块变 / 动作边界 / 来源切换 / 长度上限切段），run 收口事件前出尾段。机器语法守卫（[#234](https://github.com/ZhangColin/aiplatform/issues/234) 叙事段堵漏）：模型以原生工具参数语法（DSML 工具调用标记族，全角竖线连打变体同族）直接发射、引擎未识别为工具调用的文本**识别即丢弃**——不成段、不转译、不挪位到其他面（无闭合 = 脱轨，吞至 run 尾；跨增量 split 的标记头按住不成段）；吞段开始同步产 `part-signal` 脱轨信号（见下行） |
 | `part-signal` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `signal` | 脱轨信号部件（[#240](https://github.com/ZhangColin/aiplatform/issues/240) 机器语法吞段的人话留痕）：守卫识别到机器语法段（标记起点）即发射——脱轨 = 模型以为调了工具、实际什么都没跑（文本轮即终），不静默。载荷只有发生事实：`signal` 为封闭词表，v1 唯一值 `derailed`；**不携带任何原文**（#234 口径维持——界面任何位置不见工具语法原文，原文出口 = 后端 trace 日志）。呈现 = 活性行脱轨变体（#235 变体族加脱轨变体，一句定型文案）——**静态面无痕**（正文投影滤除）、**不伪造动作**（不产生 part-action、命令滚动行不出未执行命令）。频次：每次吞段一句（标记起点判定，吞段中的后续增量不刷），天然低频 |
 | `part-action` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `toolCallId` `toolName` `state` `label` `error`（可缺省） | 工具动作部件（动作卡）：**开始/进行中/完成/失败全生命周期**——动作一开始即出事件，同一动作以 `toolCallId` 锚定跨状态更新。`state` ∈ `started`（模型发起工具调用，参数在途）/ `running`（参数落定、工具执行中）/ `completed`（结果成功）/ `failed`（结果出错/被拒/中断——动作层状态，run 层唯一失败终态仍是 run-failed）。`label` = 动作对象短语（人话行，无时态——时态由 state 表达；started 时参数在途为通用对象如「编写【代码文件】」，running 起解析参数为具体对象如「编写【订单管理】」，终态复述不闪换）；**execute 的 label = 命令原文首行**（[#228](https://github.com/ZhangColin/aiplatform/issues/228) 直播行动态化：剥 `bash -c` / `sh -c` 壳与 `cd … &&` 前缀后裸显、单行定宽 80 截断〔含省略号，走查票校准〕；参数在途 / 解析不出回落「运行命令」，滚动行成为 claude code / replit 式 live tail）。`error`（[#229](https://github.com/ZhangColin/aiplatform/issues/229) 失败留痕）**仅 `state=failed` 时携带**——错误/stderr 首行截断（工具结果文本经增量累积后取首行，与 label 各管各的截断额度：定宽 120 含省略号，走查票校准）；结果文本为空 / 首行空白不携带——失败红行＝label＋error，排障不进容器即可初判原因。播报工具为封闭表：write_file / edit_file / execute（内核 shell 注册名——命令直通后破坏性命令照常播报，[#219](https://github.com/ZhangColin/aiplatform/issues/219)）/ generate_image（[#292](https://github.com/ZhangColin/aiplatform/issues/292) 出图工具件——设计轨的稿产出动作，label＝「出图【对象】」：name 参数〔落盘词干即稿名〕优先、回落画面描述首行定宽截断、解析不出回落「设计稿」（Avoid 词「设计图」不入用户面）；设计直播卡的稿序「正在出第 N 稿」对写稿件与出图件同计）——读类工具不进部件（对客户是噪音） |
-| `part-check` | `projectId` `runId` `sessionId` `state` | 自检播报部件（[#85](https://github.com/ZhangColin/aiplatform/issues/85)：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的呈现——**平台侧产出**（不经引擎部件映射表，收口判据是平台事实：生成 = 8081 探活、更新 = finish_edit 收口事实），核验开始发 `checking`、落定发 `passed`/`failed`。静默重试同构口径（#84）：尝试间核验未过**不发 `failed`**——部件停在 `checking`（重试信号不外泄，重复 `checking` 幂等）；`failed` 仅在末次尝试未过（超限转终态）时发，与 `run-failed` 同窗口到达。状态终值（passed/failed）= 探活结果，可被收尾统计消费（#88 轮末统计行） |
-| `part-plan` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `steps` | 步骤清单部件（[#236](https://github.com/ZhangColin/aiplatform/issues/236)）：run 级步骤清单的**全量快照**——agent 调 `update_plan` 工具自产计划（每 run 开工先调一次、随推进再调），由部件映射表从工具参数增量解析产出（参数落定点 ToolCallEnd 出事件）。`steps` = `[{ id, title, state }]` 全量数组（id 稳定跨调用不变——就地整表更新的锚；title 用户语言一句话；`state` ∈ `pending`（○ 待做）/ `in_progress`（● 当前）/ `completed`（✓ 已收口），**不设 ✗ 态**——失败留痕归 `part-action` 与收尾卡）。**快照式**：执行中再调即新事件整表替换（已收口步骤不可变＝提示词纪律，平台 v1 不强制校验；消费端不合并）；**不走动作行、不留动作痕**（计划变化不产生动作部件、不单独播报）；断线补发以**最后快照**为准（重放按事件序 + 事件 id 去重）；**不落库**（当次会话定格留驻、刷新不回显——过程明细口径维持）；agent 不调用则无事件（界面无清单区域，解说兜底）。契约与来源解耦：不携带计划来源（v1 run 执行体提示词直产，skill 线接入时再议标注） |
+| `part-check` | `projectId` `runId` `sessionId` `state` | 自检播报部件（[#85](https://github.com/ZhangColin/aiplatform/issues/85)：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的呈现——**平台侧产出**（不经引擎部件映射表，收口判据是平台事实：生成/更新 = build 过＋8081 探活双件），核验开始发 `checking`、落定发 `passed`/`failed`。生成/更新 run 单发（#604）：核验未过即发 `failed`，与 `run-failed` 同窗口到达；设计座重试环尝试间核验未过不发 `failed`——部件停在 `checking`（重试信号不外泄，重复 `checking` 幂等），`failed` 仅在末次尝试未过时发。状态终值（passed/failed）= 探活结果，可被收尾统计消费（#88 轮末统计行） |
+| `part-plan` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `steps` | 步骤清单部件（[#236](https://github.com/ZhangColin/aiplatform/issues/236)）：run 级步骤清单的**全量快照**——agent 调 `update_plan` 工具自产计划（每 run 开工先调一次、随推进再调），由部件映射表从工具参数增量解析产出（参数落定点 ToolCallEnd 出事件）。`steps` = `[{ id, title, state }]` 全量数组（id 稳定跨调用不变——就地整表更新的锚；title 用户语言一句话；`state` ∈ `pending`（○ 待做）/ `in_progress`（● 当前）/ `completed`（✓ 已收口），**不设 ✗ 态**——失败留痕归 `part-action` 与收尾卡）。**快照式**：执行中再调即新事件整表替换（已收口步骤不可变＝提示词纪律，平台 v1 不强制校验；消费端不合并）；**不走动作行、不留动作痕**（计划变化不产生动作部件、不单独播报）；断线补发以**最后快照**为准（重放按事件序 + 事件 id 去重）；**不落库**（当次会话定格留驻、刷新不回显——过程明细口径维持）；agent 不调用则无事件（界面无清单区域，解说兜底）。契约与来源解耦：不携带计划来源（v1 run 执行体提示词直产，skill 线接入时再议标注）。**退役中（#604）**：生产方（`update_plan` 工具与部件映射）已随 run 尝试体旧机制拆除，前端消费件与类型随 #608 呈现面清场整体退役 |
 | `part-attachment` | —— | **消息附件部件**（[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地）：圈注锚随用户发言发送的载荷位——指认是对话输入的增强不是替代，<b>不随 run 过程流发射</b>：随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发（渲染进主智能体 prompt 精确读取），并随用户发言落对话史 JSONB（`prj_conversation_entries.attachments`）、刷新回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip（非截图）。schema 见[下节](#消息附件部件锚载荷-schema97) |
 
-> **已退役**：`part-hint`（#437 决策时微指令部件，2026-11-12 摘除）——微指令是模型面指引、给用户看只添噪（生产实案：防重灌载体失效致同一提示每迭代重注刷屏），注入仍发生（模型面合成消息＋服务端 INFO 日志观测），用户面事件与前端渲染整体退役，存量事件按未知类型忽略。
+> **已退役**：`part-hint`（#437 决策时微指令部件，2026-11-12 摘除）——微指令是模型面指引、给用户看只添噪（生产实案：防重灌载体失效致同一提示每迭代重注刷屏），注入本体（DecisionHintMiddleware）已随 #604 run 尝试体旧机制退役，注入一并消失；用户面事件与前端渲染整体退役，存量事件按未知类型忽略。
 
 > **来源归属（#95 委派位）**：委派子智能体（如验证）转发进父流的过程事件带 `source` 字段（值 = 子智能体声明名，引擎 source 路径的末段）；run 执行体自身产出的过程事件**不携带** `source`（缺省 = 执行体——用户面仍无角色标签，source 只用于过程呈现归属）。携带范围：引擎透传事件（`text`/`reasoning`/`tool`/`step-*`，payload 顶层）与消息部件事件（`part-text`/`part-signal`/`part-action`/`part-plan`——后者是事件归属非计划来源，见该行注）。生命周期事件（`run-start`/`run-finish` 等）恒为执行体层级，不带 source；`part-check` 为平台侧产出，也不带。
 
@@ -99,8 +99,8 @@ closing: {
                 #   / 更新了系统 / 本轮系统无需改动
   prdChanged:   true | false        # 判定行·PRD 改没改（更新轮 = 交接物修订说明事实；生成轮恒 false）
   prdNote:      "修订说明"          # 可缺省——未修订/无说明（多轮排队合并以「；」连缀）
-  systemChanged: true | false       # 判定行·系统改没改（更新轮 = finish_edit 工具事实；生成轮 = 探活收口产出）
-  systemNote:   "改了什么/为什么无需改"  # 可缺省（更新轮 = finish_edit 必带说明；生成轨道 = 本段叙事，与 summary 同值）
+  systemChanged: true | false       # 判定行·系统改没改（更新轮 = 平台可观测文件改动事实；生成轮 = 探活收口产出）
+  systemNote:   "改了什么/为什么无需改"  # 可缺省（更新轮 = 内核收口叙事；生成轨道 = 本段叙事，与 summary 同值）
   files: [                         # 变更清单（文件清单级——服务端不产出 patch 类事件，清单由本扩载权威承载）
     { path: "src/App.jsx", added: 40, removed: 0 }    # path = write_file/edit_file 参数原形
     ...                                              # （提示词示例为相对形、模型可携锚定形——两形自选，
@@ -179,17 +179,6 @@ closing: {
                                     # 指路——细则正本住工作区 AGENTS.md 本栈写法规则节）；
                                     # 清单截 20、total 如实。存量工作区（健壮件不在场）与
                                     # 设计会话不携带——旧基座直用是既有合法形态（零行为改变）
-  proofOfOutput: {                  # 可缺省——产出证明判别标注（#420 空转片防呆）：收口
-    idleRejections: 1,              # 判据增补「产出证明」（本段起点以来工作区 diff＞0、
-    exempted: true,                 # 或验证确认「能力已存在」〔report_verification 的
-    exemptionBasis: "验证确认「能力已存在」：留言提交"  # existing 确认形态〕二者必居一，
-  }                                 # 平台侧判定不经模型自报；零 diff＋无确认＝结构性拒绝
-                                    # （拒绝回执经重试现场喂回执行体同 run 补做，耗尽走
-                                    # 段级自愈回滚重跑——见 #353/#405）。豁免收口（活已被
-                                    # 前片干完的薄片）携 exempted＋exemptionBasis；曾拒绝
-                                    # 后补做收口携 idleRejections（两者可并存）；正常干活
-                                    # 收口（diff＞0 且无拒绝史）不携带——收尾卡「产出证明」
-                                    # 标注行的呈现源（前端如实呈现）
   knownDefects: {                   # 可缺省——已知缺陷清单（#427 整轨终验）：修复预算
     defects: [                      # （缺省两轮、运营面 executor 行 final_verify_fix_budget
       { name: "下单支付",            # 可调）耗尽时版本照成、末轮终验 run 收尾卡如实携带
@@ -251,17 +240,16 @@ closing: {
       gateEvaluated: 26,           #     判定门放行迭代数（可能产出信号、走全量评估）
       iterations: 906              #     闭合模型调用计数（每迭代恰一次模型调用）
     },
-    attempts: [                    #   逐尝试分布（静默重试代价可归因）——round / attempt / durationMs
-      { round: 1, attempt: 1, durationMs: 61000, modelId: "deepseek-v4-flash",
+    attempts: [                    #   逐尝试分布——attempt / durationMs（#604 起单发无重试：
+                                   #   成功收口恒一条；round 轮次键随段级外环退役不再携带）
+      { attempt: 1, durationMs: 61000, modelId: "deepseek-v4-flash",
         llmMs: 52000, toolsMs: {...}, verifyMs: 9000,
         overheadMs: { configMs: 120, evalMs: 45, eventPipelineMs: 900,
                       gateSkipped: 880, gateEvaluated: 26, iterations: 906 } }
     ]                              #   （尝试墙钟）+ 该尝试三桶 + 每迭代开销归因桶（#453，同
-                                   #   run 级 overhead 口径）；round＝轮次（#353 段级
-                                   #   外环——1=首轮 / 2=回滚重跑轮，回滚重跑成功收口的
-                                   #   收尾卡首轮失败尝试与重跑尝试同携、分轮可读）；
-                                   #   modelId＝该尝试生效模型档位
-                                   #   （#354 路由留档——逐尝试哪档可归因，失败尝试同携）；
+                                   #   run 级 overhead 口径）；
+                                   #   modelId＝该尝试生效模型配置（键名＝持久化留档
+                                   #   契约不改——#554 改名不改数据面）；
                                    #   中段崩的尝试带已闭合区间的
                                    #   部分观察（#323 失败留账——AgentTurnFailure 携带；前段失败/
                                    #   判据回调抛错无可携事实仍零桶）、墙钟照记
@@ -280,23 +268,26 @@ closing: {
 
 #### 失败面 failure schema（#418）
 
-run-failed 的 `failure` 对象——run 失败终态（重试耗尽 / 回滚重跑失败 / 用户停止，失败账口径）的失败留账，**对话史落库（`prj_conversation_entries` kind=8 失败留账行，`failure` JSONB）与本载荷同 map**（同收尾卡「SSE 扩载与落库同载荷」先例；拼装单点在事件桥 `emitRunFailed`/`emitRunStopped`——先落库后发事件）。平台分析口径、前端不渲染（同 durationBreakdown）——失败作废可归因（#313 时代「33% 失败作废」从此可测），速度观测不再只看成功者：
+run-failed 的 `failure` 对象——run 失败终态（生成/更新 run #604 起单发无重试：本场失败即终态；设计轨重试耗尽即终态／用户停止，失败账口径）的失败留账，**对话史落库（`prj_conversation_entries` kind=8 失败留账行，`failure` JSONB）与本载荷同 map**（同收尾卡「SSE 扩载与落库同载荷」先例；拼装单点在事件桥 `emitRunFailed`/`emitRunStopped`——先落库后发事件）。平台分析口径、前端不渲染（同 durationBreakdown）——失败作废可归因（#313 时代「33% 失败作废」从此可测），速度观测不再只看成功者：
 
 ```
 failure: {
   stopped:  true,                  # 可缺省——用户停止口径（#359）：停止是用户动作、
-                                   # 无失败原因可报（不携 error）；缺省＝重试超限的真失败
-  error:    "单条模型流总时长超上限…",  # 可缺省——失败原因（末次尝试错误现场原文，
+                                   # 无失败原因可报（不携 error）；缺省＝真失败
+  error:    "单条模型流总时长超上限…",  # 可缺省——失败原因（本场尝试错误现场原文，
                                    # 平台分析口径——用户面人话归 message 的桥映射）；
-                                   # 轨道级失败（fork 合并失败等，无尝试环数据）只携本键
-  durationMs: 183420,              # 可缺省——本场累计墙钟（首试起跑到终态收口）；轨道级
-                                   # 失败面（只携 error）与波级停止面不携
-  attempts: [                      # 可缺省——逐尝试分布（跨轮累计——回滚重跑轮不清账，
-                                   # #323 失败留账口径）；波级停止（fork 未及回交即取消）
-                                   # 与轨道级失败面不携；条目形状同 durationBreakdown.attempts
-    { round: 1, attempt: 1,        #
-      durationMs: 61000,           # （round 轮次 / attempt 轮内序号 / durationMs 尝试墙钟 /
-      modelId: "deepseek-v4-flash",# modelId 该尝试生效档位——重试/回滚重跑升档逐试可见 /
+                                   # 轨道级失败（无尝试数据）只携本键
+  durationMs: 183420,              # 可缺省——本场累计墙钟（起跑到终态收口）；轨道级
+                                   # 失败面（只携 error）不携
+  attempts: [                      # 可缺省——逐尝试分布（#323 失败留账口径；生成/更新
+                                   # run #604 起单发：起跑后失败/停止恒一条——被中断
+                                   # 尝试的部分观察、无可携事实则零桶一条；起跑前即被
+                                   # 停止则空数组；设计轨逐尝试各一条）；轨道级失败面
+                                   # 不携；条目形状同
+                                   # durationBreakdown.attempts
+    { attempt: 1,                  #
+      durationMs: 61000,           # （attempt 尝试序号 / durationMs 尝试墙钟 /
+      modelId: "deepseek-v4-flash",# modelId 该尝试生效模型配置（键名留档契约不改）/
       llmMs: 52000,                # llmMs·toolsMs·verifyMs 该尝试三桶；中段崩的尝试带
       toolsMs: {...},              # 已闭合区间的部分观察、无可携事实仍零桶如实）
       verifyMs: 9000 }

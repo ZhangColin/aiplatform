@@ -10,12 +10,13 @@ import { useGenerationStore } from "@/lib/store/generation";
 type GenerationStartResponse = components["schemas"]["GenerationStartResponse"];
 
 /**
- * 继续生成（#222 单出口；#221 断点续跑）：POST /api/projects/{id}/generate——重发
- * 即从断点接续（跳过已收口片、只重跑失败/中断片）；计划缺失（或存量项目无轨道）
- * 返回补产轮 runId，主智能体按 PRD 补产切片计划后自动再派生成。成功即乐观登记
- * 编码 run 在途（SSE run-start 随后到，重放/回声幂等）＋失效项目域（四态投影回
- * 「生成中」档——服务端在途标记已先落）。正常流生成由平台在意见轮收口自动发起，
- * 本 mutation 只服务中断/未起跑的恢复出口。
+ * 继续生成（#222 单出口）：POST /api/projects/{id}/generate——重发即在既有工作区
+ * 重跑（#604 失败新语义＝明确展示＋重跑即恢复：服务端续跑机器已退役，不带断点、
+ * 不携错误现场）。成功即乐观登记编码 run 在途（SSE run-start 随后到，重放/回声
+ * 幂等）＋失效项目域（生成态投影回「生成中」档——服务端在途标记已先落）。正常流
+ * 生成由点火入口发起（岔路口「立即生成」／PRD 确认；快道与设计定稿由收口观测
+ * 直派），本 mutation 只服务未起跑/会话内失败的恢复出口（岔路口卡面「立即生成」
+ * 与本钩同端点，共用本 mutation）。
  */
 export function useResumeGeneration(projectId: string) {
   const queryClient = useQueryClient();
@@ -27,8 +28,8 @@ export function useResumeGeneration(projectId: string) {
         // 乐观登记编码 run 在途（run-start 随后到，重放/回声幂等）
         useGenerationStore.getState().noteCoderRun(projectId, result.runId);
       }
-      // 四态投影回「生成中」（服务端在途标记已落，重拉即得；补产轮路径靠
-      // executor run-start 的失效收尾——见 bridge）
+      // 生成态投影回「生成中」（服务端在途标记已落，重拉即得；失效收尾靠
+      // run-start 的桥侧失效——见 bridge）
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
     },
     onError: (error) => {

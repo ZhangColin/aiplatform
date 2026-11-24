@@ -32,7 +32,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.stream.IntStream;
 
 import ch.qos.logback.classic.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,7 +83,8 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * 生成编排（#22 验收 + #24 知识命中前置注入 + #104 生成轨道——先起服 + 纵向切片逐段）：
  * 编码命令全要素（coder-{projectId} 会话稳定绑定、EXECUTOR 配置与长任务超时、owner
  * 寻址、计量 dims、项目工作区、流关联）；工作区布局资产就位先于首试下发；知识命中
- * 前置注入；失败自动静默重试；成功收口落 generated_at。
+ * 前置注入；成功收口落 generated_at。#604 起失败语义＝明确展示＋重跑即恢复——
+ * 尝试环/静默重试/免预算重试账随旧 run 尝试体一并退役（本类重试系用例随机制删除）。
  *
  * <p><b>生成轨道（#104）</b>：阶段 0（先起服白底页）固定前置，其后按切片计划顺序逐片
  * 派 run——轨道顺序派 N run、阶段 0 先于切片、每片收口发 run-finish（收口扩载）、
@@ -92,7 +92,7 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  *
  * <p><b>首屏界面先行与入口文件写全（#339）</b>：首片语义＝先出可点的界面（首片
  * prompt 界面先行、其后各片端到端纵向切片）；收口判据＝8081 可达＋入口文件完整
- * （残缺「其余代码略」式占位不收口、静默重试修全）。</p>
+ * （残缺「其余代码略」式占位不收口）。</p>
  */
 @IntegrationTest
 class GenerationAppServiceTest {
@@ -105,7 +105,7 @@ class GenerationAppServiceTest {
     @Autowired
     private GenerationAppService appService;
 
-    /** 详情读口（#222 四态投影断言面——REST 行为，不触内部方法）。 */
+    /** 详情读口（#222 生成态投影断言面——REST 行为，不触内部方法）。 */
     @Autowired
     private ProjectQueryAppService queryAppService;
 
@@ -246,24 +246,6 @@ class GenerationAppServiceTest {
         }).when(agentClient).converse(any(), any());
     }
 
-    /** 首试失败、此后照常收口脚本（静默重试/路由升档用例的失败注入面——#354）。 */
-    private void givenConverseFailsThenSucceeds(String failure) {
-        AtomicInteger converseCalls = new AtomicInteger();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            verifyRan(command);
-            if (converseCalls.incrementAndGet() == 1) {
-                throw new IllegalStateException(failure);
-            }
-            Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
-                    Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            return new AgentReply(command.runId(), "完成");
-        });
-    }
-
     private void givenAgentsMdWriteSucceeds() {
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -289,14 +271,21 @@ class GenerationAppServiceTest {
                 java.sql.Timestamp.class, projectId);
     }
 
+    /** 首建点火时点读回（null = 首建未派发——岔路口卡/PRD 确认按钮的呈现条件成立）。 */
+    private java.sql.Timestamp generationRequestedAt(Long projectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT generation_requested_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId);
+    }
+
     // ---------- 内核 run 生命周期（#601 接线；切片/轨道机器 #602 已拆） ----------
 
     @Test
     void given_shutdown_interrupts_inflight_call_when_attempt_fails_then_no_retry_no_terminal_failure() {
-        // #477 关停旁路（2026-11-12 19:03 生产实录）：SIGTERM 优雅关停中断在飞模型调用
-        //（AgentShuttingDownException 经 AgentTurnFailure 上浮）——关停错误一律不可重试：
-        // 不烧尝试预算、不升档、不触发下一轮尝试；run 落「中断可续跑」态而非终态失败
-        //（片保持待跑、无 run-failed），后续片不再派发（关停宽限窗内不拉起排队轮）
+        // #477 关停旁路（2026-11-12 19:03 生产实录，#604 单发形态顺延）：SIGTERM 优雅
+        // 关停中断在飞模型调用（AgentShuttingDownException 经 AgentTurnFailure 上浮）
+        // ——关停错误按关停中断收场：不发终态事件；run 落「中断可重跑」态（片保持
+        // 待跑、无 run-failed），后续片不再派发（关停宽限窗内不拉起排队轮）
         Long projectId = persistedProject("9817");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -319,53 +308,15 @@ class GenerationAppServiceTest {
         appService.dispatchGenerationOnTurnClose(projectId);
 
         try {
-            // 一次尝试即关停收场——事故形态（升档秒败×3 烧满转终态）不复现
+            // 单发一次尝试即关停收场——事故形态（升档秒败连环烧预算）不复现
             assertThat(converseCalls.get()).isEqualTo(1);
-            // 中断可续跑：无 run-failed 失败终态、不落完成位（内核单 run——续跑即重发）
+            // 中断可重跑：无 run-failed 失败终态、不落完成位（内核单 run——重跑即重发）
             verify(eventsAppService, never())
                     .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
             assertThat(generatedAt(projectId)).isNull();
         }
         finally {
             AgentShutdownGate.exitShutdownForTesting();
-        }
-    }
-
-    @Test
-    void given_channel_instant_fails_when_llm_zero_then_no_attempt_budget_burned() {
-        // #477 通道级秒败免预算（11-12 19:03 实录：llmMs=0 秒败烧尝试、疑 #467 同族）：
-        // AgentTurnFailure 且 llmMs=0（未发生真实模型调用——连接/凭证级通道错误）不
-        // 消耗正常重试预算——进独立免预算重试账（带退避、封顶），真实尝试序不前移
-        //（重试现场仍「已失败 0/N」）、不因秒败升档；免预算额度内真实调用恢复即收口
-        Long projectId = persistedProject("9818");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        properties.setChannelInstantRetryBackoff(Duration.ofMillis(1)); // 免预算退避不拖慢测试
-        try {
-            AgentTurnFailure channelFail = new AgentTurnFailure(
-                    "智能体调用失败：Connection refused",
-                    new IllegalStateException("Connection refused"),
-                    List.of(), StageDurations.zero()); // llmMs=0——未发生真实模型调用
-            givenConverseChain(channelFail, channelFail, channelFail,
-                    new AgentReply("r", "完成"));
-
-            appService.dispatchGenerationOnTurnClose(projectId);
-
-            ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-            verify(agentClient, atLeast(4)).converse(commands.capture(), any());
-            List<AgentCommand> all = commands.getAllValues();
-            // 秒败×3 全走免预算重试（尝试序不前移）：重发同首试 prompt（干净重发
-            // ——未发生真实模型调用，无错误现场可携）；旧口径（烧预算）第 2 次起是
-            // 重试 prompt（「已失败 1/3」起计数）、3 次烧满转终态
-            assertThat(all.subList(1, 4)).extracting(AgentCommand::prompt)
-                    .allSatisfy(prompt -> assertThat(prompt).isEqualTo(all.get(0).prompt()));
-            // 免预算额度内通道恢复即收口：阶段 0 收口、生成完成位落定（不终态失败）
-            assertThat(generatedAt(projectId)).isNotNull();
-            verify(eventsAppService, never())
-                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
-        }
-        finally {
-            properties.setChannelInstantRetryBackoff(Duration.ofSeconds(2));
         }
     }
 
@@ -415,27 +366,25 @@ class GenerationAppServiceTest {
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
                 run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
                         && Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
-        // 在途 run 不落完成位（「继续生成」出口不受投影档位影响）
+        // 在途 run 不落完成位（重跑入口不受投影档位影响）
         assertThat(generatedAt(projectId)).isNull();
         assertThat(queryAppService.detail(projectId).generationState())
                 .isNotIn(GenerationState.GENERATING, GenerationState.GENERATED);
-        // 「继续生成」重发续跑：新内核 run 照跑收口判据
+        // 重跑：新内核 run 照跑收口判据
         appService.startGeneration(projectId);
         verify(agentClient, times(2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
     @Test
-    void given_executor_protocol_when_inspect_then_external_repo_convention_anchored() {
-        // #214 外部仓库流程指令写进执行体工作协议：起手先 clone 进 external/ 再读，
-        // 物理规则指路 AGENTS.md——与工作区平台约定分工（物理规则进 AGENTS.md 正本）
-        assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("外部仓库惯例")
-                .contains("浅克隆进工作区 external/")
-                .contains("external/")
-                .contains("只读参考")
-                .contains("不把仓库内容合并进你交付的系统")
-                .contains("见工作区 AGENTS.md");
+    void given_agents_md_materialization_when_inspect_then_external_repo_convention_anchored() {
+        // #214 外部仓库流程指令的工作区腿（#604 执行体协议清场后正本＝AGENTS.md
+        // 物化文本）：external/ 目录约定随布局资产就位幂等覆写——起手浅克隆进
+        // external/、只读参考、不合并进系统
+        assertThat(GenerationAppService.AGENTS_MD_CONTENT)
+                .contains("external/ 是外部仓库资料目录")
+                .contains("浅克隆进 external/")
+                .contains("只读参考其 README/文档/源码结构、不合并进系统");
     }
 
     @Test
@@ -521,11 +470,12 @@ class GenerationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_attempts_exhausted_when_generate_then_failure_face_persisted_same_payload_as_sse() {
-        // #418 灵魂用例（观测地基批）：重试耗尽转终态——失败面（逐尝试墙钟/配置/失败
-        // 原因/本场累计）随 run-failed SSE 扩载与对话史落库同载荷（同收尾卡「SSE 扩载
-        // 与落库同载荷」先例）——失败作废可归因（#313「33% 失败作废」从此可测），
-        // 速度观测不再只看成功者；平台分析口径、前端不渲染（同 durationBreakdown）
+    void given_run_fails_when_generate_then_failure_face_persisted_same_payload_as_sse() {
+        // #418 灵魂用例（观测地基批）的 #604 单发形态：本场 run 失败即转终态——失败面
+        // （逐尝试墙钟/配置/失败原因/本场累计）随 run-failed SSE 扩载与对话史落库
+        // 同载荷（同收尾卡「SSE 扩载与落库同载荷」先例）——失败作废可归因（#313「33%
+        // 失败作废」从此可测），速度观测不再只看成功者；平台分析口径、前端不渲染
+        // （同 durationBreakdown）。失败语义＝明确展示＋重跑即恢复（不自动重试）。
         Long projectId = persistedProject("9860");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -533,8 +483,8 @@ class GenerationAppServiceTest {
 
         GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
 
-        // SSE 扩载：run-failed 载荷携 failure 面——逐尝试条数 = 烧满重试次数（每条带
-        // 轮次/配置/墙钟/桶）、error = 末次错误现场原文、durationMs = 本场累计墙钟
+        // SSE 扩载：run-failed 载荷携 failure 面——单发 attempts 恰一条（带轮次/
+        // 配置/墙钟/桶）、error = 末次错误现场原文、durationMs = 本场累计墙钟
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), payloads.capture());
         assertThat(payloads.getValue().get(EventsAppService.RUN_FIELD)).isEqualTo(run.runId());
@@ -544,12 +494,9 @@ class GenerationAppServiceTest {
         assertThat(face).containsEntry("error", "起服失败");
         assertThat(((Number) face.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
         List<Map<String, Object>> attempts = (List<Map<String, Object>>) face.get("attempts");
-        assertThat(attempts).hasSize(properties.getMaxAttempts());
-        assertThat(attempts).extracting(attempt -> ((Number) attempt.get("round")).intValue())
-                .containsOnly(1);
+        assertThat(attempts).hasSize(1); // 单发：一次尝试即终态（#604 失败新语义）
         assertThat(attempts).extracting(attempt -> ((Number) attempt.get("attempt")).intValue())
-                .containsExactly(IntStream
-                        .rangeClosed(1, properties.getMaxAttempts()).boxed().toArray(Integer[]::new));
+                .containsExactly(1);
         assertThat(attempts).allSatisfy(attempt -> {
             assertThat(String.valueOf(attempt.get("modelId"))).isNotBlank(); // 逐尝试配置可归因
             assertThat(((Number) attempt.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
@@ -598,7 +545,7 @@ class GenerationAppServiceTest {
         // 中断尝试留账：切片 1 首试被打断——恰一条逐尝试（部分观察，零桶如实）
         assertThat((List<Map<String, Object>>) face.get("attempts")).singleElement()
                 .satisfies(attempt -> {
-                    assertThat(attempt).containsEntry("round", 1).containsEntry("attempt", 1);
+                    assertThat(attempt).containsEntry("attempt", 1);
                     assertThat(((Number) attempt.get("durationMs")).longValue())
                             .isGreaterThanOrEqualTo(0L);
                 });
@@ -622,14 +569,14 @@ class GenerationAppServiceTest {
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
-    // ---------- 生成态投影（#222；「生成中断」档事实源已随 #602 拆除——四态口径退役归 #604） ----------
+    // ---------- 生成态投影（#222；#604 四态归一——INTERRUPTED 枚举随旧失败语义退役） ----------
 
     @Test
     void given_generation_lifecycle_when_detail_then_state_projection() {
         // 灵魂用例（#222 AC① 顺延）：从未生成 →（派发起跑，含排队段）生成中 →（失败
-        // 终态，「中断」档事实源已随 #602 拆除——暂归从未生成档，四态口径退役归
-        // #604）→（「继续生成」续跑起跑）生成中 →（收口）已生成——投影由
-        // generated_at＋在途标记派生，读口 = REST 详情（与 SSE 会话态无关）
+        // 终态——单发即终态，#604 失败新语义；失败档并入从未生成）→（「继续生成」
+        // 重跑起跑）生成中 →（收口）已生成——投影由 generated_at＋在途标记派生，
+        // 读口 = REST 详情（与 SSE 会话态无关）
         Long projectId = persistedProject("9855");
         givenAgentsMdWriteSucceeds();
         assertThat(queryAppService.detail(projectId).generationState())
@@ -649,11 +596,9 @@ class GenerationAppServiceTest {
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.GENERATING);
 
-        // 起跑后重试耗尽转终态失败 → 未生成不在途（「继续生成」出口不受档位影响；
+        // 起跑后本场失败转终态 → 未生成不在途（「继续生成」出口不受档位影响；
         // 进程重启丢在途标记同落此档）
         when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("起服失败"))
-                .thenThrow(new IllegalStateException("起服失败"))
                 .thenThrow(new IllegalStateException("起服失败"));
         submitted.remove(0).run();
         assertThat(queryAppService.detail(projectId).generationState())
@@ -746,9 +691,9 @@ class GenerationAppServiceTest {
         // 编码命令实取库值（prompt 与模型配置两腿）；缺省回落腿由上方枚举默认断言钉死。
         // #341 起 Demo 阶段（executor）缺省＝快模型档，故覆盖档取强模型档以示库值
         // 优先（覆盖值≠缺省值，断言才有别于回落腿）。
-        // #252 增强工具开关同批编入 toolSpec（进缓存键保持规格一致）；#545 起
-        // executor 槽有构建轨出图增强件（gi），缺省规格三件全开
-        // ws=true,fu=true,gi=true
+        // #252 增强工具开关同批编入 toolSpec（进缓存键保持规格一致）；#545 的构建轨
+        // 出图增强件（gi）随 #604 出图开关退役，规格串只余 ws/fu 两件——内核座命令
+        // 不携工具规格（工具恰四件经装配结构性兑现）
         Long projectId = persistedProject("9870");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -844,47 +789,13 @@ class GenerationAppServiceTest {
                 .isEqualTo(GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
     }
 
-    @Test
-    void given_stage0_first_attempt_fails_when_retry_then_silent_retry_and_track_completes() {
-        // 失败自动静默重试（#601 内核形态：首试失败→重试成功→收口判据过）：重试续作
-        // 轨换内核重试 prompt（不重注入）、重试尝试内部 runId 逐次换新、中间信号零发；
-        // 全程成功 → generated_at 落位
-        Long projectId = persistedProject("9809");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenKnowledgeHits(); // 首试带前置注入，重试不重注入（注入块已在会话历史）
-        givenConverseChain(new IllegalStateException("首次尝试中断"),
-                new AgentReply("run-2", "系统已生成"));
-
-        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        List<AgentCommand> attempts = command.getAllValues();
-        assertThat(attempts.get(0).runId()).isEqualTo(run.runId()); // 首试 = 首 run 身份
-        assertThat(attempts.get(0).prompt())
-                .endsWith("————\n\n" + GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
-        assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId()); // 重试内部 runId
-        assertThat(attempts.get(1).prompt())
-                .contains("错误现场：首次尝试中断")
-                .contains("进展现场（平台可观测事实）")
-                .contains("已累计用时")
-                .contains("已落盘文件变更 尚无")
-                .endsWith("直至 pnpm build 通过且 curl http://localhost:8081 有响应。");
-
-        // 静默重试（#82/#84）：无重试信号、无逐次 error（run 失败为唯一失败终态）
-        verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), anyMap());
-        assertThat(generatedAt(projectId)).isNotNull();
-    }
-
     // ---------- 收口判据与收口扩载 ----------
 
     @Test
     void given_converse_ok_but_service_unreachable_when_generate_then_no_generated_at_and_reinitiate_exit() {
         // 假完成（#35）：converse 正常结束但 8081 不可达——核验不过不落
-        // generated_at，走既有重试/终态失败路径，「继续生成」出口仍在；重发（REST
-        // 路径无交接物）即新内核 run 照跑收口判据
+        // generated_at，本场失败转终态（#604 不自动重试），重跑入口仍在；重跑
+        //（点火入口/「继续生成」同口）即新内核 run 照跑收口判据
         Long projectId = persistedProject("9810");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds(); // AGENTS.md 写入（无 curl 字样）成功
@@ -895,18 +806,18 @@ class GenerationAppServiceTest {
 
         appService.dispatchGenerationOnTurnClose(projectId);
 
-        // 阶段 0 假完成 → 静默重试到超限转终态：converse 满 maxAttempts 次、不派切片
-        verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
+        // 假完成 → 本场失败转终态（#604 单发无重试）：converse 一次、不派切片
+        verify(agentClient, times(1)).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
         assertThat(generatedAt(projectId)).isNull();
 
-        // 项目不被空壳锁死：generated_at 未落 = 「继续生成」出口在——核验改可达后重发即成功
-        //（重发无交接物：内核不消费计划，重发即新内核 run 照跑收口判据）
+        // 项目不被空壳锁死：generated_at 未落 = 重跑入口在——核验改可达后重跑即成功
+        //（内核不消费计划，重跑即新内核 run 照跑收口判据）
         doReturn(new ExecResultResponse("", "", 0))
                 .when(workspaceLifecycleAppService).exec(any(), any());
         appService.startGeneration(projectId);
         // 重发 = 新内核 run 一次 converse 收口
-        verify(agentClient, times(properties.getMaxAttempts() + 1)).converse(any(), any());
+        verify(agentClient, times(2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
@@ -915,22 +826,21 @@ class GenerationAppServiceTest {
     // ---------- 产出证明闸（#420 空转片防呆：零 diff＋无「能力已存在」确认＝结构性拒绝） ----------
 
     /**
-     * 三闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行三开关
-     * true＝#424/#420/#427 现行为（产出证明/验证在场拒绝—补做链路与整轨终验的
-     * 既有用例承载面）。砍税缺省面由 given_presence_and_proof_gates_closed_.../
-     * given_final_verification_gate_closed_... 锚定。
+     * 两闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行两开关
+     * true＝#424/#427 现行为（验证在场拒绝—补做链路与整轨终验的既有用例承载面）。
+     * 砍税缺省面由 given_presence_and_proof_gates_closed_.../
+     * given_final_verification_gate_closed_... 锚定。产出证明闸（#420）随 #604 拆
+     * run 尝试体旧机制一并退役——本面只余两闸。
      */
     private void givenClosingGatesOpen() {
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs
                     (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     verification_presence_gate_enabled, proof_of_output_gate_enabled,
-                     final_verification_gate_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
+                     verification_presence_gate_enabled, final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE)
                 ON CONFLICT (agent_key) DO UPDATE SET
                     verification_presence_gate_enabled
                         = EXCLUDED.verification_presence_gate_enabled,
-                    proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled,
                     final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
                 """);
     }
@@ -956,20 +866,14 @@ class GenerationAppServiceTest {
     // ---------- 验证在场硬门（#424；#433 开关化、#435 缺省闸关——闸开用例显式切回） ----------
 
     @Test
-    void given_protocol_constants_when_inspect_then_ui_first_and_entry_completeness_anchored() {
-        // #339 协议面（经运营配置面可调）：执行体协议承载入口文件写全约定与
-        // 首屏界面先行（#602：主智能体侧切片计划/首片界面先行的旧协议句随
-        // 13 条执行协议清场一并退役——内核系统提示是生成侧协议正本）
+    void given_closing_probes_when_inspect_then_entry_completeness_anchored() {
+        // #339 收口判据锚（#604 执行体协议清场后正本＝收口探针面）：入口文件写全
+        // 约定落在收口判据行为（残缺「其余代码略」式占位不收口——重试修全语义随
+        // 尝试环退役，判据本身保留：判死即终态、重跑即恢复）
+        assertThat(ProjectFiles.hasTruncationPlaceholder("// 其余代码略")).isTrue();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("完整实现")).isFalse();
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("入口文件")
-                .contains(ProjectFiles.BASELINE_ENTRY)
-                .contains("其余代码略")
-                // #435 verify 自决化：验证降为自决建议（report_verification 不再是收口
-                // 要件；闸态以平台回执为准）＋自报验收要点＋修复—复验轮次预算
-                .contains("自报本片验收要点")
-                .contains("验证不是收口要件")
-                .contains("闸态以平台回执为准")
-                .contains("轮次预算");
+                .contains("本缺省协议正文已退役无消费面"); // #604 占位注记（枚举槽位保留）
     }
 
     @Test
@@ -1022,8 +926,8 @@ class GenerationAppServiceTest {
     void given_scripted_durations_when_closes_then_closing_carries_duration_breakdown() {
         // #111 收口扩载·阶段耗时分布：四桶齐备（llmMs / toolsMs 按工具名分桶·command
         // 按命令归组嵌套 / verifyMs 源账 / closingMs 收口尾序）+ 逐尝试分布；委派族
-        // 工具（agent_spawn 旧名＋agent_send/wait_async_results——#417 补全）除名
-        // （跨距与验证源账重叠，入桶即双计）；SSE 扩载与对话史落库同载荷；
+        // 工具（agent_spawn 旧名＋agent_send/wait_async_results）#604 起如实入桶
+        // （除名规则随委派机器退役，双计口径不复存在）；SSE 扩载与对话史落库同载荷；
         // 桶计与 durationMs 一致性守卫（允许小误差，量级不符即埋点有洞）
         Long projectId = persistedProject("9818");
         givenSessionExecutorRunsInline();
@@ -1058,9 +962,11 @@ class GenerationAppServiceTest {
         Map<String, Object> toolsMs = (Map<String, Object>) breakdown.get("toolsMs");
         assertThat(toolsMs)
                 .containsEntry("write_file", 2L)
-                .doesNotContainKey("agent_spawn") // 委派族除名（防与验证源账双计）
-                .doesNotContainKey("agent_send")
-                .doesNotContainKey("wait_async_results");
+                // #604 委派族除名规则随委派机器退役（双计口径不复存在）——出现即
+                // 普通桶如实携带
+                .containsEntry("agent_spawn", 9L)
+                .containsEntry("agent_send", 40L)
+                .containsEntry("wait_async_results", 11L);
         assertThat((Map<String, Object>) toolsMs.get("command"))
                 .containsExactly(Map.entry("install", 3L));
         long closingMs = ((Number) breakdown.get("closingMs")).longValue();
@@ -1073,15 +979,15 @@ class GenerationAppServiceTest {
                     assertThat(attempt).containsEntry("verifyMs", 1L);
                     assertThat((Map<String, Object>) attempt.get("toolsMs"))
                             .containsEntry("write_file", 2L)
-                            .doesNotContainKey("agent_spawn")
-                            .doesNotContainKey("agent_send")
-                            .doesNotContainKey("wait_async_results");
+                            .containsEntry("agent_spawn", 9L)
+                            .containsEntry("agent_send", 40L)
+                            .containsEntry("wait_async_results", 11L);
                     assertThat(((Number) attempt.get("durationMs")).longValue())
                             .isGreaterThanOrEqualTo(0L);
                 });
         // 一致性守卫：桶计 ≈ durationMs（量级守卫——纳秒/微秒单位混淆即超容差；
         // 正常全 mock 内联管道为毫秒级，2s 容差只放行管道抖动）
-        long bucketSum = 5L + 2L + 3L + 1L + closingMs;
+        long bucketSum = 5L + 2L + 9L + 40L + 11L + 3L + 1L + closingMs;
         long durationMs = ((Number) closing.get("durationMs")).longValue();
         assertThat(Math.abs(bucketSum - durationMs)).isLessThan(2_000L);
 
@@ -1098,157 +1004,10 @@ class GenerationAppServiceTest {
         assertThat(((Number) persistedBreakdown.get("llmMs")).longValue()).isEqualTo(5L);
         assertThat((Map<String, Object>) persistedBreakdown.get("toolsMs"))
                 .containsKey("command")
-                .doesNotContainKey("agent_spawn")
-                .doesNotContainKey("agent_send")
-                .doesNotContainKey("wait_async_results");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void given_first_attempt_fails_when_retry_then_breakdown_carries_each_attempt() {
-        // #111 静默重试代价可归因：每次尝试各自带分布——本例用裸异常模拟无流段
-        // 观察可携的失败（前段/判据类），仍带墙钟与零桶；客户端流失败的部分观察
-        // 留账见 #323 灵魂例，成功尝试带完整桶
-        Long projectId = persistedProject("9819");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("首次尝试中断"))
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    verifyRan(command);
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-                    return new AgentReply(command.runId(), "系统已生成", null, List.of(),
-                            new StageDurations(7, Map.of(), Map.of("test", 4L), Map.of()));
-                })
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    verifyRan(command);
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-                    return new AgentReply(command.runId(), "切片完成");
-                });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        // 内核首试中段崩 → 重试成功收口：收尾卡 attempts 恰两条
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> stage0Closing =
-                (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> breakdown =
-                (Map<String, Object>) stage0Closing.get("durationBreakdown");
-        List<Map<String, Object>> attempts = (List<Map<String, Object>>) breakdown.get("attempts");
-        assertThat(attempts).hasSize(2);
-        assertThat(attempts.get(0))
-                .containsEntry("attempt", 1)
-                .containsEntry("llmMs", 0L)
-                .containsEntry("verifyMs", 0L);
-        assertThat((Map<String, Object>) attempts.get(0).get("toolsMs")).isEmpty();
-        assertThat(((Number) attempts.get(0).get("durationMs")).longValue())
-                .isGreaterThanOrEqualTo(0L);
-        assertThat(attempts.get(1))
-                .containsEntry("attempt", 2)
-                .containsEntry("llmMs", 7L);
-        assertThat((Map<String, Object>) attempts.get(1).get("toolsMs"))
-                .containsExactly(Map.entry("command", Map.of("test", 4L)));
-        // run 级四桶 = 跨尝试合计（首试零桶 + 重试桶）
-        assertThat(breakdown).containsEntry("llmMs", 7L);
-        assertThat((Map<String, Object>) breakdown.get("toolsMs"))
-                .containsExactly(Map.entry("command", Map.of("test", 4L)));
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void given_failed_attempt_with_observation_when_retry_then_account_kept_and_scene_attached() {
-        // 灵魂用例（#323 失败留账＋重试携进展现场）：阶段 0 首试中段失败且失败携部分
-        // 观察（AgentTurnFailure：已提交文件变更＋已闭合区间阶段耗时；计划快照经
-        // 事件流观察）→ 静默重试成功收口——①收尾卡耗时分布：失败尝试带部分桶
-        //（不清零）、run 级桶跨尝试含失败尝试；②变更清单含失败尝试已落盘的文件；
-        // ③重试 prompt 携进展现场（已干多久/干到哪——累计用时、已落盘文件、计划
-        // 进度），裸异常原文不再是唯一现场（#221 错误现场仍在，原地修不回归）
-        Long projectId = persistedProject("9833");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    verifyRan(command);
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
-                            Map.of("prompt", command.prompt())));
-                    sink.accept(scripted(AgentEventTypes.PART_PLAN, command.runId(),
-                            Map.of(AgentEventTypes.PART_PLAN_STEPS_FIELD, List.of(
-                                    Map.of(AgentEventTypes.PART_PLAN_STEP_ID_FIELD, "s1",
-                                            AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD, "初始化项目",
-                                            AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
-                                            AgentEventTypes.PART_PLAN_STATE_COMPLETED),
-                                    Map.of(AgentEventTypes.PART_PLAN_STEP_ID_FIELD, "s2",
-                                            AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD, "实现注册页",
-                                            AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
-                                            AgentEventTypes.PART_PLAN_STATE_IN_PROGRESS)))));
-                    throw new AgentTurnFailure(
-                            "智能体调用失败（runId=" + command.runId() + "）：切片1中断",
-                            new RuntimeException("切片1中断"),
-                            List.of(new FileChange("src/failed.tsx", 40, 2)),
-                            new StageDurations(3, Map.of("write_file", 7L), Map.of(), Map.of()));
-                })
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    verifyRan(command);
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-                    return new AgentReply(command.runId(), "系统已生成", null,
-                            List.of(new FileChange("src/lib.js", 10, 0)),
-                            new StageDurations(7, Map.of(), Map.of(), Map.of()));
-                });
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        // 重试 prompt 携进展现场（#323）：错误现场＋已干多久/干到哪的平台可观测事实
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(1).prompt())
-                .contains("错误现场：")
-                .contains("切片1中断")
-                .contains("进展现场（平台可观测事实）")
-                .contains("已累计用时")
-                .contains("已落盘文件变更 1 件：src/failed.tsx（+40/-2）")
-                .contains("最近计划进度：")
-                .contains("✓ 初始化项目")
-                .contains("● 实现注册页")
-                .contains("不要重做");
-
-        // 收口收尾卡：失败尝试留账——部分桶不清零、run 级桶跨尝试含失败尝试、
-        // 变更清单含失败尝试已落盘的文件（活动量口径：同路径跨尝试〔含失败〕合并）
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> breakdown =
-                (Map<String, Object>) closing.get("durationBreakdown");
-        List<Map<String, Object>> attempts = (List<Map<String, Object>>) breakdown.get("attempts");
-        assertThat(attempts).hasSize(2);
-        assertThat(attempts.get(0))
-                .containsEntry("attempt", 1)
-                .containsEntry("llmMs", 3L);
-        assertThat((Map<String, Object>) attempts.get(0).get("toolsMs"))
-                .containsEntry("write_file", 7L);
-        assertThat(attempts.get(1))
-                .containsEntry("attempt", 2)
-                .containsEntry("llmMs", 7L);
-        assertThat(breakdown).containsEntry("llmMs", 10L); // run 级 = 失败 3 + 成功 7
-        assertThat((Map<String, Object>) breakdown.get("toolsMs"))
-                .containsEntry("write_file", 7L);
-        assertThat((List<Map<String, Object>>) closing.get("files"))
-                .extracting(file -> file.get("path"))
-                .containsExactlyInAnyOrder("src/failed.tsx", "src/lib.js");
+                // #604 委派族如实入桶（读回落库同载荷同口径）
+                .containsEntry("agent_spawn", 9)
+                .containsEntry("agent_send", 40)
+                .containsEntry("wait_async_results", 11);
     }
 
     // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------
@@ -1534,9 +1293,10 @@ class GenerationAppServiceTest {
 
     @Test
     void given_first_demo_failed_when_retrigger_then_redispatch_from_track() {
-        // 失败重发同口径（#542：重试面＝「继续生成」按钮，不重复确认/不再出卡）：
-        // 首派失败（起服耗尽转终态）后项目仍「未生成」——「继续生成」（startGeneration）
-        // 再触发即重发新内核 run（收口判据照跑）。首派走收口观测入口，重发走按钮路径
+        // 失败重发同口径（#604：失败＝明确展示＋重跑即恢复，不自动重试）：首派失败
+        // 后项目仍「未生成」——重跑（startGeneration：岔路口「立即生成」/PRD 确认/前端
+        // 「继续生成」同口）再触发即新内核 run（既有工作区重跑，收口判据照跑）。首派
+        // 走收口观测入口，重跑走点火入口路径
         Long projectId = persistedProject("9883");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -1555,8 +1315,8 @@ class GenerationAppServiceTest {
 
         assertThat(first).isNotNull();
         assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
-        // 重发（「继续生成」按钮路径）：新内核 run 续跑即完成（重打桩的 matcher
-        // 空参调用触发旧 answer——旧桩对 null 命令直接过，同既有先例）
+        // 重跑（点火入口路径）：新内核 run 即完成（重打桩的 matcher 空参调用触发
+        // 旧 answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
@@ -1566,6 +1326,43 @@ class GenerationAppServiceTest {
 
         assertThat(again).isNotNull();
         assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_first_build_fails_when_run_ends_then_ignition_entry_reopened_for_rerun() {
+        // #604 失败新语义＝明确展示＋重跑即恢复：「继续生成」断点续跑入口随续跑机器
+        // 退役，重跑改走点火入口——首建终态失败即清点火位（generation_requested_at），
+        // 岔路口卡/PRD 确认按钮「首建未派发」呈现条件复现，用户重走点火入口即重跑。
+        // （成功收口不清：已生成，入口本就不在场——见
+        // given_turn_close_dispatch_then_kernel_chain_and_first_build_requested）
+        Long projectId = persistedProject("9884");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        assertThat(generatedAt(projectId)).isNull(); // 仍「未生成」
+        assertThat(generationRequestedAt(projectId)).isNull(); // 点火位清——点火入口复现
+    }
+
+    @Test
+    void given_first_build_stopped_by_user_when_run_ends_then_ignition_entry_reopened_for_rerun() {
+        // 停止同口径（#359 用户停止＝中断非判死）：清点火位，重跑入口照常在场
+        Long projectId = persistedProject("9885");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            codingRunTrack.requestStop(projectId);
+            throw new IllegalStateException("java.lang.InterruptedException");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId);
+
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        assertThat(generatedAt(projectId)).isNull(); // 仍「未生成」
+        assertThat(generationRequestedAt(projectId)).isNull(); // 点火位清——点火入口复现
     }
 
     // ---------- Demo 版本化（#333）：生成收口自动成版（锚起跑时确认版本） ----------
@@ -1917,51 +1714,9 @@ class GenerationAppServiceTest {
                 .hasMessageContaining(ProjectMessage.GENERATION_DESIGN_ENDPOINT.message());
     }
 
-    // ---------- 模型路由（#354：路由判定优先、人工覆盖兜底；钉死位＝路由关） ----------
-
-    @Test
-    void given_default_routing_when_first_attempt_fails_then_retry_escalates_to_strong() {
-        // 失败升档（历史失败信号，#601 内核形态顺延）：首试快档（枚举缺省）→ 重试
-        // 升强档——换档不换会话（重试续本 run 会话，上下文连续）
-        Long projectId = persistedProject("9850");
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenConverseFailsThenSucceeds("起服失败");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "deepseek:deepseek-flash", // 首试——无信号、快档
-                "deepseek:deepseek-v4-pro"); // 重试——失败升档
-        assertThat(commands.getAllValues().get(0).sessionId())
-                .isEqualTo(commands.getAllValues().get(1).sessionId());
-
-        // 收尾卡留档：收口带路由判定（升强档＋理由＋判定依据）
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> stage0Tier = (Map<String, Object>) ((Map<String, Object>) payloads
-                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
-                .get("modelTier");
-        assertThat(stage0Tier)
-                .containsEntry("modelId", "pro")
-                .containsEntry("source", "routed");
-        assertThat((List<String>) stage0Tier.get("reasons")).contains("重试升档（第 2 次尝试）");
-        assertThat((Map<String, Object>) stage0Tier.get("signals"))
-                .containsEntry("attempt", 2)
-                .containsEntry("sizeLabel", null); // 内核无片标签——规模标签信号缺位
-        // 留档可查：modelTier 随收尾卡落对话史（JSONB 同载荷）——哪 run 用了哪档的
-        // 持久留档面（失败 run 无收尾卡、以结构化日志为面）
-        List<Map<String, Object>> closings = jdbcTemplate.queryForList(
-                "SELECT closing->'modelTier'->>'modelId' AS model_config_key FROM"
-                        + " prj_conversation_entries WHERE project_id = ? AND kind = ?"
-                        + " ORDER BY id",
-                projectId, ConversationEntryKind.CLOSING.getCode());
-        assertThat(closings).extracting(row -> row.get("model_config_key"))
-                .containsExactly("pro"); // 收口——重试升档后的强档
-    }
+    // ---------- 模型路由（#354：路由判定优先、人工覆盖兜底；钉死位＝路由关；
+    // #604 失败升档腿随尝试环退役——失败信号路由（历史 attempt 计数）无消费面，
+    // 升档系用例删除；路由判定本体归 #606） ----------
 
     @Test
     void given_large_file_surface_when_dispatch_then_strong_from_first_attempt() {
@@ -2007,46 +1762,9 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_manual_override_with_routing_on_when_retry_then_escalation_crosses_override() {
-        // 路由判定优先、人工覆盖兜底：覆盖是基础档不是钉死——首试走人工档、
-        // 重试升强档（升档越过覆盖）；下一段回落人工档。doubao-flagship 已随
-        // V79 退场（火山下线收尾）——人工档用 t- 夹具配置行（挂 deepseek 通道）
-        Long projectId = persistedProject("9853");
-        jdbcTemplate.update("""
-                INSERT INTO prj_model_configs (config_key, provider_key, model_name, enabled, display_name)
-                VALUES ('t-manual', 'deepseek', 'deepseek-chat-manual', TRUE, '人工档夹具')
-                """);
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, model_config_key)
-                VALUES ('executor', 't-manual')
-                """);
-        givenSessionExecutorRunsInline();
-        givenAgentsMdWriteSucceeds();
-        givenConverseFailsThenSucceeds("起服失败");
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "deepseek:deepseek-chat-manual", // 首试——无信号、人工档兜底
-                "deepseek:deepseek-v4-pro"); // 重试——失败升档（越过人工档）
-
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> config = (Map<String, Object>) ((Map<String, Object>) payloads
-                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
-                .get("modelTier");
-        assertThat(config)
-                .containsEntry("modelId", "pro")
-                .containsEntry("source", "routed");
-        assertThat((List<String>) config.get("reasons")).contains("重试升档（第 2 次尝试）");
-    }
-
-    @Test
-    void given_routing_off_with_override_when_retry_then_pinned_manual_tier() {
-        // 钉死位＝路由关＋人工档：人工档恒生效——失败重试不升档（既有口径）
+    void given_routing_off_with_override_when_dispatch_then_pinned_manual_tier() {
+        // 钉死位＝路由关＋人工档：人工档恒生效（#604 单发形态：一次 run 一档，
+        // 无失败升档腿——路由关时档位于起跑即定）
         Long projectId = persistedProject("9854");
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs (agent_key, model_config_key, routing_enabled)
@@ -2054,14 +1772,21 @@ class GenerationAppServiceTest {
                 """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        givenConverseFailsThenSucceeds("起服失败");
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
 
         appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro");
+        verify(agentClient, times(1)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString)
+                .containsExactly("deepseek:deepseek-v4-pro");
 
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -2076,8 +1801,9 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_routing_off_no_override_when_retry_then_enum_default_kept() {
-        // 路由关＋无覆盖：缺省档恒生效（快档）——失败重试也不升档（既有口径零变化）
+    void given_routing_off_no_override_when_dispatch_then_enum_default_kept() {
+        // 路由关＋无覆盖：缺省档恒生效（快档）——单发一次 run 即枚举缺省档（#604
+        // 无失败升档腿）
         Long projectId = persistedProject("9855");
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs (agent_key, routing_enabled)
@@ -2085,17 +1811,21 @@ class GenerationAppServiceTest {
                 """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("起服失败"))
-                .thenAnswer(invocation -> new AgentReply(
-                        invocation.getArgument(0, AgentCommand.class).runId(), "完成"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
 
         appService.dispatchGenerationOnTurnClose(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
+        verify(agentClient, times(1)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
-                "deepseek:deepseek-flash", "deepseek:deepseek-flash");
+                "deepseek:deepseek-flash");
     }
 
     /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */

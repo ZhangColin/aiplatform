@@ -7,7 +7,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelRoutingAppService;
-import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -61,13 +60,9 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param verificationPresenceGateEnabled 验证在场闸开关生效态（#433；#435 起缺省
  *                                false＝闸关——本 run 无验证登记不收口仅在该闸被
  *                                运营打开时生效。仅 run 执行体行消费）
- * @param proofOfOutputGateEnabled 空转产出证明闸开关生效态（#433；#435 起缺省
- *                                false＝闸关——零 diff 且无确认不收口仅在该闸被运营
- *                                打开时生效。仅 run 执行体行消费）
  * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关生效态（#433；
  *                                #435 起缺省 false＝闸关——终验不起 run、不拦完成
  *                                叙事。仅 run 执行体行消费）
- * @param verifySelfDecisionEnabled verify 自决开关生效态（#442；缺省 true＝自决开）
  * @param robustLintBlockingEnabled 基座 lint 强制档阻断开关生效态（#541；缺省
  *                                false＝让路——强制档违规只随收尾卡标注、不喂修轮
  *                                不触发失败链；true＝恢复原阻断形态（回滚保险）。
@@ -155,39 +150,9 @@ public record BackofficeAgentConfigResponse(
         @Schema(description = "验证在场闸开关生效态（#433；#435 起缺省 false＝闸关——本 run 无"
                 + "report_verification 登记不收口不生效〔#424〕；true＝闸开。仅 run 执行体行消费）")
         boolean verificationPresenceGateEnabled,
-        @Schema(description = "空转产出证明闸开关生效态（#433；#435 起缺省 false＝闸关——段起点"
-                + "以来零 diff 且无「能力已存在」确认不收口不生效〔#420〕；true＝闸开。"
-                + "仅 run 执行体行消费）")
-        boolean proofOfOutputGateEnabled,
         @Schema(description = "整轨终验拦「生成完成」开关生效态（#433；#435 起缺省 false＝闸关——"
                 + "终验不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事〔#427〕。仅 run 执行体行消费）")
         boolean finalVerificationGateEnabled,
-        @Schema(description = "决策时注入总开关生效态（#437，#432 Step 3；缺省 true＝注入开〔默认〕——"
-                + "执行体 ReAct 循环每迭代判定注入一条微指令；false＝全停原样透传。"
-                + "仅 run 执行体行消费）")
-        boolean decisionHintsEnabled,
-        @Schema(description = "失败止损阈值生效值（#437；库覆盖值或代码缺省）", example = "3")
-        Integer decisionHintErrorStreak,
-        @Schema(description = "失败止损阈值是否库覆盖值（true＝覆盖；false＝代码缺省）")
-        boolean decisionHintErrorStreakOverridden,
-        @Schema(description = "代码缺省失败止损阈值（预览：清空覆盖即落此值）", example = "3")
-        Integer defaultDecisionHintErrorStreak,
-        @Schema(description = "微指令堆叠上限生效值（#437；库覆盖值或代码缺省）", example = "3")
-        Integer decisionHintStackCap,
-        @Schema(description = "堆叠上限是否库覆盖值（true＝覆盖；false＝代码缺省）")
-        boolean decisionHintStackCapOverridden,
-        @Schema(description = "代码缺省堆叠上限（预览：清空覆盖即落此值）", example = "3")
-        Integer defaultDecisionHintStackCap,
-        @Schema(description = "禁用集生效值（#437；库覆盖值——空数组＝全启用）",
-                example = "[\"parallel_tools\"]")
-        List<String> decisionHintDisabled,
-        @Schema(description = "禁用集是否库覆盖值（true＝覆盖；false＝全启用）")
-        boolean decisionHintDisabledOverridden,
-        @Schema(description = "verify 自决开关生效态（#442，#441-1；缺省 true＝自决开〔默认〕——"
-                + "执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——"
-                + "提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿不受影响。"
-                + "仅 run 执行体行消费）")
-        boolean verifySelfDecisionEnabled,
         @Schema(description = "基座 lint 强制档阻断开关生效态（#541；缺省 false＝让路〔默认〕——"
                 + "强制档违规收口照扫、只随收尾卡标注（不喂修轮、不触发失败链、不间接升档），"
                 + "修轮触发面收窄至样式合规；true＝恢复原阻断形态（强制档喂修轮修一轮＋修不完"
@@ -241,25 +206,7 @@ public record BackofficeAgentConfigResponse(
                 config.finalVerifyFixBudget() != null,
                 AgentConfigAppService.DEFAULT_FINAL_VERIFY_FIX_BUDGET,
                 config.verificationPresenceGateEnabled(),
-                config.proofOfOutputGateEnabled(),
                 config.finalVerificationGateEnabled(),
-                config.decisionHintsEnabled(),
-                config.decisionHintErrorStreak() != null
-                        ? config.decisionHintErrorStreak()
-                        : AgentConfigAppService.DEFAULT_DECISION_HINT_ERROR_STREAK,
-                config.decisionHintErrorStreak() != null,
-                AgentConfigAppService.DEFAULT_DECISION_HINT_ERROR_STREAK,
-                config.decisionHintStackCap() != null
-                        ? config.decisionHintStackCap()
-                        : AgentConfigAppService.DEFAULT_DECISION_HINT_STACK_CAP,
-                config.decisionHintStackCap() != null,
-                AgentConfigAppService.DEFAULT_DECISION_HINT_STACK_CAP,
-                config.decisionHintDisabled() != null && !config.decisionHintDisabled().isBlank()
-                        ? DecisionHintKind.decode(config.decisionHintDisabled()).stream()
-                                .map(DecisionHintKind::key).toList()
-                        : List.of(),
-                config.decisionHintDisabled() != null,
-                config.verifySelfDecisionEnabled(),
                 config.robustLintBlockingEnabled(),
                 config.operatorId(),
                 config.operatorName(),

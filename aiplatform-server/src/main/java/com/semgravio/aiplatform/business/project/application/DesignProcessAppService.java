@@ -164,9 +164,11 @@ public class DesignProcessAppService {
     }
 
     /**
-     * 重试续作 prompt（原地修口径，对偶生成轨 #221；#323 重试携进展现场——
-     * retryScene 为尝试环拼装的错误事实＋已干多久/干到哪的进展事实）：不重做已对
-     * 的工作——收口判据（design/ 有新稿）照旧。
+     * 重试续作 prompt（原地修口径；#323 重试携进展现场——retryScene 为派发器拼装
+     * 的错误事实＋已干多久/干到哪的进展事实）：不重做已对的工作——收口判据
+     * （design/ 有新稿）照旧。设计线的有界重试按总 spec「原样保留」沿用（#604：
+     * 失败语义新决议的对象是生成链，其断点续跑／续作提示已退役——本提示自此只
+     * 服务设计座）。
      */
     static String retryPrompt(String item, String retryScene) {
         return "上一次尝试失败。\n" + retryScene + "\n已落盘的设计稿仍然有效"
@@ -199,7 +201,7 @@ public class DesignProcessAppService {
                 + GenerationAppService.NARRATION_CONVENTION;
     }
 
-    /** 改稿重试续作 prompt（#221 原地修同构；#323 重试现场——错误＋进展事实，relaxed 判据照旧）。 */
+    /** 改稿重试续作 prompt（原地修同构；#323 重试现场——错误＋进展事实，relaxed 判据照旧）。 */
     static String revisionRetryPrompt(String item, String retryScene) {
         return "上一次改稿尝试失败。\n" + retryScene + "\n已落盘的设计稿"
                 + "仍然有效——不要重做已对的工作。请继续完成设计物「" + item
@@ -231,7 +233,7 @@ public class DesignProcessAppService {
     private final DesignItemRepository designItems;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final AgentSessionExecutor sessionExecutor;
-    private final CoderRunAttempts coderRunAttempts;
+    private final CodingRunDispatcher codingRunDispatcher;
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
     private final TransactionTemplate transactionTemplate;
@@ -270,7 +272,7 @@ public class DesignProcessAppService {
     public DesignProcessAppService(ProjectRepository projectRepository,
             DesignItemRepository designItems,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
+            AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
             AgentEventBridge eventBridge, CodingRunTrack codingRunTrack,
             TransactionTemplate transactionTemplate, ProjectVersionAppService versions,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
@@ -283,7 +285,7 @@ public class DesignProcessAppService {
         this.designItems = designItems;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.sessionExecutor = sessionExecutor;
-        this.coderRunAttempts = coderRunAttempts;
+        this.codingRunDispatcher = codingRunDispatcher;
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
         this.transactionTemplate = transactionTemplate;
@@ -508,15 +510,16 @@ public class DesignProcessAppService {
             first = false;
             String itemTitle = item.getTitle();
             boolean systemDesign = project.getEndpointType() == ProjectEndpointType.SYSTEM_DESIGN;
-            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
+            CodingRunDispatcher.RunResult result = codingRunDispatcher.run(project, runId,
                     itemSession(projectId, item.getOrd()),
-                    new CoderRunAttempts.Prompts(
+                    // 设计座保留续作提示（设计线原样保留的有界重试，#604）
+                    new CodingRunDispatcher.Prompts(
                             itemPrompt(item.getOrd(), total, itemTitle, systemDesign),
                             errorScene -> retryPrompt(itemTitle, errorScene)),
                     (attemptRunId, attemptChanges) -> closeDesignItem(project, item,
                             attemptRunId, attemptChanges),
-                    CoderRunAttempts.DESIGN_LABEL, /* injectKnowledge= */ false,
-                    CoderRunAttempts.RunSeat.designer(itemTitle),
+                    CodingRunDispatcher.DESIGN_LABEL, /* injectKnowledge= */ false,
+                    CodingRunDispatcher.RunSeat.designer(itemTitle),
                     RunHeading.slice(itemTitle, item.getOrd(), total),
                     SegmentType.DESIGN_TURN);
             if (!result.succeeded()) {
@@ -666,23 +669,24 @@ public class DesignProcessAppService {
      *
      * @return 收场事实（成败）
      */
-    private CoderRunAttempts.RunResult runRevision(Project project, DesignItem item,
+    private CodingRunDispatcher.RunResult runRevision(Project project, DesignItem item,
             String feedback, DesignDivergence divergence, String runId) {
         Long projectId = project.getId();
-        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
+        CodingRunDispatcher.RunResult result = codingRunDispatcher.run(project, runId,
                 itemSession(projectId, item.getOrd()),
-                new CoderRunAttempts.Prompts(
+                // 设计座保留续作提示（设计线原样保留的有界重试，#604）
+                new CodingRunDispatcher.Prompts(
                         revisionPrompt(item.getTitle(), feedback, divergence),
                         errorScene -> revisionRetryPrompt(item.getTitle(), errorScene)),
                 (attemptRunId, attemptChanges) -> closeRevision(item, attemptRunId, attemptChanges),
-                CoderRunAttempts.DESIGN_LABEL, /* injectKnowledge= */ false,
-                CoderRunAttempts.RunSeat.designer(item.getTitle()),
+                CodingRunDispatcher.DESIGN_LABEL, /* injectKnowledge= */ false,
+                CodingRunDispatcher.RunSeat.designer(item.getTitle()),
                 RunHeading.slice(item.getTitle(), item.getOrd(),
                         designItems.findByProjectIdOrderByOrdAsc(projectId).size()),
                 SegmentType.DESIGN_TURN);
         lastActiveOrd.put(projectId, item.getOrd());
         if (!result.succeeded()) {
-            log.warn("[design] 项目 {} 件 {} 改稿超限转终态（runId={}）——件状态保持，用户重提即兜底",
+            log.warn("[design] 项目 {} 件 {} 改稿重试耗尽转终态（runId={}）——件状态保持，用户重提即兜底",
                     projectId, item.getOrd(), runId);
             eventBridge.emitRunFailed(project, runId, result.failure());
         }
@@ -695,7 +699,7 @@ public class DesignProcessAppService {
      * 事实），已定稿件的定稿锚不覆写（定稿选择保持到再定稿）。新代平面稿同律
      * 出稿即渲（#292——渲败/未渲条目保持 HTML 形态如实）。
      */
-    private CoderRunAttempts.ClosingJudgment closeRevision(DesignItem item, String attemptRunId,
+    private CodingRunDispatcher.ClosingJudgment closeRevision(DesignItem item, String attemptRunId,
             List<FileChange> sessionChanges) {
         Map<String, String> printed = renders.renderPrintDrafts(
                 item.getProjectId(), htmlDraftPaths(sessionChanges));
@@ -703,7 +707,7 @@ public class DesignProcessAppService {
             recordItemStatus(item.getProjectId(), item.getOrd(),
                     row -> row.close(attemptRunId));
         }
-        return CoderRunAttempts.ClosingJudgment.design(revisionClosingSummary(item.getTitle()),
+        return CodingRunDispatcher.ClosingJudgment.design(revisionClosingSummary(item.getTitle()),
                 designDrafts(item.getTitle(), sessionChanges, printed));
     }
 
@@ -717,11 +721,11 @@ public class DesignProcessAppService {
      * 系统），summary＝本场设计物叙事，稿清单随判定事实拼装（渲成平面稿以 PNG
      * 为正身——closing.drafts 扩载）。
      */
-    private CoderRunAttempts.ClosingJudgment closeDesignItem(Project project, DesignItem item,
+    private CodingRunDispatcher.ClosingJudgment closeDesignItem(Project project, DesignItem item,
             String attemptRunId, List<FileChange> sessionChanges) {
         boolean drafted = sessionChanges.stream()
                 .map(FileChange::path)
-                .anyMatch(CoderRunAttempts::designAnchored);
+                .anyMatch(CodingRunDispatcher::designAnchored);
         if (!drafted) {
             throw new IllegalStateException(
                     "设计会话未产出设计稿（design/ 目录无新稿）——收口判据未过");
@@ -730,7 +734,7 @@ public class DesignProcessAppService {
                 project.getId(), htmlDraftPaths(sessionChanges));
         recordItemStatus(project.getId(), item.getOrd(), row -> row.close(attemptRunId));
         lastActiveOrd.put(project.getId(), item.getOrd());
-        return CoderRunAttempts.ClosingJudgment.design(itemClosingSummary(item.getTitle()),
+        return CodingRunDispatcher.ClosingJudgment.design(itemClosingSummary(item.getTitle()),
                 designDrafts(item.getTitle(), sessionChanges, printed));
     }
 
@@ -744,7 +748,7 @@ public class DesignProcessAppService {
     private static List<String> designAnchoredPaths(List<FileChange> changes) {
         return changes.stream()
                 .map(FileChange::path)
-                .filter(CoderRunAttempts::designAnchored)
+                .filter(CodingRunDispatcher::designAnchored)
                 .map(ProjectFiles::anchoredFormOf)
                 .distinct()
                 .sorted()
@@ -775,7 +779,7 @@ public class DesignProcessAppService {
                     String draftPath = printed.getOrDefault(path, path);
                     return Map.<String, Object>of(
                             "item", item,
-                            "media", CoderRunAttempts.mediaOf(draftPath),
+                            "media", CodingRunDispatcher.mediaOf(draftPath),
                             "path", draftPath);
                 })
                 .toList();
@@ -899,7 +903,7 @@ public class DesignProcessAppService {
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.DESIGN_ITEM_NOT_FOUND));
         requireRevisionable(item);
         String relative = ProjectFiles.relativeFormOf(draftPath);
-        if (!CoderRunAttempts.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
+        if (!CodingRunDispatcher.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
             throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
         }
         ExecResultResponse exists = workspaceLifecycleAppService.exec(
@@ -959,7 +963,7 @@ public class DesignProcessAppService {
         }
         orderQueryAppService.requireNoActiveOrder(projectId);
         String relative = ProjectFiles.relativeFormOf(draftPath);
-        if (!CoderRunAttempts.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
+        if (!CodingRunDispatcher.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
             throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
         }
         boolean finalizedDraft = designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
@@ -1024,20 +1028,20 @@ public class DesignProcessAppService {
             String runId, String versionHash, List<String> triggers, Instant startedAt) {
         Map<String, Object> draft = new LinkedHashMap<>();
         draft.put("item", item.getTitle());
-        draft.put("media", CoderRunAttempts.mediaOf(draftPath));
+        draft.put("media", CodingRunDispatcher.mediaOf(draftPath));
         draft.put("path", draftPath);
         draft.put("triggers", triggers);
         Map<String, Object> closing = new LinkedHashMap<>();
-        closing.put(CoderRunAttempts.CLOSING_SUMMARY_FIELD,
+        closing.put(CodingRunDispatcher.CLOSING_SUMMARY_FIELD,
                 finalizeClosingSummary(item.getTitle()));
         closing.put("prdChanged", false);
         closing.put("systemChanged", false);
         closing.put("files", List.of());
         closing.put("durationMs", Duration.between(startedAt, Instant.now()).toMillis());
         if (versionHash != null) {
-            closing.put(CoderRunAttempts.CLOSING_VERSION_FIELD, versionHash);
+            closing.put(CodingRunDispatcher.CLOSING_VERSION_FIELD, versionHash);
         }
-        closing.put(CoderRunAttempts.CLOSING_DRAFTS_FIELD, List.of(draft));
+        closing.put(CodingRunDispatcher.CLOSING_DRAFTS_FIELD, List.of(draft));
         try {
             conversationHistory.recordClosing(project.getId(), runId, closing);
         }

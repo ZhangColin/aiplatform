@@ -160,7 +160,7 @@ class IterationChainSmokeTest {
         Project project = projectRepository.save(Project.create("链必达冒烟", null, null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         mainSessionId = MainAgentAppService.SESSION_PREFIX + projectId;
-        coderSessionId = CoderRunAttempts.SESSION_PREFIX + projectId;
+        coderSessionId = CodingRunDispatcher.SESSION_PREFIX + projectId;
 
         // 1) 预置已生成形态：8081 常驻小系统（主色蓝）+ generated_at 落位——须在访谈
         //    产出 PRD **之前**落位：#462 去确认门后首次产 PRD 即自动派首个构建

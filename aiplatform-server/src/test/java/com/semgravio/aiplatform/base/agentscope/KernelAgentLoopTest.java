@@ -160,7 +160,7 @@ class KernelAgentLoopTest {
     private static AgentscopeHarnessAgentFactory realFactory(AgentscopeProperties properties) {
         return new AgentscopeHarnessAgentFactory(new InMemoryAgentStateStore(),
                 (agentKey, workspace, toolSpec) -> new Toolkit(),
-                (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
+                (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(), edgeModels(),
                 properties, null);
     }
@@ -177,11 +177,6 @@ class KernelAgentLoopTest {
             @Override
             public EdgeModel precheckModel() {
                 return edge;
-            }
-
-            @Override
-            public EdgeModel subagentModel() {
-                return null;
             }
         };
     }

@@ -14,7 +14,6 @@ import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelConfigSeed;
-import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -39,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>读面缺省</b>：无覆盖行＝全回落——生效值逐字等于枚举默认、覆盖标记
  * false、默认预览同值、开关 true、写者 null；</li>
  * <li><b>覆盖写＋装配断言（缝 2）</b>：PUT 后 GET 生效值＝库值＋覆盖标记 true；
- * 装配读面（{@link AgentConfigAppService}——MainAgentAppService/CoderRunAttempts
+ * 装配读面（{@link AgentConfigAppService}——MainAgentAppService/CodingRunDispatcher
  * 命令构建的取值单点）返回库值（systemPrompt 与配置键）；两座智能体各自独立（动 main 不动 executor）；</li>
  * <li><b>清空回落</b>：null/缺省/纯空白＝清空覆盖，GET 与装配读面回枚举默认；</li>
  * <li><b>留痕＋回滚</b>：每次实际变更一痕（前后全量值快照＋操作者＋倒序最近先）、
@@ -657,45 +656,42 @@ class BackofficeAgentConfigSeamTest {
         assertThat(traceRowCount()).isZero();
     }
 
-    // ---------- 收口三硬门开关（#433 开关承载面；#435 翻转缺省 false＝闸关；仅 executor 行消费） ----------
+    // ---------- 收口两硬门开关（#433 开关承载面；#435 翻转缺省 false＝闸关；仅 executor 行消费；
+    // #604 拆 run 尝试体旧机制：proofOfOutputGate 随产出证明闸一并退役——本面只余两闸） ----------
 
     @Test
     void given_no_closing_gate_override_when_get_then_gates_default_closed() throws Exception {
-        // 三闸读面缺省（#435 翻转）：无覆盖行＝全回落缺省（闸关＝#432 Step 1 砍验证税
+        // 两闸读面缺省（#435 翻转）：无覆盖行＝全回落缺省（闸关＝#432 Step 1 砍验证税
         // 落地态——秒级探活三件套为唯一收口要件）；装配读面同步 false
         signedGet("executor")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(false))
-                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(false))
                 .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(false));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.verificationPresenceGateEnabled()).isFalse();
-        assertThat(executor.proofOfOutputGateEnabled()).isFalse();
         assertThat(executor.finalVerificationGateEnabled()).isFalse();
     }
 
     @Test
     void given_closing_gates_turned_on_when_get_and_traces_then_effective_and_snapshots()
             throws Exception {
-        // 三闸全开＝一键切回旧行为（#424/#420/#427 现行为——#435 闸缺省关，运营
-        // 可切回）→ GET 生效值＝库值；留痕前后快照含三闸（old=false 缺省态 →
+        // 两闸全开＝一键切回旧行为（#424/#420 现行为——#435 闸缺省关，运营
+        // 可切回）→ GET 生效值＝库值；留痕前后快照含两闸（old=false 缺省态 →
         // new=true）；幂等重写不落痕；清空（PUT {}）回落缺省 false
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"verificationPresenceGateEnabled": true, "proofOfOutputGateEnabled": true,
+                {"verificationPresenceGateEnabled": true,
                  "finalVerificationGateEnabled": true}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(true))
-                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(true))
                 .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.verificationPresenceGateEnabled()).isTrue();
-        assertThat(executor.proofOfOutputGateEnabled()).isTrue();
         assertThat(executor.finalVerificationGateEnabled()).isTrue();
 
-        // 幂等重写（PUT 全量语义：三闸同值携带——值面无动不落痕，写者不漂移）
+        // 幂等重写（PUT 全量语义：两闸同值携带——值面无动不落痕，写者不漂移）
         signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, """
-                {"verificationPresenceGateEnabled": true, "proofOfOutputGateEnabled": true,
+                {"verificationPresenceGateEnabled": true,
                  "finalVerificationGateEnabled": true}
                 """)
                 .andExpect(status().isOk())
@@ -704,20 +700,17 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].oldVerificationPresenceGateEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].oldProofOfOutputGateEnabled").value(false))
                 .andExpect(jsonPath("$.data[0].oldFinalVerificationGateEnabled").value(false))
                 .andExpect(jsonPath("$.data[0].newVerificationPresenceGateEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].newProofOfOutputGateEnabled").value(true))
                 .andExpect(jsonPath("$.data[0].newFinalVerificationGateEnabled").value(true))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
 
         // 切回砍税态（关闸）＝旧值写回（一次新变更、留新痕——不做版本树）
         signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
-                "{\"verificationPresenceGateEnabled\": false, \"proofOfOutputGateEnabled\": false,"
+                "{\"verificationPresenceGateEnabled\": false,"
                         + " \"finalVerificationGateEnabled\": false}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(false))
-                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(false))
                 .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(false));
         signedGet("executor/traces")
                 .andExpect(status().isOk())
@@ -730,7 +723,6 @@ class BackofficeAgentConfigSeamTest {
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(false))
-                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(false))
                 .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(false));
     }
 
@@ -738,7 +730,7 @@ class BackofficeAgentConfigSeamTest {
     void given_closing_gate_toggles_on_main_row_when_put_then_persisted_but_executor_untouched()
             throws Exception {
         // 三座同面可写（同表全量语义），但闸判定只读 executor 行——main 行写开关
-        // 不影响装配读面的 executor 三闸（两座独立口径同 #251）；executor 无行＝
+        // 不影响装配读面的 executor 两闸（两座独立口径同 #251）；executor 无行＝
         // 缺省闸关（#435）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
                 "{\"verificationPresenceGateEnabled\": true}")
@@ -746,190 +738,12 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.verificationPresenceGateEnabled()).isFalse();
-        assertThat(executor.proofOfOutputGateEnabled()).isFalse();
         assertThat(executor.finalVerificationGateEnabled()).isFalse();
     }
 
-    // ---------- 决策时注入四件（#437 开关承载面；缺省＝注入开＋阈值3＋堆叠3＋全启用；仅 executor 行消费） ----------
-
-    @Test
-    void given_no_decision_hint_override_when_get_then_defaults_with_unoverridden_marks()
-            throws Exception {
-        // #437 缺省态（无覆盖行）：注入开＝#432 Step 3 落地态；阈值/堆叠回落代码缺省
-        // 3（覆盖标记 false、默认预览同值）；禁用集空＝全启用；装配读面同步
-        // （decisionHintConfigOf＝中间件每迭代动态查库的取值单点）
-        signedGet("executor")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.decisionHintsEnabled").value(true))
-                .andExpect(jsonPath("$.data.decisionHintErrorStreak").value(3))
-                .andExpect(jsonPath("$.data.decisionHintErrorStreakOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultDecisionHintErrorStreak").value(3))
-                .andExpect(jsonPath("$.data.decisionHintStackCap").value(3))
-                .andExpect(jsonPath("$.data.decisionHintStackCapOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultDecisionHintStackCap").value(3))
-                .andExpect(jsonPath("$.data.decisionHintDisabled").isArray())
-                .andExpect(jsonPath("$.data.decisionHintDisabled.length()").value(0))
-                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(false));
-        var hintConfig = agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR);
-        assertThat(hintConfig.enabled()).isTrue();
-        assertThat(hintConfig.policy().errorStreakThreshold()).isEqualTo(3);
-        assertThat(hintConfig.policy().stackCap()).isEqualTo(3);
-        assertThat(hintConfig.policy().disabledKinds()).isEmpty();
-    }
-
-    @Test
-    void given_decision_hint_face_updated_when_get_and_traces_then_effective_and_snapshots()
-            throws Exception {
-        // 覆盖写（总开关关＋阈值 5＋堆叠 2＋禁用两件）→ GET 生效值＝库值、覆盖标记
-        // true；留痕前后快照含四件（禁用集留存储形逗号接键）；幂等重写不落痕；
-        // 清空（PUT {}）回落缺省（开关 null 归一 true＝注入开、阈值/堆叠 3、全启用）
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"decisionHintsEnabled": false, "decisionHintErrorStreak": 5,
-                 "decisionHintStackCap": 2, "decisionHintDisabled": ["parallel_tools", "anti_mock"]}
-                """)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.decisionHintsEnabled").value(false))
-                .andExpect(jsonPath("$.data.decisionHintErrorStreak").value(5))
-                .andExpect(jsonPath("$.data.decisionHintErrorStreakOverridden").value(true))
-                .andExpect(jsonPath("$.data.decisionHintStackCap").value(2))
-                .andExpect(jsonPath("$.data.decisionHintStackCapOverridden").value(true))
-                .andExpect(jsonPath("$.data.decisionHintDisabled[0]").value("parallel_tools"))
-                .andExpect(jsonPath("$.data.decisionHintDisabled[1]").value("anti_mock"))
-                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(true));
-        var hintConfig = agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR);
-        assertThat(hintConfig.enabled()).isFalse();
-        assertThat(hintConfig.policy().errorStreakThreshold()).isEqualTo(5);
-        assertThat(hintConfig.policy().stackCap()).isEqualTo(2);
-        assertThat(hintConfig.policy().disabledKinds())
-                .containsExactlyInAnyOrder(DecisionHintKind.PARALLEL_TOOLS, DecisionHintKind.ANTI_MOCK);
-
-        // 幂等重写（PUT 全量语义：四件同值携带——值面无动不落痕，写者不漂移）
-        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, """
-                {"decisionHintsEnabled": false, "decisionHintErrorStreak": 5,
-                 "decisionHintStackCap": 2, "decisionHintDisabled": ["parallel_tools", "anti_mock"]}
-                """)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].oldDecisionHintsEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].oldDecisionHintErrorStreak").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].oldDecisionHintStackCap").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].oldDecisionHintDisabled").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].newDecisionHintsEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newDecisionHintErrorStreak").value(5))
-                .andExpect(jsonPath("$.data[0].newDecisionHintStackCap").value(2))
-                // 存储形逗号接键（序随写入数组序——禁用集语义无序，回滚照单写回）
-                .andExpect(jsonPath("$.data[0].newDecisionHintDisabled").value("parallel_tools,anti_mock"))
-                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
-
-        // 清空回落缺省：注入开＋阈值 3＋堆叠 3＋全启用（#437 落地态）
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.decisionHintsEnabled").value(true))
-                .andExpect(jsonPath("$.data.decisionHintErrorStreak").value(3))
-                .andExpect(jsonPath("$.data.decisionHintErrorStreakOverridden").value(false))
-                .andExpect(jsonPath("$.data.decisionHintStackCap").value(3))
-                .andExpect(jsonPath("$.data.decisionHintStackCapOverridden").value(false))
-                .andExpect(jsonPath("$.data.decisionHintDisabled.length()").value(0))
-                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(false));
-        var back = agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR);
-        assertThat(back.enabled()).isTrue();
-        assertThat(back.policy().errorStreakThreshold()).isEqualTo(3);
-        assertThat(back.policy().stackCap()).isEqualTo(3);
-        assertThat(back.policy().disabledKinds()).isEmpty();
-    }
-
-    // ---------- verify 自决开关（#442，#441-1 开关承载面；缺省 true＝自决开＝#435 现状维持；仅 executor 行消费） ----------
-
-    @Test
-    void given_no_verify_self_decision_override_when_get_then_default_enabled() throws Exception {
-        // #442 缺省态（无覆盖行）：自决开＝#435 自决化落地态（执行体生成过程中自决
-        // 调用 verify 自测）；装配读面同步（verifySelfDecisionEnabledOf＝中间件每
-        // 迭代动态查库的取值单点）
-        signedGet("executor")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(true));
-        assertThat(agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)).isTrue();
-    }
-
-    @Test
-    void given_verify_self_decision_disabled_when_get_and_traces_then_effective_and_snapshots()
-            throws Exception {
-        // 翻转关闭 → GET 生效值＝库值；留痕前后快照含开关（old=true 缺省态 →
-        // new=false）；幂等重写不落痕；清空（PUT {}）回落缺省 true＝自决开
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"verifySelfDecisionEnabled\": false}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(false));
-        assertThat(agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)).isFalse();
-
-        // 幂等重写（PUT 全量语义：同值携带——值面无动不落痕，写者不漂移）
-        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
-                "{\"verifySelfDecisionEnabled\": false}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].oldVerifySelfDecisionEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].newVerifySelfDecisionEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
-
-        // 切回自决开＝旧值写回（一次新变更、留新痕——不做版本树）
-        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
-                "{\"verifySelfDecisionEnabled\": true}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(true));
-        signedGet("executor/traces")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(2)))
-                .andExpect(jsonPath("$.data[0].oldVerifySelfDecisionEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newVerifySelfDecisionEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
-
-        // 清空回落：开关缺省 true＝自决开（null 归一缺省，同决策注入总开关口径）
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(true));
-        assertThat(agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)).isTrue();
-    }
-
-    @Test
-    void given_invalid_decision_hint_face_when_put_then_rejected_with_zero_writes()
-            throws Exception {
-        // 区间校验：失败止损阈值 2-10（PRJ_081）、堆叠上限 1-3（PRJ_082——研究
-        // 口径 >3 收益递减转负，运营面不放宽）；禁用集封闭集校验（PRJ_083——
-        // 四键外键名写不进去）——fail-fast 零写入
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintErrorStreak\": 1}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4081));
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintErrorStreak\": 11}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4081));
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintStackCap\": 0}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4082));
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintStackCap\": 4}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4082));
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"decisionHintDisabled\": [\"parallel_tools\", \"nope\"]}")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(4083));
-
-        assertThat(configRowCount()).isZero();
-        assertThat(traceRowCount()).isZero();
-
-        // 空禁用集合法（全启用显式形）——覆盖标记 true、生效 []
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintDisabled\": []}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.decisionHintDisabled.length()").value(0))
-                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(true));
-        assertThat(agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR)
-                .policy().disabledKinds()).isEmpty();
-    }
+    // 决策时注入四件（#437）与 verify 自决开关（#442）的面与校验用例随 #604 删除：
+    // 两者只被按 executor 装配键挂的旧栈中间件消费，生成/更新 run 全走内核装配
+    // 形态后已无装配面——中间件、配置列（V83）与后台读写字段一并退役。
 
     // ---------- 基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半让路的回滚保险；缺省 false＝让路；仅 executor 行消费） ----------
 
@@ -989,25 +803,6 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.robustLintBlockingEnabled").value(false));
         assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).robustLintBlockingEnabled())
                 .isFalse();
-    }
-
-    // ---------- 构建轨出图开关（#545，ADR-0052；经既有工具面窄幅写口，全量 PUT 不重置） ----------
-
-    @Test
-    void given_build_image_tool_off_when_full_put_config_then_switch_preserved() throws Exception {
-        // 开关写面＝PUT /agent-tools/generate_image（复用既有工具面开关，无新命令字段）：
-        // 窄幅写口关掉后，配置全量 PUT（PUT 全量语义归一其余值面）携现行值不重置本列；
-        // 值面无动＝幂等零落痕
-        jdbcTemplate.update("INSERT INTO prj_agent_configs (agent_key, generate_image_enabled) "
-                + "VALUES ('executor', FALSE)");
-
-        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
-                .andExpect(status().isOk());
-
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT generate_image_enabled FROM prj_agent_configs WHERE agent_key = 'executor'",
-                Boolean.class)).isFalse();
-        assertThat(traceRowCount()).isZero();
     }
 
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------

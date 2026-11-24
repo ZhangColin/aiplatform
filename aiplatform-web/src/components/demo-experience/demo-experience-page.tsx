@@ -90,7 +90,8 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
   const latest = versions[0];
   const generationState = detail?.generationState;
   const generating = generationState === "generating" || coderStatus === "running";
-  const failed = generationState === "interrupted" || coderStatus === "error";
+  // 失败只认会话态（#604：run 失败不落投影，只经 SSE run-failed 明确呈现）
+  const failed = coderStatus === "error";
   const status: DemoHeaderStatus = failed
     ? "interrupted"
     : generating

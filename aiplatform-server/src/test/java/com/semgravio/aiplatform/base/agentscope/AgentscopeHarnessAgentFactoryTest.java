@@ -17,7 +17,6 @@ import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
-import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.agentscope.extensions.model.openai.exception.OpenAIException;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -51,12 +50,13 @@ class AgentscopeHarnessAgentFactoryTest {
     private static final AgentSkillRepositorySupplier SKILL_REPOS =
             (agentKey, workspace) -> List.of();
 
-    /** 子智能体空桩（#95 委派位——无声明挂载即框架不注入 <available_subagents>）。 */
-    private static final AgentSubagentSupplier SUBAGENTS = (agentKey, workspace) -> List.of();
 
     /** 恒空平台中间件（中间件装配另有缝测，工厂测试只验内核接线）。 */
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES =
             (agentKey, workspace) -> List.of();
+
+    /** 计量夹具时钟（#324 UsageContext 形参——本类用例只断言语量，时戳取系统钟）。 */
+    private static final Clock CLOCK = Clock.systemUTC();
 
     /**
      * 边缘模型固定桩（#366 压缩配置装配腿）：无通道语境的 deepseek 串——SDK 内置
@@ -72,11 +72,6 @@ class AgentscopeHarnessAgentFactoryTest {
         @Override
         public EdgeModel precheckModel() {
             return new EdgeModel("deepseek:deepseek-v4-flash", null);
-        }
-
-        @Override
-        public EdgeModel subagentModel() {
-            return null; // 随父级（#424 缺省同执行体档）
         }
     };
 
@@ -113,256 +108,7 @@ class AgentscopeHarnessAgentFactoryTest {
             public EdgeModelSupplier.EdgeModel precheckModel() {
                 return flash;
             }
-
-            @Override
-            public EdgeModelSupplier.EdgeModel subagentModel() {
-                return null; // 随父级（#424 缺省同执行体档）
-            }
         };
-    }
-
-    /** 计量缝测试用固定时钟（#321 streamLayer 装配测）。 */
-    private static final Clock CLOCK =
-            Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC);
-
-    private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
-        return factoryWith(created, new InMemoryAgentStateStore());
-    }
-
-    private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
-                                                      AgentStateStore stateStore) {
-        return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction, subagent,
-                        workspace, agentKey, toolSpec) -> {
-                    HarnessAgent agent = mock(HarnessAgent.class);
-                    created.add(agent);
-                    return agent;
-                }, EDGE_MODELS);
-    }
-
-    @Test
-    void given_same_spec_when_obtain_twice_then_built_once_and_reused() {
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        HarnessAgent second = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-
-        // 同规格恰建一次（技能集不入键——供应商非工厂字段、obtain 无从取技能态；
-        // #249/ADR-0021 指派变更靠装配视图动态查库，不触发实例重建）
-        assertThat(second).isSameAs(first);
-        assertThat(created).hasSize(1);
-    }
-
-    @Test
-    void given_different_spec_when_obtain_then_new_instance_per_spec() {
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "另一个 sys", "deepseek:deepseek-v4-flash", null,
-null,                 new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-chat", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(java.nio.file.Path.of("/tmp/other-workspace")), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("1", "ws-1-dev"), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("2", "ws-2-dev"), null, null);
-
-        assertThat(created).hasSize(6);
-    }
-
-    @Test
-    void given_subagent_tier_override_when_obtain_then_passed_through_and_keyed_per_tier() {
-        // #424 片轻验：verify 子智能体配置覆盖经 EdgeModelSupplier 供数——非空即
-        // 透传 builder（子智能体独立档），null＝随父级（执行体生效档，缺省同档
-        // 不降）；配置入实例缓存键（改档＝新实例——后台改档下一轮命令构建即生效，
-        // 进行中 run 不定格）
-        List<EdgeModelSupplier.EdgeModel> passed = new ArrayList<>();
-        List<HarnessAgent> created = new ArrayList<>();
-        java.util.concurrent.atomic.AtomicReference<EdgeModelSupplier.EdgeModel> subagentTier =
-                new java.util.concurrent.atomic.AtomicReference<>();
-        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS,
-                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction, subagent,
-                        workspace, agentKey, toolSpec) -> {
-                    passed.add(subagent);
-                    HarnessAgent agent = mock(HarnessAgent.class);
-                    created.add(agent);
-                    return agent;
-                },
-                new EdgeModelSupplier() {
-                    @Override
-                    public EdgeModel compactionModel() {
-                        return new EdgeModel("deepseek:deepseek-v4-flash", null);
-                    }
-
-                    @Override
-                    public EdgeModel precheckModel() {
-                        return new EdgeModel("deepseek:deepseek-v4-flash", null);
-                    }
-
-                    @Override
-                    public EdgeModel subagentModel() {
-                        return subagentTier.get();
-                    }
-                });
-
-        // 缺省：null＝随父级（执行体生效档——#406 裁决缺省同档不降）
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        assertThat(passed).containsExactly((EdgeModelSupplier.EdgeModel) null);
-
-        // 覆盖档：透传 builder＋同父级规格下新实例（verify 档变＝新实例）
-        subagentTier.set(new EdgeModelSupplier.EdgeModel("deepseek:deepseek-v4-pro", null));
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        assertThat(passed.get(1).modelString()).isEqualTo("deepseek:deepseek-v4-pro");
-        assertThat(created).hasSize(2);
-
-        // 同档重取＝复用（配置入键的稳定性：同值不重建）
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        assertThat(created).hasSize(2);
-    }
-
-    @Test
-    void given_workspace_identity_when_obtain_then_keyed_by_container() {
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
-        // 同 workspaceId 同容器 = 同规格（复用）；同 id 不同容器名 = 不同规格
-        HarnessAgent same = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
-
-        assertThat(same).isSameAs(first);
-        assertThat(created).hasSize(1);
-    }
-
-    @Test
-    void given_local_vs_project_dev_when_obtain_then_not_shared() {
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
-
-        assertThat(created).hasSize(2);
-    }
-
-    @Test
-    void given_same_spec_different_role_when_obtain_then_not_shared() {
-        // 角色入规格键（#43 工具面按角色发放）：同人格同模型同工作区、不同角色 =
-        // 不同工具面，不静默复用
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        HarnessAgent ba = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "main", null);
-        HarnessAgent coder = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "CODER", null);
-
-        assertThat(coder).isNotSameAs(ba);
-        assertThat(created).hasSize(2);
-    }
-
-    @Test
-    void given_same_spec_different_tool_spec_when_obtain_then_not_shared() {
-        // #252 工具面规格入缓存键：工具集构建时固化（Toolkit 静态注册、无技能线的
-        // 动态视图缝），规格变（开关变更）＝实例变——下一轮命令构建即新装配，进行中
-        // run 不定格；同规格（含同 toolSpec）自身复用
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        HarnessAgent open = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=true,fu=true");
-        HarnessAgent closed = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=false,fu=true");
-        HarnessAgent openAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=true,fu=true");
-
-        assertThat(closed).isNotSameAs(open);
-        assertThat(openAgain).isSameAs(open);
-        assertThat(created).hasSize(2);
-    }
-
-    /**
-     * 通道指纹入缓存键（ADR-0031 生效配置指纹）：同模型串下换 key/换地址＝指纹
-     * 变＝新实例——守「改配置即生效、进行中 run 不定格」（改 apiKey/baseUrl 后
-     * 旧实例不得滞留缓存继续用旧凭证）；同通道（指纹同）自身复用。
-     */
-    @Test
-    void given_same_model_string_when_channel_fingerprint_changes_then_new_instance() {
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-        ModelChannel keyA = new ModelChannel("https://ark.example/api/v3", "sk-a", false);
-        ModelChannel keyB = new ModelChannel("https://ark.example/api/v3", "sk-b", false);
-        ModelChannel keyAUrlMoved = new ModelChannel("https://ark2.example/api/v3", "sk-a", false);
-
-        HarnessAgent first = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", keyA, null,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
-        HarnessAgent sameChannel = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", keyA, null,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
-        HarnessAgent keyRotated = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", keyB, null,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
-        HarnessAgent urlMoved = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", keyAUrlMoved, null,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
-
-        assertThat(sameChannel).isSameAs(first);
-        assertThat(keyRotated).isNotSameAs(first);
-        assertThat(urlMoved).isNotSameAs(first);
-        assertThat(created).hasSize(3);
-    }
-
-    @Test
-    void given_same_container_read_only_vs_dev_when_obtain_then_not_shared() {
-        // #47 只读面形态入规格键：同容器同角色、读写/只读两形态 = 不同 agent 实例
-        // （内核工具面不同），不静默复用
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-
-        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "X", null);
-        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X", null);
-        HarnessAgent readOnlyAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X", null);
-
-        assertThat(readOnly).isNotSameAs(dev);
-        assertThat(readOnlyAgain).isSameAs(readOnly); // 同规格只读面自身复用
-        assertThat(created).hasSize(2);
-    }
-
-    @Test
-    void given_cached_agents_when_destroy_then_all_closed_and_cache_cleared() throws IOException {
-        List<HarnessAgent> created = new ArrayList<>();
-        AgentscopeHarnessAgentFactory factory = factoryWith(created);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys2", "deepseek:deepseek-v4-flash", null,
-null,                 new AgentWorkspace.Local(null), null, null);
-
-        factory.destroy();
-
-        for (HarnessAgent agent : created) {
-            verify(agent, times(1)).close();
-        }
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
-                null, new AgentWorkspace.Local(null), null, null);
-        assertThat(created).hasSize(3);
     }
 
     @Test
@@ -373,7 +119,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
         requireVolcengineKey();
         AgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES, volcEdgeModels(),
+                stateStore, TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES, volcEdgeModels(),
                 new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
@@ -397,7 +143,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
     void given_any_build_when_built_then_pending_tool_recovery_enabled() {
         requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
                 volcEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
@@ -421,7 +167,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
     void given_project_dev_when_built_then_subagents_enabled() {
         requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
                 volcEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent dev = factory.obtain("platform-agent", "sys",
@@ -435,7 +181,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
     void given_project_read_only_when_built_then_subagents_disabled() {
         requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
                 volcEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent readOnly = factory.obtain("platform-agent", "sys",
@@ -454,7 +200,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
     void given_project_design_when_built_then_file_tools_kept_shell_and_subagents_disabled() {
         requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
                 volcEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent designer = factory.obtain("platform-agent", "sys",
@@ -480,7 +226,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
-                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction, subagent,
+                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction,
                         workspace, agentKey, toolSpec) -> {
                     passed.add(modelQueue);
                     HarnessAgent agent = mock(HarnessAgent.class);
@@ -618,271 +364,6 @@ null,                 new AgentWorkspace.Local(null), null, null);
         }
     }
 
-    /** 子智能体测试声明（名与业务 verify 同形：inline 正文＋工具 allowlist）。 */
-    private static io.agentscope.harness.agent.subagent.SubagentDeclaration verifyDeclaration() {
-        return io.agentscope.harness.agent.subagent.SubagentDeclaration.builder()
-                .name("verify")
-                .description("运行验证：读取系统代码（只读），运行测试验证系统可用，报告回交执行体。")
-                .inlineAgentsBody("你是验证子智能体，逐项 ✅/❌ 播报，结果回交执行体。")
-                .tools(List.of("read_file", "write_file", "execute"))
-                .build();
-    }
-
-    /** 槽位分视图桩供应商（verify 键→子视图，其余→执行体视图——两测试共用）。 */
-    private static AgentSkillRepositorySupplier routedSkillRepos(
-            StubSkillRepository childView, StubSkillRepository executorView) {
-        return (agentKey, workspace) -> "verify".equals(agentKey)
-                ? List.of(childView)
-                : List.of(executorView);
-    }
-
-    @Test
-    void given_declaration_when_child_built_then_skill_repos_are_child_key_view(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
-        // 一等化接线本体：子智能体技能仓库＝供应商按子智能体键发放的视图（identity
-        // 同实例——动态查库语义随视图自带），父级（executor）视图不漏入
-        StubSkillRepository childView = new StubSkillRepository("review-pack");
-        StubSkillRepository executorView = new StubSkillRepository("code-review");
-        Model parentModel = mock(Model.class);
-        Toolkit parentToolkit = new Toolkit();
-        parentToolkit.registerAgentTool(AgentToolStub.named("finish_edit"));
-        parentToolkit.registerAgentTool(AgentToolStub.named("update_plan"));
-
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel, parentModel,
-                parentToolkit, TOOLKITS, new InMemoryAgentStateStore(),
-                routedSkillRepos(childView, executorView), List.of())
-                .apply("verify");
-
-        try {
-            // 技能面＝子键视图（同一实例），executor 视图不在
-            assertThat(child.getSkillRepositories()).containsExactly(childView);
-            // 平台工具按声明 allowlist 排除（finish_edit/update_plan 不继承）
-            assertThat(child.getToolkit().getToolNames())
-                    .doesNotContain("finish_edit", "update_plan");
-            // 计量模型同实例（子智能体轮次归当轮用量）＋会话状态同库
-            assertThat(child.getModel()).isSameAs(parentModel);
-            assertThat(child.getName()).isEqualTo("verify");
-        } finally {
-            child.close();
-        }
-    }
-
-    // ---------- #263 自荐三槽位齐开：子级工具面合并子键视图（血统槽位随视图） ----------
-
-    @Test
-    void given_child_key_tool_view_when_child_built_then_view_instance_wins_over_inherited(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
-        // 子级工具面＝声明白名单治理的（父级继承 ∪ 子键视图）：同名件子键视图后写
-        // 胜出——工具实例携带血统槽位（propose_skill 继承的是执行体槽实例，子键
-        // 视图覆写为 subagent 槽实例），identity 断言钉死不串槽
-        io.agentscope.core.tool.AgentTool parentPropose = AgentToolStub.named("propose_skill");
-        io.agentscope.core.tool.AgentTool childPropose = AgentToolStub.named("propose_skill");
-        Toolkit parentToolkit = new Toolkit();
-        parentToolkit.registerAgentTool(AgentToolStub.named("finish_edit"));
-        parentToolkit.registerAgentTool(parentPropose);
-        Toolkit childView = new Toolkit();
-        childView.registerAgentTool(childPropose);
-        AgentToolkitSupplier routedToolkits = (agentKey, workspace, toolSpec) ->
-                "verify".equals(agentKey) ? childView : new Toolkit();
-
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                proposeEnabledDeclaration(), new AgentWorkspace.Local(tempDir), null,
-                mock(Model.class), mock(Model.class) , parentToolkit, routedToolkits,
-                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-
-        try {
-            assertThat(child.getToolkit().getToolNames()).contains("propose_skill");
-            assertThat(child.getToolkit().getTool("propose_skill")).isSameAs(childPropose);
-            assertThat(child.getToolkit().getTool("propose_skill"))
-                    .isNotSameAs(parentPropose);
-            // 白名单外的父级件不继承（finish_edit 不在子级面）
-            assertThat(child.getToolkit().getToolNames()).doesNotContain("finish_edit");
-        } finally {
-            child.close();
-        }
-    }
-
-    @Test
-    void given_allowlist_without_propose_when_child_built_then_child_view_filtered_out(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
-        // 挂载治理归声明 allowlist：清单摘名即退出子级面（子键视图同受白名单约束，
-        // 不因视图自带而绕过声明）
-        Toolkit childView = new Toolkit();
-        childView.registerAgentTool(AgentToolStub.named("propose_skill"));
-        AgentToolkitSupplier routedToolkits = (agentKey, workspace, toolSpec) ->
-                "verify".equals(agentKey) ? childView : new Toolkit();
-
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null,
-                mock(Model.class), mock(Model.class) , new Toolkit(), routedToolkits,
-                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-
-        try {
-            assertThat(child.getToolkit().getToolNames()).doesNotContain("propose_skill");
-        } finally {
-            child.close();
-        }
-    }
-
-    // ---------- #266 内置件后置收口：子级构建收口后工具面 ⊆ 声明白名单 ----------
-
-    @Test
-    void given_harness_builtins_when_child_built_then_final_toolkit_within_declaration(
-            @TempDir Path tempDir) throws IOException {
-        // 框架 build() 在子级工具面合并之后无条件整体注册自带件（文件面含
-        // edit_file、wait_async_results）——内置件绕过声明 allowlist（#260 遗留）。
-        // 构建后对子级最终 toolkit 按声明再滤一道：构建收口后工具面 ⊆ 声明白名单
-        // （edit_file 结构性出局，「不改交付代码」不再只是协议级约束）；声明内的
-        // 件保留（read_file/write_file 不被误滤）
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
-                new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
-                (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-
-        try {
-            // Local 工作区真构建注册文件面六件＋execute＋wait_async_results；声明三件
-            // （read_file/write_file/execute）全在面、其余（edit_file/grep/glob/list/
-            // wait_async_results）结构性出局
-            assertThat(child.getToolkit().getToolNames())
-                    .containsExactlyInAnyOrder("read_file", "write_file", "execute");
-        } finally {
-            child.close();
-        }
-    }
-
-    @Test
-    void given_empty_allowlist_when_child_built_then_builtins_pass_through(
-            @TempDir Path tempDir) throws IOException {
-        // 缺省声明（空 allowlist）＝全放行（allowlistedToolkit 同语义单点）：后置
-        // 过滤不收窄未声明的子级——内置件照常在面
-        SubagentDeclaration noAllowlist = SubagentDeclaration.builder()
-                .name("verify")
-                .description("probe")
-                .inlineAgentsBody("probe body")
-                .build();
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                noAllowlist, new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
-                new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
-                (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-
-        try {
-            assertThat(child.getToolkit().getToolNames()).contains("edit_file");
-        } finally {
-            child.close();
-        }
-    }
-
-    /**
-     * 子级 pending 恢复接线守护（#431）：故障面正在子智能体——子会话槽位
-     * （defaultSessionId＝声明名）跨委派/跨 run 常驻 PG，上次中断遗留的无结果
-     * tool_use 让后续每次委派的 resume 炸 IllegalStateException。子级构建同款
-     * 开启 enablePendingToolRecovery（主级见
-     * {@link #given_any_build_when_built_then_pending_tool_recovery_enabled}）。
-     * 本地工作区真构建，无需 API key。
-     */
-    @Test
-    void given_child_built_then_pending_tool_recovery_enabled(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null,
-                mock(Model.class), mock(Model.class), new Toolkit(), TOOLKITS,
-                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-
-        try {
-            assertThat(child.getDelegate().isPendingToolRecoveryEnabled()).isTrue();
-        } finally {
-            child.close();
-        }
-    }
-
-    /** 含 propose_skill 的声明（#263 生产面同形：验证六件＋自荐）。 */
-    private static io.agentscope.harness.agent.subagent.SubagentDeclaration
-            proposeEnabledDeclaration() {
-        return io.agentscope.harness.agent.subagent.SubagentDeclaration.builder()
-                .name("verify")
-                .description("probe")
-                .inlineAgentsBody("probe body")
-                .tools(List.of("read_file", "write_file", "execute", "propose_skill"))
-                .build();
-    }
-
-    // ---------- #261 使用计数接线：平台中间件挂主构建与子智能体两处 ----------
-
-    @Test
-    void given_platform_middlewares_when_child_built_then_mounted_on_child(
-            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
-        // 子级显式再挂守护：框架对 HarnessRuntimeMiddleware 不随实例拷贝传播——
-        // subagentFactory 必须把平台中间件亲自挂上子级中间件链
-        MiddlewareBase counter = new MiddlewareBase() { };
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
-                new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
-                (agentKey, workspace) -> List.of(), List.of(counter))
-                .apply("verify");
-
-        try {
-            assertThat(child.getDelegate().getMiddlewares()).contains(counter);
-        } finally {
-            child.close();
-        }
-    }
-
-    @Test
-    void given_middleware_supplier_when_real_build_then_mounted_on_agent() {
-        // 主构建接线守护：supplier 发放件进 agent 中间件链（真构建路径，同
-        // given_state_store_when_built_then_wired_into_agent 的通道 key 口径）
-        requireVolcengineKey();
-        MiddlewareBase counter = new MiddlewareBase() { };
-        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
-                (agentKey, workspace) -> List.of(counter), volcEdgeModels(),
-                new AgentscopeProperties(), null);
-
-        HarnessAgent agent = factory.obtain("platform-agent-mw", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(), null,
-                new AgentWorkspace.Local(null), null, null);
-        try {
-            assertThat(agent.getDelegate().getMiddlewares()).contains(counter);
-        } finally {
-            agent.close();
-        }
-    }
-
-    @Test
-    void given_child_and_parent_views_when_real_build_then_each_key_gets_own_view() {
-        // 全链缝（命令构建 → 工厂 → 子智能体创建）：执行体装配面只含 executor 视图，
-        // 经 subagent 管理器按声明名创建的子智能体只含 verify 键视图（互不漏入）
-        requireVolcengineKey();
-        StubSkillRepository childView = new StubSkillRepository("review-pack");
-        StubSkillRepository executorView = new StubSkillRepository("code-review");
-        AgentSubagentSupplier subagents = (agentKey, workspace) -> "executor".equals(agentKey)
-                ? List.of(verifyDeclaration())
-                : List.of();
-        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, routedSkillRepos(childView, executorView),
-                subagents, NO_MIDDLEWARES, volcEdgeModels(),
-                new AgentscopeProperties(), null);
-
-        HarnessAgent executor = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(), null,
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"),
-                "executor", null);
-        HarnessAgent child = (HarnessAgent) executor.getSubagentAgentManager()
-                .createAgent("verify", io.agentscope.core.agent.RuntimeContext.empty());
-
-        try {
-            assertThat(executor.getSkillRepositories()).containsExactly(executorView);
-            assertThat(child.getSkillRepositories()).containsExactly(childView);
-        } finally {
-            child.close();
-        }
-    }
 
     /** 命名 AgentTool 桩（allowlist 过滤断言用——callAsync 不真被调）。 */
     private static final class AgentToolStub implements io.agentscope.core.tool.AgentTool {
@@ -970,7 +451,7 @@ null,                 new AgentWorkspace.Local(null), null, null);
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
                 (name, sysPrompt, modelString, modelChannel, modelQueue, compactionModel,
-                        subagent, workspace, agentKey, toolSpec) -> {
+                        workspace, agentKey, toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -984,11 +465,6 @@ null,                 new AgentWorkspace.Local(null), null, null);
                     @Override
                     public EdgeModel precheckModel() {
                         return new EdgeModel("deepseek:deepseek-v4-flash", null);
-                    }
-
-                    @Override
-                    public EdgeModel subagentModel() {
-                        return null; // 随父级（#424 缺省同执行体档）
                     }
                 });
         ModelChannel main = new ModelChannel("https://ark.example/api/v3", "sk-a", false);

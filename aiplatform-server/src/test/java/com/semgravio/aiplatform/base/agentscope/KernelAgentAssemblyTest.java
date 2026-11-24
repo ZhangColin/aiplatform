@@ -110,10 +110,6 @@ class KernelAgentAssemblyTest {
                 return edge;
             }
 
-            @Override
-            public EdgeModel subagentModel() {
-                return null; // 随父级（#424 缺省同执行体档）
-            }
         };
     }
 
@@ -125,7 +121,7 @@ class KernelAgentAssemblyTest {
             AgentscopeProperties properties) {
         return new AgentscopeHarnessAgentFactory(probe.store(), (agentKey, workspace, toolSpec) ->
                 new Toolkit(),
-                (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
+                (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(), probeEdgeModels(),
                 properties, null);
     }
@@ -185,7 +181,7 @@ class KernelAgentAssemblyTest {
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(),
                 (agentKey, workspace, toolSpec) -> new Toolkit(),
-                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction, subagent,
+                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction,
                         workspace, agentKey, toolSpec) -> {
                     names.add(name);
                     prompts.add(sysPrompt);
@@ -205,7 +201,7 @@ class KernelAgentAssemblyTest {
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(),
                 (agentKey, workspace, toolSpec) -> new Toolkit(),
-                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction, subagent,
+                (name, sysPrompt, modelString, modelChannel, modelQueue, compaction,
                         workspace, agentKey, toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);

@@ -244,14 +244,7 @@ public enum ProjectMessage implements CodeMessage {
     /** 整轨终验修复预算越界（#427）：须 0-10 整数（0＝不起修复 run 的运营选择）——错值写不进去。 */
     FINAL_VERIFY_FIX_BUDGET_INVALID(400, "PRJ_080", "整轨终验修复预算须为 0-10 的整数（null/缺省＝回落代码缺省 2；0＝不起修复 run）：{0}"),
 
-    /** 决策时注入失败止损阈值越界（#437）：须 2-10 整数——错值写不进去（null＝清空回落代码缺省 3）。 */
-    DECISION_HINT_ERROR_STREAK_INVALID(400, "PRJ_081", "决策时注入的失败止损阈值须为 2-10 的整数（null/缺省＝回落代码缺省 3）：{0}"),
-
-    /** 决策时注入堆叠上限越界（#437）：须 1-3 整数（研究口径：>3 收益递减转负）——错值写不进去（null＝清空回落代码缺省 3）。 */
-    DECISION_HINT_STACK_CAP_INVALID(400, "PRJ_082", "决策时注入的堆叠上限须为 1-3 的整数（null/缺省＝回落代码缺省 3）：{0}"),
-
-    /** 决策时注入禁用集越出封闭集（#437）：token 须为库条目键——错值写不进去（null/缺省＝全启用）。 */
-    DECISION_HINT_KIND_INVALID(400, "PRJ_083", "决策时注入的禁用集条目须为封闭集内的值：{0}（可选 failure_stop_loss/anti_mock/context_economy/parallel_tools；null/缺省＝全启用）"),
+    // PRJ_081–083（决策时注入三件校验，#437）随 #604 退役注销——码位不复用。
 
     // ========== 岔路口与派发门（#542 访谈②，ADR-0048 切片②＋ADR-0049——两入口退役、确认门恢复） ==========
 

@@ -16,8 +16,8 @@ const STOP_FALLBACK_REFETCH_MS = 2000;
  * 服务端置停＋中断执行任务（模型流随之中止）；停止是异步收场，终态经 SSE
  * run-failed(stopped=true) 收口（store 失败档分岔「已停止」文案）。
  *
- * <p>失效兜底双路：请求成功即失效项目域（四态投影在轨道 wind-down 后转「生成
- * 中断」——REST 为正确性正本）；stopped=true 再延迟失效一次——SSE 断线时
+ * <p>失效兜底双路：请求成功即失效项目域（生成态投影在轨道 wind-down 后回
+ * 「从未生成」或「已生成」——REST 为正确性正本）；stopped=true 再延迟失效一次——SSE 断线时
  * run-failed 不达，重拉是唯一收敛口（延迟窗给轨道收口留出落库时间）。</p>
  */
 export function useStopGeneration(projectId: string) {
@@ -29,7 +29,7 @@ export function useStopGeneration(projectId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
       if (result?.stopped) {
         // SSE 断线兜底：run-failed(stopped) 若未到（桥侧失效随事件），延迟窗后
-        // 重拉项目域——停止收口落库后四态投影即「生成中断」
+        // 重拉项目域——停止收口落库后在途标记已清、生成态投影即回非「生成中」档
         setTimeout(() => {
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }, STOP_FALLBACK_REFETCH_MS);

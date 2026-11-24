@@ -568,7 +568,7 @@ class ProjectControllerTest {
 
     @Test
     void given_project_when_generate_then_run_id_returned() throws Exception {
-        // 「继续生成」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
+        // 生成点火纯动作无入参：异步提交即返回本场 runId（过程经 SSE）
         when(generationAppService.startGeneration(100L)).thenReturn(
                 new GenerationAppService.GenerationRun("run-gen-1"));
 
@@ -1398,15 +1398,15 @@ class ProjectControllerTest {
 
     @Test
     void given_generation_states_when_detail_then_projection_returned() throws Exception {
-        // 生成态四态投影透出（#222）：Integer code + *Name 随行——与 SSE 会话态无关，
-        // 前端档位与「继续生成」出口的推导输入
+        // 生成态三态投影透出（#222；#604 四态归一——INTERRUPTED 枚举退役）：Integer
+        // code + *Name 随行——与 SSE 会话态无关，前端档位推导的输入
         when(queryAppService.detail(100L)).thenReturn(
                 detailOf("100", ProjectStatus.IN_PROGRESS, false, null,
-                        GenerationState.INTERRUPTED));
+                        GenerationState.GENERATING));
         performAsUser(get("/api/projects/100"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.generationState").value(3))
-                .andExpect(jsonPath("$.data.generationStateName").value("生成中断"));
+                .andExpect(jsonPath("$.data.generationState").value(2))
+                .andExpect(jsonPath("$.data.generationStateName").value("生成中"));
 
         when(queryAppService.detail(101L)).thenReturn(
                 detailOf("101", ProjectStatus.IN_PROGRESS, false, null,

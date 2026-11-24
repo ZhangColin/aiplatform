@@ -40,30 +40,24 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * <p><b>终验修复预算列（#427 整轨终验）</b>：run 执行体行的整轨终验修复 run 预算
  * ——null＝回落代码缺省（两轮）；主智能体/设计执行体行同列恒无消费。</p>
  *
- * <p><b>收口三硬门开关列（#433 开关承载面，#435 翻转缺省）</b>：验证在场闸
- * （#424）／空转产出证明闸（#420）／整轨终验拦「生成完成」（#427）三件的
- * 独立开关——缺省 false＝闸关＝#432 Step 1 砍验证税落地态（秒级确定性探活
- * 三件套〔8081 探活＋入口文件完整＋git 成版〕为唯一收口要件）；true＝该闸
- * 生效（运营可一键切回旧行为）。仅 run 执行体行消费（闸判定全部发生在 run
- * 收口路径），主智能体/设计执行体行同列恒无消费。闸判定处动态查库不缓存——
- * 运营面改完下一次闸判定即生效，不发版、进行中 run 不定格。</p>
+ * <p><b>收口闸开关列（#433 开关承载面，#435 翻转缺省；#604 读法顺延）</b>：验证
+ * 在场闸（#424）／整轨终验拦「生成完成」（#427）的独立开关——缺省 false＝闸关
+ * ＝#432 Step 1 砍验证税落地态（秒级确定性探活三件套〔8081 探活＋入口文件完整
+ * ＋git 成版〕为唯一收口要件）；true＝该闸生效（运营可一键切回旧行为）。空转
+ * 产出证明闸列（#420）随 #604 拆除（proof_of_output_gate_enabled 经 V83 迁移
+ * 删列）。仅 run 执行体行消费（闸判定全部发生在 run 收口路径），主智能体/设计
+ * 执行体行同列恒无消费。闸判定处动态查库不缓存——运营面改完下一次闸判定即
+ * 生效，不发版、进行中 run 不定格。</p>
  *
  * <p><b>生成会话形态两开关列（#436）已随 #602 拆除</b>：单会话连续编码开关
  * 与切片并行机器开关随切片/轨道机器整体退役（prj_agent_configs 两列＋留痕四面
  * 经 V82 迁移拆除）——判定消费面（生成轨道派发处）已不存在。</p>
  *
- * <p><b>决策时微指令注入四列（#437，#432 Step 3）</b>：注入总开关
- * （缺省 true＝判定注入生效；false＝全停原样透传）、失败止损阈值
- * （null＝代码缺省 3）、堆叠上限（null＝代码缺省 3——研究口径 ≤3）与禁用集
- * （库条目键逗号串；null/空＝全启用；库正文在代码正本）。判定处每迭代动态
- * 查库不缓存、装配不进 agent 实例缓存键——运营面改完下一次判定即生效，不发版、
- * 进行中 run 不定格。仅 run 执行体行消费（中间件只挂执行体装配面）。</p>
- *
- * <p><b>verify 自决开关列（#442，#441-1——#439 终裁 verify 窗 20.9min 的最大单一
- * 可收窄面）</b>：缺省 true＝自决维持现状（#435 自决化落地态）；false＝自决关闭——
- * 执行体 ReAct 循环中间件（{@code VerifySelfDecisionMiddleware}）每迭代动态查库，
- * 关闭态注入一条提示层指令（每会话一次）：生成过程中不自发委派 verify 子智能体，
- * 平台驱动验证腿（三闸回执／整轨终验编排）不受影响。仅 run 执行体行消费。</p>
+ * <p><b>决策时微指令注入四列（#437）与 verify 自决开关列（#442）已随 #604 拆除</b>：
+ * 两者只被按 executor 装配键挂的旧栈中间件（决策提示／verify 自决）消费——生成
+ * 与更新 run 全部经内核装配形态派发（装配键＝generation-kernel，#601／#604），
+ * executor 键不再进装配面，中间件与开关列（prj_agent_configs 五列＋留痕十面，经
+ * V83 迁移拆除）一并退役。</p>
  *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
@@ -91,38 +85,14 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *                                   缺省 2；0＝不起修复 run——合法运营选择）
  * @param verificationPresenceGateEnabled 验证在场闸开关（#433；#435 起缺省 false＝闸关——
  *                                   本 run 无验证登记不收口仅在该闸被运营打开时生效）
- * @param proofOfOutputGateEnabled  空转产出证明闸开关（#433；#435 起缺省 false＝闸关——段起点
- *                                   以来零 diff 且无确认被拒仅在该闸被运营打开时生效）
  * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝
  *                                   闸关——终验不起 run、不拦完成叙事）
- * @param decisionHintsEnabled        决策时注入总开关（#437；缺省 true＝判定注入生效；
- *                                   false＝全停原样透传。仅 run 执行体行消费）
- * @param decisionHintErrorStreak     失败止损阈值（#437；同类错误连续失败 ≥ 此值注入换
- *                                   策略微指令；null＝回落代码缺省 3；2-10，越界 PRJ_081）
- * @param decisionHintStackCap        微指令堆叠上限（#437；单轮最多注入几条不同微指令；
- *                                   null＝回落代码缺省 3；1-3，越界 PRJ_082）
- * @param decisionHintDisabled        禁用集（#437；库条目键逗号串——封闭集
- *                                   failure_stop_loss/anti_mock/context_economy/
- *                                   parallel_tools，非法 token PRJ_083；null/空＝全启用）
- * @param verifySelfDecisionEnabled   verify 自决开关（#442，#441-1；缺省 true＝自决维持
- *                                   现状〔#435 自决化落地态——执行体生成过程中自决调用
- *                                   verify 自测〕；false＝自决关闭——执行体 ReAct 循环
- *                                   中间件注入提示层指令，生成过程中不自发委派 verify，
- *                                   平台驱动验证腿〔三闸回执／整轨终验编排〕不受影响。
- *                                   仅 run 执行体行消费）
  * @param robustLintBlockingEnabled  基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半
  *                                   让路的回滚保险；缺省 false＝让路——强制档违规收口
  *                                   照扫、只随收尾卡标注，不喂修轮、不触发失败链、不
  *                                   间接升档，修轮触发面收窄至样式合规；true＝恢复
  *                                   #425 原阻断形态〔强制档喂修轮＋修不完结构性拒绝＋
  *                                   耗尽段级回滚重跑〕。仅 run 执行体行消费）
- * @param generateImageEnabled       构建轨出图工具开关（#545，ADR-0052 图片能力下放构建轨；
- *                                   缺省 true＝下放——run 执行体槽位挂载 generate_image，
- *                                   演示配图落 public/；false＝槽位不挂载、回无图现状。
- *                                   仅 run 执行体行消费——设计执行体同名工具是骨架件、
- *                                   恒挂载不读本列。写面＝既有工具面窄幅开关
- *                                   〔PUT /agent-tools/generate_image〕，全量配置 PUT
- *                                   携现行值不重置）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -144,15 +114,8 @@ public record AgentOperationalConfig(
         Integer verifyRoundBudget,
         Integer finalVerifyFixBudget,
         boolean verificationPresenceGateEnabled,
-        boolean proofOfOutputGateEnabled,
         boolean finalVerificationGateEnabled,
-        boolean decisionHintsEnabled,
-        Integer decisionHintErrorStreak,
-        Integer decisionHintStackCap,
-        String decisionHintDisabled,
-        boolean verifySelfDecisionEnabled,
         boolean robustLintBlockingEnabled,
-        boolean generateImageEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -160,16 +123,14 @@ public record AgentOperationalConfig(
     /**
      * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
      * 路由结构性信号两开关关（#454 缺省——文件面/规模标签不参与升档判定）、
-     * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、决策时注入开＋
-     * 阈值/上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、verify 自决开
-     * （#442 缺省）、基座 lint 强制档阻断关（#541 让路缺省——违规只标注）、
-     * 构建轨出图工具开（#545 下放缺省——新能力随发版挂载）、
-     * 无写者——装配解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
+     * 收口两闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态；产出证明闸随 #604
+     * 拆除）、基座 lint 强制档阻断关（#541 让路
+     * 缺省——违规只标注）、无写者——装配解析与留痕前态共用的归一形（null 行先落
+     * 此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, false, false, null, null, null, false, false, false, true, null, null,
-                null, true, false, true, null, null, null);
+                null, false, false, null, null, null, false, false, false, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

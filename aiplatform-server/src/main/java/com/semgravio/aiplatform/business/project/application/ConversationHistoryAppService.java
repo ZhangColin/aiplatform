@@ -224,7 +224,7 @@ public class ConversationHistoryAppService {
             }
             // 载荷键是收口扩载契约的 String summary（#88）；非 String 视同缺失——
             // 不 String.valueOf 铸假匹配键（对照是逐字精确匹配）
-            if (entry.getClosing().get(CoderRunAttempts.CLOSING_SUMMARY_FIELD) instanceof String summary) {
+            if (entry.getClosing().get(CodingRunDispatcher.CLOSING_SUMMARY_FIELD) instanceof String summary) {
                 summaries.put(summary, entry.getRunId());
             }
         }
@@ -366,7 +366,7 @@ public class ConversationHistoryAppService {
     private static ConversationSessionSource sessionSourceOf(ConversationEntry entry) {
         return entry.getKind() == ConversationEntryKind.CLOSING
                 && entry.getClosing() != null
-                && entry.getClosing().containsKey(CoderRunAttempts.CLOSING_DRAFTS_FIELD)
+                && entry.getClosing().containsKey(CodingRunDispatcher.CLOSING_DRAFTS_FIELD)
                 ? ConversationSessionSource.DESIGN
                 : null;
     }

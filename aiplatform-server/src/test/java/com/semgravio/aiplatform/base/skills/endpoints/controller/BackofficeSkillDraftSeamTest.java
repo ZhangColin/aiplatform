@@ -33,7 +33,6 @@ import com.semgravio.aiplatform.base.skills.domain.model.SkillDraftProposal;
 import com.semgravio.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileSkillRepositorySupplier;
-import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
 
 /**
  * 技能草稿端点（#259 T1 只读面＋#262 T2 晋升/拒绝写口）在 seam 上全绿：真过滤链
@@ -240,8 +239,6 @@ class BackofficeSkillDraftSeamTest {
                 .toList();
         assertThat(names).doesNotContain("draft-seam-invisible");
         assertThat(assemblyNames(AgentProfile.EXECUTOR.key(), dev))
-                .doesNotContain("draft-seam-invisible");
-        assertThat(assemblyNames(ProfileSubagentSupplier.VERIFY_NAME, dev))
                 .doesNotContain("draft-seam-invisible");
     }
 

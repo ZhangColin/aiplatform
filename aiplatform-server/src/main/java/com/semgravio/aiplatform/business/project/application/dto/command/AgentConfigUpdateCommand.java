@@ -65,27 +65,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          面；#435 翻转缺省：false/null＝闸关〔默认——本 run 无
  *                          report_verification 登记不收口不生效〕；true＝闸开〔#424〕。
  *                          仅 run 执行体行消费）
- * @param proofOfOutputGateEnabled 空转产出证明闸开关（#433；#435 翻转缺省：false/null＝
- *                          闸关〔默认〕；true＝闸开——段起点以来零 diff 且无「能力已存在」
- *                          确认不收口〔#420〕。仅 run 执行体行消费）
  * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 翻转缺省：
  *                          false/null＝闸关〔默认——终验不起 run，完成口径回落 #427 前
  *                          形态〕；true＝闸开——轨道完成前以核心旅程为轴终验、fail 拦完成
  *                          叙事〔#427〕。仅 run 执行体行消费）
- * @param decisionHintsEnabled 决策时注入总开关（#437，#432 Step 3；缺省 true/null＝
- *                          注入开〔默认〕；false＝全停原样透传。仅 run 执行体行消费）
- * @param decisionHintErrorStreak 失败止损阈值（#437；同类错误连续失败 ≥ 此值注入
- *                          「换策略」微指令；null＝清空回落代码缺省 3；2-10 整数，
- *                          越界 PRJ_081）
- * @param decisionHintStackCap 微指令堆叠上限（#437；单轮最多注入几条不同微指令；null＝
- *                          清空回落代码缺省 3；1-3 整数，越界 PRJ_082）
- * @param decisionHintDisabled 禁用集（#437；库条目键数组——封闭集
- *                          failure_stop_loss/anti_mock/context_economy/parallel_tools，
- *                          非法 token PRJ_083；空数组/null＝全启用）
- * @param verifySelfDecisionEnabled verify 自决开关（#442，#441-1；缺省 true/null＝
- *                          自决开〔默认——#435 自决化落地态〕；false＝自决关闭——
- *                          执行体生成过程中不自发委派 verify 子智能体〔提示层收窄〕，
- *                          平台驱动验证腿不受影响。仅 run 执行体行消费）
  * @param robustLintBlockingEnabled 基座 lint 强制档阻断开关（#541，ADR-0051 lint 拆半
  *                          让路的回滚保险；缺省 false/null＝让路〔默认——强制档违规
  *                          收口照扫只随收尾卡标注，不喂修轮、不触发失败链〕；true＝
@@ -147,33 +130,9 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "验证在场闸开关（#433；#435 起缺省 false＝闸关——本 run 无验证"
                 + "登记不收口不生效；true＝闸开。仅 run 执行体行消费）")
         Boolean verificationPresenceGateEnabled,
-        @Schema(description = "空转产出证明闸开关（#433；#435 起缺省 false＝闸关——段起点以来"
-                + "零 diff 且无「能力已存在」确认不收口不生效；true＝闸开。仅 run 执行体行消费）")
-        Boolean proofOfOutputGateEnabled,
         @Schema(description = "整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝闸关——终验"
                 + "不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事。仅 run 执行体行消费）")
         Boolean finalVerificationGateEnabled,
-        @Schema(description = "决策时注入总开关（#437，#432 Step 3；缺省 true＝注入开〔默认〕——"
-                + "执行体 ReAct 循环每迭代判定注入一条微指令；false＝全停原样透传。"
-                + "仅 run 执行体行消费）")
-        Boolean decisionHintsEnabled,
-        @Schema(description = "失败止损阈值（#437；同类错误连续失败 ≥ 此值注入「换策略」微指令；"
-                + "null＝清空回落代码缺省 3；2-10 整数，越界 PRJ_081）",
-                example = "3")
-        Integer decisionHintErrorStreak,
-        @Schema(description = "微指令堆叠上限（#437；单轮最多注入几条不同微指令〔研究口径 ≤3〕；"
-                + "null＝清空回落代码缺省 3；1-3 整数，越界 PRJ_082）",
-                example = "3")
-        Integer decisionHintStackCap,
-        @Schema(description = "禁用集（#437；库条目键数组——封闭集 failure_stop_loss/anti_mock/"
-                + "context_economy/parallel_tools，非法 token PRJ_083；空数组/null＝全启用）",
-                example = "[\"parallel_tools\"]")
-        List<String> decisionHintDisabled,
-        @Schema(description = "verify 自决开关（#442，#441-1；缺省 true＝自决开〔默认〕——"
-                + "执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——"
-                + "提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿（三闸回执／"
-                + "整轨终验编排）不受影响。仅 run 执行体行消费）")
-        Boolean verifySelfDecisionEnabled,
         @Schema(description = "基座 lint 强制档阻断开关（#541；缺省 false＝让路〔默认〕——"
                 + "强制档违规（裸客户端直用）收口照扫、只随收尾卡标注，不喂修轮、不触发"
                 + "失败链、不间接升档，修轮触发面收窄至样式合规；true＝恢复原阻断形态"

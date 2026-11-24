@@ -2,7 +2,6 @@ package com.semgravio.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
 import java.util.EnumSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Objects;
@@ -31,7 +30,6 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelConfig;
 import com.semgravio.aiplatform.business.project.domain.model.Operator;
 import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigStore;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
-import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 
 /**
  * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：三座智能体（main/
@@ -56,12 +54,11 @@ import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHin
 public class BackofficeAgentConfigAppService {
 
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
-     * ＋路由结构性信号两开关关〔#454 缺省〕＋收口三闸关〔#435 翻转缺省〕＋决策时
-     * 注入开＋基座 lint 阻断关〔#541 让路缺省〕」）。 */
+     * ＋路由结构性信号两开关关〔#454 缺省〕＋收口两闸关〔#435 翻转缺省〕＋基座
+     * lint 阻断关〔#541 让路缺省〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null);
+                    null, null, null, null, null, null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空配置覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -120,21 +117,9 @@ public class BackofficeAgentConfigAppService {
                 blankToNull(safe.verifyModelConfigKey()), requireValidRoundBudget(safe.verifyRoundBudget()),
                 requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
                 safe.verificationPresenceGateEnabled() != null && safe.verificationPresenceGateEnabled(),
-                safe.proofOfOutputGateEnabled() != null && safe.proofOfOutputGateEnabled(),
                 safe.finalVerificationGateEnabled() != null && safe.finalVerificationGateEnabled(),
-                // #437 缺省口径：注入总开关 null＝开（落地态 true），阈值/上限 null＝
-                // 清空回落代码缺省（校验在后），禁用集 null＝清空全启用
-                safe.decisionHintsEnabled() == null || safe.decisionHintsEnabled(),
-                requireValidHintErrorStreak(safe.decisionHintErrorStreak()),
-                requireValidHintStackCap(safe.decisionHintStackCap()),
-                requireValidHintDisabledKinds(safe.decisionHintDisabled()),
-                // #442 缺省口径：verify 自决开关 null＝开（维持 #435 自决化现状）
-                safe.verifySelfDecisionEnabled() == null || safe.verifySelfDecisionEnabled(),
                 // #541 缺省口径：基座 lint 强制档阻断 null＝关（让路形态——违规只标注）
                 safe.robustLintBlockingEnabled() != null && safe.robustLintBlockingEnabled(),
-                // #545 构建轨出图开关不在全量 PUT 命令面（无新 DTO 字段）：携现行值
-                // 不重置——写口唯一＝窄幅工具开关 toggleTool
-                current.generateImageEnabled(),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改配置写的配置键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
@@ -162,10 +147,8 @@ public class BackofficeAgentConfigAppService {
 
     /**
      * 工具面开关写口（#252，PUT /agent-tools/{toolName}）：按工具注册名窄幅开关——
-     * 增强工具三件：web_search/fetch_url（挂 {@link AgentProfile#MAIN main} 行）＋
-     * generate_image 构建轨（#545，挂 {@link AgentProfile#EXECUTOR executor} 行
-     * generate_image_enabled——与 designer 槽同名骨架件并存，按增强件解析不被遮蔽），
-     * 均与配置全量写共表共留痕机制；骨架工具与 harness 内建编码工具结构性锁死
+     * 增强工具两件：web_search/fetch_url（挂 {@link AgentProfile#MAIN main} 行），
+     * 与配置全量写共表共留痕机制；骨架工具与 harness 内建编码工具结构性锁死
      * （接口层拒绝）。写语义与全量写同构：只动目标开关列、其余值面原样携带，值面
      * 有动才落痕（幂等回执零写入）。
      *
@@ -180,8 +163,6 @@ public class BackofficeAgentConfigAppService {
         if (enabled == null) {
             throw new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_TARGET_REQUIRED);
         }
-        // #545 同名两词条（generate_image：designer 骨架＋executor 增强）——窄幅写口
-        // 解析增强件，骨架同名件不遮蔽开关
         AgentTool tool = AgentTool.enhancementByName(toolName)
                 .orElseThrow(() -> harnessBuiltinOrNotFound(toolName));
         if (tool.kind() != AgentToolKind.ENHANCEMENT) {
@@ -198,13 +179,9 @@ public class BackofficeAgentConfigAppService {
                 current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
                 current.verifyModelConfigKey(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
-                current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
+                current.verificationPresenceGateEnabled(),
                 current.finalVerificationGateEnabled(),
-                current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
-                current.decisionHintStackCap(), current.decisionHintDisabled(),
-                current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
-                tool == AgentTool.GENERATE_IMAGE_BUILD ? enabled
-                        : current.generateImageEnabled(),
+                current.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -244,12 +221,12 @@ public class BackofficeAgentConfigAppService {
         EdgeModelUpdateCommand safe = command == null ? EMPTY_EDGE_COMMAND : command;
         AgentOperationalConfig current = currentOf(point.key());
         // 值面仅配置：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态、
-        // 结构性信号两开关关〔#454 缺省〕）
+        // 结构性信号两开关关〔#454 缺省〕、收口两闸开、基座 lint 阻断关——边缘行
+        // 不参与任何 run 判定，开关列取何值恒无消费）
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelConfigKey()),
-                true, true, true, null, null, null, false, false, null, null, null, true, true, true,
-                true, null, null, null, true, false, true,
-                operator.id(), operator.name(), null);
+                true, true, true, null, null, null, false, false, null, null, null, true, true,
+                false, operator.id(), operator.name(), null);
         requireBindableConfig(next.modelConfigKey()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
                 persistIfChanged(point.key(), current, next, operator);
@@ -307,24 +284,18 @@ public class BackofficeAgentConfigAppService {
                 current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
                 current.verifyModelConfigKey(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
-                current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
+                current.verificationPresenceGateEnabled(),
                 current.finalVerificationGateEnabled(),
-                current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
-                current.decisionHintStackCap(), current.decisionHintDisabled(),
-                current.verifySelfDecisionEnabled(), current.robustLintBlockingEnabled(),
-                current.generateImageEnabled(),
+                current.robustLintBlockingEnabled(),
                 next.systemPrompt(), next.modelConfigKey(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelConfigKey(),
                 next.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
                 next.routingFileCountSignalEnabled(), next.routingSizeLabelSignalEnabled(),
                 next.verifyModelConfigKey(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
-                next.verificationPresenceGateEnabled(), next.proofOfOutputGateEnabled(),
+                next.verificationPresenceGateEnabled(),
                 next.finalVerificationGateEnabled(),
-                next.decisionHintsEnabled(), next.decisionHintErrorStreak(),
-                next.decisionHintStackCap(), next.decisionHintDisabled(),
-                next.verifySelfDecisionEnabled(), next.robustLintBlockingEnabled(),
-                next.generateImageEnabled(),
+                next.robustLintBlockingEnabled(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -352,57 +323,8 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget())
                 || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget())
                 || current.verificationPresenceGateEnabled() != next.verificationPresenceGateEnabled()
-                || current.proofOfOutputGateEnabled() != next.proofOfOutputGateEnabled()
                 || current.finalVerificationGateEnabled() != next.finalVerificationGateEnabled()
-                || current.decisionHintsEnabled() != next.decisionHintsEnabled()
-                || !Objects.equals(current.decisionHintErrorStreak(), next.decisionHintErrorStreak())
-                || !Objects.equals(current.decisionHintStackCap(), next.decisionHintStackCap())
-                || !Objects.equals(current.decisionHintDisabled(), next.decisionHintDisabled())
-                || current.verifySelfDecisionEnabled() != next.verifySelfDecisionEnabled()
-                || current.robustLintBlockingEnabled() != next.robustLintBlockingEnabled()
-                || current.generateImageEnabled() != next.generateImageEnabled();
-    }
-
-    /**
-     * 失败止损阈值校验（#437）：null＝清空回落代码缺省不校验；非空须 2-10
-     * 整数（越界 PRJ_081——错值写不进去，同配置键即时校验口径）。
-     */
-    private static Integer requireValidHintErrorStreak(Integer streak) {
-        if (streak != null && (streak < 2 || streak > 10)) {
-            throw new ApplicationException(ProjectMessage.DECISION_HINT_ERROR_STREAK_INVALID, streak);
-        }
-        return streak;
-    }
-
-    /**
-     * 微指令堆叠上限校验（#437）：null＝清空回落代码缺省不校验；非空须 1-3
-     * 整数（越界 PRJ_082——研究口径：堆叠 >3 收益递减转负，运营面不放宽）。
-     */
-    private static Integer requireValidHintStackCap(Integer cap) {
-        if (cap != null && (cap < 1 || cap > 3)) {
-            throw new ApplicationException(ProjectMessage.DECISION_HINT_STACK_CAP_INVALID, cap);
-        }
-        return cap;
-    }
-
-    /**
-     * 禁用集校验＋归一（#437）：null＝清空全启用；每个 token 须为库条目键封闭集
-     * （非法 PRJ_083——错值写不进去）。归一：去空白、剔重复、逗号拼接存储形
-     * （null 返回＝清空；空集返回空串＝全启用的显式形）。
-     */
-    private static String requireValidHintDisabledKinds(List<String> kinds) {
-        if (kinds == null) {
-            return null;
-        }
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
-        for (String kind : kinds) {
-            DecisionHintKind entry = DecisionHintKind.byKey(kind);
-            if (entry == null) {
-                throw new ApplicationException(ProjectMessage.DECISION_HINT_KIND_INVALID, kind);
-            }
-            normalized.add(entry.key());
-        }
-        return String.join(",", normalized);
+                || current.robustLintBlockingEnabled() != next.robustLintBlockingEnabled();
     }
 
     /**

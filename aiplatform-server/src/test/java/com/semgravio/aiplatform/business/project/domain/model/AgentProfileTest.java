@@ -36,8 +36,9 @@ class AgentProfileTest {
 
     @Test
     void given_profiles_when_prompts_then_protocol_anchors_present() {
-        // 协议锚点抽查：主智能体配置含追问/答询/迭代受理三段（单会话连续），
-        // 执行体配置含 finish_edit 判定契约
+        // 协议锚点抽查：主智能体配置含追问/答询/迭代受理三段（单会话连续）；
+        // 设计执行体配置含写稿协议条款。run 执行体的协议正文已随 #604 退役
+        //（缺省提示只作占位，锚点见退役占位用例）
         assertThat(AgentProfile.MAIN.systemPrompt())
                 .contains("ask_user")
                 .contains("savePrd")
@@ -47,54 +48,8 @@ class AgentProfileTest {
                 // #459：必答/选项题应给推荐项（recommended 标推荐答案＋问答卡预选缺省）
                 .contains("推荐答案")
                 .contains("recommended");
-        assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("finish_edit")
-                // #352 收口验证委派 verify 子智能体（自测位升级——独立验证三面）：
-                // 失败项修复后复验、修不了如实标注
-                .contains("verify")
-                .contains("agent_spawn")
-                .contains("复验")
-                .contains("如实")
-                .contains("关键节点才解说") // #225 叙说密度放宽：关键节点（开工/转向/失败/收口）才解说
-                // #296 遵守三件套②（验收③）：设计规范短条目（短条目优于长段——
-                // 条件式「若有 DESIGN.md」兼容无规范项目；缺省正本在此、运营
-                // 配置面可覆盖＝调整不发版）
-                .contains("DESIGN.md")
-                .contains("token 优先")
-                .contains("禁裸色")
-                // #425 执行体工作协议「用基座件、禁裸客户端」条目；#540 起单源化
-                //（ADR-0051）：协议只留指针句——件清单/用法/纪律唯一正本＝工作区
-                // AGENTS.md 本栈写法规则节（栈规则集随基座 tag 换版），不再重复
-                // 枚举预置件路径（双正本必漂移）；#541 lint 让路：两档口径句改写
-                // 为「照扫标注、不拦收口」的缺省语义（阻断形态以拒绝回执为准——
-                // 闸态回执口径同收口三闸，运营开关承载面）
-                .contains("禁裸客户端")
-                .contains("唯一正本＝工作区 AGENTS.md 的本栈写法规则节")
-                .contains("开工先读该节")
-                .contains("不重造轮子")
-                .contains("照常自建")
-                .doesNotContain("src/lib/robust")
-                .doesNotContain("src/components/robust")
-                .doesNotContain("httpFetch")
-                .doesNotContain("AsyncSection")
-                // 「预约通」实测（11-12）的语义边界对齐句随枚举移除一并归栈规则集
-                //（节内断言见 StackRulesEntryPathsTest——「含页面/组件调自家 /api 路由」）
-                .contains("本栈写法规则节")
-                // #541 lint 让路句锚点：收口照扫、违规标注不拦收口；阻断形态以回执为准
-                .contains("基座 lint")
-                .contains("不拦收口")
-                .contains("拒绝回执")
-                // #545 图片下放构建轨（ADR-0052）：工具点名＋演示配图用途＋少而精边界
-                //（个位数、不逐卡片、无机器上限）＋public/ 根路径引用
-                .contains("generate_image")
-                .contains("演示配图")
-                .contains("首屏 hero")
-                .contains("空状态")
-                .contains("少而精")
-                .contains("个位数")
-                .contains("不逐卡片")
-                .contains("没有机器上限")
-                .contains("public/");
+        // EXECUTOR 座的协议锚点断言随 #604 删除（13 条执行协议正文退役——缺省提示
+        // 只作退役占位，见 given_executor_when_prompt_then_retired_placeholder_without_legacy_protocol）
         // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
         // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
         // 运营配置面可覆盖（ADR-0021）
@@ -127,51 +82,25 @@ class AgentProfileTest {
     }
 
     @Test
-    void given_executor_prompt_when_shell_command_then_quote_discipline_clause() {
-        // #440 提示层（短平快）：容器命令一律单引号形态、禁内嵌双引号与 $()——
-        // 违反会被执行层拒绝（fail-fast 正本在 DockerExecFilesystem ①族守卫）；
-        // 条款须带改写指引与「拒绝后重试即可」口径（拒命不是终态错误）
+    void given_executor_when_prompt_then_retired_placeholder_without_legacy_protocol() {
+        // #604 拆 run 尝试体旧机制：EXECUTOR 座 13 条执行协议正文整体退役——生成/更新
+        // run 经内核装配形态派发（系统提示＝KernelSystemPrompt 权威版本），本枚举条目
+        // 保留 key/code/name/modelConfigKey 作 Demo 阶段模型配置槽位；缺省提示只是
+        // 库值缺失时的占位，不得残留旧协议锚点（防旧正文按键挂回）。原钉旧协议措辞
+        // 的用例（#440 命令引号纪律、ADR-0050 三硬底线与推迟清单、verify 自决中性
+        // 措辞）随协议正文一并删除。
         String prompt = AgentProfile.EXECUTOR.systemPrompt();
         assertThat(prompt)
-                .contains("单引号")
-                .contains("禁内嵌双引号")
-                .contains("$(")
-                .contains("执行层")
-                .contains("拒绝")
-                .contains("#440");
-    }
-
-    @Test
-    void given_executor_prompt_when_complexity_governance_then_three_hard_lines_and_deferral_clause() {
-        // ADR-0050 执行体工作协议改写：条 1 待定项最小可用缺省＋推迟清单消费句
-        //（清单内不做、不自行加回）；条 3 收口判据＝三硬底线（撤「真实应用」厚度
-        // 指令、带数据库降为手段）＋演示数据一轮建成＋真实感反 placeholder；
-        // 机器探活三件套仍是唯一收口硬判据（回归不破）
-        String prompt = AgentProfile.EXECUTOR.systemPrompt();
-        assertThat(prompt)
-                .contains("最小可用缺省")
-                .contains("清单内不做、不自行加回")
-                .contains("无此章")
-                .contains("三硬底线")
-                .contains("能打开不白屏")
-                .contains("刷新不丢")
-                .contains("核心路径可点")
-                .contains("演示数据一轮建成")
-                .contains("placeholder")
-                .contains("唯一的收口硬要件")
-                .doesNotContain("真实应用")
-                .doesNotContain("拿不准的片建议验");
-    }
-
-    @Test
-    void given_executor_prompt_when_verify_self_decision_then_neutral_wording() {
-        // ADR-0050 条 9 撤回「拿不准的片建议验」自决建议（避免与运营开关关停打架）：
-        // 验证不是收口要件、用不用由执行体自决——不自报建议、不劝验
-        assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("验证不是收口要件")
-                .contains("用不用由你自决")
-                .doesNotContain("建议验")
-                .doesNotContain("别省这一步");
+                .contains("#604")
+                .contains("退役")
+                .doesNotContain("finish_edit")
+                .doesNotContain("agent_spawn")
+                .doesNotContain("report_verification")
+                .doesNotContain("DESIGN.md")
+                .doesNotContain("三硬底线")
+                .doesNotContain("verify");
+        assertThat(AgentProfile.EXECUTOR.key()).isEqualTo("executor");
+        assertThat(AgentProfile.EXECUTOR.modelConfigKey()).isEqualTo("flash");
     }
 
     @Test

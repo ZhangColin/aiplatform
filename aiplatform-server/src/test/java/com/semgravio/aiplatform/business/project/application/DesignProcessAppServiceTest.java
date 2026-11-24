@@ -346,15 +346,15 @@ class DesignProcessAppServiceTest {
         Map<String, Object> closing = (Map<String, Object>) payloads.getAllValues().get(0)
                 .get(AgentEventTypes.CLOSING_FIELD);
         assertThat(closing)
-                .containsEntry(CoderRunAttempts.CLOSING_SUMMARY_FIELD,
+                .containsEntry(CodingRunDispatcher.CLOSING_SUMMARY_FIELD,
                         DesignProcessAppService.itemClosingSummary("品牌主 logo——方形构图，扁平风格"))
                 .containsEntry("prdChanged", false)
                 .containsEntry("systemChanged", false)
                 .doesNotContainKey("prdNote")
-                .doesNotContainKey(CoderRunAttempts.CLOSING_VERSION_FIELD);
+                .doesNotContainKey(CodingRunDispatcher.CLOSING_VERSION_FIELD);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
-                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
         assertThat(drafts).containsExactly(
                 Map.of("item", "品牌主 logo——方形构图，扁平风格", "media", "html",
                         "path", "/design/logo-1.html"),
@@ -367,7 +367,7 @@ class DesignProcessAppServiceTest {
                 .anySatisfy(entry -> {
                     assertThat(entry.kindName()).isEqualTo("收尾卡");
                     assertThat(entry.closing()).containsKey(
-                            CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                            CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
                 });
     }
 
@@ -398,7 +398,7 @@ class DesignProcessAppServiceTest {
                 .get(AgentEventTypes.CLOSING_FIELD);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
-                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
         assertThat(drafts).containsExactly(
                 Map.of("item", "品牌主 logo——方形构图，扁平风格", "media", "html",
                         "path", "/design/logo-1.html"));
@@ -427,7 +427,7 @@ class DesignProcessAppServiceTest {
                 .get(AgentEventTypes.CLOSING_FIELD);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
-                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
         assertThat(drafts).containsExactly(
                 Map.of("item", "品牌主 logo——方形构图，扁平风格", "media", "html",
                         "path", "/design/logo-1.html"));
@@ -514,7 +514,7 @@ class DesignProcessAppServiceTest {
         Map<?, ?> closing = (Map<?, ?>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
-                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
         assertThat(drafts).containsExactly(
                 Map.of("item", "促销海报——竖版", "media", "html", "path", "/design/home-1.html"),
                 Map.of("item", "促销海报——竖版", "media", "image", "path", "/design/poster-1.png"),
@@ -542,7 +542,7 @@ class DesignProcessAppServiceTest {
         Map<?, ?> closing = (Map<?, ?>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
-                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
         assertThat(drafts).containsExactly(
                 Map.of("item", "促销海报——竖版", "media", "html", "path", "/design/poster-1.html"));
     }
@@ -568,7 +568,7 @@ class DesignProcessAppServiceTest {
         Map<?, ?> closing = (Map<?, ?>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> drafts =
-                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+                (List<Map<String, Object>>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD);
         assertThat(drafts).containsExactly(
                 Map.of("item", "促销海报——竖版", "media", "html", "path", "/design/poster-1.html"));
     }
@@ -810,11 +810,11 @@ class DesignProcessAppServiceTest {
                 payloads.capture());
         Map<String, Object> closing = (Map<String, Object>) payloads.getValue()
                 .get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(closing).containsEntry(CoderRunAttempts.CLOSING_SUMMARY_FIELD,
+        assertThat(closing).containsEntry(CodingRunDispatcher.CLOSING_SUMMARY_FIELD,
                 DesignProcessAppService.revisionClosingSummary("电商海报——竖版，验收：主体清晰"));
         assertThat(closing.toString()).contains("/design/logo-4.html");
         assertThat(closing.toString()).doesNotContain("/design/logo-1.html");
-        assertThat(closing).doesNotContainKey(CoderRunAttempts.CLOSING_VERSION_FIELD);
+        assertThat(closing).doesNotContainKey(CodingRunDispatcher.CLOSING_VERSION_FIELD);
         // 件状态不翻：两件仍是已收口（改稿是探索、不是首产收口位变化）
         assertThat(itemRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2);
@@ -856,7 +856,7 @@ class DesignProcessAppServiceTest {
                 payloads.capture());
         Map<String, Object> closing = (Map<String, Object>) payloads.getValue()
                 .get(AgentEventTypes.CLOSING_FIELD);
-        assertThat((List<?>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD)).isEmpty();
+        assertThat((List<?>) closing.get(CodingRunDispatcher.CLOSING_DRAFTS_FIELD)).isEmpty();
         assertThat(itemRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2);
     }
@@ -1114,12 +1114,12 @@ class DesignProcessAppServiceTest {
         Map<String, Object> closing = (Map<String, Object>) payloads.getValue()
                 .get(AgentEventTypes.CLOSING_FIELD);
         assertThat(closing)
-                .containsEntry(CoderRunAttempts.CLOSING_SUMMARY_FIELD,
+                .containsEntry(CodingRunDispatcher.CLOSING_SUMMARY_FIELD,
                         DesignProcessAppService.finalizeClosingSummary(
                                 "品牌主 logo——方形构图，扁平风格"))
                 .containsEntry("prdChanged", false)
                 .containsEntry("systemChanged", false)
-                .containsEntry(CoderRunAttempts.CLOSING_VERSION_FIELD, "abc123def456");
+                .containsEntry(CodingRunDispatcher.CLOSING_VERSION_FIELD, "abc123def456");
         assertThat(closing.toString())
                 .contains("/design/logo-1.html")
                 .contains("triggers=[]");
@@ -1128,7 +1128,7 @@ class DesignProcessAppServiceTest {
                 .anySatisfy(entry -> {
                     assertThat(entry.kindName()).isEqualTo("收尾卡");
                     assertThat(entry.closing()).containsEntry(
-                            CoderRunAttempts.CLOSING_VERSION_FIELD, "abc123def456");
+                            CodingRunDispatcher.CLOSING_VERSION_FIELD, "abc123def456");
                 });
     }
 

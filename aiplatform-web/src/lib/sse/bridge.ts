@@ -220,7 +220,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // run 级时钟起锚（#225）：run-start 信封 ts——单一 run 起点锚
           // （ADR-0010 窄修订），缺 ts（测试/异常信封）不落锚、时钟不渲染
           work.startWork(payload.projectId, payload.runId, payload.slice, epochMsOf(envelope.ts));
-          // 四态投影回「生成中」（#222）：起跑即失效项目域——补产轮收口再派的
+          // 生成态投影回「生成中」（#222）：起跑即失效项目域——收口观测直派的
           // 轨道落库无对话面事件可搭，靠本失效收尾（点击路径的失效在 mutation）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
           // 构建基准记行失效（#462 去门化）：Demo 类 run 起跑自动记 PRD 版本行
@@ -274,8 +274,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFailed(payload.projectId, payload.message, payload.stopped);
-          // 四态投影回「生成中断」（#222）：终态落轨道表即失效项目域——「继续
-          // 生成」出口由投影派生（刷新后仍在，不依赖本事件）
+          // 终态收口即失效项目域（#222）：服务端在途标记已清——未生成的项目投影
+          // 回「从未生成」（#604 起失败不落投影，失败档只由本事件的会话态呈现）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         } else if (isDesignerWork(payload.projectId, payload.runId)) {
           // 设计轨失败终态（#289 失败不跳件）：件状态落轨道表 → 失效项目域

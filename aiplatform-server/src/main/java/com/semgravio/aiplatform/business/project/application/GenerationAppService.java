@@ -56,10 +56,12 @@ import lombok.extern.slf4j.Slf4j;
  * REST 片清单读面、规模标签落库）、单会话态／切片机器态两开关、并行波次机器
  * （fork/wave/merge、波次遥测）、段收口/段失败与失败回滚、切片交接物落盘、
  * 整轨终验（载荷轴＝计划核心旅程，随表一并退场）——全部移除；主智能体侧的
- * 计划补产链（requestBuildPlan/saveBuildPlan 事实）同步退役。失败语义＝
- * 重试耗尽转终态失败（run-failed），用户重发「继续生成」（POST /generate）
- * 即重跑（同一脏续口径：已落盘成果保留、不重做已对的工作——重试续作 prompt
- * {@link #kernelRetryPrompt} 携带错误现场）。</p>
+ * 计划补产链（requestBuildPlan/saveBuildPlan 事实）同步退役。<b>#604 拆
+ * run 尝试体旧机制</b>：尝试环（静默续试/错误现场续作/通道级免预算重试/
+ * lint 修轮/段回滚重跑）与续跑机器（terminalFailureScenes＋续作 prompt）
+ * 整体退役——失败语义＝<b>明确展示＋重跑即恢复</b>（run-failed 失败面落库
+ * ＋SSE 扩载；用户在点火入口重跑即续——已落盘成果保留、不重做已对的工作，
+ * 内核自见工作区现状，不携错误现场，ADR-0055 #580-13：不造第三层重试）。</p>
  *
  * <p><b>首建派发门（#542 访谈②，ADR-0048/0049——两入口退役）</b>：首个构建
  * run 的点火权归用户。触发面四条：试用态岔路口三选卡「立即生成」（
@@ -71,7 +73,8 @@ import lombok.extern.slf4j.Slf4j;
  * （设计轨触发律不改）。自然收口不派发：试用态出岔路口卡（状态位持久可回）、
  * 付费态确认门在场。点火时点落 {@code generation_requested_at}
  * （{@link #markFirstBuildRequested}——卡/门「首建未派发」呈现条件的事实源）；
- * 失败重试走「继续生成」不重复确认、卡与门不复现。小迭代照旧无门（受理即派）；
+ * 终态失败/停止收口清点火位（{@link #reopenFirstBuildRequest}，卡与门复现），
+ * 用户重走点火入口重跑即恢复、不重复确认。小迭代照旧无门（受理即派）；
  * 重复触发（已生成或生成在途）按钮路径拒绝 PRJ_017。Demo 类 run 起跑自动记
  * PRD 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，构建基准序
  * ——确认不写版本行，记行归起跑单点）、Demo 版本锚捕获读「最新版」。</p>
@@ -82,17 +85,17 @@ import lombok.extern.slf4j.Slf4j;
  * 平台明示（guide-reply 复用型，{@link #IN_FLIGHT_OPINION_NOTICE}）；生成<b>成功
  * 收口</b>后排空队列，多条意见合并为一场更新 run 补派（{@link IterationAppService}
  * 的逐轮配对交接物——同构修正轨排队合并，不逐条烧 run）。失败/停止收口不排空、
- * 队列保留：重发「继续生成」成功收口时再消化（不自锁）；补派起跑撞修正轨在途即
+ * 队列保留：重跑成功收口时再消化（不自锁）；补派起跑撞修正轨在途即
  * 排进修正轨队列，那场收口排空时自然合并（竞态零丢失）。意见零丢失之外仍留兜底：
  * 进程内队列重启即清（同修正轨口径），用户重提即恢复。</p>
  *
  * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡）随全部智能体
  * 事件流产出（parts 契约，前端长成工作消息）。</p>
  *
- * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以首试任务 prompt 检索知识库
+ * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以起跑任务 prompt 检索知识库
  * （query 截 2000 字、topK=5），命中块拼在任务 prompt <b>前</b>（知识是背景非
- * 指令）；检索失败降级空注入、run 照旧下发。一次切入一次注入（#114 生成链首片
- * 口径沿用到内核首跑）——只在首跑注入、重试不重注入（注入块已在会话历史）。</p>
+ * 指令）；检索失败降级空注入、run 照旧下发。一场 run 一次注入（#114 生成链首片
+ * 口径沿用到内核跑）——重跑是新的一场 run，照常重新切入注入。</p>
  *
  * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
  * （幂等覆写，内容平台所有）——run 执行体经 harness 工作区上下文自读；
@@ -113,21 +116,11 @@ public class GenerationAppService {
     static final String KERNEL_CLOSING_SUMMARY = "完成首次生成：构建通过、预览可访问";
 
     /**
-     * 内核会话寻址（#601 接线）：首轮与重试续作共用同一会话锚——内核不设切片段，
-     * 单会话连续驱动至收尾判据过；run 维度新 run 换会话（同 #114 口径的会话有界）。
+     * 内核会话寻址（#601 接线）：单会话连续驱动至收尾判据过；run 维度新 run 换
+     * 会话（同 #114 口径的会话有界）。
      */
     static String kernelSession(Long projectId, String runId) {
-        return CoderRunAttempts.SESSION_PREFIX + projectId + "-kernel-" + runId;
-    }
-
-    /**
-     * 内核重试续作 prompt（#601 接线）：不重设切片段——任务界以 PRD 正本＋收尾
-     * 判据（pnpm build 通过、8081 探活可达）为准，与权威提示词完成判据句同口径。
-     */
-    static String kernelRetryPrompt(String retryScene) {
-        return "上一次尝试失败。\n" + retryScene + "\n工作区内已完成的成果仍然有效——不要重做已对的工作。"
-                + "请先检查现状（代码、依赖、8081 端口服务是否在跑），针对该错误在现有成果上继续修复，"
-                + "直至 pnpm build 通过且 curl http://localhost:8081 有响应。";
+        return CodingRunDispatcher.SESSION_PREFIX + projectId + "-kernel-" + runId;
     }
 
     /**
@@ -147,7 +140,7 @@ public class GenerationAppService {
 
     /**
      * 定稿设计稿引用块（#291 稿入起跑上下文——ADR-0024「定稿稿以规范源身份经
-     * 起跑上下文喂系统轨」）：设计类终点全部定稿后的构建，首试与重试 prompt 前置
+     * 起跑上下文喂系统轨」）：设计类终点全部定稿后的构建，起跑 prompt 前置
      * 定稿稿清单——执行体先读稿再动手，系统的配色、字体、圆角与整体视觉语感与
      * 定稿稿保持一致（规范级提炼与校验归一致性桥 #295/#296）。空清单＝纯系统项目
      * 或无定稿件，零注入。
@@ -250,7 +243,7 @@ public class GenerationAppService {
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
-    private final CoderRunAttempts coderRunAttempts;
+    private final CodingRunDispatcher codingRunDispatcher;
     private final AgentEventBridge eventBridge;
     private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
@@ -275,18 +268,9 @@ public class GenerationAppService {
     private final KernelServingGuard kernelServingGuard;
 
     /**
-     * 终态失败现场账（#221 续跑口径随 #602 收窄为「重发重跑的中断原因」旁证，
-     * projectId → 最近一次终态失败末次尝试的错误现场）：run-failed 时记下，同
-     * 进程内重发「继续生成」的续作 prompt 经 {@link #kernelRetryPrompt} 携带
-     * 错误现场；跨进程丢失即降级为不携现场的失败叙事（失败语义＝明确展示＋重跑
-     * 即恢复，ADR-0055）。重跑收口成功即清，再失败即覆写。
-     */
-    private final Map<Long, String> terminalFailureScenes = new ConcurrentHashMap<>();
-
-    /**
      * 首 Demo 在途期间到达的意见轮（#360，projectId → 按收口序排队）：生成成功
      * 收口后由 {@link #dispatchFirstDemoTurnOpinions} 排空合并补派一场更新 run；
-     * 失败/停止收口保留（重发「继续生成」成功收口时消化）。进程内态与轨道状态
+     * 失败/停止收口保留（重跑成功收口时消化）。进程内态与轨道状态
      * 同口径——重启即清，用户重提即兜底（修正轨 queuedFixRuns 同构）。
      */
     private final Map<Long, List<TurnOpinion>> firstDemoTurnOpinions = new ConcurrentHashMap<>();
@@ -320,7 +304,7 @@ public class GenerationAppService {
     public GenerationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
+            CodingRunDispatcher codingRunDispatcher, AgentEventBridge eventBridge,
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
             DesignItemRepository designItems,
             TransactionTemplate transactionTemplate,
@@ -337,7 +321,7 @@ public class GenerationAppService {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
-        this.coderRunAttempts = coderRunAttempts;
+        this.codingRunDispatcher = codingRunDispatcher;
         this.eventBridge = eventBridge;
         this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
@@ -356,15 +340,15 @@ public class GenerationAppService {
     }
 
     /**
-     * 触发生成的显式入口（#332 生成加门后为中断「继续生成」出口的载体——POST
-     * /generate 端点与收口自动派发共用同一编排；失败重试与超限兜底在异步轨道内）：
-     * 守卫 → AGENTS.md 资产就位 → 异步提交编码 run（首试 runId 随响应回，过程事件
-     * 经 SSE）。
+     * 生成点火入口（POST /generate——岔路口「立即生成」与前端「继续生成」恢复出口
+     * 共用；#604 起重发即在既有工作区重跑：服务端续跑机器已退役，不带断点、不携
+     * 错误现场）：守卫 → AGENTS.md 资产就位 → 异步提交编码 run（runId 随响应回，
+     * 过程事件经 SSE）。失败不自动重试——终态经 run-failed 明确展示，由用户重跑。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_017 已生成或生成在途（重复发起）；
      *                              PRJ_018 PRD 从未产出（编码 run 的任务就是读
-     *                              PRD 实现，无 PRD 起跑只会空烧重试）
+     *                              PRD 实现，无 PRD 起跑只会空烧一场 run）
      */
     public GenerationRun startGeneration(Long projectId) {
         Project project = requireGeneratableProject(projectId);
@@ -589,7 +573,7 @@ public class GenerationAppService {
         }
 
         // 首建点火时点落位（#542 派发门，ADR-0049「两轨唯一差异＝触发源」）：岔路口
-        // 「立即生成」/付费轨 PRD 确认/快道直生成/断点续跑（重发）共用——单向置位
+        // 「立即生成」/付费轨 PRD 确认/快道直生成/重跑（重发）共用——单向置位
         // 不刷新；岔路口卡与确认按钮「首建未派发」呈现条件的事实源（BuildGateAppService）
         markFirstBuildRequested(projectId);
         String firstRunId = EventsAppService.newRunId();
@@ -620,7 +604,7 @@ public class GenerationAppService {
     private Future<?> submitTrack(Project project, String firstRunId, Integer prdVersionNo) {
         Long projectId = project.getId();
         return sessionExecutor.submitGeneration(
-                CoderRunAttempts.SESSION_PREFIX + projectId,
+                CodingRunDispatcher.SESSION_PREFIX + projectId,
                 () -> {
                     boolean trackReturned = false;
                     try {
@@ -630,13 +614,15 @@ public class GenerationAppService {
                     catch (RunStoppedException e) {
                         // 停止收口（#359 生成取消）：中断口径非判死——已完成进度保留；
                         // 终态按失败账口径 run-failed(stopped=true) 收口；#360 在途
-                        // 意见队列保留（不排空）——重发「继续生成」成功收口时消化，不自锁
-                        terminalFailureScenes.put(projectId, STOP_SCENE);
+                        // 意见队列保留（不排空）——重跑成功收口时消化，不自锁
+                        reopenFirstBuildRequest(projectId);
                         eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     }
                     catch (RunShutdownException e) {
                         // 关停收口（#477）：宽限窗内中断——不落失败、不发终态事件
-                        // （进程正死，留痕只日志），重启后重发「继续生成」重跑
+                        // （进程正死，留痕只日志，本处不做落库）；重启后由重跑入口
+                        // 恢复（POST /generate——点火位未清，入口为前端「继续生成」
+                        // 恢复出口，#604 起无断点续跑）
                         log.info("[generate] 项目 {} 生成轨道因平台关停中断（runId={}，本场累计与逐尝试账见 failure 面）",
                                 projectId, e.runId());
                     }
@@ -674,7 +660,7 @@ public class GenerationAppService {
      * 首 Demo 在途意见队列的排空（#360，生成轨道任务尾部调）：合并为一场更新 run
      * 补派（逐轮配对交接物——同构修正轨排队合并，不逐条烧 run）。只在生成
      * <b>成功收口</b>后排空——以 {@code generated_at} 落位事实为闸（失败收口轨道
-     * 正常返回的场景同走本方法、闸不过即原队保留，重发「继续生成」成功时再来
+     * 正常返回的场景同走本方法、闸不过即原队保留，重跑成功时再来
      * 消化——不自锁、不重复派）。补派撞修正轨在途（用户恰在收口窗口提意见起跑
      * 了更新 run）即排进修正轨队列，那场收口排空时自然合并（竞态零丢失）。补派
      * 失败不炸轨道任务（#51 口径）——记日志，用户重提即兜底。
@@ -682,7 +668,7 @@ public class GenerationAppService {
     private void dispatchFirstDemoTurnOpinions(Long projectId) {
         Project current = projectRepository.findById(projectId).orElse(null);
         if (current == null || current.getGeneratedAt() == null) {
-            return; // 未成功收口（失败/停止/收口落位失败）——队列保留待续跑成功
+            return; // 未成功收口（失败/停止/收口落位失败）——队列保留待重跑成功
         }
         List<TurnOpinion> queued;
         synchronized (codingRunTrack) { // 与入队侧同锁（begin 失败 ⟹ end 未发生的锁序）
@@ -739,7 +725,7 @@ public class GenerationAppService {
         }
     }
 
-    /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#84 静默重试——重试不换新锚，全程同值）。 */
+    /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#604 起单发无重试，全程同值）。 */
     public record GenerationRun(String runId) {
     }
 
@@ -759,14 +745,15 @@ public class GenerationAppService {
 
     /**
      * 生成内核轨道（#601 接线，ADR-0054/0055）：首建点火后整轨<b>一场 run</b>——内核
-     * 装配形态（{@link CoderRunAttempts.RunSeat#kernel()}：系统提示＝{@link
+     * 装配形态（{@link CodingRunDispatcher.RunSeat#kernel()}：系统提示＝{@link
      * KernelSystemPrompt} 权威版本、工具恰四件、循环语义中间件、装配键不带 executor
      * 〔决策提示／verify 自决旧中间件结构性挂不上〕）单会话连续驱动，直至收尾判据
      * 双件全过（{@link KernelClosingCriteria}：{@code pnpm build} 过＋8081 探活有
      * 响应——与内核完成判据句同口径）。起服先行由 {@link KernelServingGuard} 尽力
      * 确保（收敛不成不杀 run——探活仍是收口硬门）。成功：{@code generated_at}/Demo
-     * 首版成版＋preview-ready＋清失败账；失败：终态现场入续跑盘点＋run-failed
-     * （重发「继续生成」即重跑——守卫口径同 {@link #startGeneration}）。
+     * 首版成版＋preview-ready；失败/停止：终态 run-failed＋清点火位（岔路口卡/确认
+     * 按钮复现——用户在点火入口重跑即恢复，#604 失败新语义＝明确展示＋重跑即续，
+     * ADR-0055 #580-13：不自动重跑、不携错误现场）。
      */
     private void runKernelTrack(Project project, String firstRunId, Integer prdVersionNo) {
         Long projectId = project.getId();
@@ -780,23 +767,20 @@ public class GenerationAppService {
                     projectId, e.toString());
         }
         // 定稿设计稿引用块（#291 稿入起跑上下文——内核形态沿用）：设计类终点门开后
-        // 的构建，首试与重试 prompt 前置定稿稿清单；纯系统项目零注入
+        // 的构建，prompt 前置定稿稿清单；纯系统项目零注入
         String designContext = finalizedDesignsContext(
                 designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
                         .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
                         .toList());
-        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, firstRunId,
+        CodingRunDispatcher.RunResult result = codingRunDispatcher.run(project, firstRunId,
                 kernelSession(projectId, firstRunId),
-                new CoderRunAttempts.Prompts(designContext + KERNEL_FIRST_RUN_PROMPT,
-                        retryScene -> designContext
-                                + GenerationAppService.kernelRetryPrompt(retryScene)),
+                // 单发提示（内核座无续作提示——#604 失败即终态、不自动重试）
+                CodingRunDispatcher.Prompts.single(designContext + KERNEL_FIRST_RUN_PROMPT),
                 (attemptRunId, attemptChanges) -> closeKernelGeneration(project),
-                CoderRunAttempts.GENERATE_LABEL, true, CoderRunAttempts.RunSeat.kernel(),
+                CodingRunDispatcher.GENERATE_LABEL, true, CodingRunDispatcher.RunSeat.kernel(),
                 RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN);
         if (!result.succeeded()) {
-            if (result.lastError() != null) {
-                terminalFailureScenes.put(projectId, result.lastError());
-            }
+            reopenFirstBuildRequest(projectId);
             eventBridge.emitRunFailed(project, firstRunId, result.failure());
             return;
         }
@@ -804,16 +788,15 @@ public class GenerationAppService {
         // 演示种子预置（#340 口径延续：Demo 将可见前一刻——幂等，失败不阻断收工）
         demoSeed.seedSandbox(project);
         emitPreviewReady(project);
-        terminalFailureScenes.remove(projectId);
     }
 
     /**
      * 内核收口判据回调（#601 接线，ADR-0054）：run 正常返回（一轮无工具调用）后的
      * 平台侧机器核验——{@code pnpm build} 过＋8081 探活双件全过才判完成
-     * （{@link KernelClosingCriteria}，#597 落位件）；未过即抛——本环转既有重试/
-     * 终态通道（现场如实进重试 prompt），耗尽终态由轨道层记失败账。
+     * （{@link KernelClosingCriteria}，#597 落位件）；未过即抛——该场 run 失败转
+     * 终态（#604 单发：不自动重跑，用户在点火入口重跑即恢复）。
      */
-    private CoderRunAttempts.ClosingJudgment closeKernelGeneration(Project project) {
+    private CodingRunDispatcher.ClosingJudgment closeKernelGeneration(Project project) {
         KernelClosingCriteria.KernelClosingResult closing =
                 kernelClosingCriteria.assess(project.getWorkspaceId());
         if (!closing.complete()) {
@@ -822,14 +805,27 @@ public class GenerationAppService {
                     + (closing.probePassed() ? "有响应" : "无响应")
                     + "——按完成判据继续修复后再收口");
         }
-        return CoderRunAttempts.ClosingJudgment.generation(KERNEL_CLOSING_SUMMARY);
+        return CodingRunDispatcher.ClosingJudgment.generation(KERNEL_CLOSING_SUMMARY);
     }
 
     /**
-     * 用户停止的中断现场（#359 生成取消）：入续跑重发作的「中断原因」——重跑
-     * 起手即知上次是用户叫停（非故障），从现状继续不重做。
+     * 首建点火位复位（#604 失败新语义）：终态失败/停止收口时清
+     * {@code generation_requested_at}——岔路口卡/确认按钮「首建未派发」呈现条件
+     * 复现，用户在点火入口重跑即恢复（成功收口不清：已生成，入口本就不在场）。
      */
-    static final String STOP_SCENE = "用户停止——在途 run 已按你的要求停止，已完成的进度都保留";
+    private void reopenFirstBuildRequest(Long projectId) {
+        try {
+            transactionTemplate.executeWithoutResult(status -> projectRepository.findById(projectId)
+                    .ifPresent(current -> {
+                        current.reopenFirstBuildRequest();
+                        projectRepository.save(current);
+                    }));
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 点火位复位失败（不反噬终态收口）：{}", projectId,
+                    e.toString());
+        }
+    }
 
     /**
      * 首 Demo 在途时意见轮的平台明示文案（#360）：入队即回执——用户面「说了没反应」

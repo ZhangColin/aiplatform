@@ -50,12 +50,10 @@ class ProfileSkillRepositorySupplierTest {
 
     @Test
     void given_assignments_when_skill_repositories_then_union_and_slot_scoped() {
-        // main 槽指派 tdd；executor 槽指派 code-review；designer 槽指派 visual-qa；
-        // subagent 槽指派 review-pack
+        // main 槽指派 tdd；executor 槽指派 code-review；designer 槽指派 visual-qa
         skillStore.assign(SkillSlot.MAIN, record(101, "tdd", "matt 包"));
         skillStore.assign(SkillSlot.EXECUTOR, record(202, "code-review", "matt 包"));
         skillStore.assign(SkillSlot.DESIGNER, record(404, "visual-qa", "设计包"));
-        skillStore.assign(SkillSlot.SUBAGENT, record(303, "review-pack", "superpowers 包"));
 
         ProfileSkillRepositorySupplier supplier = supplier();
         AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
@@ -79,11 +77,6 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(supplier.skillRepositoriesFor(AgentProfile.DESIGNER.key(), dev)).hasSize(1);
         assertThat(names(supplier.skillRepositoriesFor(AgentProfile.DESIGNER.key(), dev).get(0)))
                 .containsExactly("visual-qa");
-
-        // 子智能体槽视图（verify 键）＝subagent 槽库技能；不继承执行体面
-        assertThat(names(supplier.skillRepositoriesFor(ProfileSubagentSupplier.VERIFY_NAME, dev)
-                .get(0)))
-                .containsExactly("review-pack");
 
         // 无配置语境＝空集（无挂载即框架不注入 <available_skills>）
         assertThat(supplier.skillRepositoriesFor("naming", new AgentWorkspace.Local(null)))
@@ -119,26 +112,6 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(names(executorView)).containsExactly("tdd");
     }
 
-    // ---------- #260 subagent 槽一等化：子智能体键视图随指派增减（动态查库同款语义） ----------
-
-    @Test
-    void given_subagent_slot_assignment_changes_when_reread_child_view_then_reflects_latest() {
-        // 子智能体技能面＝verify 键视图（平台工厂按声明名取用）：指派即在面、
-        // 取消指派即退出——同一仓库实例重读（下一轮清单重建即生效，非固化快照）
-        skillStore.assign(SkillSlot.SUBAGENT, record(303, "review-pack", "superpowers 包"));
-
-        ProfileSkillRepositorySupplier supplier = supplier();
-        AgentSkillRepository childView = supplier
-                .skillRepositoriesFor(ProfileSubagentSupplier.VERIFY_NAME,
-                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
-                .get(0);
-
-        assertThat(names(childView)).containsExactly("review-pack");
-
-        skillStore.unassign(SkillSlot.SUBAGENT, 303);
-        assertThat(names(childView)).isEmpty();
-    }
-
     // ---------- 库技能同名覆盖内置（指派显式意图优先——顺序即框架覆盖语义） ----------
 
     @Test
@@ -160,11 +133,10 @@ class ProfileSkillRepositorySupplierTest {
 
     @Test
     void given_scripts_in_record_when_assembled_then_shell_slots_carry_resources_main_empty() {
-        // 同一技能四槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位）
+        // 同一技能三槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位）
         skillStore.assign(SkillSlot.MAIN, recordWithScripts(101, "tdd", "matt 包"));
         skillStore.assign(SkillSlot.EXECUTOR, recordWithScripts(102, "tdd", "matt 包"));
         skillStore.assign(SkillSlot.DESIGNER, recordWithScripts(104, "tdd", "设计包"));
-        skillStore.assign(SkillSlot.SUBAGENT, recordWithScripts(103, "tdd", "superpowers 包"));
 
         ProfileSkillRepositorySupplier supplier = supplier();
         AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
@@ -173,13 +145,6 @@ class ProfileSkillRepositorySupplierTest {
         AgentSkill executorSkill = supplier
                 .skillRepositoriesFor(AgentProfile.EXECUTOR.key(), dev).get(0).getSkill("tdd");
         assertThat(executorSkill.getResources())
-                .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
-
-        // subagent 槽（verify 白名单含跑验证命令的 shell）：同开
-        AgentSkill subagentSkill = supplier
-                .skillRepositoriesFor(ProfileSubagentSupplier.VERIFY_NAME, dev).get(0)
-                .getSkill("tdd");
-        assertThat(subagentSkill.getResources())
                 .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
 
         // main 槽（ProjectReadOnly 禁 shell）与 designer 槽（#289 ProjectDesign 禁

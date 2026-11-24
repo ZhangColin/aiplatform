@@ -8,15 +8,16 @@ import com.cartisan.core.domain.BaseEnum;
 
 /**
  * 平台侧智能体工具面正本（#252，ADR-0021 工具面可观测＋窄幅开关）：按职能槽位
- * （{@link AgentProfile} 稳定键；#352 起另有 {@code subagent} 槽——子智能体平台
- * 件经声明 allowlist 挂载、本枚举承载其类别与描述正本）列平台资产工具——名字即
- * 模型可见注册名（与 {@code ProfileToolkitSupplier} 装配注册同源，一致性由装配面
- * 测试钉死：装配注册集与枚举该槽位集合必须一致，改一头不改另一头测试即红）。
+ * （{@link AgentProfile} 稳定键）列平台资产工具——名字即模型可见注册名（与
+ * {@code ProfileToolkitSupplier} 装配注册同源，一致性由装配面测试钉死：装配
+ * 注册集与枚举该槽位集合必须一致，改一头不改另一头测试即红）。<b>#604 拆
+ * run 尝试体旧机制</b>：executor 槽（finish_edit/update_plan/自荐两件/构建轨
+ * 出图 gi 件）与 subagent 槽（report_verification）随旧执行协议与子智能体
+ * 委派一并退役——现存槽位＝main（主智能体）＋designer（设计执行体）。
  *
  * <p><b>骨架 / 增强</b>（ADR-0021：编排权不下放配置）：骨架＝编排链路工具
- * （问答、PRD 落库、计划、收口信号）＋项目事实只读件——结构性锁死不开放关停
- * （接口层拒绝，PRJ_036）；增强＝联网搜索 / 网页抓取（#252）＋构建轨出图件
- * （#545 generate_image，executor 槽）三件——窄幅可开关（存
+ * （问答、PRD 落库）＋项目事实只读件——结构性锁死不开放关停（接口层拒绝，
+ * PRJ_036）；增强＝联网搜索 / 网页抓取（#252）两件——窄幅可开关（存
  * {@code prj_agent_configs} 开关列，关即退出装配面）。harness 内建编码工具
  * （read_file / execute 等）不属本枚举——呈现口径经 {@code HarnessBuiltinTools}
  * 注册自省，同样不可开关。</p>
@@ -44,43 +45,16 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     PROPOSE_SEDIMENT_MAIN(15, "propose_sediment", "main", AgentToolKind.SKELETON,
             "沉淀物草稿自荐（需求案例/功能模块/业务规则沉淀待审——数据飞轮采集层，#460）"),
 
-    // ---------- executor 槽位（run 执行体：生成/更新 run 的执行侧，读写面） ----------
-
-    FINISH_EDIT(9, "finish_edit", "executor", AgentToolKind.SKELETON,
-            "更新收口结束工具（「要不要动系统」的判定面——编排链路）"),
-    UPDATE_PLAN(10, "update_plan", "executor", AgentToolKind.SKELETON,
-            "run 级步骤清单的全量快照（呈现面在部件映射表——编排链路）"),
-    PROPOSE_SKILL(11, "propose_skill", "executor", AgentToolKind.SKELETON,
-            "技能草稿自荐（验证过的编码模式沉淀待审——过程知识沉淀链）"),
-    PROPOSE_SEDIMENT(16, "propose_sediment", "executor", AgentToolKind.SKELETON,
-            "沉淀物草稿自荐（可复用功能模块/业务规则沉淀待审——数据飞轮采集层，#460）"),
-    // #545 构建轨出图件（ADR-0052 图片能力下放）：与 designer 槽 GENERATE_IMAGE
-    // 同名（模型面一个工具名）但类别＝增强件——run 执行体槽位挂载态受运营开关
-    // generate_image_enabled 管控（缺省开；关＝槽位不挂载、回无图现状）；
-    // 窄幅写口按增强件解析（enhancementByName），不被同名骨架件遮蔽
-    GENERATE_IMAGE_BUILD(17, "generate_image", "executor", AgentToolKind.ENHANCEMENT,
-            "演示数据配图（首屏 hero/关键实体图/空态美化，真实感反 placeholder；"
-                    + "落 public/ 根路径引用，少而精——不逐卡片配图；可关停，"
-                    + "关＝构建执行体不挂载本工具，#545 ADR-0052）"),
-
     // ---------- designer 槽位（设计执行体：设计过程的执行侧，写文件无 shell——#289） ----------
 
     GENERATE_IMAGE(13, "generate_image", "designer", AgentToolKind.SKELETON,
             "图片生成模型出位图设计稿（写实光影/插画氛围向；档位表落提示词层——文字排版"
-                    + "海报写 HTML，ADR-0026 不做代码级硬路由）"),
-
-    // ---------- subagent 槽位（子智能体：run 内委派位，verify 验证子智能体——#352） ----------
-
-    REPORT_VERIFICATION(14, "report_verification", "subagent", AgentToolKind.SKELETON,
-            "验证结果登记（三面逐项结果落平台事实——收尾卡验证统计的事实源；经声明 "
-                    + "allowlist 挂子级面）");
+                    + "海报写 HTML，ADR-0026 不做代码级硬路由）");
 
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */
     private final String name;
-    /** 所属职能槽位（AgentProfile 稳定键；subagent 槽平台件经声明面挂载、清单
-     * 呈现按名回解本枚举——#263 propose_skill 三槽位同名两词条：byName 首现件
-     * 仅作类别回解，两词条同为骨架、开关行为一致）。 */
+    /** 所属职能槽位（AgentProfile 稳定键；清单呈现按名回解本枚举）。 */
     private final String slot;
     private final AgentToolKind kind;
     private final String description;
@@ -122,11 +96,8 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     }
 
     /**
-     * 按注册名解析（REST 按名寻址腿；空/未知返回空）。跨槽位同名件（#263 起
-     * propose_skill 两词条、#460 起 propose_sediment 两词条）解析到声明序首件——
-     * 现消费面（子级清单类别回解）只读类别，同名件类别一致无歧义。注意：工具开关
-     * 窄幅写口须用 {@link #enhancementByName}——#545 起 generate_image 同名两词条
-     * 类别不同（designer 骨架／executor 增强），首件是骨架会把开关误判为锁死。
+     * 按注册名解析（REST 按名寻址腿；空/未知返回空）。注意：工具开关窄幅写口
+     * 须用 {@link #enhancementByName}——骨架件不可开关，开关写口只认增强件。
      */
     public static Optional<AgentTool> byName(String toolName) {
         if (toolName == null || toolName.isBlank()) {
@@ -138,9 +109,8 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     }
 
     /**
-     * 按注册名解析<strong>可开关的增强件</strong>（#545 窄幅写口专用）：同名多词条
-     * 时优先返回增强件（generate_image：designer 骨架件遮蔽不了 executor 增强件）；
-     * 同名件全无增强类别时返回声明序首件（交调用方按骨架锁死拒绝——与 byName 同效）。
+     * 按注册名解析<strong>可开关的增强件</strong>（窄幅写口专用）：只返回增强类别
+     * 件；无增强件返回声明序首件（交调用方按骨架锁死拒绝——与 byName 同效）。
      */
     public static Optional<AgentTool> enhancementByName(String toolName) {
         if (toolName == null || toolName.isBlank()) {

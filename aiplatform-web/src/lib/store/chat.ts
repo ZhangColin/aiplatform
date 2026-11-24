@@ -128,9 +128,6 @@ export type WorkClosing = {
    *  存量工作区与设计会话不携带。阻断形态（运营开关回滚）强制档修不完＝收口
    *  被拒，不会以带强制档违规形态出现在收尾卡。 */
   robustKitLint?: RobustKitLintClosing;
-  /** 产出证明判别标注（#420 空转片防呆）：可缺省——豁免收口（验证确认「能力已
-   *  存在」）与空转拒绝史（曾拒绝后补做收口）的如实呈现源；正常干活收口不携带。 */
-  proofOfOutput?: ProofOfOutputClosing;
   /** 已知缺陷清单（#427 整轨终验）：可缺省——修复预算耗尽时末轮终验 run 收尾卡
    *  携带（版本照成＋缺陷如实呈现，不粉饰「完成」）；通过与预算内有修复路径不携带。 */
   knownDefects?: KnownDefectsClosing;
@@ -140,16 +137,6 @@ export type WorkClosing = {
 export type KnownDefectsClosing = {
   /** 缺陷清单（项名＋证据/失败现场——verify 登记原样）。 */
   defects: { name: string; detail?: string }[];
-};
-
-/** 收尾卡产出证明判别标注事实（#420）：豁免依据／空转拒绝史（两者可并存）。 */
-export type ProofOfOutputClosing = {
-  /** 本场空转拒绝次数（曾被拒后补做/补验证收口——纠偏过程如实）。 */
-  idleRejections?: number;
-  /** 豁免收口（活已被前片干完、验证确认「能力已存在」的合法收口）。 */
-  exempted?: boolean;
-  /** 豁免依据（确认项名拼装的「验证确认」叙事）。 */
-  exemptionBasis?: string;
 };
 
 /** 收尾卡验证统计事实（#352；#424 增轮次预算用尽标注）：末轮三面验证聚合＋复验轮次
@@ -981,7 +968,6 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     drafts: toClosingDrafts(record.drafts),
     designLint: toDesignLint(record.designLint),
     robustKitLint: toRobustKitLint(record.robustKitLint),
-    proofOfOutput: toProofOfOutput(record.proofOfOutput),
     knownDefects: toKnownDefects(record.knownDefects),
   };
 }
@@ -1005,27 +991,6 @@ function toKnownDefects(raw: unknown): KnownDefectsClosing | undefined {
       : [];
   });
   return defects.length > 0 ? { defects } : undefined;
-}
-
-/**
- * proofOfOutput 载荷容错收窄（#420）：非对象或无任何有效事实（豁免/拒绝史俱缺）
- * 回落 undefined（不出坏行——判别标注随在场呈现）；豁免收口带依据缺省回落空串。
- */
-function toProofOfOutput(raw: unknown): ProofOfOutputClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  const idleRejections = typeof record.idleRejections === "number"
-    ? record.idleRejections : undefined;
-  const exempted = record.exempted === true;
-  if (idleRejections === undefined && !exempted) {
-    return undefined;
-  }
-  return {
-    idleRejections,
-    exempted: exempted || undefined,
-    exemptionBasis: typeof record.exemptionBasis === "string"
-      ? record.exemptionBasis : undefined,
-  };
 }
 
 /**

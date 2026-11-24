@@ -70,7 +70,7 @@ class AgentEventBridgeTest {
         AgentEventBridge bridge = bridge(events);
 
         bridge.emitRunFailed(projectStub(42L, 7L, null), "run-1",
-                CoderRunAttempts.trackFailureFace("8081 不可达（curl 退出码 7）"));
+                Map.of("error", "8081 不可达（curl 退出码 7）"));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
@@ -85,8 +85,7 @@ class AgentEventBridgeTest {
         EventsAppService events = mock(EventsAppService.class);
         AgentEventBridge bridge = bridge(events);
 
-        bridge.emitRunFailed(projectStub(42L, null, 9L), "run-2",
-                CoderRunAttempts.trackFailureFace(null));
+        bridge.emitRunFailed(projectStub(42L, null, 9L), "run-2", null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
@@ -101,7 +100,7 @@ class AgentEventBridgeTest {
         AgentEventBridge bridge = bridge(events);
 
         bridge.emitRunStopped(projectStub(42L, 7L, null), "run-3",
-                CoderRunAttempts.stoppedTrackFace());
+                Map.of("stopped", true));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);

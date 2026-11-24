@@ -368,83 +368,6 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_first_attempt_fails_when_fix_then_silent_retry_with_retry_prompt() {
-        Long projectId = persistedGeneratedProject("9904");
-        List<Runnable> tracks = givenTrackQueued();
-        // 知识命中在场（#466）：首试带前置注入块、重试不重注入的对照事实
-        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
-                        "开场前 2 小时内不可取消。")));
-        // 剧本（#84 事件序列断言）：首试中途错误（error 事件 + 异常上浮）；重试尝试
-        //（内部新 runId）真实客户端会再发 run-start 与部件，收口 run-finish
-        when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
-                            "prompt", command.prompt(), "role", "CODER")));
-                    sink.accept(scripted(AgentEventTypes.ERROR, command.runId(), Map.of(
-                            AgentEventTypes.ERROR_MESSAGE_FIELD, "修正尝试中断")));
-                    throw new IllegalStateException("修正尝试中断");
-                })
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
-                            "prompt", command.prompt(), "role", "CODER")));
-                    sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(), Map.of(
-                            AgentEventTypes.PART_TEXT_FIELD, "从中断处继续修正")));
-                    finishFixFacts.record(command.workspaceId(), true, "重试轮完成修正并收口");
-                    return new AgentReply(command.runId(), "修正完成");
-                });
-
-        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "修正首页布局", null);
-        tracks.remove(0).run();
-
-        // 失败自动静默重试（#82/#84 口径）：重试续作轨照走，用户面零中间信号——
-        // 无重试信号、无逐次 error（run 失败为唯一失败终态）
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).prompt())
-                .contains("错误现场：修正尝试中断")
-                .contains("进展现场（平台可观测事实）")
-                .contains("已累计用时")
-                .contains("已落盘文件变更 尚无")
-                // #466 一次切入一次注入既有语义：知识前置注入只进首试 prompt，重试不重注入
-                .doesNotContain("【平台知识库");
-        verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
-
-        // 用户面 run 身份 = 首试 runId 全程不变（#84）：重试不新发 run-start、
-        // 重试尝试的部件归一首试锚——工作消息只见正常生长；自检播报（#85）：收口
-        // 判据核验（finish_edit 事实）「检查中 → 通过」随正常收口出现
-        ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(4)).publishAgentEvent(types.capture(), payloads.capture());
-        assertThat(types.getAllValues())
-                .containsExactly(AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
-                        AgentEventTypes.PART_CHECK, AgentEventTypes.PART_CHECK);
-        assertThat(payloads.getAllValues()).allSatisfy(payload ->
-                assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(dispatch.runId()));
-        // 自检状态序：检查中 → 通过（首试死于 converse 中途、未进核验，恰一对）
-        assertThat(payloads.getAllValues().get(2))
-                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
-                        AgentEventTypes.PART_CHECK_STATE_CHECKING);
-        assertThat(payloads.getAllValues().get(3))
-                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
-                        AgentEventTypes.PART_CHECK_STATE_PASSED);
-
-        // 重试成功后轨道正常收工：下一场可再起跑
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
     void given_all_attempts_fail_when_fix_then_terminal_and_track_released() {
         Long projectId = persistedGeneratedProject("9905");
         List<Runnable> tracks = givenTrackQueued();
@@ -455,14 +378,13 @@ class IterationAppServiceTest {
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> attempts = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(attempts.capture(), any());
-        // 终态收口事件（#56）：run-failed 恰一次、锚该场 run 的用户面标识（首试
-        // runId——重试不换新锚，#84）——前端「重新修改」出口只认本事件（点击即恢复
-        // 出口重派链路，不被 PRJ_025 挡回）
+        verify(agentClient, times(1)).converse(attempts.capture(), any()); // #604 单发：一次尝试即终态
+        // 终态收口事件（#56）：run-failed 恰一次、锚该场 run 的用户面标识——前端
+        // 「重新修改」出口只认本事件（点击即恢复出口重派链路，不被 PRJ_025 挡回）
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
                 projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
                         && dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
-        // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
+        // 转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
     }
 
@@ -525,51 +447,45 @@ class IterationAppServiceTest {
 
     @Test
     void given_instant_terminal_failure_when_queued_opinions_then_no_redispatch_merged_into_recovery() {
-        // #477 重派上限（修正轨「转终态→重派→秒败」循环的治）：整场 run 全尝试
-        // llmMs=0（通道全死、未发生真实模型调用）的终态失败后不再续派排队意见——
-        // 排队残局并入终态账（恢复出口「继续更新」一次带走，意见零丢失），不形成
-        // 秒败循环；有真实模型工作的失败不受影响（排队合并续派口径不变）
+        // #477 重派上限（修正轨「转终态→重派→秒败」循环的治）的 #604 单发形态：整场
+        // run 全尝试 llmMs=0（通道全死、未发生真实模型调用）的终态失败后不再续派
+        // 排队意见——排队残局并入终态账（恢复出口「继续更新」一次带走，意见零丢失），
+        // 不形成秒败循环；有真实模型工作的失败不受影响（排队合并续派口径不变）
         Long projectId = persistedGeneratedProject("9907");
         List<Runnable> tracks = givenTrackQueued();
-        properties.setChannelInstantRetryMax(0); // 关免预算——直击预算烧尽口径
-        try {
-            AgentTurnFailure channelFail = new AgentTurnFailure(
-                    "智能体调用失败：Connection refused",
-                    new IllegalStateException("Connection refused"),
-                    List.of(), StageDurations.zero());
-            when(agentClient.converse(any(), any())).thenThrow(channelFail);
+        AgentTurnFailure channelFail = new AgentTurnFailure(
+                "智能体调用失败：Connection refused",
+                new IllegalStateException("Connection refused"),
+                List.of(), StageDurations.zero());
+        when(agentClient.converse(any(), any())).thenThrow(channelFail);
 
-            appService.startFixRun(projectId, "列表加筛选", null);
-            appService.startFixRun(projectId, "按钮改蓝色", null); // 在途排队
-            tracks.remove(0).run(); // 轨道执行：首场秒败×3 转终态
+        appService.startFixRun(projectId, "列表加筛选", null);
+        appService.startFixRun(projectId, "按钮改蓝色", null); // 在途排队
+        tracks.remove(0).run(); // 轨道执行：首场秒败转终态（单发一次尝试即收场）
 
-            // 首场即停：排队意见不再作为续派 run 入场（旧口径：合并续派再烧 3 次秒败）
-            verify(agentClient, times(3)).converse(any(), any());
-            verify(eventsAppService, times(1))
-                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        // 首场即停：排队意见不再作为续派 run 入场（旧口径：合并续派再烧秒败）
+        verify(agentClient, times(1)).converse(any(), any());
+        verify(eventsAppService, times(1))
+                .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
 
-            // 恢复出口可达且一次带走全部意见（首场＋排队）：通道恢复后「继续更新」
-            // 重派的交接物含两条意见原文（意见零丢失）
-            assertThat(appService.restartFixRun(projectId).runId()).isNotBlank();
-            AtomicBoolean channelRecovered = new AtomicBoolean(true);
-            doAnswer(invocation -> {
-                AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-                if (channelRecovered.get() && command.sessionId().startsWith("coder-")) {
-                    verifyRan(command);
-                    finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-                }
-                return new AgentReply(command.runId(), "已按意见修正");
-            }).when(agentClient).converse(any(), any());
-            tracks.remove(0).run();
-            ArgumentCaptor<AgentCommand> restarted = ArgumentCaptor.forClass(AgentCommand.class);
-            verify(agentClient, times(4)).converse(restarted.capture(), any());
-            assertThat(restarted.getAllValues().get(3).prompt())
-                    .contains("列表加筛选")
-                    .contains("按钮改蓝色");
-        }
-        finally {
-            properties.setChannelInstantRetryMax(3);
-        }
+        // 恢复出口可达且一次带走全部意见（首场＋排队）：通道恢复后「继续更新」
+        // 重派的交接物含两条意见原文（意见零丢失）
+        assertThat(appService.restartFixRun(projectId).runId()).isNotBlank();
+        AtomicBoolean channelRecovered = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (channelRecovered.get() && command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            }
+            return new AgentReply(command.runId(), "已按意见修正");
+        }).when(agentClient).converse(any(), any());
+        tracks.remove(0).run();
+        ArgumentCaptor<AgentCommand> restarted = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(restarted.capture(), any());
+        assertThat(restarted.getAllValues().get(1).prompt())
+                .contains("列表加筛选")
+                .contains("按钮改蓝色");
     }
 
     // ---------- 更新停止（#359 生成取消：失败账口径——终态账可达「继续更新」） ----------
@@ -1042,10 +958,10 @@ class IterationAppServiceTest {
     void given_fix_terminal_failure_when_restart_fix_then_same_handoff_redispatched() {
         Long projectId = persistedGeneratedProject("9913");
         List<Runnable> tracks = givenTrackQueued();
-        // 首场 3 次尝试全失败（超限转终态）；恢复轮收口成功
+        // 首场失败（#604 单发：一次尝试即超限转终态）；恢复轮收口成功
         IllegalStateException persistentFailure = new IllegalStateException("持续失败");
         when(agentClient.converse(any(), any()))
-                .thenThrow(persistentFailure, persistentFailure, persistentFailure)
+                .thenThrow(persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
                     if (command.sessionId().startsWith("coder-")) {
@@ -1057,7 +973,7 @@ class IterationAppServiceTest {
 
         appService.startFixRun(projectId, "把主色调改成绿色", "按意见把主色调改为绿");
         tracks.remove(0).run();
-        verify(agentClient, times(3)).converse(any(), any());
+        verify(agentClient, times(1)).converse(any(), any());
 
         // 恢复出口：重派修正 run——交接物沿用（意见清单 + 判定结果、同 coder 会话），
         // 响应 runId 即新 run 首试标识（与新 run 的链路锚，同 /generate 口径）
@@ -1066,8 +982,8 @@ class IterationAppServiceTest {
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(4)).converse(command.capture(), any());
-        AgentCommand redispatch = command.getAllValues().get(3);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        AgentCommand redispatch = command.getAllValues().get(1);
         assertThat(redispatch.prompt())
                 .isEqualTo(IterationAppService.kernelFixRunPrompt(
                         singleHandoff("把主色调改成绿色", "按意见把主色调改为绿")));
@@ -1131,23 +1047,23 @@ class IterationAppServiceTest {
 
         IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
         tracks.remove(0).run();
-        // 重派轨同样烧满 3 次尝试（全败）：第 7 次调用即重派首试
+        // 重派轨同样单发失败（#604 全败）：第 3 次调用即重派首试
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(9)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(6).prompt())
+        verify(agentClient, times(3)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(2).prompt())
                 .isEqualTo(IterationAppService.kernelFixRunPrompt(singleHandoff("第二次意见", null)));
-        assertThat(command.getAllValues().get(6).runId()).isEqualTo(restart.runId());
+        assertThat(command.getAllValues().get(2).runId()).isEqualTo(restart.runId());
     }
 
     @Test
     void given_terminal_failure_with_queued_continuation_when_track_settles_then_no_stale_recovery() {
-        // 首场超限但队列有排队意见：轨道合并续派而非收工——续派场成功即整轨收工，
+        // 首场失败但队列有排队意见：轨道合并续派而非收工——续派场成功即整轨收工，
         // 终态账不落（首场的失败不是可恢复面，排队合并那场才是末场事实）
         Long projectId = persistedGeneratedProject("9918");
         List<Runnable> tracks = givenTrackQueued();
         IllegalStateException persistentFailure = new IllegalStateException("持续失败");
         when(agentClient.converse(any(), any()))
-                .thenThrow(persistentFailure, persistentFailure, persistentFailure)
+                .thenThrow(persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
                     if (command.sessionId().startsWith("coder-")) {
@@ -1161,9 +1077,9 @@ class IterationAppServiceTest {
         assertThat(appService.startFixRun(projectId, "排队意见", null).queued()).isTrue();
         tracks.remove(0).run();
 
-        // 首场 3 败 + 合并续派 1 成；成功收工 → 无恢复面（首场超限不留陈账）
-        verify(agentClient, times(4)).converse(any(), any());
-        // 中途超限不是终态（#56）：首场烧满即续派合并场，全程不发 run-failed——
+        // 首场单发即败 + 合并续派 1 成；成功收工 → 无恢复面（首场失败不留陈账）
+        verify(agentClient, times(2)).converse(any(), any());
+        // 中途失败不是终态（#56）：首场即续派合并场，全程不发 run-failed——
         // 「重新修改」出口零闪现（轨道仍在途，出口本就会被 PRJ_025 挡回）
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         assertThatThrownBy(() -> appService.restartFixRun(projectId))

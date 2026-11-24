@@ -1130,7 +1130,7 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
     // 未登记的 run（无 CODER run-start 前置）：不失效
     expect(projects.fetchCount()).toBe(1);
 
-    // 起跑即失效（#222 四态投影回「生成中」——补产轮再派无对话面事件可搭）
+    // 起跑即失效（#222 生成态投影回「生成中」——收口观测直派无对话面事件可搭）
     dispatchAgentEvent(
       queryClient,
       {
@@ -1161,7 +1161,7 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
     queryClient.clear();
   });
 
-  it("coder run-failed → projects 域 active query 重拉（#222 四态投影回「生成中断」——「继续生成」出口由投影派生）", async () => {
+  it("coder run-failed → projects 域 active query 重拉（#222 终态收口在途标记已清——未生成的项目生成态投影回「从未生成」；#604 起失败不落投影）", async () => {
     useGenerationStore.setState({ generations: {} });
     const queryClient = new QueryClient();
     queryClient.setDefaultOptions({ queries: { retry: false } });
@@ -1359,7 +1359,7 @@ describe("bridge · designer 事件 → 直播卡生长＋收尾卡稿清单（#
           slice: { title: "首页主视觉", index: 1, total: 3 },
           startedAt: Date.parse("2026-10-06T08:00:00Z"),
         });
-        // 生成面不涉（designer 非编码 run——四态投影不漂）
+        // 生成面不涉（designer 非编码 run——生成态投影不漂）
         expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
         await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
       })

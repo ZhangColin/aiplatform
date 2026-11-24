@@ -52,7 +52,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileSkillRepositorySupplier;
-import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
 
 import io.agentscope.core.skill.AgentSkill;
 
@@ -673,11 +672,8 @@ class BackofficeSkillSeamTest {
         assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
                 .containsExactly("prd-writing");
 
-        // subagent 槽视图（缝按三槽同权供读侧/未来一等化接线）：指派后即反映、
-        // 不继承执行体面
-        signedPutAssignments("subagent", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
-        assertThat(assemblyFace(ProfileSubagentSupplier.VERIFY_NAME, dev))
-                .containsExactly("tdd");
+        // subagent 槽视图随 #604 退役：装配 supplier 不再发放该槽视图（委派机制
+        // 已拆）——本测试只钉 main/executor 两槽。
     }
 
     @Test

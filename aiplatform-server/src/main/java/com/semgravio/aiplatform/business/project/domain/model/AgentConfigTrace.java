@@ -7,7 +7,8 @@ import java.time.LocalDateTime;
  * 值快照＋操作者。旧值快照＝回滚依据——回滚＝把旧值写回（即一次新变更、留新痕，
  * 不做版本树，ADR-0021）。值面八件（systemPrompt、modelConfigKey、两工具开关、路由
  * 策略四件〔#354〕）全量留痕：每痕都是完整状态对，与 #252 工具开关变更共表共
- * 机制。
+ * 机制。决策时注入四件与 verify 自决开关的前后面已随 #604 退役（executor 装配键
+ * 旧中间件出局，留痕列经 V83 迁移拆除）。
  *
  * @param id                            留痕标识（TSID，写痕用例生成）
  * @param agentKey                      智能体稳定键（无 FK——留痕跨配置行存活）
@@ -28,7 +29,6 @@ import java.time.LocalDateTime;
  * @param oldFinalVerifyFixBudget       变更前整轨终验修复预算（#427；null＝代码缺省）
  * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
  *                                       缺省态恒 false＝闸关，#435）
- * @param oldProofOfOutputGateEnabled   变更前空转产出证明闸开关（#433；同上）
  * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
  * @param newSystemPrompt               变更后 systemPrompt（null＝本次清空回落）
  * @param newModelConfigKey                    变更后模型配置（null 同上）
@@ -45,25 +45,10 @@ import java.time.LocalDateTime;
  * @param newVerifyRoundBudget          变更后单场验证轮次预算（null＝清空回落代码缺省）
  * @param newFinalVerifyFixBudget       变更后整轨终验修复预算（null＝清空回落代码缺省）
  * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
- * @param newProofOfOutputGateEnabled   变更后空转产出证明闸开关（#433；同上）
  * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
- * @param oldDecisionHintsEnabled     变更前决策时注入总开关（#437；恒有值——缺省态恒
- *                                true＝注入开）
- * @param oldDecisionHintErrorStreak 变更前失败止损阈值（#437；null＝代码缺省）
- * @param oldDecisionHintStackCap    变更前微指令堆叠上限（#437；null＝代码缺省）
- * @param oldDecisionHintDisabled    变更前禁用集（#437；null＝全启用）
- * @param newDecisionHintsEnabled     变更后决策时注入总开关（#437；恒有值）
- * @param newDecisionHintErrorStreak 变更后失败止损阈值（#437；null＝清空回落代码缺省）
- * @param newDecisionHintStackCap    变更后微指令堆叠上限（#437；null＝清空回落代码缺省）
- * @param newDecisionHintDisabled    变更后禁用集（#437；null＝清空全启用）
- * @param oldVerifySelfDecisionEnabled 变更前 verify 自决开关（#442；恒有值——缺省态恒 true＝自决开）
- * @param newVerifySelfDecisionEnabled 变更后 verify 自决开关（#442；恒有值）
  * @param oldRobustLintBlockingEnabled 变更前基座 lint 强制档阻断开关（#541；恒有值——
  *                                       缺省态恒 false＝让路）
  * @param newRobustLintBlockingEnabled 变更后基座 lint 强制档阻断开关（#541；恒有值）
- * @param oldGenerateImageEnabled      变更前构建轨出图工具开关（#545；恒有值——缺省态恒
- *                                       true＝下放，设计执行体同名工具不读本列）
- * @param newGenerateImageEnabled      变更后构建轨出图工具开关（#545；恒有值）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -85,15 +70,8 @@ public record AgentConfigTrace(
         Integer oldVerifyRoundBudget,
         Integer oldFinalVerifyFixBudget,
         boolean oldVerificationPresenceGateEnabled,
-        boolean oldProofOfOutputGateEnabled,
         boolean oldFinalVerificationGateEnabled,
-        boolean oldDecisionHintsEnabled,
-        Integer oldDecisionHintErrorStreak,
-        Integer oldDecisionHintStackCap,
-        String oldDecisionHintDisabled,
-        boolean oldVerifySelfDecisionEnabled,
         boolean oldRobustLintBlockingEnabled,
-        boolean oldGenerateImageEnabled,
         String newSystemPrompt,
         String newModelConfigKey,
         boolean newWebSearchEnabled,
@@ -108,15 +86,8 @@ public record AgentConfigTrace(
         Integer newVerifyRoundBudget,
         Integer newFinalVerifyFixBudget,
         boolean newVerificationPresenceGateEnabled,
-        boolean newProofOfOutputGateEnabled,
         boolean newFinalVerificationGateEnabled,
-        boolean newDecisionHintsEnabled,
-        Integer newDecisionHintErrorStreak,
-        Integer newDecisionHintStackCap,
-        String newDecisionHintDisabled,
-        boolean newVerifySelfDecisionEnabled,
         boolean newRobustLintBlockingEnabled,
-        boolean newGenerateImageEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

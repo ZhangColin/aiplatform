@@ -61,8 +61,6 @@ class AgentscopeSkillStageSuppressionTest {
 
     private static final AgentToolkitSupplier TOOLKITS = (agentKey, workspace, toolSpec) -> new Toolkit();
 
-    private static final AgentSubagentSupplier SUBAGENTS = (agentKey, workspace) -> List.of();
-
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES = (agentKey, workspace) -> List.of();
 
     /** 桩模型串（构建期解析即注册工厂直构——无通道语境、不触网）。 */
@@ -77,10 +75,6 @@ class AgentscopeSkillStageSuppressionTest {
             return new EdgeModel(PROBE_MODEL, null);
         }
 
-            @Override
-            public EdgeModel subagentModel() {
-                return null; // 随父级（#424 缺省同执行体档）
-            }
     };
 
     /** 单技能桩仓库（a-only 形——resources 空；物化面照样无条件 createDirectories）。 */
@@ -149,7 +143,7 @@ class AgentscopeSkillStageSuppressionTest {
     private HarnessAgent buildMainReadOnlyAgent() {
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
-                (agentKey, workspace) -> List.of(new ProbeSkillRepository()), SUBAGENTS,
+                (agentKey, workspace) -> List.of(new ProbeSkillRepository()),
                 NO_MIDDLEWARES, EDGE_MODELS, new AgentscopeProperties(), null);
         return factory.obtain("platform-agent-363", "sys", PROBE_MODEL,
                 null, null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);

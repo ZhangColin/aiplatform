@@ -78,8 +78,6 @@ class AgentscopeCompactionOffloadSuppressionTest {
 
     private static final AgentSkillRepositorySupplier SKILL_REPOS = (agentKey, workspace) -> List.of();
 
-    private static final AgentSubagentSupplier SUBAGENTS = (agentKey, workspace) -> List.of();
-
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES = (agentKey, workspace) -> List.of();
 
     /** 桩模型串（构建期解析即注册工厂直构——无通道语境、不触网）。 */
@@ -93,11 +91,6 @@ class AgentscopeCompactionOffloadSuppressionTest {
         public EdgeModel precheckModel() {
             return new EdgeModel(PROBE_MODEL, null);
         }
-
-            @Override
-            public EdgeModel subagentModel() {
-                return null; // 随父级（#424 缺省同执行体档）
-            }
     };
 
     /** 恒定长文本响应桩（每次调用同一形状——主循环应答与压缩摘要调用无差别服务）。 */
@@ -164,7 +157,7 @@ class AgentscopeCompactionOffloadSuppressionTest {
         properties.setCompactionTriggerTokens(LOW_TRIGGER_TOKENS);
         InMemoryAgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS,
+                stateStore, TOOLKITS, SKILL_REPOS,
                 NO_MIDDLEWARES, EDGE_MODELS, properties, null);
         HarnessAgent agent = factory.obtain("platform-agent-379", "sys", PROBE_MODEL,
                 null, null, new AgentWorkspace.Local(workspaceRoot), "main", null);

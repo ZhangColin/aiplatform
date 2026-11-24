@@ -14,8 +14,8 @@ public final class AgentEventTypes {
     /**
      * 运行开始（runId 随 run 响应同值返回）。engine/model 之外携带智能体配置键
      * {@code agent}（业务侧 AgentProfile 的稳定键，如 executor；无配置语境的
-     * 一次性调用不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次：
-     * 编码 run 静默重试（#84）不新发——用户面 run 身份 = 首试 runId 全程不变。
+     * 一次性调用不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次
+     * （#604 起编码 run 单发无重试——用户面 run 身份全程不变）。
      */
     public static final String RUN_START = "run-start";
 
@@ -100,12 +100,15 @@ public final class AgentEventTypes {
     public static final String QUESTION_RAISED = "question-raised";
 
     /**
-     * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与
-     * 终态账（恢复出口的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；
-     * 生成轨道超限即终态。runId = 该场 run 的<b>用户面标识</b>（首试 runId——#84
-     * 静默重试：重试不换新锚、不新发 {@link #RUN_START}，中间尝试的内部 runId
-     * 不出用户面，事件序上 run-failed 前无任何失败/重试信号）。前端恢复出口
-     * （继续生成 / 重新修改）只认本事件——run 失败为唯一失败终态。
+     * 编码 run 终态失败收口（#56；#604 起生成/更新 run 单发无重试——失败/停止即
+     * 终态；设计轨重试耗尽即终态）：轨道层在
+     * 真终态落定点发射——修正轨道与终态账（恢复出口的重派依据）同事实点，排队
+     * 合并续派的中途超限不是终态、不发；生成轨道失败/停止即终态（#604 失败新
+     * 语义＝明确展示＋重跑即恢复，本事件即「明确展示」的发射点）。runId = 该场
+     * run 的<b>用户面标识</b>（生成/更新 run 单发：无静默重试；设计轨中间重试的
+     * 失败信号不出用户面——事件序上 run-failed 前无任何失败/重试信号）。前端恢复
+     * 出口（继续生成 / 继续更新）只认本事件——run 失败
+     * 为唯一失败终态。
      */
     public static final String RUN_FAILED = "run-failed";
 
@@ -319,6 +322,9 @@ public final class AgentEventTypes {
      * 补发以最后快照为准；不落库（当次会话定格留驻，刷新不回显）；步骤不设 ✗ 态
      * （失败留痕归动作部件与收尾卡）。契约与来源解耦——本部件不携带计划来源
      * （v1 run 执行体提示词直产；skill 线接入时再议标注）。
+     *
+     * <p><b>退役中（#604）</b>：生产方（update_plan 工具与部件映射）已随 run 尝试
+     * 体旧机制拆除；本类型与前端消费件随 #608 呈现面清场整体退役。</p>
      */
     public static final String PART_PLAN = "part-plan";
 
@@ -345,13 +351,13 @@ public final class AgentEventTypes {
 
     /**
      * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的
-     * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成 = 8081
-     * 探活、更新 = finish_edit 收口事实），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、
-     * 落定发 {@link #PART_CHECK_STATE_PASSED}/{@link #PART_CHECK_STATE_FAILED}。静默重试
-     * 同构口径（#84）：尝试间核验未过不发 failed——部件停在 checking（重试信号不外泄，
-     * 重复 checking 幂等）；failed 仅在末次尝试未过（超限转终态）时发，与
-     * {@link #RUN_FAILED} 同窗口到达。状态终值 = 探活结果，可被收尾统计消费（#88
-     * 轮末统计行）。
+     * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成/更新 =
+     * build 过＋8081 探活双件），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、
+     * 落定发 {@link #PART_CHECK_STATE_PASSED}/{@link #PART_CHECK_STATE_FAILED}。
+     * 生成/更新 run 单发（#604）：核验未过即发 failed，与 {@link #RUN_FAILED} 同
+     * 窗口到达；设计座重试环尝试间核验未过不发 failed——部件停在 checking（重试
+     * 信号不外泄，重复 checking 幂等），failed 仅在末次尝试未过时发。状态终值 =
+     * 探活结果，可被收尾统计消费（#88 轮末统计行）。
      */
     public static final String PART_CHECK = "part-check";
 
@@ -376,7 +382,8 @@ public final class AgentEventTypes {
 
     // part-hint（#437 决策时微指令的用户面部件）2026-11-12 退役：微指令是模型面
     // 指引、给用户看只添噪（生产实案同一提示每迭代重注刷屏），注入观测走
-    // DecisionHintMiddleware 的 INFO 日志。类型与常量整体摘除——SSE 事件面不再
+    // DecisionHintMiddleware 的 INFO 日志（该中间件本体随 #604 run 尝试体旧机制
+    // 一并退役）。类型与常量整体摘除——SSE 事件面不再
     // 有该事件，历史存量事件前端按未知类型忽略。
 
     private AgentEventTypes() {

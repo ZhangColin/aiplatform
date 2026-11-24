@@ -62,7 +62,7 @@ public class AgentscopeProperties {
     /**
      * 模型流断流自动重试次数上界（含首试；#321）。单条模型流遇可重试错误（HTTP
      * 429/5xx，框架 {@code ExecutionConfig.RETRYABLE_ERRORS} 分类）在流层有限次
-     * 自动重试接续，耗尽才上抛进外层尝试环（CoderRunAttempts 维持最后防线）；1 =
+     * 自动重试接续，耗尽才上抛进外层尝试环（CodingRunDispatcher 维持最后防线）；1 =
      * 关闭流层重试。缺省 3 = 首试 + 2 次重试。平台层独占流层重试（框架内建缺省
      * 已在 resolve 时关闭，见工厂 innerRetryDisabledOptions——两层叠加会让次数
      * 语义不可控）。已发块后的失败不重试（重订阅重放已消费块会让下游累积重复

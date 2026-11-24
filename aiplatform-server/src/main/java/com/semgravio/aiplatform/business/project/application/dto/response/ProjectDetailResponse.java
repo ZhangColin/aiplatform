@@ -29,11 +29,11 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
  * @param prdProducedAt       PRD 产出时点（PRD 文档面滑出判据；NULL = 闲聊期——对话占
  *                            满全宽、右栏未滑出）
  * @param generatedAt         首次生成时点（run 成功收口单向置位；NULL = 未生成过——
- *                            生成经确认门触发或失败重发、「Demo 确认门」不可用的推导口径）
- * @param generationState     生成态四态投影（#222：轨道表＋generated_at＋在途标记
- *                            派生——NEVER_GENERATED / GENERATING / INTERRUPTED /
- *                            GENERATED；与 SSE 会话态无关，刷新/回访后档位仍正确，
- *                            前端「继续生成」出口挂中端口径）
+ *                            含首建未起跑、失败/停止后待重跑）
+ * @param generationState     生成态投影（#222；#604 四态归一：generated_at＋在途标记
+ *                            派生——NEVER_GENERATED / GENERATING / GENERATED 三档，
+ *                            无「生成中断」档〔失败不落投影，只经 run-failed 事件在
+ *                            会话内呈现〕；与 SSE 会话态无关，刷新/回访后档位仍正确）
  * @param generationStateName 生成态名（#186 枚举出口配 *Name，消费端零映射）
  * @param activeOrder         未终结订单摘要（#28：无 = null——锁定式矩阵的推导输入，
  *                            订单存在即冻结迭代；跨 BC 软引用）

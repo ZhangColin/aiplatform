@@ -16,7 +16,6 @@ import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import io.agentscope.harness.agent.middleware.HarnessSkillMiddleware;
-import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,16 +37,12 @@ import org.springframework.stereotype.Component;
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（memory：源码包
  * 是交付物，记忆文件不进包）——工作区上下文（AGENTS.md 等）与
- * workspace/tools.json 读取照常，经容器文件面即项目事实；subagents 委派位在此
- * 开启（#95 挂载：声明经 {@link AgentSubagentSupplier} 取得；#260 装配一等化：
- * 声明转平台子智能体工厂构建——技能面按子智能体键接 subagent 槽位装配视图、
- * 容器文件面同父级，隔离根落位平台目录下进非交付目录集），只读面在分支处单独
- * 关闭；
+ * workspace/tools.json 读取照常，经容器文件面即项目事实；
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
  * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具
  * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）；
  * {@link AgentWorkspace.ProjectDesign ProjectDesign} 项目工作区设计面（#289
- * 设计执行体姿态，ADR-0025 无 shell）——文件工具保留、另关内核 shell 与委派
+ * 设计执行体姿态，ADR-0025 无 shell）——文件工具保留、另关内核 shell
  * （写文件件在、命令执行结构性不存在）；
  * {@link AgentWorkspace.ProjectKernel ProjectKernel} 项目工作区生成内核形态
  * （#595 内核装配，ADR-0054）——容器/内脏关/memory 关同 ProjectDev，提示词＝
@@ -55,7 +50,9 @@ import org.springframework.stereotype.Component;
  * 提示词被结构拒绝）、工具面＝恰四件（{@link KernelTools}）、循环五条语义结构性
  * 挂载（#596 {@link KernelLoopSemantics}）、不挂技能、不挂子智能体委派；会话状态
  * 存储、(userId,sessionId) 串行、内核重试关停、上下文压缩全部沿用现有装配
- * （一行不改）。</p>
+ * （一行不改）。<b>子智能体委派面（#95/#260/#424）已随 #604 拆除</b>——
+ * ProfileSubagentSupplier 与 AgentSubagentSupplier SPI 一并删除，全形态
+ * disableSubagents() 保留（结构性关死框架自带委派位，防升级后框架内置件回归）。</p>
  *
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
@@ -77,7 +74,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         HarnessAgent build(String name, String sysPrompt, String modelString,
                 ModelChannel modelChannel, ModelCandidateQueue modelQueue,
                 EdgeModelSupplier.EdgeModel compaction,
-                EdgeModelSupplier.EdgeModel subagent, AgentWorkspace workspace, String agentKey,
+                AgentWorkspace workspace, String agentKey,
                 String toolSpec);
     }
 
@@ -103,15 +100,15 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
-            AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
+            AgentMiddlewareSupplier middlewareSupplier,
             EdgeModelSupplier edgeModels, AgentscopeProperties properties,
             ModelSwitchTraceSink switchTraceSink) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel, modelQueue,
-                compaction, subagent, workspace, agentKey, toolSpec) ->
-                buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
+                compaction, workspace, agentKey, toolSpec) ->
+                buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier,
                         middlewareSupplier, switchTraceSink,
                         name, sysPrompt, modelString, modelChannel, modelQueue, compaction,
-                        subagent, workspace, agentKey, toolSpec, properties),
+                        workspace, agentKey, toolSpec, properties),
                 edgeModels, switchTraceSink);
     }
 
@@ -135,9 +132,6 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 压缩配置随装配解析（#366 边缘点收编：compaction 配置库值优先缺省 → 解析
         // 单点，每次 obtain 动态查——后台改档下一轮命令构建即生效）
         EdgeModelSupplier.EdgeModel compaction = edgeModels.compactionModel();
-        // 委派子智能体配置随装配解析（#424 片轻验）：null＝随父级（执行体生效档
-        // ——含路由升档），非空即独立档；同入实例缓存键指纹（改档即新实例）
-        EdgeModelSupplier.EdgeModel subagent = edgeModels.subagentModel();
         // sysPrompt/workspace/agentKey/toolSpec 明文入键（不用 hashCode：碰撞会把不同
         // 人格/工作区/工具面的 agent 当同规格静默复用）；toolSpec 是工具面规格
         // （#252 增强工具开关）：工具集构建时固化（Toolkit 静态注册、无技能线的
@@ -146,18 +140,17 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 「改配置即生效、进行中 run 不定格」。#557 起队列形优先：modelQueue 非
         // 空时整队列指纹（任一候选变＝新实例——failover 面对全队列成立），双字段
         // 形（modelChannel.fingerprint()）为无队列测试形保留；
-        // 压缩配置同入指纹（#366）：改压缩档即新实例；子智能体配置同律（#424）
+        // 压缩配置同入指纹（#366）：改压缩档即新实例
         String channelFingerprint = modelQueue != null ? modelQueue.fingerprint()
                 : (modelChannel == null ? "" : modelChannel.fingerprint());
         String key = name + "|" + modelString + "|" + channelFingerprint + "|"
                 + sysPrompt + "|" + workspace.identity()
                 + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec)
-                // 边缘配置（压缩/子智能体）整队列指纹：#557 队列化后任一候选变＝新实例
-                + "|cx=" + compaction.queue().fingerprint()
-                + "|sg=" + (subagent == null ? "" : subagent.queue().fingerprint());
+                // 边缘配置（压缩）整队列指纹：#557 队列化后任一候选变＝新实例
+                + "|cx=" + compaction.queue().fingerprint();
         return agents.computeIfAbsent(key,
                 k -> builder.build(name, sysPrompt, modelString, modelChannel, modelQueue,
-                        compaction, subagent, workspace, agentKey, toolSpec));
+                        compaction, workspace, agentKey, toolSpec));
     }
 
     /**
@@ -203,11 +196,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
-            AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
+            AgentMiddlewareSupplier middlewareSupplier,
             ModelSwitchTraceSink switchTraceSink,
             String name, String sysPrompt, String modelString, ModelChannel modelChannel,
             ModelCandidateQueue modelQueue,
-            EdgeModelSupplier.EdgeModel compaction, EdgeModelSupplier.EdgeModel subagent,
+            EdgeModelSupplier.EdgeModel compaction,
             AgentWorkspace workspace, String agentKey,
             String toolSpec, AgentscopeProperties properties) {
         boolean kernelForm = workspace instanceof AgentWorkspace.ProjectKernel;
@@ -238,11 +231,6 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 : streamLayer(
                         ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
                         modelString, vendorOf(modelChannel), properties);
-        // 委派子智能体配置（#424 片轻验）：覆盖档独立解析同款流层包装（计量外圈＋
-        // 断流重试同构；#557 起整队列 failover 同构）；null＝随父级实例（缺省同
-        // 执行体档——含路由升档，计量边界连续的既有口径不变）
-        Model subagentModel = subagent == null ? model
-                : failoverLayer(subagent.queue(), properties, switchTraceSink);
         // 项目工作区容器文件面（ProjectDev/ProjectReadOnly/ProjectDesign/ProjectKernel 共用；
         // 子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
@@ -305,16 +293,6 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         List<MiddlewareBase> platformMiddlewares =
                 middlewareSupplier.middlewaresFor(agentKey, workspace);
         platformMiddlewares.forEach(builder::middleware);
-        // 委派位（#95 挂载 / #260 装配一等化）：声明转平台子智能体工厂（框架 2.0.1
-        // declared 工厂只继承父级技能仓库，子智能体槽位视图接不进去——见工厂方法
-        // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>。
-        // 内核形态（#595）结构性跳过——「不挂子智能体委派」不靠业务供应商返回空集兑现
-        if (!kernelForm) {
-            subagentSupplier.subagentsFor(agentKey, workspace)
-                    .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
-                            workspace, containerFs, model, subagentModel, toolkit, toolkitSupplier,
-                            stateStore, skillRepositorySupplier, platformMiddlewares)));
-        }
         // 内核循环五条语义（#596，ADR-0054／#590 最终修订）结构性挂载：一轮不调工具
         // 即结束（框架原生兑现）、截断/空回复＝轮次结束＋收尾如实告知原因、同参重复
         // 3/5/8 只提醒不拦截、到护栏上限关工具＋如实汇报——仅内核形态挂载，旧形态循环
@@ -611,152 +589,6 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
             return delegate.callAsync(param);
         }
-    }
-
-    /**
-     * 子智能体构建工厂（#260 subagent 槽装配一等化——撤哨兵接真视图）：业务侧声明
-     * 携带 WHAT（名/描述/正文/工具 allowlist/步数），平台不变式在此兑现 HOW——计量
-     * 模型同实例、状态存储同库、记忆关闭（记忆不进包）、容器文件面同父级、无工作区
-     * 技能、pending tool 恢复开（#431——子会话槽位常驻，中断遗留的无结果 tool_use
-     * 续跑即炸 IllegalStateException）；<b>技能面＝按子智能体键取装配视图</b>（{@link
-     * AgentSkillRepositorySupplier#skillRepositoriesFor}——subagent 槽动态查库视图，
-     * 指派/启停变更子智能体下一轮清单重建即生效、进行中 run 不定格，ADR-0021 语义
-     * 与主装配同款）。
-     *
-     * <p>为何不走框架声明直配（{@code Builder.subagent(decl)}）：2.0.1 declared 工厂
-     * 把<b>父级</b>技能仓库实例原样继承给子智能体、声明 {@code skills} 只做静态名
-     * 过滤——无「子智能体自带仓库」通路，槽位视图接不进去（上游 {@code
-     * SubagentDeclaration.skillRepositories} 未发布）。自定义工厂路径的两处代价记录
-     * 在案：条目描述退化为名（2.0.1 {@code subagentFactory(name, factory)} 无描述参
-     * ——路由由执行体工作协议点名 agent_id 承担，框架带描述参版本发布后可回归）；
-     * 框架子智能体上下文段不随行（正文自含角色与回交纪律，通用英文段不复制以免
-     * 跟版漂移）。{@code asLeafSubagent()} 包私有不可及，公开等价面 {@code
-     * disableSubagents()} 封死子智能体再委派。</p>
-     *
-     * <p>容器文件面显式同父级：2.0.1 declared 工厂对 ISOLATED 子智能体不继承
-     * {@code abstractFilesystem}（子级回落宿主机本地缺省——读代码/报告落盘与
-     * {@code execute} 跑测试分裂在两个文件面）；本工厂给子智能体同一容器面，读/写/
-     * 命令一致落项目 dev 容器，技能脚本物化（hasShell 槽位）同面可跑。隔离根＝父级
-     * 工作区下 {@code agents/<name>/workspace/}（框架 ISOLATED 布局同款路径演算，
-     * 已进非交付目录集——报告写隔离根不脏交付面）。</p>
-     *
-     * <p><b>子级工具面（#263 自荐三槽位齐开）</b>：声明白名单治理的（父级继承 ∪
-     * 工具供应商按子智能体键发放的视图 ∪ 框架 build() 注册的内置件——后者在合并
-     * 之后整体注册，#266 起构建后按声明后置再滤一道，构建收口后子级工具面 ⊆ 声明
-     * ［运行时另挂的仅技能装载件 load_skill_through_path——中间件每轮重挂，归技能
-     * 面治理非工具面声明］）——同件子键视图后写胜出（工具实例携带血统槽位：继承的
-     * propose_skill 是执行体槽实例，子键视图覆写为 subagent 槽实例，草稿血统不串槽）。
-     * 白名单摘名即退出子级面（视图自带也绕不过声明），镜像技能仓库的子键路由先例。</p>
-     */
-    static Function<String, Agent> subagentFactory(
-            SubagentDeclaration declaration, AgentWorkspace workspace,
-            DockerExecFilesystem containerFs, Model parentModel, Model subagentModel,
-            Toolkit parentToolkit,
-            AgentToolkitSupplier toolkitSupplier, AgentStateStore stateStore,
-            AgentSkillRepositorySupplier skillRepositorySupplier,
-            List<MiddlewareBase> platformMiddlewares) {
-        List<AgentSkillRepository> childSkills =
-                skillRepositorySupplier.skillRepositoriesFor(declaration.getName(), workspace);
-        Toolkit childToolkit = childToolkit(parentToolkit, declaration, workspace,
-                toolkitSupplier);
-        java.nio.file.Path isolatedRoot = containerFs != null
-                ? java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT)
-                        .resolve("agents").resolve(declaration.getName()).resolve("workspace")
-                : null;
-        // 注册键即声明名（Function 入参恒同名），构建只认声明——单声明单工厂；
-        // 子智能体模型＝覆盖档（#424：调用侧 buildAgent 已把无覆盖归一为父级实例，
-        // 此处恒非空——parentModel 仅作参数形占位）
-        return name -> {
-            HarnessAgent.Builder sub = HarnessAgent.builder()
-                    .name(declaration.getName())
-                    .description(declaration.getDescription())
-                    .model(subagentModel)
-                    .toolkit(childToolkit)
-                    .defaultSessionId(declaration.getName())
-                    .maxIters(declaration.getSteps())
-                    .sysPrompt(declaration.getInlineAgentsBody())
-                    // 子智能体不委派（框架 asLeafSubagent 包私有的公开等价面）
-                    .disableSubagents()
-                    .disableDefaultWorkspaceSkills()
-                    // pending tool 恢复开（#431）：故障面正在子级——子级同款开启
-                    // （根因与机制见 buildAgent 处注释）
-                    .enablePendingToolRecovery(true)
-                    // 会话誊本写面关停（#553，同主装配——机制与依据见 buildAgent 处注释）
-                    .disableTranscript()
-                    // 内层重试关闭·内核旋钮（#555 / ADR-0053 ①，同主装配——机制与
-                    // 修法见 buildAgent 处注释）
-                    .maxRetries(1)
-                    .stateStore(stateStore);
-            if (isolatedRoot != null) {
-                sub.workspace(isolatedRoot).abstractFilesystem(containerFs);
-            }
-            // 记忆同父级项目面口径关闭（记忆不进包；压缩链不走子智能体）
-            sub.disableMemoryHooks().disableMemoryTools();
-            childSkills.forEach(sub::skillRepository);
-            // 平台中间件显式同挂（框架对 HarnessRuntimeMiddleware 不随拷贝传播）
-            platformMiddlewares.forEach(sub::middleware);
-            HarnessAgent child = sub.build();
-            // #266 构建后置收口：框架 build() 在子级工具面合并之后整体注册自带件
-            // （内核文件面含 edit_file、wait_async_results、未来版 WebTools）——内置
-            // 件同受声明 allowlist 治理（镜像 realignBuiltinWebTools 后置校正先例，
-            // build() 之后才是完整事实面；技能装载件 load_skill_through_path 由中间
-            // 件每轮运行时挂载，不在此处、不受影响）
-            stripUndeclared(child.getToolkit(), declaration.getTools());
-            // #482：内置等待屏障件 schema 覆写（声明放行即在面——同主装配口径）
-            relaxWaitBarrierTimeoutSchema(child.getToolkit());
-            // #363：容器面同款抑制——子级隔离根同样是容器路径（物化面纯宿主 NIO，
-            // 见 suppressHostSkillStaging）；Local 姿态不抑制
-            if (isolatedRoot != null) {
-                suppressHostSkillStaging(child);
-            }
-            return child;
-        };
-    }
-
-    /**
-     * 工具 allowlist 过滤（框架 declared 工厂同款语义）：非空 allowlist 只留列名件、
-     * 空即全保留；在副本上摘除（父级工具集不动）。
-     */
-    private static Toolkit allowlistedToolkit(Toolkit parentToolkit, List<String> allowlist) {
-        Toolkit toolkit = parentToolkit.copy();
-        stripUndeclared(toolkit, allowlist);
-        return toolkit;
-    }
-
-    /** 就地摘除非列名件（声明白名单机械半边，两处消费：合并前副本＋#266 构建后收口）。 */
-    private static void stripUndeclared(Toolkit toolkit, List<String> allowlist) {
-        if (allowlist == null || allowlist.isEmpty()) {
-            return;
-        }
-        toolkit.getToolNames().stream()
-                .filter(toolName -> !allows(allowlist, toolName))
-                .toList()
-                .forEach(toolkit::removeTool);
-    }
-
-    /**
-     * 子级工具面（#263 自荐三槽位齐开）：声明白名单治理的（父级继承 ∪ 工具供应商
-     * 按子智能体键发放的视图）。子键视图件经白名单放行后<b>后写胜出</b>注册——
-     * 工具实例携带血统槽位（继承的 propose_skill 是执行体槽实例，子键视图覆写为
-     * subagent 槽实例）；白名单摘名即退出子级面（视图自带也绕不过声明治理）。
-     * toolSpec 传 null：子智能体无运营配置行，且子键视图只发骨架件（无开关件）。
-     */
-    private static Toolkit childToolkit(Toolkit parentToolkit, SubagentDeclaration declaration,
-            AgentWorkspace workspace, AgentToolkitSupplier toolkitSupplier) {
-        List<String> allowlist = declaration.getTools();
-        Toolkit toolkit = allowlistedToolkit(parentToolkit, allowlist);
-        Toolkit ownView = toolkitSupplier.toolkitFor(declaration.getName(), workspace, null);
-        for (String name : ownView.getToolNames()) {
-            if (allows(allowlist, name)) {
-                toolkit.registerAgentTool(ownView.getTool(name));
-            }
-        }
-        return toolkit;
-    }
-
-    /** 声明白名单判定（同款语义单点）：缺省/空＝全放行，非空＝只放行列名件。 */
-    private static boolean allows(List<String> allowlist, String toolName) {
-        return allowlist == null || allowlist.isEmpty() || allowlist.contains(toolName);
     }
 
     /**

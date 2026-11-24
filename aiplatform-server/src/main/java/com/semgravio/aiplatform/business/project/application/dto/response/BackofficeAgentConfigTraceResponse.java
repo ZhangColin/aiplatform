@@ -44,10 +44,8 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
  * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
  *                          缺省态恒 false＝闸关，#435）
- * @param oldProofOfOutputGateEnabled 变更前空转产出证明闸开关（#433；同上）
  * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
  * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
- * @param newProofOfOutputGateEnabled 变更后空转产出证明闸开关（#433；同上）
  * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
@@ -85,24 +83,10 @@ public record BackofficeAgentConfigTraceResponse(
         Integer oldFinalVerifyFixBudget,
         @Schema(description = "变更前验证在场闸开关（#433；恒有值——缺省态恒 false＝闸关，#435）")
         boolean oldVerificationPresenceGateEnabled,
-        @Schema(description = "变更前空转产出证明闸开关（#433；恒有值）")
-        boolean oldProofOfOutputGateEnabled,
         @Schema(description = "变更前整轨终验拦「生成完成」开关（#433；恒有值）")
         boolean oldFinalVerificationGateEnabled,
-        @Schema(description = "变更前决策时注入总开关（#437；恒有值——缺省态恒 true＝注入开）")
-        boolean oldDecisionHintsEnabled,
-        @Schema(description = "变更前失败止损阈值（#437；null＝此前即代码缺省）")
-        Integer oldDecisionHintErrorStreak,
-        @Schema(description = "变更前微指令堆叠上限（#437；null＝此前即代码缺省）")
-        Integer oldDecisionHintStackCap,
-        @Schema(description = "变更前禁用集（#437 存储形逗号接键；null＝此前即全启用；空串＝全启用显式形）")
-        String oldDecisionHintDisabled,
-        @Schema(description = "变更前 verify 自决开关（#442；恒有值——缺省态恒 true＝自决开）")
-        boolean oldVerifySelfDecisionEnabled,
         @Schema(description = "变更前基座 lint 强制档阻断开关（#541；恒有值——缺省态恒 false＝让路）")
         boolean oldRobustLintBlockingEnabled,
-        @Schema(description = "变更前构建轨出图工具开关（#545；恒有值——缺省态恒 true＝下放）")
-        boolean oldGenerateImageEnabled,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型配置（null＝本次清空回落）")
@@ -132,24 +116,10 @@ public record BackofficeAgentConfigTraceResponse(
         Integer newFinalVerifyFixBudget,
         @Schema(description = "变更后验证在场闸开关（#433；恒有值）")
         boolean newVerificationPresenceGateEnabled,
-        @Schema(description = "变更后空转产出证明闸开关（#433；恒有值）")
-        boolean newProofOfOutputGateEnabled,
         @Schema(description = "变更后整轨终验拦「生成完成」开关（#433；恒有值）")
         boolean newFinalVerificationGateEnabled,
-        @Schema(description = "变更后决策时注入总开关（#437；恒有值）")
-        boolean newDecisionHintsEnabled,
-        @Schema(description = "变更后失败止损阈值（#437；null＝本次清空回落代码缺省）")
-        Integer newDecisionHintErrorStreak,
-        @Schema(description = "变更后微指令堆叠上限（#437；null＝本次清空回落代码缺省）")
-        Integer newDecisionHintStackCap,
-        @Schema(description = "变更后禁用集（#437 存储形逗号接键；null＝本次清空全启用）")
-        String newDecisionHintDisabled,
-        @Schema(description = "变更后 verify 自决开关（#442；恒有值）")
-        boolean newVerifySelfDecisionEnabled,
         @Schema(description = "变更后基座 lint 强制档阻断开关（#541；恒有值）")
         boolean newRobustLintBlockingEnabled,
-        @Schema(description = "变更后构建轨出图工具开关（#545；恒有值——经工具面窄幅写口变更）")
-        boolean newGenerateImageEnabled,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -167,12 +137,9 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldRoutingFileCountSignalEnabled(), trace.oldRoutingSizeLabelSignalEnabled(),
                 trace.oldVerifyModelConfigKey(), trace.oldVerifyRoundBudget(),
                 trace.oldFinalVerifyFixBudget(),
-                trace.oldVerificationPresenceGateEnabled(), trace.oldProofOfOutputGateEnabled(),
+                trace.oldVerificationPresenceGateEnabled(),
                 trace.oldFinalVerificationGateEnabled(),
-                trace.oldDecisionHintsEnabled(), trace.oldDecisionHintErrorStreak(),
-                trace.oldDecisionHintStackCap(), trace.oldDecisionHintDisabled(),
-                trace.oldVerifySelfDecisionEnabled(), trace.oldRobustLintBlockingEnabled(),
-                trace.oldGenerateImageEnabled(),
+                trace.oldRobustLintBlockingEnabled(),
                 trace.newSystemPrompt(), trace.newModelConfigKey(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelConfigKey(),
@@ -180,12 +147,9 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.newRoutingFileCountSignalEnabled(), trace.newRoutingSizeLabelSignalEnabled(),
                 trace.newVerifyModelConfigKey(), trace.newVerifyRoundBudget(),
                 trace.newFinalVerifyFixBudget(),
-                trace.newVerificationPresenceGateEnabled(), trace.newProofOfOutputGateEnabled(),
+                trace.newVerificationPresenceGateEnabled(),
                 trace.newFinalVerificationGateEnabled(),
-                trace.newDecisionHintsEnabled(), trace.newDecisionHintErrorStreak(),
-                trace.newDecisionHintStackCap(), trace.newDecisionHintDisabled(),
-                trace.newVerifySelfDecisionEnabled(), trace.newRobustLintBlockingEnabled(),
-                trace.newGenerateImageEnabled(),
+                trace.newRobustLintBlockingEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

@@ -18,7 +18,7 @@ import reactor.util.retry.Retry;
 /**
  * 模型流层断流自动重试（#321）＋单条流总时长上限（#322）：包一层 {@link Model}，
  * 单条模型流遇可重试错误（HTTP 429/5xx）时有限次自动重试接续——重发同一请求，
- * 失败才上抛进外层尝试环（{@code CoderRunAttempts} 维持最后防线）；非可重试错误
+ * 失败才上抛进外层尝试环（{@code CodingRunDispatcher} 维持最后防线）；非可重试错误
  * （4xx 业务错）不重试、原样上抛（重试面不吞真错误）。
  *
  * <p><b>错误分类＝接线框架既有接口</b>：{@link ExecutionConfig#RETRYABLE_ERRORS}

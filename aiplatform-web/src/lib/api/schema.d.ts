@@ -3346,6 +3346,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/flywheel-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 飞轮三个数统计（按项目分页＋分组汇总）
+         * @description 只看趋势、不打分不设目标（#643）。每个项目一行：projectId、projectName（项目名快照，取最新提炼记录，无记录回落当前项目名）、modificationRounds（修改轮数＝第一次生成之后的用户面版本 v2、v3……条数，取提炼处理记录里版本号大于 1 的条数）、missedRounds（没做对轮数＝其中判定「需求写明了但没做对」的轮数，同一轮多条只算一轮）、hitCount（命中次数＝含命中条目的留痕条数）、latestHitAt（最近命中时间，从未命中为 null）、hasHit（是否有命中；检索成功但 0 条与降级都算无命中）。summary 给有命中／无命中两组项目数与两组的平均修改轮数、平均没做对轮数（全量项目口径，不随分页变化；组内零项目平均值为 0）。没有版本或没有提炼记录的项目返回 0，不报错；空数据返回零值。行序服务端定死＝项目 id 倒序；page 1 基（缺省 1）、size 缺省 20（上界 100）。只读，不写任何表。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         */
+        get: operations["flywheelStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/materials": {
         parameters: {
             query?: never;
@@ -5287,6 +5310,51 @@ export interface components {
             checkedAt?: string;
             /** Format: int64 */
             elapsedMs?: number;
+        };
+        ApiResponseBackofficeFlywheelStatsResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeFlywheelStatsResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeFlywheelStatsResponse: {
+            items?: components["schemas"]["ProjectRow"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            summary?: components["schemas"]["Summary"];
+        };
+        ProjectRow: {
+            projectId?: string;
+            projectName?: string;
+            /** Format: int32 */
+            modificationRounds?: number;
+            /** Format: int32 */
+            missedRounds?: number;
+            /** Format: int32 */
+            hitCount?: number;
+            /** Format: date-time */
+            latestHitAt?: string;
+            hasHit?: boolean;
+        };
+        Summary: {
+            /** Format: int32 */
+            withHitProjectCount?: number;
+            /** Format: int32 */
+            withoutHitProjectCount?: number;
+            /** Format: double */
+            withHitAverageModificationRounds?: number;
+            /** Format: double */
+            withHitAverageMissedRounds?: number;
+            /** Format: double */
+            withoutHitAverageModificationRounds?: number;
+            /** Format: double */
+            withoutHitAverageMissedRounds?: number;
         };
         ContractActionCommand: {
             basis?: string;
@@ -10481,6 +10549,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeVectorHealthResponse"];
+                };
+            };
+        };
+    };
+    flywheelStats: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeFlywheelStatsResponse"];
                 };
             };
         };

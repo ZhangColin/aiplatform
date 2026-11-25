@@ -30,6 +30,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.ProjectRetrievalStats;
 import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
@@ -355,6 +356,24 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
     @Override
     public void deleteRetrievalsByProject(String projectId) {
         jdbcTemplate.update("DELETE FROM knw_retrievals WHERE project_id = ?", projectId);
+    }
+
+    /**
+     * 飞轮命中统计（#643 只读聚合）：含命中条目的留痕才算命中（成功 0 条与
+     * 降级的 items 为空、不计数）；无命中记录的项目不进结果（HAVING 过滤）。
+     */
+    @Override
+    public List<ProjectRetrievalStats> retrievalStats() {
+        return jdbcTemplate.query("""
+                SELECT project_id,
+                       COUNT(*) FILTER (WHERE jsonb_array_length(items) > 0) AS hit_count,
+                       MAX(created_at) FILTER (WHERE jsonb_array_length(items) > 0)
+                           AS latest_hit_at
+                FROM knw_retrievals
+                GROUP BY project_id
+                HAVING COUNT(*) FILTER (WHERE jsonb_array_length(items) > 0) > 0
+                """, (rs, rowNum) -> new ProjectRetrievalStats(
+                        rs.getString(1), rs.getInt(2), rs.getTimestamp(3).toInstant()));
     }
 
     /** 留痕行 → 读模型（列序＝{@link #RETRIEVAL_COLUMNS}）。 */

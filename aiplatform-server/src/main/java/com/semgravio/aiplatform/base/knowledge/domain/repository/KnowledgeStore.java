@@ -9,6 +9,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.ProjectRetrievalStats;
 import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalSearchResult;
 
@@ -106,4 +107,11 @@ public interface KnowledgeStore {
      * 按项目清理命中留痕（项目 DELETE 级联入口，#639）。
      */
     void deleteRetrievalsByProject(String projectId);
+
+    /**
+     * 飞轮命中统计（#643 只读聚合）：按项目汇总含命中条目的留痕条数与最近命中
+     * 时间。成功 0 条与降级的留痕不计命中；无命中记录的项目不出现在结果里
+     * （读面按 0 呈现）。
+     */
+    List<ProjectRetrievalStats> retrievalStats();
 }

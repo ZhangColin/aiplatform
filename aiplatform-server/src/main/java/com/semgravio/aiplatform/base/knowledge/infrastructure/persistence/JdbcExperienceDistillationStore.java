@@ -11,6 +11,7 @@ import com.cartisan.core.domain.BaseEnum;
 
 import com.semgravio.aiplatform.base.knowledge.domain.enums.ExperienceDistillationStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.model.ExperienceDistillationRecord;
+import com.semgravio.aiplatform.base.knowledge.domain.model.ProjectDistillationStats;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.ExperienceDistillationStore;
 
 /**
@@ -51,6 +52,16 @@ public class JdbcExperienceDistillationStore implements ExperienceDistillationSt
                 updated_at = CURRENT_TIMESTAMP
             """;
 
+    /** 飞轮提炼统计（#643）：项目名取最新版本记录的快照（array_agg 按版本倒序首元素）。 */
+    private static final String PROJECT_STATS_SQL = """
+            SELECT project_id,
+                   (ARRAY_AGG(project_name ORDER BY version_no DESC))[1] AS project_name,
+                   COUNT(*) FILTER (WHERE version_no > 1) AS modification_rounds,
+                   COUNT(*) FILTER (WHERE version_no > 1 AND missed_count > 0) AS missed_rounds
+            FROM knw_experience_distillations
+            GROUP BY project_id
+            """;
+
     private final JdbcTemplate jdbcTemplate;
 
     public JdbcExperienceDistillationStore(JdbcTemplate jdbcTemplate) {
@@ -76,6 +87,12 @@ public class JdbcExperienceDistillationStore implements ExperienceDistillationSt
                 record.commitHash(), record.status().getCode(), record.opinionCount(),
                 record.missedCount(), record.candidateCount(), record.batchId(),
                 record.errorSummary());
+    }
+
+    @Override
+    public List<ProjectDistillationStats> projectStats() {
+        return jdbcTemplate.query(PROJECT_STATS_SQL, (rs, rowNum) -> new ProjectDistillationStats(
+                rs.getLong(1), rs.getString(2), rs.getInt(3), rs.getInt(4)));
     }
 
     private ExperienceDistillationRecord recordOf(ResultSet rs) throws SQLException {

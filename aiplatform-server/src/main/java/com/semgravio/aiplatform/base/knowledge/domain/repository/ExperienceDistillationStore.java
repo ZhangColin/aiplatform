@@ -1,6 +1,9 @@
 package com.semgravio.aiplatform.base.knowledge.domain.repository;
 
+import java.util.List;
+
 import com.semgravio.aiplatform.base.knowledge.domain.model.ExperienceDistillationRecord;
+import com.semgravio.aiplatform.base.knowledge.domain.model.ProjectDistillationStats;
 
 /**
  * 事后提炼处理记录存取（#641，{@code knw_experience_distillations} 单表，JdbcTemplate
@@ -30,4 +33,11 @@ public interface ExperienceDistillationStore {
      * 落库/覆盖：同一项目同一版本插入或原地更新（含状态、计数、批次、错误摘要）。
      */
     void upsert(ExperienceDistillationRecord record);
+
+    /**
+     * 飞轮提炼统计（#643 只读聚合）：按项目汇总修改轮数（版本号 &gt; 1 的记录条数）
+     * 与没做对轮数（修改轮中 missed_count &gt; 0 的记录条数），项目名取最新一条
+     * 记录的快照。无记录的项目不出现在结果里（读面按 0 呈现）。
+     */
+    List<ProjectDistillationStats> projectStats();
 }

@@ -88,6 +88,10 @@ class ProjectVersionAppServiceTest {
     @MockitoBean
     private ProjectKnowledgeAppService projectKnowledgeAppService;
 
+    /** 成版后的事后提炼触发面（#641）：异步提炼归提炼编排自身的测试，本类只验触发连线。 */
+    @MockitoBean
+    private ExperienceDistillationAppService experienceDistillationAppService;
+
     @Autowired
     private CodingRunTrack codingRunTrack;
 
@@ -466,6 +470,26 @@ class ProjectVersionAppServiceTest {
                 .contains("Run-Id: run-3");
         // #640：用户面版本提交成功即触发一次需求文档入库（异步队列由知识编排自持）
         verify(projectKnowledgeAppService).ingestPrdOnVersionAsync(projectId);
+        // #641：成版成功同样触发一次事后提炼（异步队列由提炼编排自持）
+        verify(experienceDistillationAppService).triggerOnVersionAsync(projectId, 3);
+    }
+
+    @Test
+    void given_distillation_trigger_fails_when_commit_user_version_then_version_still_recorded() {
+        // #641：提炼触发只是尽力而为——触发抛错也绝不反噬成版（版本号照常返回）
+        Long projectId = persistedProject("9924");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        stubExec((command, out) -> {
+            if (command.contains("git log --format")) {
+                out.stdout = "";
+            } else if (command.contains("git commit")) {
+                out.stdout = "abcdef";
+            }
+        });
+        doThrow(new RuntimeException("提炼触发挂了"))
+                .when(experienceDistillationAppService).triggerOnVersionAsync(any(), any());
+
+        assertThat(appService.commitUserVersion(project, "run-1", "做一个预约系统")).isEqualTo(1);
     }
 
     @Test
@@ -502,6 +526,8 @@ class ProjectVersionAppServiceTest {
         assertThat(appService.commitUserVersion(project, "run-2", "加导出功能")).isNull();
         // #640：没有成版就没有新版本可入库——触发不发出
         verify(projectKnowledgeAppService, never()).ingestPrdOnVersionAsync(any());
+        // #641：没有成版就没有新版本可提炼——触发同样不发出
+        verify(experienceDistillationAppService, never()).triggerOnVersionAsync(any(), any());
     }
 
     @Test

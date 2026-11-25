@@ -25,6 +25,12 @@ public final class UsageDims {
     /** 入口分类调用的智能体种类（#47 三分类轻量调用，一次性辅助面、无展示名）。 */
     public static final String AGENT_KIND_CLASSIFY = "classify";
 
+    /**
+     * 候选经验提炼调用的智能体种类（#641 事后提炼，一次性后台辅助面；成本切片按
+     * 此维度归集，展示名见 {@code AgentProfile#displayNameOf}）。
+     */
+    public static final String AGENT_KIND_REFINEMENT = "refinement";
+
     private UsageDims() {
     }
 

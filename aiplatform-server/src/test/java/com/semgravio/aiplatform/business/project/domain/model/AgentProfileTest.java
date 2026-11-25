@@ -35,6 +35,16 @@ class AgentProfileTest {
     }
 
     @Test
+    void given_refinement_kind_when_display_name_then_readable_name_while_auxiliary_stays_null() {
+        // #641 事后提炼的成本切片要有可读的智能体种类名；naming/classify 维持「—」桶口径
+        assertThat(AgentProfile.displayNameOf(UsageDims.AGENT_KIND_REFINEMENT))
+                .isEqualTo(AgentEdgePoint.REFINEMENT.getName())
+                .isEqualTo("候选经验提炼");
+        assertThat(AgentProfile.displayNameOf(UsageDims.AGENT_KIND_NAMING)).isNull();
+        assertThat(AgentProfile.displayNameOf(UsageDims.AGENT_KIND_CLASSIFY)).isNull();
+    }
+
+    @Test
     void given_profiles_when_prompts_then_protocol_anchors_present() {
         // 协议锚点抽查：主智能体配置含追问/答询/迭代受理三段（单会话连续）；
         // 设计执行体配置含写稿协议条款。run 执行体的协议正文已随 #604 退役

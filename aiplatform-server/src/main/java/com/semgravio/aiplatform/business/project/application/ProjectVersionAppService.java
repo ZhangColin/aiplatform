@@ -97,6 +97,8 @@ public class ProjectVersionAppService {
     private final KernelServingGuard kernelServingGuard;
     private final ClosingProbes closingProbes;
     private final ProjectKnowledgeAppService projectKnowledgeAppService;
+    private final WorkspaceVersionLogReader versionLogReader;
+    private final ExperienceDistillationAppService experienceDistillationAppService;
 
     public ProjectVersionAppService(ProjectRepository projectRepository,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -106,7 +108,9 @@ public class ProjectVersionAppService {
             EventsAppService eventsAppService,
             KernelServingGuard kernelServingGuard,
             ClosingProbes closingProbes,
-            ProjectKnowledgeAppService projectKnowledgeAppService) {
+            ProjectKnowledgeAppService projectKnowledgeAppService,
+            WorkspaceVersionLogReader versionLogReader,
+            ExperienceDistillationAppService experienceDistillationAppService) {
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.codingRunTrack = codingRunTrack;
@@ -116,6 +120,8 @@ public class ProjectVersionAppService {
         this.kernelServingGuard = kernelServingGuard;
         this.closingProbes = closingProbes;
         this.projectKnowledgeAppService = projectKnowledgeAppService;
+        this.versionLogReader = versionLogReader;
+        this.experienceDistillationAppService = experienceDistillationAppService;
     }
 
     /**
@@ -170,6 +176,9 @@ public class ProjectVersionAppService {
             // #640（ADR-0058）：每出一个用户面版本，后台异步入库最新需求文档——
             // 单线程队列、失败降级，绝不反噬成版（触发异常在此吞掉）
             triggerPrdIngestion(project.getId());
+            // #641（ADR-0058）：成版成功后触发事后提炼——后台单线程队列串行、
+            // 失败只记日志，绝不反噬成版
+            triggerExperienceDistillation(project.getId(), nextVersionNo);
             return nextVersionNo;
         }
         catch (RuntimeException e) {
@@ -194,21 +203,23 @@ public class ProjectVersionAppService {
         }
     }
 
+    /**
+     * 成版后事后提炼触发（#641，ADR-0058）：后台单线程队列异步读版本窗口与需求
+     * 文档、调便宜模型提候选经验；提交失败只记日志——成版是真、提炼是尽力而为。
+     */
+    private void triggerExperienceDistillation(Long projectId, int versionNo) {
+        try {
+            experienceDistillationAppService.triggerOnVersionAsync(projectId, versionNo);
+        }
+        catch (RuntimeException e) {
+            log.warn("[version] 项目 {} 成版后候选经验提炼触发失败（降级跳过）：{}",
+                    projectId, e.toString());
+        }
+    }
+
     /** git log 读取（零版本 = 空列表；其它非零 = WSP_002 环境故障）。 */
     private List<WorkspaceVersion> readVersions(Project project) {
-        ExecResultResponse result = exec(project, WorkspaceVersions.listCommand());
-        if (result == null) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "版本列表读取失败: exec 无结果");
-        }
-        if (result.exitCode() == WorkspaceVersions.EXIT_NO_VERSION) {
-            return List.of();
-        }
-        if (result.exitCode() != 0) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "版本列表读取失败: " + result.stderr());
-        }
-        return WorkspaceVersions.parseLog(result.stdout());
+        return versionLogReader.read(project);
     }
 
     /**

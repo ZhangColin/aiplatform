@@ -110,9 +110,10 @@ public class BackofficeAgentConfigController {
     @Operation(summary = "边缘调用点配置读面（生效值＋覆盖标记＋默认预览）",
             description = "边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或"
                     + "代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/"
-                    + "工具开关）。寻址稳定键三把：naming=项目取名 / "
-                    + "compaction=上下文压缩 / classification=入口分类（#638 技能预检"
-                    + "边缘点已退场）。改配置下一轮命令构建即生效（装配动态查库，"
+                    + "工具开关）。寻址稳定键四把：naming=项目取名 / "
+                    + "compaction=上下文压缩 / classification=入口分类 / "
+                    + "refinement=候选经验提炼（#641；#638 技能预检边缘点已退场）。"
+                    + "改配置下一轮命令构建即生效（装配动态查库，"
                     + "进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"PRJ_064"})
     public ApiResponse<BackofficeEdgeModelConfigResponse> edgeConfig(@PathVariable String edgeKey) {

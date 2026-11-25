@@ -39,7 +39,9 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     private static final String DRAFT_SELECT_PREFIX = """
             SELECT id, kind, title, summary, content, payload, project_id, run_id, slot,
                    inflight_slot, scan_verdict, scan_findings, status, operator_id,
-                   operator_name, reviewed_at, reject_reason, created_at
+                   operator_name, reviewed_at, reject_reason, created_at,
+                   source_project_name, source_version_no, source_commit_hash,
+                   source_sentence, distill_batch_id
             FROM knw_sediment_drafts
             """;
 
@@ -88,8 +90,10 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     private static final String INSERT_SQL = """
             INSERT INTO knw_sediment_drafts
                 (id, kind, title, summary, content, payload, project_id, run_id, slot,
-                 inflight_slot, scan_verdict, scan_findings, status)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?)
+                 inflight_slot, scan_verdict, scan_findings, status,
+                 source_project_name, source_version_no, source_commit_hash,
+                 source_sentence, distill_batch_id)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
             """;
 
     /** 项目删除清理（#460）：只在途行随项目清，终态留档。 */
@@ -115,7 +119,10 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
                 record.id(), record.kind().key(), record.title(), record.summary(),
                 record.content(), jsonOf(record.payload()), record.projectId(),
                 record.runId(), record.slot(), record.inflightSlot(), record.scanVerdict(),
-                jsonOf(record.scanFindings()), record.status().getCode());
+                jsonOf(record.scanFindings()), record.status().getCode(),
+                record.sourceProjectName(), record.sourceVersionNo(),
+                record.sourceCommitHash(), record.sourceSentence(),
+                record.distillBatchId());
     }
 
     @Override
@@ -208,7 +215,12 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
                 rs.getString(15),
                 rs.getTimestamp(16) == null ? null : rs.getTimestamp(16).toLocalDateTime(),
                 rs.getString(17),
-                rs.getTimestamp(18).toLocalDateTime());
+                rs.getTimestamp(18).toLocalDateTime(),
+                rs.getString(19),
+                rs.getObject(20) == null ? null : rs.getInt(20),
+                rs.getString(21),
+                rs.getString(22),
+                rs.getString(23));
     }
 
     private List<Map<String, Object>> findingsOf(String json) throws SQLException {

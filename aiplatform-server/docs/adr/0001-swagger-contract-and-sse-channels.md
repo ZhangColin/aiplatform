@@ -1,5 +1,7 @@
 # swagger 为唯一契约，SSE 单端点单流
 
+> **改记（2026-11-25，#652 事件流僵死假死）**：心跳形态改口——每 15s 的心跳从注释行 `:ping` 改为具名事件 `event: ping`（无 id、空 data 行），建连即发那条同步改形；防代理掐空闲连接的保活语义不变（含 PoC ② 的 Next 代理有效性）。动因：原生 EventSource API 对浏览器完全不暴露注释行，客户端读不到心跳——经代理半开的「开着但沉默」连接浏览器不 error 不重连，页面静默假死（#649 亲测现象链）。具名事件使前端连接层可挂空闲看门狗（45s＝3× 心跳无活动判死重建，清单前端段）；不带 id 不推进 Last-Event-ID 补发锚、不进重放缓冲与前端去重集，空 data 行保证跨 SSE 实现派发。同票在前端薄 client 落默认 30s 请求超时（超时可见报错，慢调用显式覆盖）。注释行线格式（SseServerEvent 的 comment 形态）随改形拆除。本文其余为历史结论。
+
 > 状态：已接受（2026-08-19 · [wayfinder 票 #3](https://github.com/ZhangColin/aiplatform-server/issues/3)）
 
 前后端对接只认 swagger（本机 `http://localhost:8888`，`/v3/api-docs` + `/swagger-ui/index`），不维护任何 REST 对接文档——swagger 由代码生成，系统更新契约即更新。为此全 BC 的 controller 遵守同一套书写约定（本 ADR）；SSE 事件名册另册长期维护（[docs/spec/SSE事件清单.md](../spec/SSE事件清单.md)）。

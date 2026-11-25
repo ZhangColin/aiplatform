@@ -163,8 +163,10 @@ describe("薄 client：dev in-flight GET 去重（issue #60）", () => {
     await expect(first).resolves.toEqual(["survived"]);
     await expect(second).resolves.toEqual(["survived"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // 共享 fetch 不挂消费者 signal（挂了就会被首个挂载方击穿）
-    expect(fetchMock.mock.calls[0][1]?.signal).toBeUndefined();
+    // 共享 fetch 不挂消费者 signal（挂了就会被首个挂载方击穿）；默认超时信号照挂
+    // （#652：共享请求同样不得无限挂死）
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeDefined();
+    expect(fetchMock.mock.calls[0][1]?.signal).not.toBe(controller.signal);
   });
 
   it("401 路径不受去重影响：共享方一起拒绝 + 出口事件化不整页跳（#326）", async () => {
@@ -230,5 +232,73 @@ describe("薄 client：dev in-flight GET 去重（issue #60）", () => {
     await Promise.all([api.get("/projects"), api.get("/projects")]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("薄 client：默认请求超时（#652——排队/挂死中的请求也要有可见报错，不静默吞掉）", () => {
+  /** 挂死 fetch 桩：只在 signal abort 时拒绝（排队/无响应语义），可外部落定。 */
+  function hangingFetch(resolve?: Promise<Response>) {
+    return vi.fn().mockImplementation(
+      (_url: unknown, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((res, rej) => {
+          init?.signal?.addEventListener("abort", () =>
+            rej(new DOMException("Aborted", "AbortError")),
+          );
+          resolve?.then(res, rej);
+        }),
+    );
+  }
+
+  it("默认超时规格值 30s（契约值防无意改动）", async () => {
+    const { DEFAULT_TIMEOUT_MS } = await importClient();
+    expect(DEFAULT_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it("挂死请求按超时以可见错误拒绝：ApiError、status 0（本地超时无 HTTP 状态）、中文提示", async () => {
+    const { api } = await importClient();
+    const { ApiError } = await import("./api-error");
+    vi.stubGlobal("fetch", hangingFetch());
+
+    const error = await api.get("/projects", { timeoutMs: 15 }).then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(0);
+    expect(error.message).toContain("超时");
+  });
+
+  it("调用方 abort 仍按 AbortError 原样透传（不吞成超时——StrictMode cleanup／查询取消语义）", async () => {
+    const { api } = await importClient();
+    const { ApiError } = await import("./api-error");
+    vi.stubGlobal("fetch", hangingFetch());
+    const controller = new AbortController();
+
+    const promise = api.post("/projects", { name: "a" }, { signal: controller.signal });
+    controller.abort();
+    const error = await promise.then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(error).not.toBeInstanceOf(ApiError);
+    expect(error?.name).toBe("AbortError");
+  });
+
+  it("timeoutMs 0 关闭超时：慢请求不被打断，随后正常返回（上传等慢调用覆盖口径）", async () => {
+    const { api } = await importClient();
+    const d = deferred<Response>();
+    const fetchMock = hangingFetch(d.promise);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = api.get("/projects", { timeoutMs: 0 });
+    await new Promise((r) => {
+      setTimeout(r, 40);
+    }); // 越过机制测试的毫秒级阈值：无超时信号、未被打断
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeUndefined();
+
+    d.resolve(jsonResponse({ data: ["slow-ok"] }));
+    await expect(promise).resolves.toEqual(["slow-ok"]);
   });
 });

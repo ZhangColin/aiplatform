@@ -22,6 +22,8 @@ export function useUploadMaterial(projectId: string) {
       const uploaded = await api.post<UploadedMaterial>(
         `/projects/${projectId}/materials`,
         form,
+        // 慢上行大文件不吃默认 30s 超时（#652 覆盖口径），2min 仍有界
+        { timeoutMs: 120_000 },
       );
       // 文件树即时反映新物料（点看走 raw 直出）
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects.files(projectId) });

@@ -288,7 +288,7 @@ class AgentEventDeadSocketTest {
             return new RawSseClient(socket, reader);
         }
 
-        /** 等到首条 :ping（订阅已建立并完成响应头冲刷）。 */
+        /** 等到首条心跳（订阅已建立并完成响应头冲刷；#652 起为具名事件 event:ping）。 */
         boolean awaitPing(Duration timeout) throws Exception {
             long deadline = System.nanoTime() + timeout.toNanos();
             while (System.nanoTime() < deadline) {
@@ -301,7 +301,7 @@ class AgentEventDeadSocketTest {
                 if (line == null) {
                     return false;
                 }
-                if (":ping".equals(line.trim())) {
+                if ("event:ping".equals(line.trim())) {
                     return true;
                 }
                 // 响应头与空行一路放过

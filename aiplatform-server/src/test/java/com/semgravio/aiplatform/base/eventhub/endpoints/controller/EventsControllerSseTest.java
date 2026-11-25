@@ -142,8 +142,10 @@ class EventsControllerSseTest {
         SseClient client = connect("");
 
         assertThat(client.contentType()).startsWith(MediaType.TEXT_EVENT_STREAM_VALUE);
-        // 连接建立即刻收到 :ping（响应头冲刷 + 即时存活信号），不进前端 listener
-        assertThat(client.pollLine()).isEqualTo(":ping");
+        // 连接建立即刻收到具名 ping 帧（响应头冲刷 + 即时存活信号）——#652 起具名
+        // 事件形态（无 id、空 data）：原生 EventSource 可观测，前端看门狗的起搏点
+        assertThat(client.pollLine()).isEqualTo("event:ping");
+        assertThat(client.pollLine()).isEqualTo("data:");
     }
 
     @Test
@@ -516,10 +518,13 @@ class EventsControllerSseTest {
             return lines.poll(timeoutMillis, TimeUnit.MILLISECONDS);
         }
 
-        /** 取下一条非注释、非空行；超时返回 null。 */
+        /** 取下一条非心跳、非注释、非空行；超时返回 null。心跳帧（#652 具名 ping：event:ping＋data:）对事件断言透明。 */
         String nextNonCommentLine(long timeoutMillis) throws InterruptedException {
             String line = pollLine(timeoutMillis);
-            while (line != null && (line.isEmpty() || line.startsWith(":"))) {
+            while (line != null && (line.isEmpty() || line.startsWith(":") || line.equals("event:ping"))) {
+                if (line.equals("event:ping")) {
+                    pollLine(timeoutMillis); // 心跳帧体（data: 行）一并跳过
+                }
                 line = pollLine(timeoutMillis);
             }
             return line;

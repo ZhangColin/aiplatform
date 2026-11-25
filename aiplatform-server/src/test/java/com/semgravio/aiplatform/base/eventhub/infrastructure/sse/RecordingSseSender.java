@@ -1,13 +1,11 @@
 package com.semgravio.aiplatform.base.eventhub.infrastructure.sse;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.map.MapUtil;
 
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -17,9 +15,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  */
 public final class RecordingSseSender implements SseSender {
 
-    private final List<SseEmitter> brokenEmitters = CollUtil.newArrayList();
-    private final Map<SseEmitter, List<SseServerEvent>> received = MapUtil.newHashMap();
-    private final Map<SseEmitter, AtomicInteger> attemptsPerEmitter = MapUtil.newHashMap();
+    /** 测试线程 add、心跳/广播线程 contains 并发触碰：COW（评审补漏——并发安全化须整类一致）。 */
+    private final List<SseEmitter> brokenEmitters = new CopyOnWriteArrayList<>();
+    /** 心跳线程与广播线程并发写入、测试线程并发流读：值列表并发安全（COW，读多写少）。 */
+    private final Map<SseEmitter, List<SseServerEvent>> received = new ConcurrentHashMap<>();
+    private final Map<SseEmitter, AtomicInteger> attemptsPerEmitter = new ConcurrentHashMap<>();
     private final AtomicInteger attempts = new AtomicInteger();
 
     public void breakEmitter(SseEmitter emitter) {
@@ -38,7 +38,7 @@ public final class RecordingSseSender implements SseSender {
         return received.getOrDefault(emitter, List.of());
     }
 
-    /** 只取事件行（排除心跳注释行）。 */
+    /** 只取事件行（排除心跳：具名 ping 事件无 id，#652 起与事件行同为具名形态）。 */
     public List<SseServerEvent> eventFramesOf(SseEmitter emitter) {
         return framesOf(emitter).stream().filter(frame -> frame.id() != null).toList();
     }
@@ -50,6 +50,6 @@ public final class RecordingSseSender implements SseSender {
         if (brokenEmitters.contains(emitter)) {
             throw new IOException("broken pipe");
         }
-        received.computeIfAbsent(emitter, key -> CollUtil.newArrayList()).add(event);
+        received.computeIfAbsent(emitter, key -> new CopyOnWriteArrayList<>()).add(event);
     }
 }

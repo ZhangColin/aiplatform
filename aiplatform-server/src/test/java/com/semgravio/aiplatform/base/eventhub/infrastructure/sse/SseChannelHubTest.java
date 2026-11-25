@@ -97,10 +97,11 @@ class SseChannelHubTest {
 
         assertThat(sender.framesOf(emitter)).hasSize(1);
         SseServerEvent ping = sender.framesOf(emitter).get(0);
-        assertThat(ping.comment()).isEqualTo("ping");
-        assertThat(ping.id()).isNull();
-        assertThat(ping.name()).isNull();
-        assertThat(ping.data()).isNull();
+        // #652：心跳从注释行改为具名事件——原生 EventSource 对浏览器不暴露注释行，
+        // 客户端看门狗读不到心跳是僵死连接假死的根因；具名事件原生可观测。
+        assertThat(ping.name()).isEqualTo("ping");
+        assertThat(ping.data()).isEqualTo(""); // 空 data 行：无 data 的具名事件跨 SSE 实现派发行为有差异，带空 data 行保证派发
+        assertThat(ping.id()).isNull();       // 不带 id：Last-Event-ID 重连锚不被心跳推进、不进去重集
     }
 
     @Test
@@ -237,8 +238,15 @@ class SseChannelHubTest {
         SseEmitter emitter = hub.subscribe(NOTIFICATION, payload -> true);
 
         awaitUntil("周期心跳持续到达", () -> sender.framesOf(emitter).stream()
-                .filter(frame -> "ping".equals(frame.comment()))
+                .filter(frame -> "ping".equals(frame.name()))
                 .count() >= 2);
+        // 周期帧与建连帧同一 PING_FRAME：具名、空 data、无 id（Last-Event-ID 锚不被心跳推进）
+        List<SseServerEvent> pings = sender.framesOf(emitter).stream()
+                .filter(frame -> "ping".equals(frame.name())).toList();
+        assertThat(pings).allSatisfy(ping -> {
+            assertThat(ping.data()).isEqualTo("");
+            assertThat(ping.id()).isNull();
+        });
     }
 
     @Test
@@ -308,7 +316,7 @@ class SseChannelHubTest {
                 payload -> "p1".equals(payload.get("projectId")), "run-0:0");
 
         assertThat(sender.framesOf(late)).hasSize(3); // ping + 命中谓词的两事件
-        assertThat(sender.framesOf(late).get(0).comment()).isEqualTo("ping");
+        assertThat(sender.framesOf(late).get(0).name()).isEqualTo("ping");
         assertThat(sender.eventFramesOf(late))
                 .extracting(SseServerEvent::id)
                 .containsExactly("run-1:1", "run-1:2"); // 原事件 id 补发，p2 事件被谓词滤掉

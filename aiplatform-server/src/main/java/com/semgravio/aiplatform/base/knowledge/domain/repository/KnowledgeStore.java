@@ -9,10 +9,13 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalRecord;
+import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalSearchResult;
 
 /**
- * 知识存取（素材登记表 {@code knw_materials} + 块表 {@code knw_chunks}）：素材
- * 身份、状态与操作者落登记表（单一事实源），块表只存内容与向量。pgvector 向量
+ * 知识存取（素材登记表 {@code knw_materials} + 块表 {@code knw_chunks} +
+ * 命中留痕表 {@code knw_retrievals}）：素材身份、状态与操作者落登记表（单一
+ * 事实源），块表只存内容与向量，留痕表存每次开场检索（#639）。pgvector 向量
  * 列超出 JPA 映射面，写读两侧都走原生 SQL（照 {@code UsageEventAggregations}
  * 先例：接口在 domain/repository，JdbcTemplate 实现在 infrastructure，不挂
  * Spring Data 仓储）。
@@ -78,4 +81,29 @@ public interface KnowledgeStore {
      * @return 素材不存在返回 false，由调用方定 404 语义
      */
     boolean deleteMaterial(long id);
+
+    /**
+     * 命中留痕写入（#639）：一条记录＝一次开场检索（项目、时间、命中条目、
+     * 是否降级）。检索成功但 0 条也写（hits 空、degraded=false）。
+     */
+    void recordRetrieval(String projectId, boolean degraded, List<KnowledgeHit> hits);
+
+    /**
+     * 该项目最近一次命中留痕（#639，按时间倒序取一）。
+     *
+     * @return 查无返回 null
+     */
+    RetrievalRecord latestRetrieval(String projectId);
+
+    /**
+     * 命中留痕读面（#639）：项目精确（null/空白＝不过滤）＋检索时间闭区间
+     * （null 侧不限），排序检索时间倒序、id 倒序稳定；SQL 侧分页。
+     */
+    RetrievalSearchResult searchRetrievals(String projectId, Instant from, Instant to,
+                                           int offset, int limit);
+
+    /**
+     * 按项目清理命中留痕（项目 DELETE 级联入口，#639）。
+     */
+    void deleteRetrievalsByProject(String projectId);
 }

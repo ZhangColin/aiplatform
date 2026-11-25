@@ -5,6 +5,8 @@ import java.util.List;
 import com.cartisan.core.stereotype.Port;
 import com.cartisan.core.stereotype.PortType;
 
+import com.semgravio.aiplatform.base.knowledge.domain.model.EmbeddingHealth;
+
 /**
  * 向量化端口（driven）：本机 fastembed 服务（BAAI/bge-small-zh-v1.5，512 维，
  * {@code scripts/embedding_server.py}）的抽象——换 embedding 提供方只换适配器。
@@ -19,4 +21,11 @@ public interface EmbeddingClient {
      * 批量向量化：返回向量与入参文本同序同量；服务不可用返回空列表。
      */
     List<float[]> embed(List<String> texts);
+
+    /**
+     * 健康探活（#639）：走服务已有健康路径、短超时，返回可用／不可用、检查
+     * 时间、耗时；探活失败（连不上/非 200/异常）一律「不可用」、不抛错——
+     * 探活不影响检索或入库。
+     */
+    EmbeddingHealth health();
 }

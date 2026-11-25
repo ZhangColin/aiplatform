@@ -336,7 +336,7 @@ public class IterationAppService {
                             (attemptRunId, attemptChanges) -> closeKernelFix(project,
                                     attemptRunId, prdBaseline, versionLabel,
                                     attemptChanges),
-                            "fix", true, CodingRunDispatcher.RunSeat.kernel(),
+                            "fix", CodingRunDispatcher.RunSeat.kernel(),
                             RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
                             /* includePatch= */ true);
                 }

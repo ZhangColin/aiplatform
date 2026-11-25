@@ -241,7 +241,7 @@ class BackofficeMaterialSeamTest {
         when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(vector(1, 1)));
 
         // 停用前：两素材皆命中（余弦距离升序——A 同向在前）
-        assertThat(knowledgePort.retrieve("密码加密", 5))
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits())
                 .extracting(KnowledgeHit::sourceProjectName)
                 .containsExactly("电商系统", "物流系统");
 
@@ -262,7 +262,7 @@ class BackofficeMaterialSeamTest {
         assertThat(row.get("operator_name")).isEqualTo(OPERATOR_NAME);
 
         // 端到端：停用素材退出检索命中，未停用素材照常进位
-        assertThat(knowledgePort.retrieve("密码加密", 5))
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits())
                 .extracting(KnowledgeHit::sourceProjectName)
                 .containsExactly("物流系统");
 
@@ -287,7 +287,7 @@ class BackofficeMaterialSeamTest {
                 .containsEntry("status", 1)
                 .containsEntry("operator_id", OPERATOR_ID)
                 .containsEntry("operator_name", OPERATOR_NAME);
-        assertThat(knowledgePort.retrieve("密码加密", 5))
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits())
                 .extracting(KnowledgeHit::sourceProjectName)
                 .containsExactly("电商系统", "物流系统");
 
@@ -314,7 +314,7 @@ class BackofficeMaterialSeamTest {
         plantedProjectIds.add(source.getId());
         long id = plant(source.getId().toString(), "bk 来源项目", List.of("独有内容块"), hot(0));
         when(embeddingClient.embed(List.of("独有内容"))).thenReturn(List.of(hot(0)));
-        assertThat(knowledgePort.retrieve("独有内容", 5)).hasSize(1);
+        assertThat(knowledgePort.retrieve("独有内容", 5).hits()).hasSize(1);
 
         // 删除：回执＝删除前终态（确认移除了什么）
         String path = "/api/backoffice/materials/" + id;
@@ -334,7 +334,7 @@ class BackofficeMaterialSeamTest {
                 .andExpect(jsonPath("$.data.total").value("0"));
         signedGet(path)
                 .andExpect(status().isNotFound());
-        assertThat(knowledgePort.retrieve("独有内容", 5)).isEmpty();
+        assertThat(knowledgePort.retrieve("独有内容", 5).hits()).isEmpty();
 
         // 来源项目不受动（管理删除与项目删除级联正交）
         assertThat(projectRepository.findById(source.getId())).isPresent();

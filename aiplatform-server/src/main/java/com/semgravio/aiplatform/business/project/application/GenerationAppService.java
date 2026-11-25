@@ -76,10 +76,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡）随全部智能体
  * 事件流产出（parts 契约，前端长成工作消息）。</p>
  *
- * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以起跑任务 prompt 检索知识库
- * （query 截 2000 字、topK=5），命中块拼在任务 prompt <b>前</b>（知识是背景非
- * 指令）；检索失败降级空注入、run 照旧下发。一场 run 一次注入（#114 生成链首片
- * 口径沿用到内核跑）——重跑是新的一场 run，照常重新切入注入。</p>
+ * <p><b>生成执行体不收知识</b>（#639，ADR-0058）：生成/迭代下发前的知识命中前置
+ * 注入整体退场——任务 prompt 原样下发，生成执行体只读当前项目需求文档；知识命中
+ * 的唯一作用点＝主智能体开场找相似需求。</p>
  *
  * <p><b>起手文件资产</b>：PRD（docs/PRD.md）由主智能体先前写出，run 执行体自读、
  * 平台不搬运；#607 起平台不再向工作区写 AGENTS.md 平台约定（仍成立的生产约束
@@ -448,7 +447,7 @@ public class GenerationAppService {
                 KERNEL_FIRST_RUN_PROMPT,
                 (attemptRunId, attemptChanges) ->
                         closeKernelGeneration(project, attemptRunId, versionLabel),
-                CodingRunDispatcher.GENERATE_LABEL, true, CodingRunDispatcher.RunSeat.kernel(),
+                CodingRunDispatcher.GENERATE_LABEL, CodingRunDispatcher.RunSeat.kernel(),
                 RunHeading.titled(STAGE0_TITLE), SegmentType.GENERATION_RUN,
                 /* includePatch= */ false); // 首建清单只出真实行数（目录汇总归 #620）
         if (!result.succeeded()) {

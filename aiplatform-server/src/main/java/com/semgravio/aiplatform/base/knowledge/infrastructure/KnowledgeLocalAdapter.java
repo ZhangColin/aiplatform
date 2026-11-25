@@ -1,14 +1,12 @@
 package com.semgravio.aiplatform.base.knowledge.infrastructure;
 
-import java.util.List;
-
 import org.springframework.stereotype.Component;
 
 import com.cartisan.core.stereotype.Adapter;
 import com.cartisan.core.stereotype.PortType;
 
 import com.semgravio.aiplatform.base.knowledge.application.KnowledgeAppService;
-import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -34,8 +32,18 @@ public class KnowledgeLocalAdapter implements KnowledgePort {
     }
 
     @Override
-    public List<KnowledgeHit> retrieve(String query, int topK) {
+    public KnowledgeRetrieval retrieve(String query, int topK) {
         return knowledgeAppService.retrieve(query, topK);
+    }
+
+    @Override
+    public void recordRetrieval(String projectId, KnowledgeRetrieval retrieval) {
+        knowledgeAppService.recordRetrieval(projectId, retrieval);
+    }
+
+    @Override
+    public KnowledgeRetrieval latestRetrieval(String projectId) {
+        return knowledgeAppService.latestRetrieval(projectId);
     }
 
     @Override

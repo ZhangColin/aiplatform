@@ -244,17 +244,23 @@ public class MainAgentAppService {
 
     /**
      * 主智能体会话建立轮（建项目自动开场专用）：绑定 {@code main-{projectId}}
-     * 之时做知识命中注入——query = 初始需求原文，命中块落会话缓存并接 system prompt
-     * 尾部（知识是背景非指令）；检索失败降级为空注入，访谈照常开始（#5 决议①）。
-     * 一次切入一次注入：后续轮（{@link #runOpinionTurn} / {@link #answerInquiry}）
-     * 与问答续跑（{@link #answerQuestion}）复用同一注入块，不重检索不重追加。
+     * 之时做知识命中注入——query = 访客真实填写的初始需求描述（没填不检索、不
+     * 注入），命中块接 system prompt 尾部（知识是背景非指令）；检索失败降级为空
+     * 注入，访谈照常开始（#5 决议①）。一次切入一次注入：后续轮（
+     * {@link #runOpinionTurn} / {@link #answerInquiry}）与问答续跑（
+     * {@link #answerQuestion}）从留痕重建同一注入块，不重检索不重追加（#639）。
+     *
+     * <p>没填需求描述（空白）= 首条对话走平台固定开场白，但开场白不作为检索词
+     * ——真实需求与固定开场白在此分开。</p>
      *
      * @throws ApplicationException PRJ_001 项目不存在；守卫组同 {@link #runOpinionTurn}
      *                              （自动开场仅 PRJ_001 可实际发生）
      */
     public MainAgentRun startConversation(Long projectId, String requirement) {
         knowledgeAppService.establishSessionInjection(projectId, requirement);
-        return opinionTurn(projectId, requirement, MessageAttachment.NONE);
+        String prompt = requirement == null || requirement.isBlank()
+                ? AgentProfile.DEFAULT_KICKOFF_PROMPT : requirement;
+        return opinionTurn(projectId, prompt, MessageAttachment.NONE);
     }
 
     /**

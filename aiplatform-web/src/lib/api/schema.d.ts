@@ -3300,6 +3300,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/knowledge-retrievals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 命中留痕清单（按项目/时间过滤，分页）
+         * @description 主智能体开场检索留痕（#639）：每次检索一条（项目、时间、命中条目、是否降级），检索成功但 0 条也记（hits 空、degraded=false）。两过滤维度可组合、均可缺省（缺省＝全量）：① projectId 项目 id 精确（查无＝空清单 200）；② from/to 检索时间闭区间（闭区间含两端，ISO-8601 Instant，如 2026-09-01T00:00:00Z）。排序服务端定死＝检索时间倒序（id 倒序稳定）。行字段：项目／时间／命中条目（类别、标题、来源项目展示名、片段）／是否降级。page 1 基（缺省 1）、size 缺省 20（上界 100）。只读，不写任何表。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
+         */
+        get: operations["retrievals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/knowledge-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 向量服务健康探活（当次结果）
+         * @description 探活本机向量小服务（#639）：走服务已有健康路径、短超时，返回 available 可用／不可用、checkedAt 检查时间、elapsedMs 耗时。只读；探活失败不影响检索或入库。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         */
+        get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/materials": {
         parameters: {
             query?: never;
@@ -5186,6 +5233,52 @@ export interface components {
             sunkAt?: string;
             operatorId?: string;
             operatorName?: string;
+        };
+        ApiResponsePageResponseBackofficeKnowledgeRetrievalResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeKnowledgeRetrievalResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PageResponseBackofficeKnowledgeRetrievalResponse: {
+            items?: components["schemas"]["BackofficeKnowledgeRetrievalResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        BackofficeKnowledgeRetrievalResponse: {
+            id?: string;
+            projectId?: string;
+            /** Format: date-time */
+            recordedAt?: string;
+            degraded?: boolean;
+            hits?: components["schemas"]["HitItem"][];
+        };
+        HitItem: {
+            kind?: string;
+            sourceProjectName?: string;
+            title?: string;
+            chunk?: string;
+        };
+        ApiResponseBackofficeVectorHealthResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeVectorHealthResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeVectorHealthResponse: {
+            available?: boolean;
+            /** Format: date-time */
+            checkedAt?: string;
+            /** Format: int64 */
+            elapsedMs?: number;
         };
         ContractActionCommand: {
             basis?: string;
@@ -10327,6 +10420,53 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListBackofficeModelConfigCandidateTraceResponse"];
+                };
+            };
+        };
+    };
+    retrievals: {
+        parameters: {
+            query?: {
+                projectId?: string;
+                from?: string;
+                to?: string;
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeKnowledgeRetrievalResponse"];
+                };
+            };
+        };
+    };
+    health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeVectorHealthResponse"];
                 };
             };
         };

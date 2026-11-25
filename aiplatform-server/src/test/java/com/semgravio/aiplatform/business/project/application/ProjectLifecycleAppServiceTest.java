@@ -49,7 +49,6 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointTyp
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -195,7 +194,7 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
-    void given_blank_requirement_when_create_then_default_kickoff_prompt_and_no_naming() throws Exception {
+    void given_blank_requirement_when_create_then_raw_requirement_passed_and_no_naming() throws Exception {
         stubWorkspace("9101", "aiplatform-dev-101");
         stubInterviewAccepted("run-2");
 
@@ -204,10 +203,11 @@ class ProjectLifecycleAppServiceTest {
                 () -> appService.create(new CreateProjectCommand(" ")));
 
         assertThat(creation.response().project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
-        // 空需求描述 → 缺省开场提示（对话展开起点）；取名守卫在命名服务内
+        // 空需求描述：入口传原文（可能空白）——#639 真实需求与固定开场白分开传参，
+        // 开场白由主智能体侧取缺省（不拿开场白当检索词）；取名守卫在命名服务内
         //（blank 不发起轻调用，见 ProjectNamingAppServiceTest）
         verify(mainAgentAppService).startConversation(
-                Long.parseLong(creation.response().project().id()), AgentProfile.DEFAULT_KICKOFF_PROMPT);
+                Long.parseLong(creation.response().project().id()), " ");
     }
 
     @Test

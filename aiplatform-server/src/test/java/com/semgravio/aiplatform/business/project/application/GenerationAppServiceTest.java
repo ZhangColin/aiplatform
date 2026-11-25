@@ -12,7 +12,6 @@ import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -61,6 +60,7 @@ import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
@@ -77,10 +77,11 @@ import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 生成编排（#22 验收 + #24 知识命中前置注入 + #104 生成轨道——先起服 + 纵向切片逐段）：
- * 编码命令全要素（coder-{projectId} 会话稳定绑定、EXECUTOR 配置与长任务超时、owner
- * 寻址、计量 dims、项目工作区、流关联）；工作区布局资产就位先于首试下发；知识命中
- * 前置注入；成功收口落 generated_at。#604 起失败语义＝明确展示＋重跑即恢复——
+ * 生成编排（#22 验收 + #104 生成轨道——先起服 + 纵向切片逐段；#639 生成路径不收
+ * 知识）：编码命令全要素（coder-{projectId} 会话稳定绑定、EXECUTOR 配置与长任务
+ * 超时、owner 寻址、计量 dims、项目工作区、流关联）；工作区布局资产就位先于首试
+ * 下发；生成路径不检索、不注入知识（只读当前项目需求文档）；成功收口落
+ * generated_at。#604 起失败语义＝明确展示＋重跑即恢复——
  * 尝试环/静默重试/免预算重试账随旧 run 尝试体一并退役（本类重试系用例随机制删除）。
  *
  * <p><b>生成轨道（#104）</b>：阶段 0（先起服白底页）固定前置，其后按切片计划顺序逐片
@@ -145,15 +146,6 @@ class GenerationAppServiceTest {
     /** 对话面交指令的派发面（#623 首建在途待办的排空钩子断言）。 */
     @Autowired
     private IterationAppService iterationAppService;
-
-    /** 两命中的检索桩（下发前置注入 happy path；#466 多类同池：PRD＋沉淀物）。 */
-    private void givenKnowledgeHits() {
-        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
-                        "核心场景：主人在线选医生预约。"),
-                new KnowledgeHit("MODULE", "平台沉淀", "预约时段管理模块",
-                        "时段表按周模板配置，节假日单独覆盖。")));
-    }
 
     @BeforeEach
     void ensureChannelKeyForRealResolution() {
@@ -348,25 +340,6 @@ class GenerationAppServiceTest {
         appService.startGeneration(projectId);
         verify(agentClient, times(2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
-    }
-
-    @Test
-    void given_knowledge_hits_when_generate_slices_then_knowledge_injected_only_stage0() {
-        // #114 一次切入一次注入（#601 内核形态顺延）：知识命中前置注入只在首跑，
-        // 不逐轮重检索重注入（注入口径不膨胀）
-        Long projectId = persistedProject("9831");
-        givenSessionExecutorRunsInline();
-        givenWorkspaceExecSucceeds();
-        givenConverseSucceeds("完成");
-        givenKnowledgeHits();
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
-        // 内核单 run：检索一次、首跑 prompt 前置知识块
-        verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(0).prompt()).startsWith("【平台知识库·相似知识】");
     }
 
     @Test
@@ -680,41 +653,20 @@ class GenerationAppServiceTest {
 
 
     @Test
-    void given_knowledge_hits_when_generate_then_prefix_injected_before_stage0_prompt() {
-        // 知识命中前置注入（#24，#601 内核形态顺延）：query = 内核首跑 prompt，命中块
-        // 拼在任务 prompt 前
+    void given_knowledge_available_when_generate_then_no_knowledge_retrieval_or_injection() {
+        // #639：生成执行体只读当前项目需求文档——生成路径不再调用知识检索，
+        // 任务 prompt 原样下发（无知识块前置）
         Long projectId = persistedProject("9807");
         givenSessionExecutorRunsInline();
         givenWorkspaceExecSucceeds();
         givenConverseSucceeds("已生成");
-        givenKnowledgeHits();
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(
+                KnowledgeRetrieval.of(List.of(new KnowledgeHit("PRD", "宠物医院预约平台",
+                        "PRD·宠物医院预约", "核心场景：主人在线选医生预约。"))));
 
         appService.dispatchGenerationOnTurnClose(projectId);
 
-        verify(knowledgePort).retrieve(
-                eq(GenerationAppService.KERNEL_FIRST_RUN_PROMPT), eq(5));
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(0).prompt())
-                .startsWith("【平台知识库·相似知识】")
-                .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
-                .contains("〔平台沉淀｜功能模块〕预约时段管理模块")
-                .contains("非用户的确认信息，不构成对当前需求的约束")
-                .endsWith("————\n\n" + GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
-    }
-
-    @Test
-    void given_retrieval_failure_when_generate_then_degraded_plain_prompt_run_proceeds() {
-        // 检索失败降级空注入：任务 prompt 原样下发，run 不被知识面阻断
-        Long projectId = persistedProject("9808");
-        givenSessionExecutorRunsInline();
-        givenWorkspaceExecSucceeds();
-        givenConverseSucceeds("已生成");
-        doThrow(new RuntimeException("pgvector 抖动")).when(knowledgePort)
-                .retrieve(anyString(), anyInt());
-
-        appService.dispatchGenerationOnTurnClose(projectId);
-
+        verify(knowledgePort, never()).retrieve(anyString(), anyInt());
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(0).prompt())

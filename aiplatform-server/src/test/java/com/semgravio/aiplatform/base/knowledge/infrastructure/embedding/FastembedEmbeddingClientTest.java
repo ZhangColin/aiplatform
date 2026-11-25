@@ -14,6 +14,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.semgravio.aiplatform.base.knowledge.domain.model.EmbeddingHealth;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -72,6 +74,41 @@ class FastembedEmbeddingClientTest {
         respond(200, "not-json");
 
         assertThat(client.embed(List.of("文本"))).isEmpty();
+    }
+
+    @Test
+    void given_health_200_when_health_then_available_with_elapsed() {
+        server.createContext("/health", exchange -> {
+            requests.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
+            write(exchange, 200, "{\"ok\":true}");
+        });
+
+        EmbeddingHealth health = client.health();
+
+        assertThat(health.available()).isTrue();
+        assertThat(health.checkedAt()).isNotNull();
+        assertThat(health.elapsedMs()).isGreaterThanOrEqualTo(0);
+        assertThat(requests).containsExactly("GET /health");
+    }
+
+    @Test
+    void given_health_non_200_when_health_then_unavailable() {
+        server.createContext("/health", exchange -> write(exchange, 503, "{}"));
+
+        assertThat(client.health().available()).isFalse();
+    }
+
+    @Test
+    void given_connection_refused_when_health_then_unavailable() {
+        int port;
+        try (var socket = new java.net.ServerSocket(0)) {
+            port = socket.getLocalPort();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        FastembedEmbeddingClient dead = new FastembedEmbeddingClient("http://127.0.0.1:" + port);
+
+        assertThat(dead.health().available()).isFalse();
     }
 
     @Test

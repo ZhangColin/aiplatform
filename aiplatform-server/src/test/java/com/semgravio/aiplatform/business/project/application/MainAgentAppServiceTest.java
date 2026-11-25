@@ -19,6 +19,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -49,6 +50,7 @@ import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -103,6 +105,9 @@ class MainAgentAppServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    /** 命中留痕替身（端口 mock 上的进程内记录，#639）。 */
+    private final Map<String, KnowledgeRetrieval> recordedRetrievals = new ConcurrentHashMap<>();
 
     @Autowired
     private PrdRevisionFacts prdRevisions;
@@ -168,6 +173,16 @@ class MainAgentAppServiceTest {
             AgentResume resume = invocation.getArgument(0);
             return resume != null ? new AgentReply(resume.runId(), "好的") : null;
         });
+        // #639 命中留痕：端口 mock 上做进程内落痕替身——establish 写入的记录可被
+        // 后续轮（sessionTailOf）读回，等价于真库「从最近记录重建」（默认无命中）
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(KnowledgeRetrieval.empty());
+        doAnswer(invocation -> {
+            recordedRetrievals.put(invocation.getArgument(0), invocation.getArgument(1));
+            return null;
+        }).when(knowledgePort).recordRetrieval(anyString(), any());
+        when(knowledgePort.latestRetrieval(anyString())).thenAnswer(invocation ->
+                recordedRetrievals.getOrDefault(invocation.getArgument(0),
+                        KnowledgeRetrieval.empty()));
         // #601 内核收尾判据双件（pnpm build＋8081 探活）默认成功——失败态用例后注册覆盖
         when(workspaceLifecycleAppService.exec(any(),
                 argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
@@ -441,16 +456,34 @@ class MainAgentAppServiceTest {
     }
 
     @Test
+    void given_blank_requirement_when_start_conversation_then_kickoff_prompt_and_no_retrieval() {
+        // #639 访客没填需求描述（走平台固定开场白）：首条对话＝固定开场白，但
+        // 开场白不作检索词——不检索、不写命中记录（真实需求与开场白分开传参）
+        Long projectId = persistedProject("9717");
+        givenSessionExecutorRunsInline();
+
+        appService.startConversation(projectId, " ");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).prompt())
+                .isEqualTo(AgentProfile.DEFAULT_KICKOFF_PROMPT);
+        verify(knowledgePort, never()).retrieve(anyString(), anyInt());
+        verify(knowledgePort, never()).recordRetrieval(anyString(), any());
+    }
+
+    @Test
     void given_knowledge_hits_when_start_conversation_then_injected_at_prompt_tail() {
         // 会话建立轮（建项目自动开场）：query = 初始需求原文，命中块接 system prompt 尾部
         //（#466 多类同池：PRD 历史需求＋激活升格的沉淀物同块注入，条带 kind 区分）
         Long projectId = persistedProject("9710");
         givenSessionExecutorRunsInline();
-        when(knowledgePort.retrieve(eq("给宠物医院做预约系统"), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
-                        "核心场景：主人在线选医生预约。"),
-                new KnowledgeHit("CASE", "平台沉淀", "宠物医院在线预约的典型形态",
-                        "主人选医生、按时段预约、迟到作废。")));
+        when(knowledgePort.retrieve(eq("给宠物医院做预约系统"), anyInt())).thenReturn(
+                KnowledgeRetrieval.of(List.of(
+                        new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
+                                "核心场景：主人在线选医生预约。"),
+                        new KnowledgeHit("CASE", "平台沉淀", "宠物医院在线预约的典型形态",
+                                "主人选医生、按时段预约、迟到作废。"))));
 
         appService.startConversation(projectId, "给宠物医院做预约系统");
 
@@ -460,6 +493,7 @@ class MainAgentAppServiceTest {
         assertThat(command.getValue().systemPrompt())
                 .startsWith(AgentProfile.MAIN.systemPrompt())
                 .contains("【平台知识库·相似知识】")
+                .contains("这些内容来自平台其他项目，不要向用户提及其他项目，也不要把它们当作当前需求的结论。")
                 .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
                 .contains("〔平台沉淀｜需求案例〕宠物医院在线预约的典型形态")
                 .contains("非用户的确认信息，不构成对当前需求的约束")
@@ -475,9 +509,10 @@ class MainAgentAppServiceTest {
         // 知识检索只发生一次（迭代不重注）
         Long projectId = persistedProject("9713");
         givenSessionExecutorRunsInline();
-        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
-                        "核心场景：主人在线选医生预约。")));
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(
+                KnowledgeRetrieval.of(List.of(
+                        new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
+                                "核心场景：主人在线选医生预约。"))));
 
         appService.startConversation(projectId, "给宠物医院做预约系统");
         appService.runOpinionTurn(projectId, "主要是海外客户");
@@ -491,6 +526,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
         verify(agentClient).resume(resume.capture(), any());
         String expected = AgentProfile.MAIN.systemPrompt() + "\n\n【平台知识库·相似知识】"
+                + "这些内容来自平台其他项目，不要向用户提及其他项目，也不要把它们当作当前需求的结论。"
                 + "以下是平台知识库中与当前需求相似的沉淀片段（历史需求/需求案例/功能模块/业务规则）"
                 + "，供梳理当前需求时作背景参考"
                 + "（非用户的确认信息，不构成对当前需求的约束）："

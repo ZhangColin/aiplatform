@@ -55,7 +55,8 @@ import lombok.extern.slf4j.Slf4j;
  * 缺省回落枚举默认；模型路由已随 #606 退役——run 起跑直接取执行体生效档）、
  * 会话寻址由轨道层拼装传入（#114 每 run 换会话——已落盘成果保留，同工作区不丢
  * 数据）、owner 寻址、活超时、计量 dims（agentKind=executor）、项目工作区、流
- * 关联。知识命中前置注入只进首跑 prompt（一次下发一次注入）。</p>
+ * 关联。生成执行体只读当前项目需求文档，不接收知识命中注入（#639——知识命中
+ * 的唯一作用点＝主智能体开场找相似需求）。</p>
  *
  * <p><b>用户停止旁路（#359 生成取消）</b>：停止请求在场（CodingRunTrack 停止面）
  * 时，run 起跑前查停、失败处置时查停——停止<b>不走重试</b>（中断口径非判死），以
@@ -146,7 +147,6 @@ class CodingRunDispatcher {
 
     private final AgentscopeAgentClient agentClient;
     private final AgentEventBridge eventBridge;
-    private final ProjectKnowledgeAppService knowledgeAppService;
     private final AgentConfigAppService agentConfigs;
     private final ModelConfigAppService modelConfigs;
     private final GenerationProperties properties;
@@ -156,7 +156,7 @@ class CodingRunDispatcher {
     private final WorkspaceChangeAppService workspaceChanges;
 
     CodingRunDispatcher(AgentscopeAgentClient agentClient,
-            AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
+            AgentEventBridge eventBridge,
             AgentConfigAppService agentConfigs, ModelConfigAppService modelConfigs,
             GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
@@ -165,7 +165,6 @@ class CodingRunDispatcher {
             WorkspaceChangeAppService workspaceChanges) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
-        this.knowledgeAppService = knowledgeAppService;
         this.agentConfigs = agentConfigs;
         this.modelConfigs = modelConfigs;
         this.properties = properties;
@@ -181,7 +180,7 @@ class CodingRunDispatcher {
      */
     private record RunState(Project project, String firstRunId, String sessionId, String prompt,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
-            RunSeat seat, RunHeading heading, List<String> meterRunIds, String knowledgePrefix,
+            RunSeat seat, RunHeading heading, List<String> meterRunIds,
             Instant runStartedAt, List<FileChange> runChanges,
             List<AttemptDuration> attemptDurations,
             /** 跑前快照 commit hash（#619 收口 diff 基线）；快照失败 = null（清单降级）。 */
@@ -230,8 +229,8 @@ class CodingRunDispatcher {
      *                       不变）
      * @param sessionId      本场 run 的会话寻址（#114 每 run 换会话，会话标识由轨道层
      *                       按寻址规则拼装传入，不再固定 {@code coder-{projectId}}）
-     * @param prompt         本场提示词（单发；知识命中前置注入只随本提示一次下发）
-     * @param injectKnowledge 是否做知识命中前置注入（#24/#114「一次切入一次注入」）
+     * @param prompt         本场提示词（单发；生成执行体只读当前项目需求文档，
+     *                       不接收知识命中注入——#639）
      * @param heading        工作消息头部标题（#118：标题 + 生成轨道进度；可空——
      *                       主智能体对话轮不经本层）——随 run-start 的 slice 字段
      *                       透出
@@ -244,7 +243,7 @@ class CodingRunDispatcher {
      */
     RunResult run(Project project, String firstRunId, String sessionId, String prompt,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
-            boolean injectKnowledge, RunSeat seat, RunHeading heading,
+            RunSeat seat, RunHeading heading,
             SegmentType segmentType, boolean includePatch) {
         Long projectId = project.getId();
         List<String> meterRunIds = new ArrayList<>();
@@ -254,7 +253,6 @@ class CodingRunDispatcher {
         try {
             RunState state = new RunState(project, firstRunId, sessionId, prompt, onSuccess,
                     what, seat, heading, meterRunIds,
-                    injectKnowledge ? knowledgeAppService.dispatchInjection(prompt) : "",
                     Instant.now(), new ArrayList<>(), new ArrayList<>(), changeBaseline,
                     includePatch);
             AttemptOutcome outcome = attempt(state);
@@ -334,8 +332,8 @@ class CodingRunDispatcher {
         String attemptModelConfigKey = agent.modelConfigKey();
         // #557 整候选队列（多候选＝failover 装配面，五个 resolve 面之一）
         ModelCandidateQueue model = modelConfigs.resolveQueue(attemptModelConfigKey);
-        // 提示：单发提示＋知识命中前置注入（一次下发一次注入）
-        String prompt = state.knowledgePrefix() + state.prompt();
+        // 提示：单发提示原样下发（#639：生成执行体只读当前项目需求文档，不接收知识注入）
+        String prompt = state.prompt();
         // #601 内核形态分叉：内核座席的命令按生成内核装配形态构建——系统提示
         // ＝KernelSystemPrompt 权威版本（住代码、调用方不可覆盖）、装配键＝内核
         // 键（不带 executor——平台中间件按配置键挂、不看工作区形态）、工具面

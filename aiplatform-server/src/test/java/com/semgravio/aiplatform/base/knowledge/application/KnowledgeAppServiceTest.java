@@ -15,6 +15,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
 import com.semgravio.aiplatform.base.knowledge.domain.port.EmbeddingClient;
@@ -160,7 +161,7 @@ class KnowledgeAppServiceTest {
         indexDirect(spec("BUG", "bug-9", PROJ_B, "物流系统", "登录超时", List.of("登录超时缺陷"), null),
                 vector(1, 0.5f));
 
-        List<KnowledgeHit> hits = knowledgePort.retrieve("密码加密", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("密码加密", 5).hits();
 
         assertThat(hits).extracting(KnowledgeHit::sourceProjectName)
                 .containsExactly("电商系统", "物流系统");   // 余弦距离升序
@@ -176,7 +177,7 @@ class KnowledgeAppServiceTest {
         indexDirect(spec("BUG", "bug-9", PROJ_B, "物流系统", "登录超时", List.of("登录超时缺陷"), null),
                 vector(1, 0.5f));
 
-        assertThat(knowledgePort.retrieve("密码加密", 1))
+        assertThat(knowledgePort.retrieve("密码加密", 1).hits())
                 .containsExactly(new KnowledgeHit("ARTIFACT", "电商系统", "PRD.md", "密码加密方案"));
     }
 
@@ -184,7 +185,20 @@ class KnowledgeAppServiceTest {
     void given_embedding_unavailable_when_retrieve_then_empty_no_error() {
         when(embeddingClient.embed(anyList())).thenReturn(List.of());
 
-        assertThat(knowledgePort.retrieve("任意查询", 5)).isEmpty();
+        KnowledgeRetrieval retrieval = knowledgePort.retrieve("任意查询", 5);
+        assertThat(retrieval.hits()).isEmpty();
+        assertThat(retrieval.degraded()).isTrue();   // 服务不可用＝降级，不是「真没有」
+    }
+
+    @Test
+    void given_empty_library_when_retrieve_then_zero_hits_not_degraded() {
+        // #639 可区分：检索成功但 0 条 ≠ 降级（degraded 只在服务不可用/异常时为真）
+        when(embeddingClient.embed(List.of("任意查询"))).thenReturn(List.of(vector(1, 1)));
+
+        KnowledgeRetrieval retrieval = knowledgePort.retrieve("任意查询", 5);
+
+        assertThat(retrieval.hits()).isEmpty();
+        assertThat(retrieval.degraded()).isFalse();
     }
 
     @Test
@@ -266,7 +280,7 @@ class KnowledgeAppServiceTest {
         indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD",
                 List.of("密码加密的实施细则与轮替口径"), null), vector(1, 0.5f)); // 关键词通道首位
 
-        List<KnowledgeHit> hits = knowledgePort.retrieve("密码加密", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("密码加密", 5).hits();
 
         // RRF：关键词块 = 1/(60+2)+1/(60+1) ＞ 纯向量块 = 1/(60+1)
         assertThat(hits).extracting(KnowledgeHit::chunk)
@@ -282,7 +296,7 @@ class KnowledgeAppServiceTest {
         indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD",
                 List.of("订单物流跟踪"), null), vector(1, 0.5f));
 
-        assertThat(knowledgePort.retrieve("量子波动速读", 5))
+        assertThat(knowledgePort.retrieve("量子波动速读", 5).hits())
                 .extracting(KnowledgeHit::chunk)
                 .containsExactly("密码加密方案", "订单物流跟踪");
     }
@@ -322,7 +336,7 @@ class KnowledgeAppServiceTest {
         indexDirect(spec("RULE", "sed-2", null, "平台沉淀", "退款规则",
                 List.of("退款规则口径"), null), vector(1, 0.8f));
 
-        List<KnowledgeHit> hits = knowledgePort.retrieve("退款规则", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("退款规则", 5).hits();
 
         assertThat(hits).extracting(KnowledgeHit::kind).contains("PRD", "CASE", "RULE");
     }
@@ -335,12 +349,12 @@ class KnowledgeAppServiceTest {
         when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(vector(1, 1)));
         indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("密码加密方案"), null), vector(1, 1));
         indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD", List.of("登录超时治理"), null), vector(1, 0.5f));
-        assertThat(knowledgePort.retrieve("密码加密", 5)).hasSize(2);   // 停用前：皆命中
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits()).hasSize(2);   // 停用前：皆命中
 
         knowledgePort.disable("PRD", PROJ_A, OPERATOR);
 
         // 停用素材的块整体退出命中，未停用素材照常进位
-        assertThat(knowledgePort.retrieve("密码加密", 5))
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits())
                 .extracting(KnowledgeHit::sourceProjectName)
                 .containsExactly("物流系统");
     }
@@ -351,11 +365,11 @@ class KnowledgeAppServiceTest {
         indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("密码加密方案"), null), vector(1, 1));
 
         knowledgePort.disable("PRD", PROJ_A, OPERATOR);
-        assertThat(knowledgePort.retrieve("密码加密", 5)).isEmpty();
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits()).isEmpty();
 
         knowledgePort.enable("PRD", PROJ_A, OPERATOR);
 
-        assertThat(knowledgePort.retrieve("密码加密", 5))
+        assertThat(knowledgePort.retrieve("密码加密", 5).hits())
                 .extracting(KnowledgeHit::chunk).containsExactly("密码加密方案");
     }
 
@@ -384,11 +398,11 @@ class KnowledgeAppServiceTest {
         assertThat(registryStatus()).isEqualTo(MaterialStatus.DISABLED.getCode());
         assertThat(registryField("operator_id")).isEqualTo("42");
         assertThat(registryField("operator_name")).isEqualTo("运营张三");
-        assertThat(knowledgePort.retrieve("新需求", 5)).isEmpty();
+        assertThat(knowledgePort.retrieve("新需求", 5).hits()).isEmpty();
 
         knowledgePort.enable("PRD", PROJ_A, OPERATOR);
 
-        assertThat(knowledgePort.retrieve("新需求", 5))
+        assertThat(knowledgePort.retrieve("新需求", 5).hits())
                 .extracting(KnowledgeHit::chunk).containsExactly("新需求");
     }
 

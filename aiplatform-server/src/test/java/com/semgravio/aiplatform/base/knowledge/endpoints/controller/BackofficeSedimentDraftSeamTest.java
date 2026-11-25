@@ -349,7 +349,7 @@ class BackofficeSedimentDraftSeamTest {
                 "SELECT COUNT(*) FROM knw_materials WHERE source_ref = ?",
                 Integer.class, prdRef)).isZero();
         // 混检同池：激活素材进检索面，kind 透出（CASE/MODULE/RULE 与 PRD 同池命中）
-        List<KnowledgeHit> hits = knowledgePort.retrieve("孤儿退款规则", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("孤儿退款规则", 5).hits();
         assertThat(hits).extracting(KnowledgeHit::kind).contains("RULE");
         assertThat(hits).extracting(KnowledgeHit::chunk).contains("正文。");
     }
@@ -594,7 +594,7 @@ class BackofficeSedimentDraftSeamTest {
         knowledgePort.index(new KnowledgeSpec("PRD", sourceRef, sourceRef, "对照项目", "PRD",
                 List.of("对照素材内容块"), null));
 
-        List<KnowledgeHit> hits = knowledgePort.retrieve("草稿独有标记", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("草稿独有标记", 5).hits();
         assertThat(hits).isNotEmpty();
         assertThat(hits).extracting(KnowledgeHit::chunk)
                 .allSatisfy(chunk -> assertThat(chunk).doesNotContain("sediment-invisible-xyz"));

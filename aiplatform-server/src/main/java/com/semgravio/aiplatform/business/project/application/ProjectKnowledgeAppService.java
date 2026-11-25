@@ -4,7 +4,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -12,21 +11,22 @@ import org.springframework.stereotype.Service;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeChunker;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 知识沉淀编排（业务侧缝）：入库/检索/清理的存储语义归 base.knowledge
+ * 知识沉淀编排（业务侧缝）：入库/检索/清理/留痕的存储语义归 base.knowledge
  * （{@link KnowledgePort}），「什么时机沉淀什么素材」是业务知识，在此落定。
- * v1 的沉淀触发点 = 每笔成交自动沉淀 PRD（交易环，#30）；命中注入在需求环
- * （主智能体会话建立尾注，#19）与生成环（生成/修正下发前置，#24）。#465 起
- * 检索面为多类同池混检（PRD＋激活升格的 CASE/MODULE/RULE 沉淀物），#466 起
- * 注入块命中条带来源 kind 区分——两个注入点零新通道，各自拼装口径不变。
+ * 沉淀触发点 = 每笔成交自动沉淀 PRD（交易环，#30）；知识命中的唯一作用点 =
+ * 主智能体会话建立尾注（需求环，#19/#639——生成/修正下发前置注入已退场，
+ * 生成执行体只读当前项目需求文档）。#465 起检索面为多类同池混检（PRD＋激活
+ * 升格的 CASE/MODULE/RULE 沉淀物），#466 起注入块命中条带来源 kind 区分。
  *
- * <p><b>降级契约</b>：摄取/清理/命中检索一律失败不炸——记日志跳过、降级为空
- * 注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索空列表）。</p>
+ * <p><b>降级契约</b>：摄取/清理/命中检索/留痕一律失败不炸——记日志跳过、降级
+ * 为空注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索降级）。</p>
  */
 @Service
 @Slf4j
@@ -66,25 +66,21 @@ public class ProjectKnowledgeAppService {
     private static final String KIND_SCOPE_LINE = "以下是平台知识库中与当前需求相似的沉淀片段（"
             + String.join("/", KIND_LABELS.values()) + "）";
 
-    /** 非约束限定语（知识是背景非指令，#5 决议①）——两注入点同款，单源防漂移。 */
+    /** 非约束限定语（知识是背景非指令，#5 决议①）。 */
     private static final String NON_BINDING_QUALIFIER = "（非用户的确认信息，不构成对当前需求的约束）";
 
     /**
-     * 注入块表头（尾注/前置两注入点共用拼装，差异仅用途短语）：锚＋类别枚举行＋
-     * 用途短语＋非约束限定语。
+     * 跨项目保护句（#639）：命中内容来自平台其他项目——不向用户提及其他项目，
+     * 不当成当前需求的结论（飞轮不碰内核的对话面口径，ADR-0058）。
      */
-    private static String blockHeader(String usePhrase) {
-        return "【平台知识库·相似知识】" + KIND_SCOPE_LINE + "，" + usePhrase
-                + NON_BINDING_QUALIFIER + "：";
-    }
+    private static final String CROSS_PROJECT_GUARD =
+            "这些内容来自平台其他项目，不要向用户提及其他项目，也不要把它们当作当前需求的结论。";
 
-    /**
-     * 主智能体会话已注入的知识块（projectId → 注入块）：会话建立时检索一次落此
-     * （一次切入一次注入），后续轮/续跑复用同一块——不重检索不重追加（agent
-     * 工厂按 systemPrompt 缓存，同块即同 agent 实例）。进程内态：重启后为空
-     * （后续轮退化为无知识块的裸配置——会话恢复不重注的降级面）。
-     */
-    private final Map<Long, String> establishedSessionTails = new ConcurrentHashMap<>();
+    /** 注入块表头（锚＋保护句＋类别枚举行＋用途短语＋非约束限定语）。 */
+    private static String blockHeader(String usePhrase) {
+        return "【平台知识库·相似知识】" + CROSS_PROJECT_GUARD + KIND_SCOPE_LINE + "，"
+                + usePhrase + NON_BINDING_QUALIFIER + "：";
+    }
 
     private final KnowledgePort knowledgePort;
     private final ProjectQueryAppService projectQueryAppService;
@@ -98,80 +94,78 @@ public class ProjectKnowledgeAppService {
         this.hitTopK = hitTopK;
     }
 
-    // ---------- 知识命中（主智能体会话建立注入，#19） ----------
+    // ---------- 知识命中（主智能体会话建立注入，#19/#639） ----------
 
     /**
-     * 主智能体会话建立的知识命中注入（一次切入一次注入）：query = 用户初始需求原文
-     * （超长截断），命中拼为「背景资料」块落会话缓存并返回——由调用方接在主智能体
-     * system prompt 尾部（知识是背景非指令，#5 决议①）。后续轮/续跑经
-     * {@link #sessionTailOf} 复用同一块（不重检索）。空命中 / 检索失败 / 空
-     * query = 空注入降级（不落缓存），访谈照常开始。
+     * 主智能体会话建立的知识命中注入（一次切入一次注入）：query = 访客真实填写的
+     * 初始需求描述（超长截断），检索一次、写一条命中留痕，命中拼为「背景资料」块
+     * 返回——由调用方接在主智能体 system prompt 尾部（知识是背景非指令，#5 决议①）。
+     * 后续轮/续跑经 {@link #sessionTailOf} 从留痕重建同一块（不重检索）。
+     *
+     * <p>访客没填需求描述（走平台固定开场白）= 不检索、不写命中记录、不注入，
+     * 访谈照常开始。检索成功但 0 条也留痕；检索失败/向量服务不可用记降级。</p>
      */
     public String establishSessionInjection(Long projectId, String requirement) {
-        String tail = composeSessionInjection(requirement);
-        if (tail.isEmpty()) {
+        if (requirement == null || requirement.isBlank()) {
             return "";
         }
-        establishedSessionTails.put(projectId, tail);
-        return tail;
+        KnowledgeRetrieval retrieval = retrieve(requirement);
+        recordQuietly(projectId, retrieval);
+        log.info("[knowledge] 主智能体会话建立检索完成：命中 {} 条、降级={}",
+                retrieval.hits().size(), retrieval.degraded());
+        return composeBlock(retrieval.hits());
     }
 
-    /** 会话已注入的知识块（未建立 / 空注入 / 重启后 = 空串，裸配置照跑）。 */
+    /**
+     * 会话知识块（#639 起从该项目最近一次命中留痕重建）：服务重启后继续同一场
+     * 访谈仍拿到同一份块，不重检索；无留痕 / 空命中 = 空串（裸配置照跑）。
+     */
     public String sessionTailOf(Long projectId) {
-        return establishedSessionTails.getOrDefault(projectId, "");
+        try {
+            KnowledgeRetrieval latest = knowledgePort.latestRetrieval(projectId.toString());
+            return latest == null ? "" : composeBlock(latest.hits());
+        }
+        catch (RuntimeException e) {
+            log.warn("[knowledge] 命中留痕读取失败（降级为空注入）：{}", e.toString());
+            return "";
+        }
     }
 
-    private String composeSessionInjection(String requirement) {
-        List<KnowledgeHit> hits = retrieveDegraded(requirement, "主智能体会话建立");
+    /** 检索（不抛错）：query 超长截 {@link #MAX_QUERY_CHARS}，异常一律降级。 */
+    private KnowledgeRetrieval retrieve(String rawQuery) {
+        String query = rawQuery.length() > MAX_QUERY_CHARS
+                ? rawQuery.substring(0, MAX_QUERY_CHARS) : rawQuery;
+        try {
+            KnowledgeRetrieval retrieval = knowledgePort.retrieve(query, hitTopK);
+            return retrieval == null ? KnowledgeRetrieval.empty() : retrieval;
+        }
+        catch (RuntimeException e) {
+            log.warn("[knowledge] 主智能体会话建立检索失败（降级为空注入）：{}", e.toString());
+            return KnowledgeRetrieval.unavailable();
+        }
+    }
+
+    /** 命中留痕写入（失败降级不炸：留痕丢失不阻断访谈）。 */
+    private void recordQuietly(Long projectId, KnowledgeRetrieval retrieval) {
+        try {
+            knowledgePort.recordRetrieval(projectId.toString(), retrieval);
+        }
+        catch (RuntimeException e) {
+            log.warn("[knowledge] 命中留痕写入失败（降级跳过）：{}", e.toString());
+        }
+    }
+
+    private String composeBlock(List<KnowledgeHit> hits) {
         if (hits.isEmpty()) {
             return "";
         }
-        log.info("[knowledge] 主智能体会话建立注入命中 {} 条", hits.size());
         StringBuilder block = new StringBuilder("\n\n")
                 .append(blockHeader("供梳理当前需求时作背景参考"));
         appendHits(block, hits);
         return block.toString();
     }
 
-    // ---------- 知识命中（生成/修正下发前置注入，#24） ----------
-
-    /**
-     * 生成/修正过程下发的知识命中前置注入（一次下发一次注入）：query = 任务
-     * prompt 截 2000 字，命中拼为「背景资料」前置块返回——自带收尾分隔，调用方
-     * 直接 {@code prefix + 任务 prompt}（知识是背景非指令，限定语与主智能体尾注同款）。
-     * 空命中 / 检索失败 / 空任务 prompt = 空注入降级（空串），run 照旧下发不阻断。
-     */
-    public String dispatchInjection(String taskPrompt) {
-        List<KnowledgeHit> hits = retrieveDegraded(taskPrompt, "生成下发");
-        if (hits.isEmpty()) {
-            return "";
-        }
-        log.info("[knowledge] 生成下发前置注入命中 {} 条", hits.size());
-        StringBuilder block = new StringBuilder(blockHeader("实现当前需求时可作背景参考"));
-        appendHits(block, hits);
-        block.append("\n\n————\n\n");
-        return block.toString();
-    }
-
     // ---------- 拼装私有件 ----------
-
-    /**
-     * 语义检索（降级为空）：query 超长截 {@link #MAX_QUERY_CHARS}、空 query 不触
-     * 检索、检索失败记日志返回空列表——两种注入（尾注/前置）共用同一降级契约。
-     */
-    private List<KnowledgeHit> retrieveDegraded(String rawQuery, String what) {
-        if (rawQuery == null || rawQuery.isBlank()) {
-            return List.of();
-        }
-        String query = rawQuery.length() > MAX_QUERY_CHARS
-                ? rawQuery.substring(0, MAX_QUERY_CHARS) : rawQuery;
-        try {
-            return knowledgePort.retrieve(query, hitTopK);
-        } catch (RuntimeException e) {
-            log.warn("[knowledge] {}检索失败（降级为空注入）：{}", what, e.toString());
-            return List.of();
-        }
-    }
 
     /**
      * 命中逐条拼进块（表头与收尾由调用方定调）：〔来源｜类别〕标题 + 片段
@@ -223,9 +217,8 @@ public class ProjectKnowledgeAppService {
 
     // ---------- 级联清理 ----------
 
-    /** 项目 DELETE 级联清空 knw_chunks 与会话注入缓存：失败记日志不阻断删除（残留可重删收敛）。 */
+    /** 项目 DELETE 级联清空 knw_chunks、命中留痕与登记行：失败记日志不阻断删除（残留可重删收敛）。 */
     void purgeByProject(Long projectId) {
-        establishedSessionTails.remove(projectId);
         quietly("项目知识级联清理", () -> knowledgePort.purgeByProject(projectId.toString()));
     }
 

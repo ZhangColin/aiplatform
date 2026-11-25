@@ -30,7 +30,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
 
@@ -168,12 +167,11 @@ public class ProjectLifecycleAppService {
         namingService.nameAsync(project.getId(), command.requirement());
 
         // 前缀段自动：建项目即开始主智能体对话（初始描述即开场输入；会话建立轮做
-        // 知识命中注入——query = 初始需求原文）
-        String prompt = command.requirement() == null || command.requirement().isBlank()
-                ? AgentProfile.DEFAULT_KICKOFF_PROMPT : command.requirement();
+        // 知识命中注入——#639 真实需求与平台固定开场白分开传参：没填需求描述时
+        // 入口传原文（可能空白），开场白由主智能体侧取缺省，不拿开场白当检索词）
         MainAgentAppService.MainAgentRun run;
         try {
-            run = mainAgentAppService.startConversation(project.getId(), prompt);
+            run = mainAgentAppService.startConversation(project.getId(), command.requirement());
         } catch (RuntimeException e) {
             log.warn("项目 {} 自动对话起跑失败（项目已成立，不回滚）", project.getId(), e);
             return new Creation(

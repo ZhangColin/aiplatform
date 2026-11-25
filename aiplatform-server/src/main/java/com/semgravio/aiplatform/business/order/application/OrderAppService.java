@@ -20,7 +20,6 @@ import com.semgravio.aiplatform.business.order.domain.model.Operator;
 import com.semgravio.aiplatform.business.order.domain.repository.ContractRepository;
 import com.semgravio.aiplatform.business.order.domain.repository.OrderRepository;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
-import com.semgravio.aiplatform.business.project.application.ProjectKnowledgeAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -50,9 +49,8 @@ import lombok.extern.slf4j.Slf4j;
  * {@link #cancelByBackoffice}（#338 收窄后）用 {@link TransactionTemplate} 收
  * 「订单取消＋活跃合同联动作废」一个事务；{@link #retryArchive}（#158 后台
  * 手动补归档口——已归档＝后台人工终局的唯一触发）同款收「订单＋项目」一个
- * 事务，失败异常上抛（运营须看见拦截原因）；知识沉淀与 SSE 在事务提交后
- * （#5 决议；沉淀降级不炸——embedding 不可用不允许回滚已成功的归档；取版
- * ＝合同冻结 PRD 优先、无合同回退项目最新版）。</p>
+ * 事务，失败异常上抛（运营须看见拦截原因）；SSE 在事务提交后（#5 决议）。
+ * 知识入库 #640 起改挂用户面版本成版——订单归档不再触发沉淀。</p>
  */
 @Service
 @Slf4j
@@ -71,7 +69,6 @@ public class OrderAppService {
     private final ContractRepository contractRepository;
     private final ProjectQueryAppService projectQueryAppService;
     private final ProjectLifecycleAppService projectLifecycleAppService;
-    private final ProjectKnowledgeAppService projectKnowledgeAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
@@ -80,7 +77,6 @@ public class OrderAppService {
                            ContractRepository contractRepository,
                            ProjectQueryAppService projectQueryAppService,
                            ProjectLifecycleAppService projectLifecycleAppService,
-                           ProjectKnowledgeAppService projectKnowledgeAppService,
                            ConversationHistoryAppService conversationHistoryAppService,
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
@@ -88,7 +84,6 @@ public class OrderAppService {
         this.contractRepository = contractRepository;
         this.projectQueryAppService = projectQueryAppService;
         this.projectLifecycleAppService = projectLifecycleAppService;
-        this.projectKnowledgeAppService = projectKnowledgeAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
@@ -299,8 +294,8 @@ public class OrderAppService {
      * 归档失败」的卡单手动补归档。归档事务＝订单＋项目一事务（守卫复用：非已
      * 支付 ORD_012、项目重复归档 PRJ_013），失败异常原样上抛（运营须看见拦截
      * 原因，不留静默半成态）。成功收尾同款 {@link #settleArchive}：重读
-     * 库定真，已归档发「已归档」通知并触发知识沉淀（沉淀跟随归档成功——支付链
-     * 与本口皆触发）。操作者留痕落订单行（缺头落空；支付链自动归档为 NULL）。
+     * 库定真，已归档发「已归档」通知（知识入库改挂成版，#640——本口不再触发）。
+     * 操作者留痕落订单行（缺头落空；支付链自动归档为 NULL）。
      * 不做自动 Scheduled 补偿（隐藏状态机，v1 单量不值当）。
      *
      * @return 订单（已归档终态）
@@ -315,35 +310,21 @@ public class OrderAppService {
             orderRepository.save(order);
             projectLifecycleAppService.archive(projectId);
         });
-        return settleArchive(orderId, projectId);
+        return settleArchive(orderId);
     }
 
     /**
      * 归档收尾（#158 起支付链与重试归档共用）：重读库定真——归档事务回滚不还原
-     * 内存对象，通知与沉淀以库内真值为准（已归档才发「已归档」通知并触发知识
-     * 沉淀；沉淀 best-effort，降级不炸的既有口径不变）。沉淀取版对齐（#338；
-     * #462 读法顺延——ADR-0039）：合同冻结的 PRD 版优先（签约双方约定的正身），
-     * 无合同回退项目最新版。
+     * 内存对象，通知以库内真值为准（已归档才发「已归档」通知）。
+     * #640 起知识入库改挂用户面版本成版，订单归档不再触发沉淀（取版辅助逻辑
+     * 随之退场）。
      */
-    private OrderResponse settleArchive(Long orderId, Long projectId) {
+    private OrderResponse settleArchive(Long orderId) {
         Order persisted = requireOrder(orderId);
         if (persisted.getStatus() == OrderStatus.ARCHIVED) {
             publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, persisted); // 归档落定发「已归档」
-            projectKnowledgeAppService.sinkPrd(projectId, archivePrdContent(orderId, projectId));
         }
         return OrderResponse.of(persisted);
-    }
-
-    /**
-     * 归档沉淀取版（#338；#629 改接当前 PRD 正文）：订单最近合同已签署完成 →
-     * 合同冻结的 PRD 全文（合同自含冗余拷贝，签约即定格）；无已签合同（mock 时代
-     * 遗留单/异常路径）→ 回退当前工作区 PRD 全文（currentPrdContent）。两源都不在
-     * 场（legacy/未产出）如实 null——sinkPrd 空内容跳过。
-     */
-    private String archivePrdContent(Long orderId, Long projectId) {
-        return contractRepository.findLatestSignedByOrderId(orderId)
-                .map(Contract::getPrdSnapshot)
-                .orElseGet(() -> projectQueryAppService.currentPrdContent(projectId));
     }
 
     /**

@@ -160,10 +160,10 @@ public class BackofficeOrderController {
     @PostMapping("/{id}/retry-archive")
     @Operation(summary = "重试归档（已支付未归档的卡单补归档）",
             description = "对支付成功但归档失败的卡单手动补完结：一事务内订单落已归档"
-                    + "＋项目归档，成功后补发「已归档」通知并触发知识沉淀（成交 PRD "
-                    + "入知识库，best-effort 不炸主流程）。幂等由既有守卫保证——"
-                    + "重复触发/非已支付态 409 ORD_012；项目已归档 409 PRJ_013"
-                    + "（不产生重复素材）。X-User-Id/X-User-Name 透传头自动落痕订单行"
+                    + "＋项目归档，成功后补发「已归档」通知。知识入库自 #640 起改挂"
+                    + "用户面版本成版，订单归档不再触发知识沉淀。幂等由既有守卫保证——"
+                    + "重复触发/非已支付态 409 ORD_012；项目已归档 409 PRJ_013。"
+                    + "X-User-Id/X-User-Name 透传头自动落痕订单行"
                     + "（缺头落空，#158；支付链自动归档操作者为空）。需要机机签名")
     @ErrorCodes({"ORD_001", "ORD_012", "PRJ_013"})
     public ApiResponse<OrderResponse> retryArchive(@PathVariable String id) {

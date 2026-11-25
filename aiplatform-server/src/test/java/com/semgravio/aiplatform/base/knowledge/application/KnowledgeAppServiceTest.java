@@ -387,7 +387,7 @@ class KnowledgeAppServiceTest {
         Timestamp firstSunkAt = jdbcTemplate.queryForObject(
                 "SELECT created_at FROM knw_materials", Timestamp.class);
 
-        knowledgePort.index(second);   // 重沉淀（重试归档再触发）：幂等换块
+        knowledgePort.index(second);   // 重沉淀（新版本再次入库触发，#640）：幂等换块
 
         // 登记表单行、状态仍停用、操作者/id/首沉淀时间保留——被治理素材重沉淀不复活
         assertThat(registryCount()).isEqualTo(1);

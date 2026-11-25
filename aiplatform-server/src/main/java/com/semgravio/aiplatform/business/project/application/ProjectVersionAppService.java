@@ -36,7 +36,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>自动成版（#626，ADR-0056）</b>：每轮成功生成（首建/迭代）探活通过后，界面
  * 侧经 {@link #commitUserVersion} 把当时工作区提交为用户面版本（{@code Platform-Version}
  * ＋{@code Run-Id} trailer，主题＝用户那句话）；版本序列＝按标记过滤的 git log，
- * 无新表。成版失败降级（日志留痕、不反噬生成）——下一轮成功交付覆盖累计现状。</p>
+ * 无新表。成版失败降级（日志留痕、不反噬生成）——下一轮成功交付覆盖累计现状。
+ * 成版成功即触发一次需求文档入库（#640，ADR-0058）：知识编排自有单线程队列
+ * 异步直读工作区最新 {@code docs/PRD.md}，失败不阻断成版。</p>
  *
  * <p><b>回到某版（#627，ADR-0056 回滚面）</b>：{@link #rollback} 是<b>平台侧异步
  * 动作</b>（不是内核 run）：校验版本存在／项目未归档／无 run 在途后立即受理，
@@ -94,6 +96,7 @@ public class ProjectVersionAppService {
     private final EventsAppService eventsAppService;
     private final KernelServingGuard kernelServingGuard;
     private final ClosingProbes closingProbes;
+    private final ProjectKnowledgeAppService projectKnowledgeAppService;
 
     public ProjectVersionAppService(ProjectRepository projectRepository,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -102,7 +105,8 @@ public class ProjectVersionAppService {
             AgentEventBridge eventBridge,
             EventsAppService eventsAppService,
             KernelServingGuard kernelServingGuard,
-            ClosingProbes closingProbes) {
+            ClosingProbes closingProbes,
+            ProjectKnowledgeAppService projectKnowledgeAppService) {
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.codingRunTrack = codingRunTrack;
@@ -111,6 +115,7 @@ public class ProjectVersionAppService {
         this.eventsAppService = eventsAppService;
         this.kernelServingGuard = kernelServingGuard;
         this.closingProbes = closingProbes;
+        this.projectKnowledgeAppService = projectKnowledgeAppService;
     }
 
     /**
@@ -136,7 +141,8 @@ public class ProjectVersionAppService {
      * 生成探活通过后，平台把当时工作区提交为用户面版本（版本号＝已有版本最大值+1，
      * 主题＝用户那句话，正文携版本标记与 run 标识）。<b>成版失败降级</b>：任何
      * exec 失败/回执非 hash 只记日志返回 null，绝不反噬生成——下一轮成功交付的
-     * 提交覆盖累计后的工作区现状，时间线可能少一格但不丢代码。
+     * 提交覆盖累计后的工作区现状，时间线可能少一格但不丢代码。成版成功即触发
+     * 一次需求文档入库（#640）：异步、失败降级，不影响返回值与生成。
      *
      * @param project 成版项目（工作区锚）
      * @param runId   成版 run 标识（用户面 runId）
@@ -161,12 +167,30 @@ public class ProjectVersionAppService {
             }
             log.info("[version] 项目 {} run {} 记录用户面版本 v{}（{}）", project.getId(), runId,
                     nextVersionNo, label);
+            // #640（ADR-0058）：每出一个用户面版本，后台异步入库最新需求文档——
+            // 单线程队列、失败降级，绝不反噬成版（触发异常在此吞掉）
+            triggerPrdIngestion(project.getId());
             return nextVersionNo;
         }
         catch (RuntimeException e) {
             log.warn("[version] 项目 {} 用户面版本提交执行异常（生成照常，下一次成功交付覆盖累计"
                     + "现状）：{}", project.getId(), e.toString());
             return null;
+        }
+    }
+
+    /**
+     * 成版后需求文档入库触发（#640，ADR-0058）：此刻工作区已是用户面版本，
+     * 知识素材与时间线同源。异步入库归知识编排（自有单线程队列）；提交失败
+     * 只记日志——成版是真、入库是尽力而为。
+     */
+    private void triggerPrdIngestion(Long projectId) {
+        try {
+            projectKnowledgeAppService.ingestPrdOnVersionAsync(projectId);
+        }
+        catch (RuntimeException e) {
+            log.warn("[version] 项目 {} 成版后需求文档入库触发失败（降级跳过）：{}",
+                    projectId, e.toString());
         }
     }
 

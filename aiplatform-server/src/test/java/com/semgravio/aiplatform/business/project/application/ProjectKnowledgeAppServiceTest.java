@@ -8,6 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -15,9 +16,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -47,6 +50,10 @@ class ProjectKnowledgeAppServiceTest {
 
     @MockitoBean
     private KnowledgePort knowledgePort;
+
+    /** 工作区 PRD 读口（#640 成版入库直读最新 docs/PRD.md；工作区读取失败面亦在此造）。 */
+    @MockitoBean
+    private ProjectQueryAppService projectQueryAppService;
 
     /** 端口 mock 上的进程内留痕替身（record → latest 可读回）。 */
     private final Map<String, KnowledgeRetrieval> recorded = new ConcurrentHashMap<>();
@@ -213,5 +220,91 @@ class ProjectKnowledgeAppServiceTest {
                 .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
                 .contains("核心场景：主人在线选医生预约。");
         verify(knowledgePort, never()).retrieve(anyString(), anyInt()); // 不重检索
+    }
+
+    // ---------- 需求文档入库（#640：成版触发，直读工作区最新 PRD） ----------
+
+    @Test
+    void given_workspace_prd_when_version_ingest_then_indexed_as_project_latest_prd() {
+        // 用户面版本提交成功后：直读工作区最新 docs/PRD.md，按「PRD＋项目标识」幂等入库
+        when(projectQueryAppService.currentPrdContent(9800L)).thenReturn(
+                "# PRD\n\n## 需求背景\n\n宠物店官网。\n\n## 功能清单\n\n1. 商品列表");
+        when(projectQueryAppService.namesOf(List.of(9800L)))
+                .thenReturn(Map.of(9800L, "宠物店官网"));
+
+        directService().ingestPrdOnVersionAsync(9800L);
+
+        ArgumentCaptor<KnowledgeSpec> spec = ArgumentCaptor.forClass(KnowledgeSpec.class);
+        verify(knowledgePort).index(spec.capture());
+        assertThat(spec.getValue().kind()).isEqualTo("PRD");
+        assertThat(spec.getValue().sourceRef()).isEqualTo("9800"); // 幂等键＝项目标识
+        assertThat(spec.getValue().projectId()).isEqualTo("9800");
+        assertThat(spec.getValue().projectName()).isEqualTo("宠物店官网");
+        assertThat(spec.getValue().chunks()).isNotEmpty()
+                .allSatisfy(chunk -> assertThat(chunk).isNotBlank());
+    }
+
+    @Test
+    void given_new_version_when_ingest_again_then_same_key_so_old_chunks_replaced() {
+        // 同项目只留最新一份：两次成版入库走同一幂等键，底座删后插换掉旧块
+        when(projectQueryAppService.namesOf(List.of(9801L)))
+                .thenReturn(Map.of(9801L, "宠物店官网"));
+        when(projectQueryAppService.currentPrdContent(9801L)).thenReturn("# PRD\n\n第一版");
+        ProjectKnowledgeAppService service = directService();
+        service.ingestPrdOnVersionAsync(9801L);
+        when(projectQueryAppService.currentPrdContent(9801L)).thenReturn("# PRD\n\n第二版");
+
+        service.ingestPrdOnVersionAsync(9801L);
+
+        ArgumentCaptor<KnowledgeSpec> specs = ArgumentCaptor.forClass(KnowledgeSpec.class);
+        verify(knowledgePort, times(2)).index(specs.capture());
+        assertThat(specs.getAllValues())
+                .allSatisfy(spec -> assertThat(spec.sourceRef()).isEqualTo("9801"))
+                .last()
+                .satisfies(spec -> assertThat(String.join("", spec.chunks()))
+                        .contains("第二版"));
+    }
+
+    @Test
+    void given_no_workspace_prd_when_version_ingest_then_skipped_without_index() {
+        // 未产出 PRD / 空文档：没有可入库内容，不调用入库端口（版本本身照常成立）
+        when(projectQueryAppService.currentPrdContent(9802L)).thenReturn(null);
+        ProjectKnowledgeAppService service = directService();
+
+        service.ingestPrdOnVersionAsync(9802L);
+        when(projectQueryAppService.currentPrdContent(9803L)).thenReturn("  ");
+        service.ingestPrdOnVersionAsync(9803L);
+
+        verify(knowledgePort, never()).index(any());
+    }
+
+    @Test
+    void given_workspace_read_failure_when_version_ingest_then_degraded_without_throwing() {
+        // 工作区读取失败：记日志降级，不阻断成版、不影响生成结果
+        when(projectQueryAppService.currentPrdContent(9804L))
+                .thenThrow(new IllegalStateException("容器不可达"));
+
+        assertThatCode(() -> directService().ingestPrdOnVersionAsync(9804L))
+                .doesNotThrowAnyException();
+        verify(knowledgePort, never()).index(any());
+    }
+
+    @Test
+    void given_registry_write_failure_when_version_ingest_then_degraded_without_throwing() {
+        // 登记表写入失败：同样降级吞掉——成版主流程不被拖回滚
+        when(projectQueryAppService.currentPrdContent(9805L)).thenReturn("# PRD\n\n官网");
+        when(projectQueryAppService.namesOf(List.of(9805L)))
+                .thenReturn(Map.of(9805L, "官网"));
+        doThrow(new RuntimeException("登记表写入失败")).when(knowledgePort).index(any());
+
+        assertThatCode(() -> directService().ingestPrdOnVersionAsync(9805L))
+                .doesNotThrowAnyException();
+        verify(knowledgePort).index(any()); // 确实尝试过入库
+    }
+
+    /** 直通执行器：成版入库提交即同步执行（异步队列语义由连线测试与代码自证）。 */
+    private ProjectKnowledgeAppService directService() {
+        return new ProjectKnowledgeAppService(knowledgePort, projectQueryAppService, 5,
+                Runnable::run);
     }
 }

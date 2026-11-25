@@ -18,7 +18,6 @@ import com.cartisan.core.context.RequestContext;
 
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
-import com.semgravio.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.semgravio.aiplatform.business.identity.domain.aggregate.Account;
 import com.semgravio.aiplatform.business.identity.application.AccountAppService;
 import com.semgravio.aiplatform.business.order.application.OrderAppService;
@@ -36,7 +35,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -74,10 +72,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 被 ORD_005 拦；缺/空白/超长原因被 ORD_013/014 拒。用户面读面不携带原因归
  * {@code OrderAppServiceTest} 钉死。</p>
  *
- * <p>#158 重试归档写口在本类一链钉死：支付链归档失败造卡单（已支付未归档、
- * 无沉淀）→ 带操作者头签名重试归档 → 订单落已归档＋库列留痕 → 项目归档联动
- * → 知识块落库（sinkPrd 补调生效，素材登记同落）→ 后台详情呈现留痕 → 再触发
- * 被守卫拦（幂等、素材不重复）；待报价/已报价被 ORD_012 拦、联动不被触达。</p>
+ * <p>#158 重试归档写口在本类一链钉死：支付链归档失败造卡单（已支付未归档）
+ * → 带操作者头签名重试归档 → 订单落已归档＋库列留痕 → 项目归档联动 → 后台
+ * 详情呈现留痕 → 再触发被守卫拦（幂等）；#640 起归档不再触发知识入库（知识
+ * 两表零写入）——待报价/已报价被 ORD_012 拦、联动不被触达。</p>
  *
  * <p>#298 交付物类型列在本类钉死：真 place 落库 → 清单/详情带 deliverableType；
  * #611 设计线退役后收窄为系统单值（2=系统，设计交付物包端点退场）。</p>
@@ -92,7 +90,7 @@ class BackofficeOrderSeamTest {
     private static final long PROJECT_ID = 900100L;
     private static final String PRD = "# PRD\n\n需求背景：后台 seam。";
 
-    /** #158 卡单补偿链专用项目（沉淀断言面，与其他测试互不沾）。 */
+    /** #158 卡单补偿链专用项目（归档链断言面，与其他测试互不沾）。 */
     private static final long STUCK_PROJECT_ID = 910701L;
     /** #158 守卫负例专用项目（非已支付态触发被拦）。 */
     private static final long GUARD_PROJECT_ID = 910702L;
@@ -125,9 +123,6 @@ class BackofficeOrderSeamTest {
     @MockitoBean
     private ProjectLifecycleAppService projectLifecycleAppService;
 
-    /** embedding 端口：mock 供给 512 维向量（沉淀入库的真向量面，本机 fastembed 不属测试依赖）。 */
-    @MockitoBean
-    private EmbeddingClient embeddingClient;
 
     @AfterEach
     void tearDown() {
@@ -751,15 +746,11 @@ class BackofficeOrderSeamTest {
     @Test
     void given_stuck_paid_order_when_signed_retry_archive_then_full_chain_completes()
             throws Exception {
-        // 一链：已报价单支付（项目归档联动失败）→ 卡单（已支付未归档、无沉淀）→
-        // 带操作者头签名重试归档 → 订单落已归档＋库列留痕（JdbcTemplate）→ 项目
-        // 归档联动 → 知识块落库（sinkPrd 补调生效）→ 后台详情呈现留痕 → 再触发
-        // 被守卫拦（幂等，素材不重复）
+        // 一链：已报价单支付（项目归档联动失败）→ 卡单（已支付未归档）→ 带操作者
+        // 头签名重试归档 → 订单落已归档＋库列留痕（JdbcTemplate）→ 项目归档联动
+        // → 后台详情呈现留痕 → 再触发被守卫拦（幂等）；#640 起归档不再写知识两表
         OrderResponse order = placeOrder(STUCK_PROJECT_ID);
         appService.submitQuote(Long.parseLong(order.id()), 128000L, "首版报价", null);
-        when(projectQueryAppService.namesOf(List.of(STUCK_PROJECT_ID)))
-                .thenReturn(Map.of(STUCK_PROJECT_ID, "卡单补偿项目")); // 沉淀取名面
-        stubEmbeddingOk();
         // 已支付卡单夹具（聚合正身直落——#337 mock 支付链退役，重试归档的入口态）
         com.semgravio.aiplatform.business.order.domain.aggregate.Order paid = orderRepository.findWithHistory(Long.parseLong(order.id())).orElseThrow();
         paid.pay("TEST-" + order.id());
@@ -771,7 +762,7 @@ class BackofficeOrderSeamTest {
                 .containsEntry("archived_at", null); // 卡单事实：已支付、未归档
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
-                Long.toString(STUCK_PROJECT_ID))).isZero(); // 归档未成，沉淀未触
+                Long.toString(STUCK_PROJECT_ID))).isZero(); // 归档未成，无知识写入
 
         String retryPath = "/api/backoffice/orders/" + order.id() + "/retry-archive";
         mockMvc.perform(BackofficeSignatures.signed(post(retryPath), retryPath, null)
@@ -792,16 +783,13 @@ class BackofficeOrderSeamTest {
         assertThat(row.get("archive_operator_name")).isEqualTo(OPERATOR_NAME);
         // 项目归档联动一触（重试归档事务内——支付链已退役）
         verify(projectLifecycleAppService, times(1)).archive(STUCK_PROJECT_ID);
-        // 知识块落库（sinkPrd 补调生效）：kind=PRD、幂等键=projectId；素材登记行同落
-        List<Map<String, Object>> chunks = jdbcTemplate.queryForList(
-                "SELECT kind, source_ref FROM knw_chunks WHERE project_id = ?",
-                Long.toString(STUCK_PROJECT_ID));
-        assertThat(chunks).isNotEmpty();
-        assertThat(chunks.get(0)).containsEntry("kind", "PRD")
-                .containsEntry("source_ref", Long.toString(STUCK_PROJECT_ID));
+        // #640：订单归档不再触发知识入库——块表与登记表零写入
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(STUCK_PROJECT_ID))).isZero();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM knw_materials WHERE project_id = ?", Integer.class,
-                Long.toString(STUCK_PROJECT_ID))).isEqualTo(1);
+                Long.toString(STUCK_PROJECT_ID))).isZero();
 
         // 后台详情呈现留痕（运营内部读面；用户面 OrderResponse 不含归档操作者字段）
         mockMvc.perform(BackofficeSignatures.signed(
@@ -812,7 +800,7 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.archiveOperatorId").value(OPERATOR_ID_STR))
                 .andExpect(jsonPath("$.data.archiveOperatorName").value(OPERATOR_NAME));
 
-        // 幂等（守卫保证）：再触发被 ORD_012 拦、素材不重复
+        // 幂等（守卫保证）：再触发被 ORD_012 拦、知识表仍零写入
         mockMvc.perform(BackofficeSignatures.signed(post(retryPath), retryPath, null)
                         .header("X-User-Id", OPERATOR_ID_STR)
                         .header("X-User-Name", OPERATOR_NAME))
@@ -820,7 +808,7 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.message").value("订单非已支付状态，无法归档"));
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
-                Long.toString(STUCK_PROJECT_ID))).isEqualTo(chunks.size());
+                Long.toString(STUCK_PROJECT_ID))).isZero();
     }
 
     @Test
@@ -855,18 +843,6 @@ class BackofficeOrderSeamTest {
     private void stubProjectName() {
         when(projectQueryAppService.namesOf(List.of(PROJECT_ID)))
                 .thenReturn(Map.of(PROJECT_ID, "seam 测试项目"));
-    }
-
-    /** embedding 正常供给：每块一个 512 维向量（同 {@code OrderPaymentArchiveTest} 形制）。 */
-    private void stubEmbeddingOk() {
-        when(embeddingClient.embed(anyList())).thenAnswer(invocation -> {
-            List<String> chunks = invocation.getArgument(0);
-            return chunks.stream().map(chunk -> {
-                float[] vector = new float[512];
-                vector[0] = chunk.hashCode() % 97 / 97f; // 确定性伪向量（仅入库，不验相似）
-                return vector;
-            }).toList();
-        });
     }
 
     /** 缺省下单账号（placeOrder 未显式指定账号时绑定的会话 user——owner 路由键非空）。 */

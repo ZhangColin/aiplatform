@@ -4,7 +4,12 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -20,30 +25,35 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 知识沉淀编排（业务侧缝）：入库/检索/清理/留痕的存储语义归 base.knowledge
  * （{@link KnowledgePort}），「什么时机沉淀什么素材」是业务知识，在此落定。
- * 沉淀触发点 = 每笔成交自动沉淀 PRD（交易环，#30）；知识命中的唯一作用点 =
+ * 沉淀触发点 = 每出一个用户面版本后异步入库工作区最新需求文档（#640，ADR-0058；
+ * 原「每笔成交沉淀合同/归档 PRD」随订单归档触发一并退场）；知识命中的唯一作用点 =
  * 主智能体会话建立尾注（需求环，#19/#639——生成/修正下发前置注入已退场，
  * 生成执行体只读当前项目需求文档）。#465 起检索面为多类同池混检（PRD＋激活
  * 升格的 CASE/MODULE/RULE 沉淀物），#466 起注入块命中条带来源 kind 区分。
  *
  * <p><b>降级契约</b>：摄取/清理/命中检索/留痕一律失败不炸——记日志跳过、降级
- * 为空注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索降级）。</p>
+ * 为空注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索降级）。
+ * 成版入库在自有单线程队列异步执行，失败不阻断成版、不影响生成结果。</p>
  */
 @Service
 @Slf4j
-public class ProjectKnowledgeAppService {
+public class ProjectKnowledgeAppService implements DisposableBean {
 
     /** 命中检索 query 上限（bge-small-zh 512 维模型，超长截断）。 */
     static final int MAX_QUERY_CHARS = 2000;
 
-    /** 沉淀素材类别（幂等键之一；v1 唯一业务口径 = 成交项目 PRD）。 */
+    /** 沉淀素材类别（幂等键之一；v1 唯一业务口径 = 用户面版本最新需求文档）。 */
     static final String KIND_PRD = "PRD";
 
     /** 沉淀条目标题（命中条目展示：〔来源｜类别〕标题 + 片段）。 */
     static final String TITLE_PRD = "PRD";
 
+    /** 成版入库队列线程名（单线程串行，按触发顺序处理）。 */
+    static final String INGEST_THREAD_NAME = "project-knowledge-ingest";
+
     /**
-     * 命中条目类别展示名（#466 命中条带来源 kind 区分）：PRD＝历史需求（成交
-     * 项目归档，业务侧类别），CASE/MODULE/RULE＝激活升格的沉淀物（孤儿，来源恒
+     * 命中条目类别展示名（#466 命中条带来源 kind 区分）：PRD＝历史需求（用户面
+     * 版本入库，业务侧类别），CASE/MODULE/RULE＝激活升格的沉淀物（孤儿，来源恒
      * 「平台沉淀」；键形单源 {@link SedimentKind#key()}）。kind 开放（#451）——
      * 未知类别不映射，原键透传（新类生长零改注入面）。插入序即块头枚举序。
      */
@@ -85,13 +95,41 @@ public class ProjectKnowledgeAppService {
     private final KnowledgePort knowledgePort;
     private final ProjectQueryAppService projectQueryAppService;
     private final int hitTopK;
+    /** 成版入库提交通道（生产＝自有单线程队列；测试＝直通同步）。 */
+    private final Executor ingestExecutor;
+    /** 生产队列生命周期（测试注入直通道时为 null）。 */
+    private final ExecutorService ownedIngestExecutor;
 
+    @Autowired
     public ProjectKnowledgeAppService(KnowledgePort knowledgePort,
             ProjectQueryAppService projectQueryAppService,
             @Value("${app.knowledge.top-k:5}") int hitTopK) {
         this.knowledgePort = knowledgePort;
         this.projectQueryAppService = projectQueryAppService;
         this.hitTopK = hitTopK;
+        this.ownedIngestExecutor = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, INGEST_THREAD_NAME);
+            thread.setDaemon(true);
+            return thread;
+        });
+        this.ingestExecutor = ownedIngestExecutor;
+    }
+
+    /** 测试便利构造（直通道，无队列生命周期）。 */
+    ProjectKnowledgeAppService(KnowledgePort knowledgePort,
+            ProjectQueryAppService projectQueryAppService, int hitTopK, Executor ingestExecutor) {
+        this.knowledgePort = knowledgePort;
+        this.projectQueryAppService = projectQueryAppService;
+        this.hitTopK = hitTopK;
+        this.ingestExecutor = ingestExecutor;
+        this.ownedIngestExecutor = null;
+    }
+
+    @Override
+    public void destroy() {
+        if (ownedIngestExecutor != null) {
+            ownedIngestExecutor.shutdownNow();
+        }
     }
 
     // ---------- 知识命中（主智能体会话建立注入，#19/#639） ----------
@@ -179,38 +217,74 @@ public class ProjectKnowledgeAppService {
         }
     }
 
-    // ---------- 知识沉淀（订单归档成功触发：支付链与重试归档两路，#30/#158） ----------
+    // ---------- 需求文档入库（#640：用户面版本成版异步触发） ----------
 
     /**
-     * 成交 PRD 沉淀（#30；#158 起沉淀跟随归档成功——支付链与重试归档两路触发、
-     * 本口唯一；#338 取版对齐）：沉淀内容由调用方（归档链）裁决——合同冻结的
-     * PRD 确认版优先（签约双方约定的正身），无合同（遗留/异常路径）回退最新
-     * 确认版；本口只管分块入库，不再读工作区（归档链的 docker exec 依赖点
-     * 随之退场）。幂等键 = {@code (PRD, projectId)} 删后插——同项目再成交自然
-     * 覆盖旧块。失败降级记日志不炸（丢失容忍，A5 §1）：归档事务已成功，沉淀
-     * 不允许把它拖回滚。项目名经 {@code namesOf} 单查询取（缺档即降级跳过，
-     * 不走 detail 全量拼装）。
+     * 用户面版本成版后的需求文档入库（#640，ADR-0058）：fire-and-forget 提交到
+     * 自有单线程队列——触发点＝工作区已记为用户面版本（成版提交成功），本口
+     * 异步<b>直读工作区最新 {@code docs/PRD.md}</b>，按「PRD＋项目标识」幂等
+     * 入库（同项目只留最新一份、旧块被替换）。只有成版动作触发：没有用户面
+     * 版本的项目不入库，订单归档/合同冻结版不再触发。失败一律记日志降级——
+     * 不阻断成版、不影响生成结果。
      *
-     * @param projectId  所属项目
-     * @param prdContent 沉淀正身全文（合同冻结版或最新确认版；空内容即跳过）
+     * @param projectId 刚成版的项目
      */
-    public void sinkPrd(Long projectId, String prdContent) {
+    public void ingestPrdOnVersionAsync(Long projectId) {
+        if (projectId == null) {
+            return;
+        }
+        try {
+            ingestExecutor.execute(() -> ingestPrdQuietly(projectId));
+        }
+        catch (RuntimeException e) {
+            // 队列已关闭等提交失败：降级记日志，绝不把异常抛回成版路径
+            log.warn("[knowledge] 项目 {} 需求文档入库任务提交失败（降级跳过，不阻断成版）：{}",
+                    projectId, e.toString());
+        }
+    }
+
+    /** 入库任务体（直读工作区最新 PRD → 分块入库）：任何失败只记日志。 */
+    private void ingestPrdQuietly(Long projectId) {
+        try {
+            String prdContent = projectQueryAppService.currentPrdContent(projectId);
+            if (prdContent == null || prdContent.isBlank()) {
+                log.info("[knowledge] 项目 {} 无最新需求文档（未产出/为空），入库跳过", projectId);
+                return;
+            }
+            sinkPrdContent(projectId, prdContent);
+        }
+        catch (RuntimeException e) {
+            log.warn("[knowledge] 项目 {} 需求文档入库失败（降级跳过，不阻断成版、不影响生成）：{}",
+                    projectId, e.toString());
+        }
+    }
+
+    /**
+     * 需求文档分块入库（幂等键 = {@code (PRD, projectId)} 删后插——同项目新版本
+     * 自然覆盖旧块；登记表状态跨替换存活，被运营停用的素材不会因新版本入库而
+     * 复活）。项目名经 {@code namesOf} 单查询取（缺档即降级跳过，不走 detail
+     * 全量拼装）。空文档/含空白块由底座跳过并记日志；登记表写入失败在此吞掉
+     * 降级（丢失容忍，A5 §1）——成版事务已成功，入库不允许把它拖回滚。
+     */
+    private void sinkPrdContent(Long projectId, String prdContent) {
         try {
             String projectName = projectQueryAppService.namesOf(List.of(projectId)).get(projectId);
             if (projectName == null) {
-                log.warn("[knowledge] 项目 {} 缺档，成交 PRD 沉淀跳过", projectId);
+                log.warn("[knowledge] 项目 {} 缺档，需求文档入库跳过", projectId);
                 return;
             }
             List<String> chunks = chunkByParagraph(prdContent);
             if (chunks.isEmpty()) {
-                log.info("[knowledge] 项目 {} 成交 PRD 为空，沉淀跳过", projectId);
+                log.info("[knowledge] 项目 {} 需求文档为空，入库跳过", projectId);
                 return;
             }
             knowledgePort.index(new KnowledgeSpec(KIND_PRD, projectId.toString(),
                     projectId.toString(), projectName, TITLE_PRD, chunks, null));
-            log.info("[knowledge] 项目 {} 成交 PRD 沉淀入库（{} 块）", projectId, chunks.size());
+            // 入库端口不回报是否真落库（向量服务不可用时底座自行降级）——此处只记提交
+            log.info("[knowledge] 项目 {} 需求文档入库已提交（{} 块；向量服务不可用时底座跳过）",
+                    projectId, chunks.size());
         } catch (RuntimeException e) {
-            log.warn("[knowledge] 项目 {} 成交 PRD 沉淀失败（降级跳过，丢失容忍）：{}",
+            log.warn("[knowledge] 项目 {} 需求文档入库失败（降级跳过，丢失容忍）：{}",
                     projectId, e.toString());
         }
     }
@@ -222,11 +296,11 @@ public class ProjectKnowledgeAppService {
         quietly("项目知识级联清理", () -> knowledgePort.purgeByProject(projectId.toString()));
     }
 
-    // ---------- 分块成形（沉淀入料的公共件，#30 起消费；实现归底座 KnowledgeChunker） ----------
+    // ---------- 分块成形（入库入料的公共件，#640 起成版入库消费；实现归底座 KnowledgeChunker） ----------
 
     /**
      * 段落级分块（底座 {@link KnowledgeChunker} 口径，激活升格 #465 同款复用）。
-     * 保留为本类静态缝：PRD 沉淀路径（{@code #sediment}）与 ProjectKnowledgeAppServiceTest 共用此入口。
+     * 保留为本类静态缝：成版需求文档入库路径与 ProjectKnowledgeAppServiceTest 共用此入口。
      */
     static List<String> chunkByParagraph(String text) {
         return KnowledgeChunker.byParagraph(text);

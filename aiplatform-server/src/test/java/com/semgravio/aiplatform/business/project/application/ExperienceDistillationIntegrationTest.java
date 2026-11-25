@@ -89,7 +89,6 @@ class ExperienceDistillationIntegrationTest {
         assertThat(draft.get("kind")).isEqualTo("MODULE");
         assertThat(draft.get("title")).isEqualTo("可复用导出");
         assertThat(((Number) draft.get("status")).intValue()).isEqualTo(1); // 待审
-        assertThat(((Number) draft.get("inflight_slot")).intValue()).isEqualTo(1);
         assertThat(draft.get("slot")).isEqualTo(AgentEdgePoint.REFINEMENT.key());
         assertThat(draft.get("source_project_name")).isEqualTo(PROJECT_NAME);
         assertThat(((Number) draft.get("source_version_no")).intValue()).isEqualTo(2);

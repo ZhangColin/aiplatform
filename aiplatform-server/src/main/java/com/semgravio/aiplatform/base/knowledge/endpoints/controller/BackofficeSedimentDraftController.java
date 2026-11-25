@@ -33,7 +33,7 @@ import com.semgravio.aiplatform.support.Tsid;
  * 人审是知识入库的主质量闸（未审核草稿不参与任何检索）；三键终态语义照技能
  * 草稿审核先例（ADR-0022）：CAS、已审结拒、拒绝理由必填、操作者必留痕。
  * 错误码前缀 KNW_（草稿不存在 KNW_008、已审结 KNW_009、理由空 KNW_010、
- * 类别非法 KNW_011、目标类别在途满 KNW_012、操作者缺 KNW_006）。
+ * 类别非法 KNW_011、操作者缺 KNW_006）。#642 起三键不再占在途名额。
  */
 @RestController
 @RequestMapping("/api/backoffice/sediment-drafts")
@@ -56,10 +56,10 @@ public class BackofficeSedimentDraftController {
                     + "RULE，大小写不敏感，非法 400 KNW_011 带合法取值表）；③ status "
                     + "状态单选，Integer code（1=在途 2=已激活 3=已拒绝；非法 code 400 "
                     + "带合法取值表）。排序服务端定死＝自荐时间倒序（id 倒序稳定）。行"
-                    + "字段：类别/标题/摘要＋血统三件（来源项目/run/槽位）＋扫描判定＋"
-                    + "在途序号（每项目每 kind 上限 3 的队列可见性）＋状态＋自荐时刻；"
-                    + "正文与扫描 findings 在详情。page 1 基（缺省 1）、size 缺省 20"
-                    + "（上界 100）。需要机机签名（五头 HMAC），无签名 401")
+                    + "字段：类别/标题/摘要＋来源回溯（来源项目标识与项目名快照、来源版本号、"
+                    + "来源提交哈希、来源原句）＋血统三件（来源项目/run/槽位）＋扫描判定＋"
+                    + "状态＋自荐时刻；正文与扫描 findings 在详情。page 1 基（缺省 1）、"
+                    + "size 缺省 20（上界 100）。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"BAD_REQUEST", "KNW_011"})
     public ApiResponse<PageResponse<BackofficeSedimentDraftSummaryResponse>> queue(
             @RequestParam(required = false) String projectId,
@@ -89,8 +89,8 @@ public class BackofficeSedimentDraftController {
     @PostMapping("/{id}/activate")
     @Operation(summary = "激活草稿（人审采纳，原样升格不改稿）",
             description = "「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕"
-                    + "（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放"
-                    + "在途名额，并升格 knw_materials（#465——kind 随草稿、正文段落级"
+                    + "（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列，并升格 "
+                    + "knw_materials（#465——kind 随草稿、正文段落级"
                     + "分块入库、与来源项目脱钩成孤儿沉淀）。草稿须在途（已审结 409 "
                     + "KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；"
                     + "缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必"
@@ -120,15 +120,14 @@ public class BackofficeSedimentDraftController {
     }
 
     @PostMapping("/{id}/relabel")
-    @Operation(summary = "改标签（在途内调整类别，占目标类别在途名额）",
+    @Operation(summary = "改标签（在途内调整类别，不占名额）",
             description = "「数据标注」三键之一（#464）：在途草稿调整类别（一期合法"
-                    + "取值 CASE/MODULE/RULE——非法 400 KNW_011；同类别幂等 no-op）；"
-                    + "占目标类别在途序号最低空位（每项目每 kind 上限 3 的结构性约束"
-                    + "跨类别生效——目标类别满 409 KNW_012）。不翻终态、不动正文——纯"
+                    + "取值 CASE/MODULE/RULE——非法 400 KNW_011；同类别幂等 no-op）。"
+                    + "#642 起只调整类别、不再检查或在途占位。不翻终态、不动正文——纯"
                     + "队列分诊修正。草稿须在途（已审结 409 KNW_009）；草稿不存在 404 "
                     + "KNW_008；缺操作者 400 KNW_006（标注动作必留痕）。回执＝详情（新"
                     + "类别直读）。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"KNW_006", "KNW_008", "KNW_009", "KNW_011", "KNW_012"})
+    @ErrorCodes({"KNW_006", "KNW_008", "KNW_009", "KNW_011"})
     public ApiResponse<BackofficeSedimentDraftDetailResponse> relabel(@PathVariable String id,
             @RequestBody(required = false) SedimentDraftRelabelCommand command) {
         return ApiResponse.ok(draftAppService.relabel(

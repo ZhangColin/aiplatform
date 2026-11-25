@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import com.cartisan.data.jpa.id.TsidGenerator;
 import com.jayway.jsonpath.JsonPath;
 
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
@@ -45,9 +46,11 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
  * <ul>
  * <li><b>清单</b>：三过滤维度（项目精确/类别单选/状态单选，可组合可缺省）＋自荐
  * 时间倒序＋分页行走与越界空页＋非法类别 400 KNW_011（非法状态 code 骑框架 400
- * 带合法取值表）＋查无项目＝空清单 200（畸形项目过滤值宽松解析＝缺省不过滤）；</li>
- * <li><b>详情</b>：正文全文＋载荷＋扫描 findings 逐条留档（CAUTION 案例）＋终态字段
- * 在途恒 null——审核面所见即写入时扫描回执；未寻址/畸形柄同语义 404 KNW_008；</li>
+ * 带合法取值表）＋查无项目＝空清单 200（畸形项目过滤值宽松解析＝缺省不过滤）＋
+ * 来源回溯字段（项目名快照/版本号/提交哈希/原句）随行返回（#642）；</li>
+ * <li><b>详情</b>：正文全文＋载荷＋扫描 findings 逐条留档（CAUTION 案例）＋来源回溯
+ * 字段＋终态字段在途恒 null——审核面所见即写入时扫描回执；未寻址/畸形柄同语义
+ * 404 KNW_008；</li>
  * <li><b>鉴权</b>：非签名请求被拒（401）；</li>
  * <li><b>激活</b>：在途翻已激活＋操作者两列留痕＋审结时刻＋出标注队列（在途过滤零
  * 收）＋升格 knw_materials（#465：kind 随草稿、source_ref＝草稿 id、project_id
@@ -58,9 +61,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
  * <li><b>拒绝</b>：理由必填 400 KNW_010＋trim 落档＋终态留痕＋出队列；已审结重审
  * 409 KNW_009（已拒/已激活两终态形态齐测——已拒理由不被覆盖、已激活终态不被
  * 改写）；</li>
- * <li><b>改标签</b>：在途翻类别＋占目标类别在途序号最低空位（跨类别上限 3 结构性
- * 生效——满即 409 KNW_012）＋同类别幂等 no-op＋非法类别 400 KNW_011＋不翻终态
- * 不动正文；</li>
+ * <li><b>改标签</b>：在途翻类别＋#642 起只调类别不占名额（已有同类在途不挡）＋
+ * 同类别幂等 no-op＋非法类别 400 KNW_011＋不翻终态不动正文；</li>
  * <li><b>缺操作者</b>：三键缺头皆 400 KNW_006（标注动作必留痕，无落空通道）；</li>
  * <li><b>检索不可见钉死</b>（装配缝同款）：在途草稿对知识检索不可见——草稿独有
  * 文本在命中面零出现（未审核草稿不参与任何检索，#465 激活升格是唯一入口）。</li>
@@ -74,7 +76,6 @@ class BackofficeSedimentDraftSeamTest {
     private static final int SEDIMENT_DRAFT_ALREADY_REVIEWED_CODE = 2009;
     private static final int SEDIMENT_REJECT_REASON_REQUIRED_CODE = 2010;
     private static final int SEDIMENT_KIND_INVALID_CODE = 2011;
-    private static final int SEDIMENT_TARGET_KIND_FULL_CODE = 2012;
     private static final int KNOWLEDGE_OPERATOR_REQUIRED_CODE = 2006;
 
     /** 血统种植值（projectId 软引用不查项目表——propose 不触 prj_*）。 */
@@ -146,7 +147,7 @@ class BackofficeSedimentDraftSeamTest {
                 .andReturn().getResponse().getContentAsString();
         String firstId = JsonPath.read(body, "$.data.items[0].id");
         assertThat(firstId).isEqualTo(String.valueOf(otherProject.draftId()));
-        // 行字段逐字段：类别/标题/摘要＋血统三件＋扫描判定＋在途序号＋状态＋时刻
+        // 行字段逐字段：类别/标题/摘要＋血统三件＋扫描判定＋状态＋时刻
         Map<String, Object> row = JsonPath.read(body, "$.data.items[1]");
         assertThat(row)
                 .containsEntry("id", String.valueOf(ruleOne.draftId()))
@@ -157,7 +158,6 @@ class BackofficeSedimentDraftSeamTest {
                 .containsEntry("projectId", String.valueOf(LINEAGE_PROJECT_ID))
                 .containsEntry("runId", LINEAGE_RUN_ID)
                 .containsEntry("scanVerdict", "SAFE")
-                .containsEntry("inflightSlot", 1)
                 .containsEntry("status", 1)
                 .containsEntry("statusName", "在途");
         assertThat(row).as("自荐时刻可读").containsKey("createdAt");
@@ -243,6 +243,34 @@ class BackofficeSedimentDraftSeamTest {
                 .andExpect(jsonPath("$.data.operatorName").value(nullValue()))
                 .andExpect(jsonPath("$.data.reviewedAt").value(nullValue()))
                 .andExpect(jsonPath("$.data.rejectReason").value(nullValue()));
+    }
+
+    @Test
+    void given_draft_with_source_when_signed_queue_and_detail_then_source_fields_returned()
+            throws Exception {
+        long id = plantWithSource(LINEAGE_PROJECT_ID, "CASE", "有来源的案例", "宠物店官网", 3,
+                "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3", "加一个预约日历");
+
+        // 队列行返回来源回溯四件，且无在途序号字段
+        signedGet("/api/backoffice/sediment-drafts?projectId=" + LINEAGE_PROJECT_ID)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value("1"))
+                .andExpect(jsonPath("$.data.items[0].sourceProjectName").value("宠物店官网"))
+                .andExpect(jsonPath("$.data.items[0].sourceVersionNo").value(3))
+                .andExpect(jsonPath("$.data.items[0].sourceCommitHash")
+                        .value("c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"))
+                .andExpect(jsonPath("$.data.items[0].sourceSentence").value("加一个预约日历"))
+                .andExpect(jsonPath("$.data.items[0].inflightSlot").doesNotExist());
+
+        // 详情同样返回来源回溯四件
+        signedGet("/api/backoffice/sediment-drafts/" + id)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sourceProjectName").value("宠物店官网"))
+                .andExpect(jsonPath("$.data.sourceVersionNo").value(3))
+                .andExpect(jsonPath("$.data.sourceCommitHash")
+                        .value("c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"))
+                .andExpect(jsonPath("$.data.sourceSentence").value("加一个预约日历"))
+                .andExpect(jsonPath("$.data.inflightSlot").doesNotExist());
     }
 
     @Test
@@ -390,30 +418,28 @@ class BackofficeSedimentDraftSeamTest {
         assertThat(draftStatus(receipt.draftId())).isEqualTo(1);
     }
 
-    // ---------- 改标签：跨类别占序号＋目标满拒＋幂等 ----------
+    // ---------- 改标签：只调类别＋不占名额＋幂等 ----------
 
     @Test
-    void given_pending_draft_when_signed_relabel_then_kind_changed_with_target_lowest_free_slot()
+    void given_pending_draft_when_signed_relabel_then_kind_changed_and_others_untouched()
             throws Exception {
-        // 目标类别 RULE 在途已占序号 1、2（A/B 两条）——改类进来的占最低空位 3
-        SedimentDraftReceipt ruleA = plant(LINEAGE_PROJECT_ID, "RULE", "规则A");
-        SedimentDraftReceipt ruleB = plant(LINEAGE_PROJECT_ID, "RULE", "规则B");
+        plant(LINEAGE_PROJECT_ID, "RULE", "规则A");
+        plant(LINEAGE_PROJECT_ID, "RULE", "规则B");
         SedimentDraftReceipt caseC = plant(LINEAGE_PROJECT_ID, "CASE", "案例C");
 
         signedPostRelabel(caseC.draftId(), "RULE", OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.kind").value("RULE"))
-                .andExpect(jsonPath("$.data.inflightSlot").value(3))
+                // #642：不再有在途序号字段
+                .andExpect(jsonPath("$.data.inflightSlot").doesNotExist())
                 // 不翻终态、不动正文
                 .andExpect(jsonPath("$.data.status").value(1))
                 .andExpect(jsonPath("$.data.title").value("案例C"));
 
-        // 库行真面：类别已翻、在途序号＝目标类别最低空位
+        // 库行真面：类别已翻，不再有在途序号列
         Map<String, Object> row = jdbcTemplate.queryForMap(
-                "SELECT kind, inflight_slot, status FROM knw_sediment_drafts WHERE id = ?",
-                caseC.draftId());
+                "SELECT kind, status FROM knw_sediment_drafts WHERE id = ?", caseC.draftId());
         assertThat(row.get("kind")).isEqualTo("RULE");
-        assertThat(((Number) row.get("inflight_slot")).intValue()).isEqualTo(3);
         assertThat(row.get("status")).isEqualTo(1);
 
         // 队列读面：新类别可见、原类别退出（CASE 过滤零收）
@@ -424,12 +450,12 @@ class BackofficeSedimentDraftSeamTest {
                         + "&kind=CASE&status=1")
                 .andExpect(jsonPath("$.data.total").value("0"));
 
-        // 目标类别名额随之占满：本项目 RULE 第 4 条在途（自荐真链）即被上限拒
+        // #642：目标类别已有 3 条在途，再写第 4 条不再被上限拒（名额机制已拆）
         SedimentDraftReceipt fourth = draftAppService.propose(new SedimentDraftProposal(
                 "RULE", "规则第四", "摘要。", "正文。", LINEAGE_PROJECT_ID, LINEAGE_RUN_ID,
                 "executor"));
-        assertThat(fourth.accepted()).isFalse();
-        assertThat(fourth.message()).contains("3");
+        assertThat(fourth.accepted()).isTrue();
+        plantedDraftIds.add(fourth.draftId());
     }
 
     @Test
@@ -439,30 +465,7 @@ class BackofficeSedimentDraftSeamTest {
         signedPostRelabel(receipt.draftId(), "module", OPERATOR_ID, OPERATOR_NAME)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.kind").value("MODULE"))
-                .andExpect(jsonPath("$.data.inflightSlot").value(1))
                 .andExpect(jsonPath("$.data.status").value(1));
-    }
-
-    @Test
-    void given_target_kind_full_when_signed_relabel_then_conflict_and_untouched()
-            throws Exception {
-        // 目标类别 RULE 在途已满 3（上限结构性承载跨类别生效）
-        plant(LINEAGE_PROJECT_ID, "RULE", "满员规则一");
-        plant(LINEAGE_PROJECT_ID, "RULE", "满员规则二");
-        plant(LINEAGE_PROJECT_ID, "RULE", "满员规则三");
-        SedimentDraftReceipt caseDraft = plant(LINEAGE_PROJECT_ID, "CASE", "改不动的案例");
-
-        signedPostRelabel(caseDraft.draftId(), "RULE", OPERATOR_ID, OPERATOR_NAME)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(SEDIMENT_TARGET_KIND_FULL_CODE));
-
-        // 草稿不动（仍在途、原类别原序号）
-        assertThat(jdbcTemplate.queryForMap(
-                "SELECT kind, inflight_slot, status FROM knw_sediment_drafts WHERE id = ?",
-                caseDraft.draftId()))
-                .containsEntry("kind", "CASE")
-                .containsEntry("inflight_slot", 1)
-                .containsEntry("status", 1);
     }
 
     @Test
@@ -624,6 +627,29 @@ class BackofficeSedimentDraftSeamTest {
         assertThat(receipt.accepted()).as("种植须成功: %s", receipt.message()).isTrue();
         plantedDraftIds.add(receipt.draftId());
         return receipt;
+    }
+
+    /**
+     * 种植一条带来源回溯字段的待审行（#641 生产由事后提炼直写，来源五件齐全）——
+     * 直接落库以覆盖队列/详情的来源字段返回，id 供 teardown 精确清理。
+     */
+    private long plantWithSource(long projectId, String kind, String title,
+            String sourceProjectName, Integer sourceVersionNo, String commitHash,
+            String sourceSentence) {
+        long id = TsidGenerator.newInstance().generate();
+        jdbcTemplate.update("""
+                INSERT INTO knw_sediment_drafts
+                    (id, kind, title, summary, content, payload, project_id, run_id, slot,
+                     scan_verdict, scan_findings, status, created_at, updated_at,
+                     source_project_name, source_version_no, source_commit_hash,
+                     source_sentence, distill_batch_id)
+                VALUES (?, ?, ?, '摘要。', '正文。', '{}'::jsonb, ?, 'batch-seam-1',
+                        'refinement', 'SAFE', '[]'::jsonb, 1, CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP, ?, ?, ?, ?, 'batch-seam-1')
+                """, id, kind, title, projectId, sourceProjectName, sourceVersionNo,
+                commitHash, sourceSentence);
+        plantedDraftIds.add(id);
+        return id;
     }
 
     /** 签名 GET（无体）。 */

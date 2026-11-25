@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DuplicateKeyException;
 
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
@@ -20,39 +19,21 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
 
 /**
- * {@link SedimentDraftAppService#propose}：沉淀自荐写入正本的全链判定（#460 数据
- * 飞轮采集层——工具缝的应用服务半边，照 {@code SkillDraftAppServiceTest} 先例：
- * 纯函数链，store 用内存替身直测，JDBC 落库真面在项目删除缝覆盖）：校验违例拒写
- * （kind 三类/title/summary/正文上限）；写入前静态扫描 DANGEROUS 拒写（scanner
- * 是依赖内纯静态件，真跑）；CAUTION 放行且 findings 随草稿留档；每项目每 kind
- * 在途上限 3（超限回执拒、在途序号取最低空位、部分唯一索引兜底并发窗归一为
- * 上限回执）；落库带血统（项目/run/槽位）。
+ * {@link SedimentDraftAppService#propose}：沉淀写入正本（校验违例拒写、DANGEROUS
+ * 扫描拒写、CAUTION 放行且 findings 随草稿留档、落库带血统）。#642 拆在途名额后，
+ * 同项目同类别的连续写入不再受「最多 3 条」上限拒绝。
  *
  * <p>{@link SedimentDraftAppService#purgeByProject}：项目删除级联——只清在途行，
  * 终态留档（审结事实独立于项目存续）。</p>
  */
 class SedimentDraftAppServiceTest {
 
-    /** 落库替身：记录插入形状（供断言），在途序号占用可编程；并发撞索引可编程。 */
+    /** 落库替身：记录插入形状（供断言）。 */
     private static final class RecordingSedimentStore implements SedimentDraftStore {
         final List<SedimentDraftRecord> inserted = new ArrayList<>();
 
-        /** 在途序号占用编程位：空＝无在途（缺省）。 */
-        List<Integer> pendingSlots = List.of();
-
-        /** 并发窗编程位：true＝insert 抛 DuplicateKeyException（部分唯一索引兜底）。 */
-        boolean duplicateOnInsert;
-
-        @Override
-        public List<Integer> findPendingSlots(long projectId, String kindKey) {
-            return pendingSlots;
-        }
-
         @Override
         public void insert(SedimentDraftRecord record) {
-            if (duplicateOnInsert) {
-                throw new DuplicateKeyException("uq_knw_sediment_drafts_pending_slot");
-            }
             inserted.add(record);
         }
 
@@ -68,12 +49,6 @@ class SedimentDraftAppServiceTest {
         }
 
         @Override
-        public List<Integer> findPendingSlotsExcluding(long excludeId, long projectId,
-                String kindKey) {
-            throw new UnsupportedOperationException("改标签查腿归 #464 审结缝测试");
-        }
-
-        @Override
         public boolean markActivated(long id, Operator operator) {
             throw new UnsupportedOperationException("审结写口归 #464 审结缝测试");
         }
@@ -84,7 +59,7 @@ class SedimentDraftAppServiceTest {
         }
 
         @Override
-        public boolean updateKind(long id, String kindKey, int inflightSlot) {
+        public boolean updateKind(long id, String kindKey) {
             throw new UnsupportedOperationException("审结写口归 #464 审结缝测试");
         }
 
@@ -131,8 +106,7 @@ class SedimentDraftAppServiceTest {
         assertThat(record.projectId()).isEqualTo(42L);
         assertThat(record.runId()).isEqualTo("run-abc-1");
         assertThat(record.slot()).isEqualTo("executor");
-        // 在途序号＝最低空位（无在途即 1）；扫描回执随草稿留档（SAFE 无 findings）；状态在途
-        assertThat(record.inflightSlot()).isEqualTo(1);
+        // 扫描回执随草稿留档（SAFE 无 findings）；状态在途
         assertThat(record.scanVerdict()).isEqualTo("SAFE");
         assertThat(record.scanFindings()).isEmpty();
         assertThat(record.status()).isEqualTo(SedimentDraftStatus.PENDING);
@@ -196,41 +170,15 @@ class SedimentDraftAppServiceTest {
     }
 
     @Test
-    void given_inflight_cap_reached_when_propose_then_rejected_with_cap_reason() {
-        // 每项目每 kind 在途上限 3（防单一项目淹没标注队列的辅闸）：超限自荐回执拒
-        drafts.pendingSlots = List.of(1, 2, 3);
-
-        SedimentDraftReceipt receipt = appService.propose(
-                proposal("CASE", "第四个案例", "摘要。", "正文。"));
-
-        assertThat(receipt.accepted()).isFalse();
-        assertThat(receipt.message()).contains("3");
-        assertThat(drafts.inserted).isEmpty();
-    }
-
-    @Test
-    void given_partially_occupied_slots_when_propose_then_lowest_free_slot_assigned() {
-        drafts.pendingSlots = List.of(1, 3);
-
-        SedimentDraftReceipt receipt = appService.propose(
-                proposal("CASE", "补位案例", "摘要。", "正文。"));
-
-        assertThat(receipt.accepted()).isTrue();
-        assertThat(drafts.inserted.get(0).inflightSlot()).isEqualTo(2);
-    }
-
-    @Test
-    void given_concurrent_slot_grab_when_propose_then_duplicate_key_normalized_to_cap_receipt() {
-        // 并发窗兜底：在途部分唯一索引（project_id, kind, inflight_slot）拦抢先落库
-        // ——归一为上限回执（与预检同形，模型可读）
-        drafts.duplicateOnInsert = true;
-
-        SedimentDraftReceipt receipt = appService.propose(
-                proposal("CASE", "并发案例", "摘要。", "正文。"));
-
-        assertThat(receipt.accepted()).isFalse();
-        assertThat(receipt.message()).contains("在途");
-        assertThat(drafts.inserted).isEmpty();
+    void given_many_same_kind_writes_when_propose_then_none_rejected_by_cap() {
+        // #642 拆在途名额：同项目同类别连续写 5 条全部受理（旧「每项目每类最多 3 条」
+        // 上限已拆，上限只由每次提炼最多 3 条保证）
+        for (int i = 1; i <= 5; i++) {
+            SedimentDraftReceipt receipt = appService.propose(
+                    proposal("CASE", "同类第 " + i + " 条", "摘要。", "正文。"));
+            assertThat(receipt.accepted()).as("第 %s 条", i).isTrue();
+        }
+        assertThat(drafts.inserted).hasSize(5);
     }
 
     @Test
@@ -238,11 +186,11 @@ class SedimentDraftAppServiceTest {
         SedimentDraftReceipt pending = appService.propose(
                 proposal("CASE", "在途案例", "摘要。", "正文。"));
         drafts.addTerminal(new SedimentDraftRecord(920099900000000001L, SedimentKind.RULE,
-                "已拒规则", "摘要。", "正文。", Map.of(), 42L, "run-x", "main", 2,
+                "已拒规则", "摘要。", "正文。", Map.of(), 42L, "run-x", "main",
                 "SAFE", List.of(), SedimentDraftStatus.REJECTED, "op-1", "运营",
                 LocalDateTime.now(), "与现有规则重叠", LocalDateTime.now()));
         drafts.addTerminal(new SedimentDraftRecord(920099900000000002L, SedimentKind.CASE,
-                "他项目在途", "摘要。", "正文。", Map.of(), 43L, "run-y", "main", 1,
+                "他项目在途", "摘要。", "正文。", Map.of(), 43L, "run-y", "main",
                 "SAFE", List.of(), SedimentDraftStatus.PENDING, null, null, null, null,
                 LocalDateTime.now()));
 

@@ -1143,15 +1143,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 改标签（在途内调整类别，占目标类别在途名额）
-         * @description 「数据标注」三键之一（#464）：在途草稿调整类别（一期合法取值 CASE/MODULE/RULE——非法 400 KNW_011；同类别幂等 no-op）；占目标类别在途序号最低空位（每项目每 kind 上限 3 的结构性约束跨类别生效——目标类别满 409 KNW_012）。不翻终态、不动正文——纯队列分诊修正。草稿须在途（已审结 409 KNW_009）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（标注动作必留痕）。回执＝详情（新类别直读）。需要机机签名（五头 HMAC），无签名 401
+         * 改标签（在途内调整类别，不占名额）
+         * @description 「数据标注」三键之一（#464）：在途草稿调整类别（一期合法取值 CASE/MODULE/RULE——非法 400 KNW_011；同类别幂等 no-op）。#642 起只调整类别、不再检查或在途占位。不翻终态、不动正文——纯队列分诊修正。草稿须在途（已审结 409 KNW_009）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（标注动作必留痕）。回执＝详情（新类别直读）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 KNW_006 — 操作者不能为空
          *     - 404 KNW_008 — 沉淀草稿不存在
          *     - 409 KNW_009 — 沉淀草稿已审结（已激活/已拒绝），终态不可再审——重提为新草稿
          *     - 400 KNW_011 — 沉淀物类别非法，合法取值：CASE（需求案例）/MODULE（功能模块）/RULE（业务规则）
-         *     - 409 KNW_012 — 目标类别在途草稿已满 3 条——先审结该类别在途草稿再改标签
          */
         post: operations["relabel"];
         delete?: never;
@@ -1197,7 +1196,7 @@ export interface paths {
         put?: never;
         /**
          * 激活草稿（人审采纳，原样升格不改稿）
-         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放在途名额，并升格 knw_materials（#465——kind 随草稿、正文段落级分块入库、与来源项目脱钩成孤儿沉淀）。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
+         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列，并升格 knw_materials（#465——kind 随草稿、正文段落级分块入库、与来源项目脱钩成孤儿沉淀）。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 KNW_006 — 操作者不能为空
@@ -2808,7 +2807,7 @@ export interface paths {
         };
         /**
          * 标注队列（按项目/类别/状态过滤，分页）
-         * @description 「数据标注」人审队列（#464）：采集层自荐的沉淀草稿，三过滤维度可组合、均可缺省（缺省＝全量）：① projectId 来源项目 id 精确（数值，查无＝空清单 200；畸形值宽松解析＝缺省不过滤）；② kind 类别单选（CASE/MODULE/RULE，大小写不敏感，非法 400 KNW_011 带合法取值表）；③ status 状态单选，Integer code（1=在途 2=已激活 3=已拒绝；非法 code 400 带合法取值表）。排序服务端定死＝自荐时间倒序（id 倒序稳定）。行字段：类别/标题/摘要＋血统三件（来源项目/run/槽位）＋扫描判定＋在途序号（每项目每 kind 上限 3 的队列可见性）＋状态＋自荐时刻；正文与扫描 findings 在详情。page 1 基（缺省 1）、size 缺省 20（上界 100）。需要机机签名（五头 HMAC），无签名 401
+         * @description 「数据标注」人审队列（#464）：采集层自荐的沉淀草稿，三过滤维度可组合、均可缺省（缺省＝全量）：① projectId 来源项目 id 精确（数值，查无＝空清单 200；畸形值宽松解析＝缺省不过滤）；② kind 类别单选（CASE/MODULE/RULE，大小写不敏感，非法 400 KNW_011 带合法取值表）；③ status 状态单选，Integer code（1=在途 2=已激活 3=已拒绝；非法 code 400 带合法取值表）。排序服务端定死＝自荐时间倒序（id 倒序稳定）。行字段：类别/标题/摘要＋来源回溯（来源项目标识与项目名快照、来源版本号、来源提交哈希、来源原句）＋血统三件（来源项目/run/槽位）＋扫描判定＋状态＋自荐时刻；正文与扫描 findings 在详情。page 1 基（缺省 1）、size 缺省 20（上界 100）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
@@ -4882,9 +4881,18 @@ export interface components {
             slot?: string;
             projectId?: string;
             runId?: string;
+            /** @description 来源项目名快照（项目改名/删除后仍可读） */
+            sourceProjectName?: string;
+            /**
+             * Format: int32
+             * @description 来源用户面版本号
+             */
+            sourceVersionNo?: number;
+            /** @description 来源提交哈希 */
+            sourceCommitHash?: string;
+            /** @description 来源用户原句（从该版本修改意见中提炼） */
+            sourceSentence?: string;
             scanVerdict?: string;
-            /** Format: int32 */
-            inflightSlot?: number;
             /** Format: int32 */
             status?: number;
             statusName?: string;
@@ -5988,25 +5996,31 @@ export interface components {
             title?: string;
             summary?: string;
             /**
-             * @description 来源槽位稳定键（main=主智能体 executor=run 执行体 subagent=子智能体）
-             * @example executor
+             * @description 来源槽位稳定键（main=主智能体 executor=run 执行体 refinement=候选经验提炼）
+             * @example refinement
              */
             slot?: string;
             /** @description 来源项目 id（血统——审核溯源与项目删除清理入口） */
             projectId?: string;
-            /** @description 来源 run 标识（血统——run 级溯源锚） */
+            /** @description 来源 run/批次标识（血统——批次级溯源锚） */
             runId?: string;
+            /** @description 来源项目名快照（项目改名/删除后仍可读） */
+            sourceProjectName?: string;
+            /**
+             * Format: int32
+             * @description 来源用户面版本号
+             * @example 2
+             */
+            sourceVersionNo?: number;
+            /** @description 来源提交哈希 */
+            sourceCommitHash?: string;
+            /** @description 来源用户原句（从该版本修改意见中提炼） */
+            sourceSentence?: string;
             /**
              * @description 写入前静态扫描判定（SAFE/CAUTION；DANGEROUS 已在写入口拒收不落库）
              * @example SAFE
              */
             scanVerdict?: string;
-            /**
-             * Format: int32
-             * @description 在途序号 1-3（每项目每 kind 在途上限 3 的结构性承载）
-             * @example 1
-             */
-            inflightSlot?: number;
             /**
              * Format: int32
              * @description 状态 code（1=在途 2=已激活 3=已拒绝）

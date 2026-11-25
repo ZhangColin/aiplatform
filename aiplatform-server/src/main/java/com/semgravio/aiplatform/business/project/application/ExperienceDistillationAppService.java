@@ -83,11 +83,8 @@ public class ExperienceDistillationAppService implements DisposableBean {
     /** 一次性会话标识前缀（refinement-{projectId}-v{versionNo}）。 */
     static final String SESSION_PREFIX = "refinement-";
 
-    /** 每次提炼最多接受的候选条数（超出只取前 3 条）。 */
+    /** 每次提炼最多接受的候选条数（超出只取前 3 条；#642 拆在途名额后这是唯一上限）。 */
     static final int MAX_CANDIDATES = 3;
-
-    /** 新提炼草稿临时占用的固定序号（#642 前保留在途列；上限只由单次提炼条数保证）。 */
-    static final int FIXED_INFLIGHT_SLOT = 1;
 
     /** 提炼会话超时（一次性判定，120 秒总墙钟）。 */
     static final Duration REFINEMENT_TIMEOUT = Duration.ofSeconds(120);
@@ -474,7 +471,6 @@ public class ExperienceDistillationAppService implements DisposableBean {
                     project.getId(),
                     batchId,
                     AgentEdgePoint.REFINEMENT.key(),
-                    FIXED_INFLIGHT_SLOT,
                     scan.verdict().name(),
                     findingsOf(scan),
                     SedimentDraftStatus.PENDING,

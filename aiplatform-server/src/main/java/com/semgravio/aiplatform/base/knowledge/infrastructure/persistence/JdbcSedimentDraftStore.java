@@ -25,12 +25,12 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftSt
 /**
  * 沉淀草稿存取实现（#460 数据飞轮采集层＋#464 后台「数据标注」审结面，JdbcTemplate
  * 原生 SQL，照 {@code JdbcSkillDraftStore} 先例）：单表 {@code knw_sediment_drafts}
- * 读写；payload/scan_findings JSONB 经字面量序列化出入。在途上限并发兜底＝在途
- * 部分唯一索引（DuplicateKeyException 由应用层归一为上限/改标签冲突回执）。
+ * 读写；payload/scan_findings JSONB 经字面量序列化出入。
  *
- * <p>#460 自荐写入与项目删除清理＋#464 审结读面（队列/详情）与三键 CAS 翻态
- * （激活/拒绝/改标签）——升格 knw_materials 由应用服务经 KnowledgeAppService 完成
- * （#465），本实现不触素材表。</p>
+ * <p>#641 事后提炼写入＋#464 审结读面（队列/详情）与三键 CAS 翻态（激活/拒绝/改
+ * 标签）——升格 knw_materials 由应用服务经 KnowledgeAppService 完成（#465），本实现
+ * 不触素材表。#642 拆在途机制：在途序号列、检查约束与部分唯一索引全部拆除，写入/
+ * 改类别不再涉及名额。</p>
  */
 @Component
 public class JdbcSedimentDraftStore implements SedimentDraftStore {
@@ -38,7 +38,7 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     /** 草稿读列（SELECT 共形；顺序即 {@link #recordOf} 下标）。 */
     private static final String DRAFT_SELECT_PREFIX = """
             SELECT id, kind, title, summary, content, payload, project_id, run_id, slot,
-                   inflight_slot, scan_verdict, scan_findings, status, operator_id,
+                   scan_verdict, scan_findings, status, operator_id,
                    operator_name, reviewed_at, reject_reason, created_at,
                    source_project_name, source_version_no, source_commit_hash,
                    source_sentence, distill_batch_id
@@ -46,16 +46,6 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
             """;
 
     private static final String FIND_SQL = DRAFT_SELECT_PREFIX + " WHERE id = ?";
-
-    private static final String FIND_PENDING_SLOTS_SQL = """
-            SELECT inflight_slot FROM knw_sediment_drafts
-            WHERE project_id = ? AND kind = ? AND status = ?
-            """;
-
-    private static final String FIND_PENDING_SLOTS_EXCLUDING_SQL = """
-            SELECT inflight_slot FROM knw_sediment_drafts
-            WHERE id <> ? AND project_id = ? AND kind = ? AND status = ?
-            """;
 
     private static final String QUEUE_COUNT_PREFIX = "SELECT COUNT(*) FROM knw_sediment_drafts";
 
@@ -80,20 +70,20 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
             WHERE id = ? AND status = ?
             """;
 
-    /** 改标签 CAS（#464）：翻目标类别＋目标类别最低空位序号（部分唯一索引拦并发窗）。 */
+    /** 改标签 CAS（#464）：纯类别调整（#642 起不再占在途名额/序号）。 */
     private static final String UPDATE_KIND_SQL = """
             UPDATE knw_sediment_drafts
-            SET kind = ?, inflight_slot = ?, updated_at = CURRENT_TIMESTAMP
+            SET kind = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND status = ?
             """;
 
     private static final String INSERT_SQL = """
             INSERT INTO knw_sediment_drafts
                 (id, kind, title, summary, content, payload, project_id, run_id, slot,
-                 inflight_slot, scan_verdict, scan_findings, status,
+                 scan_verdict, scan_findings, status,
                  source_project_name, source_version_no, source_commit_hash,
                  source_sentence, distill_batch_id)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
             """;
 
     /** 项目删除清理（#460）：只在途行随项目清，终态留档。 */
@@ -108,17 +98,11 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     }
 
     @Override
-    public List<Integer> findPendingSlots(long projectId, String kindKey) {
-        return jdbcTemplate.queryForList(FIND_PENDING_SLOTS_SQL, Integer.class,
-                projectId, kindKey, SedimentDraftStatus.PENDING.getCode());
-    }
-
-    @Override
     public void insert(SedimentDraftRecord record) {
         jdbcTemplate.update(INSERT_SQL,
                 record.id(), record.kind().key(), record.title(), record.summary(),
                 record.content(), jsonOf(record.payload()), record.projectId(),
-                record.runId(), record.slot(), record.inflightSlot(), record.scanVerdict(),
+                record.runId(), record.slot(), record.scanVerdict(),
                 jsonOf(record.scanFindings()), record.status().getCode(),
                 record.sourceProjectName(), record.sourceVersionNo(),
                 record.sourceCommitHash(), record.sourceSentence(),
@@ -161,13 +145,6 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     }
 
     @Override
-    public List<Integer> findPendingSlotsExcluding(long excludeId, long projectId,
-            String kindKey) {
-        return jdbcTemplate.queryForList(FIND_PENDING_SLOTS_EXCLUDING_SQL, Integer.class,
-                excludeId, projectId, kindKey, SedimentDraftStatus.PENDING.getCode());
-    }
-
-    @Override
     public boolean markActivated(long id, Operator operator) {
         return jdbcTemplate.update(MARK_ACTIVATED_SQL,
                 SedimentDraftStatus.ACTIVATED.getCode(), operator.id(), operator.name(),
@@ -182,9 +159,9 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     }
 
     @Override
-    public boolean updateKind(long id, String kindKey, int inflightSlot) {
+    public boolean updateKind(long id, String kindKey) {
         return jdbcTemplate.update(UPDATE_KIND_SQL,
-                kindKey, inflightSlot, id, SedimentDraftStatus.PENDING.getCode()) > 0;
+                kindKey, id, SedimentDraftStatus.PENDING.getCode()) > 0;
     }
 
     @Override
@@ -207,20 +184,19 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
                 rs.getLong(7),
                 rs.getString(8),
                 rs.getString(9),
-                rs.getInt(10),
-                rs.getString(11),
-                findingsOf(rs.getString(12)),
-                BaseEnum.requireByCode(SedimentDraftStatus.class, rs.getInt(13)),
+                rs.getString(10),
+                findingsOf(rs.getString(11)),
+                BaseEnum.requireByCode(SedimentDraftStatus.class, rs.getInt(12)),
+                rs.getString(13),
                 rs.getString(14),
-                rs.getString(15),
-                rs.getTimestamp(16) == null ? null : rs.getTimestamp(16).toLocalDateTime(),
-                rs.getString(17),
-                rs.getTimestamp(18).toLocalDateTime(),
-                rs.getString(19),
-                rs.getObject(20) == null ? null : rs.getInt(20),
+                rs.getTimestamp(15) == null ? null : rs.getTimestamp(15).toLocalDateTime(),
+                rs.getString(16),
+                rs.getTimestamp(17).toLocalDateTime(),
+                rs.getString(18),
+                rs.getObject(19) == null ? null : rs.getInt(19),
+                rs.getString(20),
                 rs.getString(21),
-                rs.getString(22),
-                rs.getString(23));
+                rs.getString(22));
     }
 
     private List<Map<String, Object>> findingsOf(String json) throws SQLException {

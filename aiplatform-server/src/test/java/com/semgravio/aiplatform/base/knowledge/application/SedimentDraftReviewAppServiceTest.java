@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DuplicateKeyException;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.web.request.Pagination;
@@ -41,35 +40,20 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftSt
  * <p>三键（{@link SedimentDraftAppService#activate}/{@link SedimentDraftAppService#reject}/
  * {@link SedimentDraftAppService#relabel}）：守卫序（寻址 404 → 在途 409 → 操作者 400
  * → 键特有校验）＋终态留痕形状（理由 trim 落档/操作者两列/审结时刻）＋CAS 零行
- * 命中不吞并为成功（并发审结 → 409）＋改标签占目标类别最低空位（排除自身）＋
- * 目标类别满拒（预检与并发撞索引归一为 KNW_012）。激活另带升格写口（#465——
- * 激活＝升格 knw_materials：kind 随草稿、source_ref＝草稿 id、project_id 置空＝
- * 孤儿沉淀；升格落库真面归 seam 测试，本缝只钉写口调用形状）。</p>
+ * 命中不吞并为成功（并发审结 → 409）＋#642 起改标签只调类别不占名额。激活另带
+ * 升格写口（#465——激活＝升格 knw_materials：kind 随草稿、source_ref＝草稿 id、
+ * project_id 置空＝孤儿沉淀；升格落库真面归 seam 测试，本缝只钉写口调用形状）。</p>
  */
 class SedimentDraftReviewAppServiceTest {
 
     private static final Operator OPERATOR = new Operator("700300", "运营·数据标注员");
 
-    /** 落库替身：记录插入形状（供断言）；审结 CAS 与并发窗可编程。 */
+    /** 落库替身：记录插入形状（供断言）；审结 CAS 可编程。 */
     private static final class RecordingSedimentStore implements SedimentDraftStore {
         final List<SedimentDraftRecord> inserted = new ArrayList<>();
 
-        /** 在途序号占用编程位（propose 查腿）：空＝无在途。 */
-        List<Integer> pendingSlots = List.of();
-
-        /** 改标签查腿编程位：目标类别在途序号占用（不含自身）。 */
-        List<Integer> pendingSlotsExcluding = List.of();
-
         /** 审结/改标签 CAS 编程位：false＝模拟并发审结抢先（零行命中）。 */
         boolean reviewOutcome = true;
-
-        /** 并发窗编程位：true＝updateKind 抛 DuplicateKeyException（部分唯一索引兜底）。 */
-        boolean duplicateOnUpdateKind;
-
-        @Override
-        public List<Integer> findPendingSlots(long projectId, String kindKey) {
-            return pendingSlots;
-        }
 
         @Override
         public void insert(SedimentDraftRecord record) {
@@ -78,7 +62,7 @@ class SedimentDraftReviewAppServiceTest {
                     ? new SedimentDraftRecord(record.id(), record.kind(), record.title(),
                             record.summary(), record.content(), record.payload(),
                             record.projectId(), record.runId(), record.slot(),
-                            record.inflightSlot(), record.scanVerdict(), record.scanFindings(),
+                            record.scanVerdict(), record.scanFindings(),
                             record.status(), record.operatorId(), record.operatorName(),
                             record.reviewedAt(), record.rejectReason(), LocalDateTime.now())
                     : record);
@@ -106,12 +90,6 @@ class SedimentDraftReviewAppServiceTest {
         }
 
         @Override
-        public List<Integer> findPendingSlotsExcluding(long excludeId, long projectId,
-                String kindKey) {
-            return pendingSlotsExcluding;
-        }
-
-        @Override
         public boolean markActivated(long id, Operator operator) {
             if (!reviewOutcome) {
                 return false;
@@ -128,12 +106,9 @@ class SedimentDraftReviewAppServiceTest {
         }
 
         @Override
-        public boolean updateKind(long id, String kindKey, int inflightSlot) {
+        public boolean updateKind(long id, String kindKey) {
             if (!reviewOutcome) {
                 return false;
-            }
-            if (duplicateOnUpdateKind) {
-                throw new DuplicateKeyException("uq_knw_sediment_drafts_pending_slot");
             }
             SedimentDraftRecord current = find(id);
             if (current == null || current.status() != SedimentDraftStatus.PENDING) {
@@ -142,7 +117,7 @@ class SedimentDraftReviewAppServiceTest {
             inserted.set(inserted.indexOf(current), new SedimentDraftRecord(current.id(),
                     SedimentKind.byKey(kindKey).orElseThrow(), current.title(), current.summary(),
                     current.content(), current.payload(), current.projectId(), current.runId(),
-                    current.slot(), inflightSlot, current.scanVerdict(), current.scanFindings(),
+                    current.slot(), current.scanVerdict(), current.scanFindings(),
                     current.status(), current.operatorId(), current.operatorName(),
                     current.reviewedAt(), current.rejectReason(), current.createdAt()));
             return true;
@@ -168,7 +143,7 @@ class SedimentDraftReviewAppServiceTest {
             inserted.set(inserted.indexOf(current), new SedimentDraftRecord(current.id(),
                     current.kind(), current.title(), current.summary(), current.content(),
                     current.payload(), current.projectId(), current.runId(), current.slot(),
-                    current.inflightSlot(), current.scanVerdict(), current.scanFindings(),
+                    current.scanVerdict(), current.scanFindings(),
                     status, operator.id(), operator.name(), LocalDateTime.now(), reason,
                     current.createdAt()));
             return true;
@@ -202,7 +177,7 @@ class SedimentDraftReviewAppServiceTest {
         plant("CASE", "案例一");
         plant("RULE", "规则一");
         drafts.addTerminal(new SedimentDraftRecord(920099900000000001L, SedimentKind.MODULE,
-                "已激活模块", "摘要。", "正文。", Map.of(), 42L, "run-x", "main", 2,
+                "已激活模块", "摘要。", "正文。", Map.of(), 42L, "run-x", "main",
                 "SAFE", List.of(), SedimentDraftStatus.ACTIVATED, "op-1", "运营",
                 LocalDateTime.now(), null, LocalDateTime.now().minusDays(1)));
 
@@ -326,20 +301,32 @@ class SedimentDraftReviewAppServiceTest {
     // ---------- relabel ----------
 
     @Test
-    void given_pending_draft_when_relabel_then_kind_changed_with_lowest_free_slot() {
+    void given_pending_draft_when_relabel_then_kind_changed_and_still_pending() {
         SedimentDraftReceipt receipt = plant("CASE", "改类案例");
-        // 目标类别 RULE 在途已占 1、3——最低空位 2（排除自身语义由 store 查腿保证）
-        drafts.pendingSlotsExcluding = List.of(1, 3);
 
         BackofficeSedimentDraftDetailResponse detail = appService.relabel(
                 receipt.draftId(), "rule", OPERATOR);
 
         assertThat(detail.kind()).isEqualTo("RULE");
-        assertThat(detail.inflightSlot()).isEqualTo(2);
         assertThat(detail.status()).isEqualTo(SedimentDraftStatus.PENDING.getCode());
         // 不翻终态：在途队列按新类别可收
         assertThat(appService.queue(null, "RULE", SedimentDraftStatus.PENDING,
                 new Pagination(1, 20, null)).total()).isEqualTo(1);
+    }
+
+    @Test
+    void given_many_same_kind_pending_when_relabel_then_not_blocked_by_cap() {
+        // #642：目标类别已有 5 条在途也照改——不再检查或在途占位
+        for (int i = 1; i <= 5; i++) {
+            plant("RULE", "在途规则 " + i);
+        }
+        SedimentDraftReceipt caseDraft = plant("CASE", "改类不受名额限");
+
+        BackofficeSedimentDraftDetailResponse detail = appService.relabel(
+                caseDraft.draftId(), "RULE", OPERATOR);
+
+        assertThat(detail.kind()).isEqualTo("RULE");
+        assertThat(detail.status()).isEqualTo(SedimentDraftStatus.PENDING.getCode());
     }
 
     @Test
@@ -350,28 +337,6 @@ class SedimentDraftReviewAppServiceTest {
                 receipt.draftId(), "module", OPERATOR);
 
         assertThat(detail.kind()).isEqualTo("MODULE");
-        assertThat(detail.inflightSlot()).isEqualTo(1);
-    }
-
-    @Test
-    void given_target_kind_full_when_relabel_then_conflict_and_untouched() {
-        SedimentDraftReceipt receipt = plant("CASE", "满员改类");
-        drafts.pendingSlotsExcluding = List.of(1, 2, 3);
-
-        assertThatThrownBy(() -> appService.relabel(receipt.draftId(), "RULE", OPERATOR))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_SEDIMENT_TARGET_KIND_FULL.message());
-        assertThat(drafts.find(receipt.draftId()).kind()).isEqualTo(SedimentKind.CASE);
-    }
-
-    @Test
-    void given_concurrent_slot_grab_when_relabel_then_duplicate_key_normalized_to_full() {
-        SedimentDraftReceipt receipt = plant("CASE", "并发改类");
-        drafts.duplicateOnUpdateKind = true;
-
-        assertThatThrownBy(() -> appService.relabel(receipt.draftId(), "RULE", OPERATOR))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_SEDIMENT_TARGET_KIND_FULL.message());
     }
 
     @Test

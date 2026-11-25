@@ -399,10 +399,10 @@ class ProjectLifecycleAppServiceTest {
         jdbcTemplate.update("""
                 INSERT INTO knw_sediment_drafts
                     (id, kind, title, summary, content, project_id, run_id, slot,
-                     inflight_slot, scan_verdict, scan_findings, status, operator_id,
+                     scan_verdict, scan_findings, status, operator_id,
                      operator_name, reviewed_at, reject_reason, created_at, updated_at)
                 VALUES (?, 'RULE', 't6-沉淀-已拒规则', '摘要', '正文', ?, 'run-x', 'main',
-                        2, 'SAFE', '[]'::jsonb, 3, 'op-1', '运营·标注员',
+                        'SAFE', '[]'::jsonb, 3, 'op-1', '运营·标注员',
                         CURRENT_TIMESTAMP, '与现有规则口径重叠', CURRENT_TIMESTAMP,
                         CURRENT_TIMESTAMP)
                 """, 920099900000000010L, projectId);

@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.extern.slf4j.Slf4j;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,36 +32,27 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftSt
 import io.agentscope.harness.agent.skill.curator.SkillSecurityScanner;
 
 /**
- * 沉淀草稿用例（#460 数据飞轮采集层）：智能体自荐需求案例（CASE）/功能模块
- * （MODULE）/业务规则（RULE）进采集层——照技能草稿先例（ADR-0022）带血统
- * （来源项目/run/槽位）、扫描回执、终态留痕与在途上限。
+ * 沉淀草稿用例（#460 数据飞轮采集层，现由 #641 事后提炼写入候选经验）：草稿带血统
+ * （来源项目/run/槽位）、扫描回执、终态留痕。候选经验的来源五件由事后提炼填写
+ * （#641：来源项目名快照/版本号/提交哈希/原句/提炼批次），人审据此回溯。
  *
- * <p><b>propose 写入链</b>（拒绝一律回执原因、不抛——智能体可读可修正重提）：
- * 校验正本（{@link SedimentDraftProposal#violation()}——kind 三类/title/summary/
- * 正文上限）→ 静态安全扫描（{@link SkillSecurityScanner}——依赖内纯静态件，
- * 扫描面＝标题＋摘要＋正文合成文本，与草稿真实内容一致；DANGEROUS 拒写——scanner
- * 是廉价哨兵非安全边界，安全边界是后台「数据标注」人审门）→ 在途上限判定
- * （每项目每 kind 上限 {@value #INFLIGHT_CAP}——防单一项目淹没标注队列的辅闸，
- * 人审是主闸：应用层先查在途序号占用取最低空位，落库撞在途部分唯一索引
- * （DuplicateKeyException 归一为上限回执）→ 落库（TSID、在途态、verdict＋
- * findings 随草稿留档、载荷一期恒空面）。run 失败不回滚已写入的自荐（照
- * ADR-0022 同口径：工具执行即事实落库，无 run 级回滚概念）。</p>
+ * <p><b>写入链</b>（保留的写入入口；生产候选经验由事后提炼直写；拒绝一律回执原因、不抛）：
+ * 校验正本（{@link SedimentDraftProposal#violation()}）→ 静态安全扫描
+ * （{@link SkillSecurityScanner}，DANGEROUS 拒写）→ 落库（TSID、在途态、verdict＋
+ * findings 随草稿留档）。<b>#642 拆在途机制</b>：不再有「每项目每类最多 3 条」上限、
+ * 在途序号分配与并发撞索引归一——上限只由每次提炼最多 3 条保证。run 失败不回滚已
+ * 写入的草稿（照 ADR-0022 同口径：工具执行即事实落库，无 run 级回滚概念）。</p>
  *
- * <p><b>采集埋点</b>：每次自荐（受理与拒因两形）留结构化日志行
- * {@code [sediment-propose]}（项目/类别/槽位/扫描判定/结果）——自荐事件可统计；
- * 受理行本身即采集层留痕（血统＋扫描回执随档），拒因行（校验/DANGEROUS/超限）
- * 不落库、日志是其在观测面的唯一形态。</p>
+ * <p><b>purgeByProject</b>：项目删除清理未终结草稿（采集层不留僵尸行）——只清在途，
+ * 终态留档；编排与失败语义归 {@code ProjectLifecycleAppService} 删除流程。</p>
  *
- * <p><b>purgeByProject</b>：项目删除清理未终结草稿（采集层不留僵尸行）——只清
- * 在途，终态留档；编排与失败语义归 {@code ProjectLifecycleAppService} 删除流程。</p>
- *
- * <p><b>「数据标注」审结面</b>（#464）：队列（按项目/类别/状态过滤＋分页，排序
- * 自荐时间倒序）＋详情（任意状态——终态留档可查）＋三键——激活（原样升格不改稿：
- * 在途翻已激活＋操作者留痕＋升格 knw_materials，#465 接通——段落分块入库、kind
- * 随草稿、与来源项目脱钩）/拒绝（理由必填＋终态留档，库级 CHECK 双锁）/改标签
- * （在途内调类别＋占目标类别在途序号最低空位——目标类别满即拒）。三键终态语义照
- * 技能草稿审核先例（ADR-0022）：CAS 条件更新（{@code WHERE status=在途}，零行
- * 命中＝并发审结 → 409 已审结）、已审结拒、操作者必留痕（缺 400 KNW_006）。</p>
+ * <p><b>「数据标注」审结面</b>（#464）：队列（按项目/类别/状态过滤＋分页，排序自荐
+ * 时间倒序）＋详情（任意状态——终态留档可查）＋三键——激活（原样升格不改稿：在途
+ * 翻已激活＋操作者留痕＋升格 knw_materials，#465 接通——段落分块入库、kind 随草稿、
+ * 与来源项目脱钩）/拒绝（理由必填＋终态留档，库级 CHECK 双锁）/改标签（在途内调
+ * 类别——#642 起纯类别调整，不再占名额）。三键终态语义照技能草稿审核先例
+ * （ADR-0022）：CAS 条件更新（{@code WHERE status=在途}，零行命中＝并发审结 →
+ * 409 已审结）、已审结拒、操作者必留痕（缺 400 KNW_006）。</p>
  *
  * <p><b>采集埋点（审结侧）</b>：每次标注动作留结构化日志行 {@code [sediment-annotate]}
  * （草稿/类别/动作/操作者）——标注动作留痕可统计（#457 采集面口径）。</p>
@@ -70,9 +60,6 @@ import io.agentscope.harness.agent.skill.curator.SkillSecurityScanner;
 @Slf4j
 @Service
 public class SedimentDraftAppService {
-
-    /** 每项目每 kind 在途上限（防泛滥辅闸；与迁移 V59 在途序号 CHECK 1-3 同值）。 */
-    public static final int INFLIGHT_CAP = 3;
 
     /**
      * 孤儿沉淀的登记面展示名（#465）：激活升格素材与来源项目脱钩（project_id
@@ -91,7 +78,7 @@ public class SedimentDraftAppService {
     }
 
     /**
-     * 自荐写入：全判定链见类 javadoc；回执见 {@link SedimentDraftReceipt}。
+     * 写入：校验 → 扫描 → 落库（#642 起无在途上限）。回执见 {@link SedimentDraftReceipt}。
      */
     public SedimentDraftReceipt propose(SedimentDraftProposal proposal) {
         var violation = proposal.violation();
@@ -109,15 +96,6 @@ public class SedimentDraftAppService {
             return SedimentDraftReceipt.rejected("安全扫描判定 DANGEROUS，拒写不入库。触发的"
                     + "规则：" + patternIdsOf(scan) + "——请移除相应危险内容后重提。");
         }
-        List<Integer> occupied = draftStore.findPendingSlots(proposal.projectId(), kind.key());
-        if (occupied.size() >= INFLIGHT_CAP) {
-            log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 在途上限拒（在途 {}/{}）",
-                    proposal.projectId(), kind.key(), proposal.slot(), occupied.size(),
-                    INFLIGHT_CAP);
-            return SedimentDraftReceipt.rejected("该项目该类别的在途沉淀草稿已满 "
-                    + INFLIGHT_CAP + " 条（后台「数据标注」审结落定后释放名额）——本条未写入。");
-        }
-        int inflightSlot = lowestFreeSlot(occupied);
         SedimentDraftRecord record = new SedimentDraftRecord(
                 TsidGenerator.newInstance().generate(),
                 kind,
@@ -128,24 +106,14 @@ public class SedimentDraftAppService {
                 proposal.projectId(),
                 proposal.runId(),
                 proposal.slot(),
-                inflightSlot,
                 scan.verdict().name(),
                 findingsOf(scan),
                 SedimentDraftStatus.PENDING,
                 null, null, null, null, null);
-        try {
-            draftStore.insert(record);
-        }
-        catch (DuplicateKeyException e) {
-            // 并发窗内同项目同类别在途草稿抢先占满（部分唯一索引兜底）——归一为上限回执
-            log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 并发撞索引归一为上限拒",
-                    proposal.projectId(), kind.key(), proposal.slot());
-            return SedimentDraftReceipt.rejected("该项目该类别的在途沉淀草稿已满 "
-                    + INFLIGHT_CAP + " 条（并发写入撞在途名额）——本条未写入，可稍后重试。");
-        }
-        log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 扫描 {} 在途序号 {} 已留档（草稿 {}）",
+        draftStore.insert(record);
+        log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 扫描 {} 已留档（草稿 {}）",
                 proposal.projectId(), kind.key(), proposal.slot(), scan.verdict().name(),
-                inflightSlot, record.id());
+                record.id());
         return SedimentDraftReceipt.accepted(record.id(),
                 "沉淀草稿已留档待审（后台「数据标注」人工审核激活后才入知识库；未审核"
                         + "草稿不参与任何检索）。感谢沉淀。");
@@ -269,15 +237,14 @@ public class SedimentDraftAppService {
 
     /**
      * 改标签（#464 三键之一，在途内调类别）：目标类别限一期三类（KNW_011 同写入
-     * 校验口径）；占目标类别在途序号的最低空位（排除自身——自改自的序号不算占用；
-     * 目标类别在途已满 3 即拒 409 KNW_012，部分唯一索引拦并发窗归一为同码）。同类
-     * 别幂等 no-op（200 原样回执）。不翻终态、不动正文——纯队列分诊修正。回执＝
+     * 校验口径）；同类别幂等 no-op（200 原样回执）。<b>#642 起只调整类别</b>——不再
+     * 检查或在途占位（名额机制已拆）。不翻终态、不动正文——纯队列分诊修正。回执＝
      * 详情（新类别直读）。<b>操作者留痕面＝采集埋点日志行</b>（{@code [sediment-annotate]}）：
      * 终态四列是审结语义、在途行恒 null 的 seam 断言钉死该形状，改标签不翻终态不落
      * 终态列——持久留痕如需独立列（V60 生长面）由后续票裁决（ADR-0038 补记）。
      *
      * @throws ApplicationException KNW_008 草稿不存在；KNW_009 已审结；
-     *         KNW_011 类别非法；KNW_012 目标类别在途满；KNW_006 操作者缺
+     *         KNW_011 类别非法；KNW_006 操作者缺
      */
     @Transactional
     public BackofficeSedimentDraftDetailResponse relabel(long id, String kindKey,
@@ -288,22 +255,10 @@ public class SedimentDraftAppService {
                 .orElseThrow(() -> new ApplicationException(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_KIND_INVALID));
         if (record.kind() != target) {
-            List<Integer> occupied = draftStore.findPendingSlotsExcluding(id,
-                    record.projectId(), target.key());
-            if (occupied.size() >= INFLIGHT_CAP) {
-                throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_SEDIMENT_TARGET_KIND_FULL);
-            }
-            int inflightSlot = lowestFreeSlot(occupied);
-            try {
-                if (!draftStore.updateKind(id, target.key(), inflightSlot)) {
-                    // CAS 零行命中＝并发审结抢先落定
-                    throw new ApplicationException(
-                            KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED);
-                }
-            }
-            catch (DuplicateKeyException e) {
-                // 并发窗内目标类别同序号抢先占住（部分唯一索引兜底）——归一为目标满拒
-                throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_SEDIMENT_TARGET_KIND_FULL);
+            if (!draftStore.updateKind(id, target.key())) {
+                // CAS 零行命中＝并发审结抢先落定
+                throw new ApplicationException(
+                        KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED);
             }
         }
         log.info("[sediment-annotate] 草稿 {} 改标签 {} → {}（操作者 {} {}）", id,
@@ -345,16 +300,6 @@ public class SedimentDraftAppService {
                 .orElseThrow(() -> new ApplicationException(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_KIND_INVALID))
                 .key();
-    }
-
-    /** 在途序号分配：最低空位（1-3）。 */
-    private static int lowestFreeSlot(List<Integer> occupied) {
-        for (int slot = 1; slot <= INFLIGHT_CAP; slot++) {
-            if (!occupied.contains(slot)) {
-                return slot;
-            }
-        }
-        throw new IllegalStateException("在途序号分配越界（占用=" + occupied + "）");
     }
 
     /** 扫描面＝标题＋摘要＋正文合成的草稿全文：与留档真实内容一致。 */

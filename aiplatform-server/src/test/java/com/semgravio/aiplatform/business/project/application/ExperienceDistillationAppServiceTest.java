@@ -290,8 +290,6 @@ class ExperienceDistillationAppServiceTest {
         SedimentDraftRecord draft = captured.drafts().get(0);
         assertThat(draft.kind()).isEqualTo(SedimentKind.MODULE);
         assertThat(draft.status()).isEqualTo(SedimentDraftStatus.PENDING);
-        assertThat(draft.inflightSlot())
-                .isEqualTo(ExperienceDistillationAppService.FIXED_INFLIGHT_SLOT);
         assertThat(draft.sourceProjectName()).isEqualTo(PROJECT_NAME);
         assertThat(draft.sourceVersionNo()).isEqualTo(2);
         assertThat(draft.sourceCommitHash()).isEqualTo(HASH_2);

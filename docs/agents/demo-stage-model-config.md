@@ -35,7 +35,7 @@ Demo 阶段激进用快模型（质量靠生成内核自证＋收口判据兜底
 1. **备账号 key 就位后配置**（不发版不重启，改完下一轮命令构建即生效）：先建备通道行 `POST /api/backoffice/model-providers`（同供应商多账号行 vendor 显式同填 deepseek；前缀即协议路由——通道行键取受支持前缀，OpenAI 兼容端点用 `openai` 键＋base_url 指实际端点），再经候选面 `POST /api/backoffice/model-configs/{configKey}/candidates` 追加备选（curl 执行面同 `backoffice-model-channel.sh` 的 `add-candidate`）。
 2. **定期活体演练**（建议随改配置窗口跑）：`ModelFailoverDrillLiveTest`（live 车道，`set -a; source .env.local; set +a && mvn test -P live -Dtest=ModelFailoverDrillLiveTest`）——测试库 flash 主候选注入假 key（真 401）→ 经真实解析链＋平台命令面验证自动切备、生成成功、留痕与计量归因（2026-11-20 全绿收口：假 key 真 401→切换留痕→备候选生成成功；演练自注入自还原，红先查 `.env.local` key 死活——本日旧 dev key 曾在供应商侧失效，法证靠全量落盘日志）。
 
-**边缘调用点同面改配置（#366）**：项目取名（`naming`）、上下文压缩（`compaction`）、入口分类（`classification`）、技能预检（`precheck`）四件一次性轻调用的模型配置收编同一配置面——端点 `/api/backoffice/agent-configs/edge/{edgeKey}`（GET/PUT/traces 同制，值面仅模型配置：`{"modelConfigKey": "pro"}`；缺省一律 `flash`）。改配置下一轮调用即生效（装配动态查库）。
+**边缘调用点同面改配置（#366）**：项目取名（`naming`）、上下文压缩（`compaction`）、入口分类（`classification`）、候选经验提炼（`refinement`）四件一次性轻调用的模型配置收编同一配置面——端点 `/api/backoffice/agent-configs/edge/{edgeKey}`（GET/PUT/traces 同制，值面仅模型配置：`{"modelConfigKey": "pro"}`；缺省一律 `flash`）。改配置下一轮调用即生效（装配动态查库）。
 
 **收口与验证面开关（#424／#427／#433／#442）已随审查与收口组退役（#605，ADR-0055）**：验证子智能体、整轨终验、收口三运营开关与基座 lint 阻断开关整体出局——`prj_agent_configs` 六列经 V84 迁移拆除，后台 GET/PUT/留痕面不再有这些字段；收口判据只余平台侧机器双件（build 探活＋8081 探活）。生成会话形态两开关随切片与轨道机器退役（#602，V82 迁移拆除）。
 

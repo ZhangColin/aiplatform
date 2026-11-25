@@ -126,7 +126,7 @@ class ProfileSkillRepositorySupplierTest {
 
     @Test
     void given_scripts_in_record_when_assembled_then_shell_slots_carry_resources_main_empty() {
-        // 同一技能三槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位）
+        // 同一技能两槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位；#638 后仅 main/executor）
         skillStore.assign(SkillSlot.MAIN, recordWithScripts(101, "tdd", "matt 包"));
         skillStore.assign(SkillSlot.EXECUTOR, recordWithScripts(102, "tdd", "matt 包"));
 

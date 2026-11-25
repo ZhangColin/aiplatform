@@ -13,8 +13,8 @@ import com.semgravio.aiplatform.base.skills.domain.repository.SkillStore;
 import io.agentscope.core.middleware.MiddlewareBase;
 
 /**
- * 平台中间件装配（#261 使用计数首件）：全形态（主智能体／生成内核／设计执行体
- * ——三槽位技能同出库）挂 {@link SkillLoadCountMiddleware 技能加载计数}——
+ * 平台中间件装配（#261 使用计数首件）：两槽位（主智能体／生成执行体——技能同
+ * 出库，main/executor）挂 {@link SkillLoadCountMiddleware 技能加载计数}——
  * 观测面对全库一致、不分槽位不分配置键；无状态中间件单实例长生命周期（依赖
  * 单例 {@link SkillStore}，多 agent 共享安全）。
  *

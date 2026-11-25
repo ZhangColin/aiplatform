@@ -9,7 +9,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
  * 沉淀自荐写入参数（#460）：内容四件（kind/title/summary/正文——载荷 JSONB 一期
  * 不开工具参数，列随档生长）＋血统三件（来源项目/run 标识/来源槽位——照技能草稿
  * 先例：project_id 软引用、run_id 为 RuntimeContext 透传的本轮平台标识、slot 为
- * 三职能槽位稳定键）。kind 紧凑构造归一（trim＋大写键），校验正本在
+ * 来源槽位稳定键（main/executor/refinement））。kind 紧凑构造归一（trim＋大写键），校验正本在
  * {@link #contentViolation()}——违例返回给模型可读的拒因（可修正重提），合规返回空。
  *
  * @param kind      沉淀物类别（CASE/MODULE/RULE，大小写不敏感，归一大写键）
@@ -18,7 +18,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
  * @param content   正文 markdown：沉淀物的完整陈述（≤100k）
  * @param projectId 来源项目（项目删除清理入口的血统锚）
  * @param runId     来源 run 标识（RuntimeContext 透传的本轮平台标识）
- * @param slot      来源槽位（血统：哪类智能体自荐的——main/executor/subagent 稳定键）
+ * @param slot      来源槽位（血统：哪类智能体产出——main/executor/refinement 稳定键）
  */
 public record SedimentDraftProposal(
         String kind,

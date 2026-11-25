@@ -22,11 +22,11 @@ Demo 阶段激进用快模型（质量靠生成内核自证＋收口判据兜底
 
 ## 三、改配置 SOP（不发版）
 
-档位经智能体运营配置机制切换，**不发版**——改配置下一次命令构建即生效（每次命令构建动态查库取生效值，无缓存）。模型配置值为**语义键**（ADR-0031：`flash`/`pro`/`doubao-flagship` 这类运营短名，指向实际模型名与供应商通道——模型版本升级改配置行指向即可，逐处绑定不动）：
+档位经智能体运营配置机制切换，**不发版**——改配置下一次命令构建即生效（每次命令构建动态查库取生效值，无缓存）。模型配置值为**语义键**（ADR-0031：`flash`/`pro` 这类运营短名，指向实际模型名与供应商通道——模型版本升级改配置行指向即可，逐处绑定不动）：
 
 1. **改配置**：`PUT /api/backoffice/agent-configs/executor`（机机五头 HMAC 签名；`X-User-Id`/`X-User-Name` 必带——写操作留痕）。请求体全量语义：`{"modelConfigKey": "pro"}` 换强模型档，`{"modelConfigKey": "flash"}` 回快模型档，`{"modelConfigKey": null}`（或纯空白/缺省）清空覆盖、回落枚举缺省（快模型档）。配置键即时校验（#367）：非空须在模型配置面（`/api/backoffice/model-configs`）有行且启用——错值 400 当场拒（PRJ_074 缺行 / PRJ_075 停用），不再靠留痕回滚兜底；null 清空不校验。
 
-**模型版本升级（方舟名带日期后缀、季度级更新）**：改配置行指向即全部引用自动跟上——`PUT /api/backoffice/model-configs/{configKey}` 改 `modelName`（同面可换通道、改显示名、停启用、开/关深度思考〔`thinkingEnabled`，缺省保持现值；缺省关＝显式关——不配置不默认拖慢首 token，#370〕）。V79 起（#556/ADR-0053）配置＝有序候选队列、写面改配置同步镜像 priority 1 首选候选（`prj_model_config_candidates`）——单档改指向语义不变；**主备多通道编排（#559/ADR-0053 ③ 后台写面）走候选子资源** `/api/backoffice/model-configs/{configKey}/candidates`：增（POST，缺省追加队尾/显式序插位）、改指向/启停/排序（PUT `/{priority}`——缺省保持、动到 priority 1 配置行镜像跟随）、删（DELETE——队列压实、最后候选不可删）、留痕读面（GET `/candidates/traces`——身份轴前后快照，回滚＝旧值写回即一次新变更）。建新配置走 POST、删行有绑定守卫（被引用 409）。**换 key/换通道/换归一**（不发版不重启）：`/api/backoffice/model-providers` 面——apiKey 写收全量值、读面与留痕一律掩码（尾 4 位），`PUT` 不携 apiKey＝保持现值、携全量新值＝换 key；vendor 受控值（小写 slug，缺省＝通道键同值——同供应商多账号行显式同填，#559）改完下一轮命令构建即生效。curl 执行面：`aiplatform-server/scripts/backoffice-model-channel.sh`（`demo` 全流程演示〔可弃键自动清场，含主备候选编排段〕＋单动词运维操作——`add-candidate`/`set-candidate`/`enable-candidate`/`move-candidate`/`delete-candidate`/`traces-candidates`）。
+**模型版本升级**：改配置行指向即全部引用自动跟上——`PUT /api/backoffice/model-configs/{configKey}` 改 `modelName`（同面可换通道、改显示名、停启用、开/关深度思考〔`thinkingEnabled`，缺省保持现值；缺省关＝显式关——不配置不默认拖慢首 token，#370〕）。V79 起（#556/ADR-0053）配置＝有序候选队列、写面改配置同步镜像 priority 1 首选候选（`prj_model_config_candidates`）——单档改指向语义不变；**主备多通道编排（#559/ADR-0053 ③ 后台写面）走候选子资源** `/api/backoffice/model-configs/{configKey}/candidates`：增（POST，缺省追加队尾/显式序插位）、改指向/启停/排序（PUT `/{priority}`——缺省保持、动到 priority 1 配置行镜像跟随）、删（DELETE——队列压实、最后候选不可删）、留痕读面（GET `/candidates/traces`——身份轴前后快照，回滚＝旧值写回即一次新变更）。建新配置走 POST、删行有绑定守卫（被引用 409）。**换 key/换通道/换归一**（不发版不重启）：`/api/backoffice/model-providers` 面——apiKey 写收全量值、读面与留痕一律掩码（尾 4 位），`PUT` 不携 apiKey＝保持现值、携全量新值＝换 key；vendor 受控值（小写 slug，缺省＝通道键同值——同供应商多账号行显式同填，#559）改完下一轮命令构建即生效。curl 执行面：`aiplatform-server/scripts/backoffice-model-channel.sh`（`demo` 全流程演示〔可弃键自动清场，含主备候选编排段〕＋单动词运维操作——`add-candidate`/`set-candidate`/`enable-candidate`/`move-candidate`/`delete-candidate`/`traces-candidates`）。
 2. **查生效值**：`GET /api/backoffice/agent-configs/executor`——生效 `modelConfigKey` ＋覆盖标记 `modelConfigKeyOverridden` ＋缺省预览 `defaultModelConfigKey`。
 3. **回滚**：`GET /api/backoffice/agent-configs/executor/traces` 取某痕旧值快照，把旧值 `PUT` 回写（即一次新变更、留新痕——不做版本树）。
 
@@ -60,4 +60,4 @@ Demo 阶段激进用快模型（质量靠生成内核自证＋收口判据兜底
    - **强档对照（质量基线）**：`PUT` 写 `{"modelConfigKey": "pro"}`（改档不发版，下一轮命令构建即生效）；
 4. 对比结果留档（时长量级、质量差异、项目账 token）——快档轮供速度目标推算，强档轮为质量基线。
 
-**enableThinking 开关对比（#369 留下、#370 开关后台化后可做）**：方舟 DeepSeek V4 系均标深度思考，装配显式表态不留给模型默认；开关跟配置走（`prj_model_configs.thinking_enabled`，缺省 false＝显式关——#369 活体结论「维持 false」）。对比法：配置维护面 `PUT /api/backoffice/model-configs/{configKey}` 带 `"thinkingEnabled": true` 开→同一任务跑一轮，与关态轮对比首轮延迟/质量/token——改完下一轮命令构建即生效（通道指纹含 thinking 腿，进行中 run 不定格），不发版不重启；结论按档回写（若开态显著拖慢首 token 则维持关，用户故事 12 承诺不破），留痕可回滚。成本面联动：跑完经成本观测面核 volcengine 模型行有单价匹配（单价表已开三档位实际模型行，#369 种子）、无 unpriced 警示。
+**enableThinking 开关对比（#369 留下、#370 开关后台化后可做；V79 后单通道＝deepseek 官方）**：装配显式表态不留给模型默认；开关跟配置走（`prj_model_configs.thinking_enabled`，缺省 false＝显式关——#369 活体结论「维持 false」）。对比法：配置维护面 `PUT /api/backoffice/model-configs/{configKey}` 带 `"thinkingEnabled": true` 开→同一任务跑一轮，与关态轮对比首轮延迟/质量/token——改完下一轮命令构建即生效（通道指纹含 thinking 腿，进行中 run 不定格），不发版不重启；结论按档回写（若开态显著拖慢首 token 则维持关，用户故事 12 承诺不破），留痕可回滚。成本面联动：跑完经成本观测面核 deepseek 模型行有单价匹配（单价表已开档位实际模型行）、无 unpriced 警示。

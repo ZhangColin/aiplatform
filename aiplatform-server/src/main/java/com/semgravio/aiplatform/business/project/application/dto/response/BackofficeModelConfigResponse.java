@@ -25,7 +25,7 @@ public record BackofficeModelConfigResponse(
         @Schema(description = "配置语义键（绑定面引用值）", example = "flash")
         String configKey,
         @Schema(description = "所属通道键（模型串「前缀:实际模型名」的前缀腿）",
-                example = "volcengine")
+                example = "deepseek")
         String providerKey,
         @Schema(description = "实际模型名（通道侧 Model ID；版本升级改此处、全部引用自动跟上）",
                 example = "deepseek-v4-flash-ga-260731")

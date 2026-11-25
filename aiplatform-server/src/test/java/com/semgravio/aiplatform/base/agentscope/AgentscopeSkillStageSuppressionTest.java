@@ -34,8 +34,8 @@ import io.agentscope.harness.agent.middleware.HarnessSkillMiddleware;
  *
  * <p>两断言互补：装配面（stager 字段卸除——全宿主确定性）＋症状面（真驱框架
  * 每轮钩子 {@code onSystemPrompt}，宿主可写环境下物化尝试必留痕）。模型经自注册
- * {@code probe363:} 桩工厂解析（SDK 公开 {@code ModelRegistry.registerFactory}，
- * 仿 VolcengineModelRegistrar——测试不依赖任何模型环境 key，桩不被调用）。</p>
+ * {@code probe363:} 桩工厂解析（SDK 公开 API {@code ModelRegistry.registerFactory}
+ * 同款接线——测试不依赖任何模型环境 key，桩不被调用）。</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AgentscopeSkillStageSuppressionTest {
@@ -53,7 +53,7 @@ class AgentscopeSkillStageSuppressionTest {
 
     @BeforeAll
     static void registerProbeModelFactory() {
-        // 构建期模型解析不触网不依赖环境 key（同 VolcengineModelRegistrar 公开注册面）
+        // 构建期模型解析不触网不依赖环境 key（SDK 公开 API ModelRegistry.registerFactory 同款接线）
         io.agentscope.core.model.ModelRegistry.registerFactory(
                 "probe363:.+", (modelId, context) -> org.mockito.Mockito.mock(
                         io.agentscope.core.model.Model.class));

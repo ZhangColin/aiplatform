@@ -20,8 +20,8 @@ import com.semgravio.aiplatform.business.project.domain.port.ModelCatalogFetcher
 
 /**
  * OpenAI 兼容模型清单拉取器（#368 手动同步的唯一实现）：{@code GET {baseUrl}/models}，
- * Bearer key。响应形状以方舟端点 2026-10-23 实测为准（OpenAI 兼容 {@code data[]}
- * 条目：id 必有，name/status/domain 可缺——方舟活跃模型无 status 字段、Shutdown/
+ * Bearer key。响应形状以 OpenAI 兼容端点 2026-10-23 实测为准（OpenAI 兼容 {@code data[]}
+ * 条目：id 必有，name/status/domain 可缺——实测端点活跃模型无 status 字段、Shutdown/
  * Retiring＝下架/退场中）。形制照 {@code BochaWebSearchProvider}：降级契约＝
  * 非 200 / 坏响应（非 JSON、缺 data）/ 连接异常一律 {@link ModelCatalog.Failed}
  * 带如实理由，不抛错不炸——调用方（后台拉取用例）转明确错误信封，不静默。

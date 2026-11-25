@@ -23,14 +23,14 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
  * @param updatedAt    最近写入时刻
  */
 public record BackofficeModelProviderResponse(
-        @Schema(description = "通道键名＝协议路由前缀", example = "volcengine")
+        @Schema(description = "通道键名＝协议路由前缀", example = "deepseek")
         String providerKey,
         @Schema(description = "归一供应商（计量按模型统计与单价/峰谷匹配的维度腿；"
                 + "同供应商多账号行同填，如 deepseek/deepseek-2 同填 deepseek）",
                 example = "deepseek")
         String vendor,
         @Schema(description = "通道 baseUrl（创建上下文注入 SDK）",
-                example = "https://ark.cn-beijing.volces.com/api/v3")
+                example = "https://api.deepseek.com")
         String baseUrl,
         @Schema(description = "apiKey 掩码形（尾 4 位；null＝未配置——接口回显零明文 key）",
                 example = "****ab12")

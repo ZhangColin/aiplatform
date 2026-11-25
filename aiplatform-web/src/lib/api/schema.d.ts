@@ -46,7 +46,7 @@ export interface paths {
         };
         /**
          * 通道单行读面（掩码形）
-         * @description 该通道行（掩码形同清单）。寻址键即协议路由前缀（volcengine/deepseek 等）。需要机机签名（五头 HMAC），无签名 401
+         * @description 该通道行（掩码形同清单）。寻址键即协议路由前缀（deepseek 等）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_065 — 模型供应商通道不存在
@@ -87,7 +87,7 @@ export interface paths {
         };
         /**
          * 配置单行读面
-         * @description 该配置行。寻址键即绑定引用腿（flash/pro/doubao-flagship 这类运营短名）。需要机机签名（五头 HMAC），无签名 401
+         * @description 该配置行。寻址键即绑定引用腿（flash/pro 这类运营短名）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_066 — 模型配置不存在
@@ -224,7 +224,7 @@ export interface paths {
         };
         /**
          * 边缘调用点配置读面（生效值＋覆盖标记＋默认预览）
-         * @description 边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/工具开关）。寻址稳定键三把：naming=项目取名 / compaction=上下文压缩 / classification=入口分类（#638 技能预检边缘点已退场）。改配置下一轮命令构建即生效（装配动态查库，进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401
+         * @description 边缘调用点（一次性轻调用）的模型配置生效值：库覆盖值或代码缺省配置键（#366 同表收编——值面仅模型配置，无 prompt/工具开关）。寻址稳定键四把：naming=项目取名 / compaction=上下文压缩 / classification=入口分类 / refinement=候选经验提炼（#641；#638 技能预检边缘点已退场）。改配置下一轮命令构建即生效（装配动态查库，进行中 run 不定格）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_064 — 边缘调用点不存在（配置面只有 naming/compaction/classification 三点）
@@ -1609,7 +1609,7 @@ export interface paths {
         };
         /**
          * 通道清单读面（apiKey 一律掩码）
-         * @description 全部通道行按键序；apiKey 只出掩码形（尾 4 位，null＝未配置）——接口回显面零明文 key。种子两通道：volcengine 主用（火山方舟）＋deepseek 官方备胎。需要机机签名（五头 HMAC），无签名 401
+         * @description 全部通道行按键序；apiKey 只出掩码形（尾 4 位，null＝未配置）——接口回显面零明文 key。种子单通道：deepseek 官方。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 401 UNAUTHORIZED — Authentication required
@@ -1643,7 +1643,7 @@ export interface paths {
         put?: never;
         /**
          * 远端模型清单手动拉取（对照库内配置）
-         * @description 按通道行真拉远端模型清单（OpenAI 兼容 GET {baseUrl}/models，方舟端点实测同形状）并与库内配置对照：条目 trackedConfigKeys 空＝远端有库里无（建议入库）；staleConfigs＝库内指向远端已无（提示过时）。每次全量真拉无缓存（手动同步——自动定时同步备案未来增强，ADR-0031）。勾选入库复用配置创建写口（POST /api/backoffice/model-configs，modelName 填所选条目 modelId、语义键人工命名）。条目 status 如实转述（方舟：无 status＝活跃、Shutdown/Retiring＝下架/退场中）。上游不可用明确报错不静默（502 PRJ_077 带理由）；通道 key 空 400 PRJ_076；停用通道可拉（巡检语义）。纯读动作零留痕。需要机机签名（五头 HMAC），无签名 401
+         * @description 按通道行真拉远端模型清单（OpenAI 兼容 GET {baseUrl}/models，OpenAI 兼容端点实测同形状）并与库内配置对照：条目 trackedConfigKeys 空＝远端有库里无（建议入库）；staleConfigs＝库内指向远端已无（提示过时）。每次全量真拉无缓存（手动同步——自动定时同步备案未来增强，ADR-0031）。勾选入库复用配置创建写口（POST /api/backoffice/model-configs，modelName 填所选条目 modelId、语义键人工命名）。条目 status 如实转述（无 status＝活跃、Shutdown/Retiring＝下架/退场中）。上游不可用明确报错不静默（502 PRJ_077 带理由）；通道 key 空 400 PRJ_076；停用通道可拉（巡检语义）。纯读动作零留痕。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_065 — 模型供应商通道不存在
@@ -1676,7 +1676,7 @@ export interface paths {
         put?: never;
         /**
          * 配置创建（建行即可被绑定）
-         * @description 新建配置：语义键随体（已存在 409 PRJ_068）；所属通道必须已有行（PRJ_071——先建通道再挂配置）；实际模型名必填（PRJ_070）；显示名可空（＝回落语义键）；enabled 缺省 true。创建即落痕（old 全 null）。模型版本升级（方舟名带日期后缀、季度级更新）＝改配置行指向，全部引用自动跟上。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         * @description 新建配置：语义键随体（已存在 409 PRJ_068）；所属通道必须已有行（PRJ_071——先建通道再挂配置）；实际模型名必填（PRJ_070）；显示名可空（＝回落语义键）；enabled 缺省 true。创建即落痕（old 全 null）。模型版本升级＝改配置行指向，全部引用自动跟上。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 409 PRJ_068 — 模型配置已存在（语义键唯一——改既有档走 PUT）
@@ -3299,6 +3299,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/materials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识素材清单（三过滤维度，分页）
+         * @description 治理工作清单：新沉淀在前。三维度可组合、均可缺省（缺省＝全量）：① status 状态单选，Integer code（1=启用 2=停用；缺省＝全部——与订单清单状态多选有意不同，照项目面状态单选先例）；② sunkFrom/sunkTo 沉淀时间区间（首沉淀时间，闭区间含两端，ISO-8601 Instant，如 2026-09-01T00:00:00Z）；③ projectId 来源项目 id 精确（登记面字符串，查无＝空清单 200）。不做内容模糊与账号维度。排序服务端定死＝沉淀时间倒序（id 倒序稳定）。行带最近管理动作操作者（未治理过为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
+         */
+        get: operations["materials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/materials/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识素材详情（元数据＋PRD 全文）
+         * @description 读内容判治理：元数据（素材类型/来源项目引用/沉淀时间（首沉淀，重沉淀与治理动作不改）/状态/最近管理动作操作者）＋素材全文＝块按 seq 以空行拼接（段落级重组：超长单段硬切的切点呈现为段落断，内容无损）。来源项目引用容缺直读登记面（不校验项目存在，缺档不炸）。素材不存在（含畸形 id）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_005 — 知识素材不存在
+         */
+        get: operations["detail_8"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除素材（治理移除，不可逆）
+         * @description 治理移除素材登记行与全部块、不动来源项目（管理删除与项目删除级联正交）；清单/详情/检索均不可见。无行可留、不留痕（全局审计流水不建——admin 侧自有操作日志）。回执＝删除前终态（确认移除了什么）。素材不存在（含畸形 id、重复删除）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_005 — 知识素材不存在
+         */
+        delete: operations["delete_4"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/knowledge-retrievals": {
         parameters: {
             query?: never;
@@ -3360,64 +3414,10 @@ export interface paths {
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
          */
-        get: operations["flywheelStats"];
+        get: operations["stats"];
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/backoffice/materials": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 知识素材清单（三过滤维度，分页）
-         * @description 治理工作清单：新沉淀在前。三维度可组合、均可缺省（缺省＝全量）：① status 状态单选，Integer code（1=启用 2=停用；缺省＝全部——与订单清单状态多选有意不同，照项目面状态单选先例）；② sunkFrom/sunkTo 沉淀时间区间（首沉淀时间，闭区间含两端，ISO-8601 Instant，如 2026-09-01T00:00:00Z）；③ projectId 来源项目 id 精确（登记面字符串，查无＝空清单 200）。不做内容模糊与账号维度。排序服务端定死＝沉淀时间倒序（id 倒序稳定）。行带最近管理动作操作者（未治理过为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 400 BAD_REQUEST — Invalid request
-         *     - 404 NOT_FOUND — Resource not found
-         */
-        get: operations["materials"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/backoffice/materials/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 知识素材详情（元数据＋PRD 全文）
-         * @description 读内容判治理：元数据（素材类型/来源项目引用/沉淀时间（首沉淀，重沉淀与治理动作不改）/状态/最近管理动作操作者）＋素材全文＝块按 seq 以空行拼接（段落级重组：超长单段硬切的切点呈现为段落断，内容无损）。来源项目引用容缺直读登记面（不校验项目存在，缺档不炸）。素材不存在（含畸形 id）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 404 KNW_005 — 知识素材不存在
-         */
-        get: operations["detail_8"];
-        put?: never;
-        post?: never;
-        /**
-         * 删除素材（治理移除，不可逆）
-         * @description 治理移除素材登记行与全部块、不动来源项目（管理删除与项目删除级联正交）；清单/详情/检索均不可见。无行可留、不留痕（全局审计流水不建——admin 侧自有操作日志）。回执＝删除前终态（确认移除了什么）。素材不存在（含畸形 id、重复删除）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
-         *
-         *     错误码：
-         *     - 404 KNW_005 — 知识素材不存在
-         */
-        delete: operations["delete_4"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3793,7 +3793,7 @@ export interface components {
             vendor?: string;
             /**
              * @description 通道 baseUrl（终态全量替换，必填）
-             * @example https://ark.cn-beijing.volces.com/api/v3
+             * @example https://api.deepseek.com
              */
             baseUrl?: string;
             /** @description apiKey：写全量新值＝换 key（写面唯一明文入口）；null/空白/等于现值掩码形＝保持现值（读面掩码回显的 round-trip 安全语义）。清除 key 无写面——下线通道走 enabled=false */
@@ -3812,7 +3812,7 @@ export interface components {
         BackofficeModelProviderResponse: {
             /**
              * @description 通道键名＝协议路由前缀
-             * @example volcengine
+             * @example deepseek
              */
             providerKey?: string;
             /**
@@ -3822,7 +3822,7 @@ export interface components {
             vendor?: string;
             /**
              * @description 通道 baseUrl（创建上下文注入 SDK）
-             * @example https://ark.cn-beijing.volces.com/api/v3
+             * @example https://api.deepseek.com
              */
             baseUrl?: string;
             /**
@@ -3851,7 +3851,7 @@ export interface components {
         ModelConfigUpdateCommand: {
             /**
              * @description 所属通道键（终态全量替换，必填且须已存在）
-             * @example volcengine
+             * @example deepseek
              */
             providerKey?: string;
             /**
@@ -3885,7 +3885,7 @@ export interface components {
             configKey?: string;
             /**
              * @description 所属通道键（模型串「前缀:实际模型名」的前缀腿）
-             * @example volcengine
+             * @example deepseek
              */
             providerKey?: string;
             /**
@@ -5151,7 +5151,7 @@ export interface components {
         ModelProviderCreateCommand: {
             /**
              * @description 通道键名＝协议路由前缀（模型串「前缀:实际模型名」的前缀腿；OpenAI 兼容通道统一接，SDK 内置前缀走原生 provider）
-             * @example volcengine
+             * @example deepseek
              */
             providerKey?: string;
             /**
@@ -5161,7 +5161,7 @@ export interface components {
             vendor?: string;
             /**
              * @description 通道 baseUrl（创建上下文注入 SDK，覆盖依赖库默认地址）
-             * @example https://ark.cn-beijing.volces.com/api/v3
+             * @example https://api.deepseek.com
              */
             baseUrl?: string;
             /** @description 凭证全量值（写面唯一明文入口；null/空白＝暂不配置——装配按 PRJ_063 明确报错不静默兜底） */
@@ -5200,22 +5200,22 @@ export interface components {
         ModelConfigCreateCommand: {
             /**
              * @description 配置语义键（引用腿——两座智能体/边缘点绑定的值）
-             * @example doubao-flagship
+             * @example flash
              */
             configKey?: string;
             /**
              * @description 所属通道键（必须已存在——先建通道行再挂配置）
-             * @example volcengine
+             * @example deepseek
              */
             providerKey?: string;
             /**
-             * @description 实际模型名（通道侧 Model ID，方舟名带日期后缀——版本升级改此处指向、全部引用自动跟上）
-             * @example doubao-seed-2-1-pro-260915
+             * @description 实际模型名（通道侧 Model ID——版本升级改此处指向、全部引用自动跟上）
+             * @example deepseek-flash
              */
             modelName?: string;
             /**
              * @description 运营显示名（后台绑定下拉的人话标签；可空＝回落语义键）
-             * @example 豆包旗舰
+             * @example 快模型档
              */
             displayName?: string;
             /** @description 启用态（缺省 true；停用＝既有绑定装配报错、新绑定被即时校验拒绝） */
@@ -5264,97 +5264,6 @@ export interface components {
             sunkAt?: string;
             operatorId?: string;
             operatorName?: string;
-        };
-        ApiResponsePageResponseBackofficeKnowledgeRetrievalResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["PageResponseBackofficeKnowledgeRetrievalResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        PageResponseBackofficeKnowledgeRetrievalResponse: {
-            items?: components["schemas"]["BackofficeKnowledgeRetrievalResponse"][];
-            /** Format: int64 */
-            total?: number;
-            /** Format: int32 */
-            page?: number;
-            /** Format: int32 */
-            size?: number;
-        };
-        BackofficeKnowledgeRetrievalResponse: {
-            id?: string;
-            projectId?: string;
-            /** Format: date-time */
-            recordedAt?: string;
-            degraded?: boolean;
-            hits?: components["schemas"]["HitItem"][];
-        };
-        HitItem: {
-            kind?: string;
-            sourceProjectName?: string;
-            title?: string;
-            chunk?: string;
-        };
-        ApiResponseBackofficeVectorHealthResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["BackofficeVectorHealthResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        BackofficeVectorHealthResponse: {
-            available?: boolean;
-            /** Format: date-time */
-            checkedAt?: string;
-            /** Format: int64 */
-            elapsedMs?: number;
-        };
-        ApiResponseBackofficeFlywheelStatsResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["BackofficeFlywheelStatsResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        BackofficeFlywheelStatsResponse: {
-            items?: components["schemas"]["ProjectRow"][];
-            /** Format: int64 */
-            total?: number;
-            /** Format: int32 */
-            page?: number;
-            /** Format: int32 */
-            size?: number;
-            summary?: components["schemas"]["Summary"];
-        };
-        ProjectRow: {
-            projectId?: string;
-            projectName?: string;
-            /** Format: int32 */
-            modificationRounds?: number;
-            /** Format: int32 */
-            missedRounds?: number;
-            /** Format: int32 */
-            hitCount?: number;
-            /** Format: date-time */
-            latestHitAt?: string;
-            hasHit?: boolean;
-        };
-        Summary: {
-            /** Format: int32 */
-            withHitProjectCount?: number;
-            /** Format: int32 */
-            withoutHitProjectCount?: number;
-            /** Format: double */
-            withHitAverageModificationRounds?: number;
-            /** Format: double */
-            withHitAverageMissedRounds?: number;
-            /** Format: double */
-            withoutHitAverageModificationRounds?: number;
-            /** Format: double */
-            withoutHitAverageMissedRounds?: number;
         };
         ContractActionCommand: {
             basis?: string;
@@ -6072,7 +5981,10 @@ export interface components {
             projectId?: string;
             /** @description 来源 run/批次标识（血统——批次级溯源锚） */
             runId?: string;
-            /** @description 来源项目名快照（项目改名/删除后仍可读） */
+            /**
+             * @description 来源项目名快照（项目改名/删除后仍可读）
+             * @example 宠物店官网
+             */
             sourceProjectName?: string;
             /**
              * Format: int32
@@ -6533,7 +6445,7 @@ export interface components {
             id?: string;
             /**
              * @description 变更前所属通道键（null＝创建痕）
-             * @example volcengine
+             * @example deepseek
              */
             oldProviderKey?: string;
             /** @description 变更前实际模型名（null＝创建痕） */
@@ -6549,7 +6461,7 @@ export interface components {
             oldThinkingEnabled?: boolean;
             /**
              * @description 变更后所属通道键（null＝删除痕）
-             * @example volcengine
+             * @example deepseek
              */
             newProviderKey?: string;
             /** @description 变更后实际模型名（null＝删除痕） */
@@ -6664,6 +6576,97 @@ export interface components {
             operatorId?: string;
             operatorName?: string;
             content?: string;
+        };
+        ApiResponsePageResponseBackofficeKnowledgeRetrievalResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeKnowledgeRetrievalResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeKnowledgeRetrievalResponse: {
+            id?: string;
+            projectId?: string;
+            /** Format: date-time */
+            recordedAt?: string;
+            degraded?: boolean;
+            hits?: components["schemas"]["HitItem"][];
+        };
+        HitItem: {
+            kind?: string;
+            sourceProjectName?: string;
+            title?: string;
+            chunk?: string;
+        };
+        PageResponseBackofficeKnowledgeRetrievalResponse: {
+            items?: components["schemas"]["BackofficeKnowledgeRetrievalResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponseBackofficeVectorHealthResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeVectorHealthResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeVectorHealthResponse: {
+            available?: boolean;
+            /** Format: date-time */
+            checkedAt?: string;
+            /** Format: int64 */
+            elapsedMs?: number;
+        };
+        ApiResponseBackofficeFlywheelStatsResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeFlywheelStatsResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeFlywheelStatsResponse: {
+            items?: components["schemas"]["ProjectRow"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            summary?: components["schemas"]["Summary"];
+        };
+        ProjectRow: {
+            projectId?: string;
+            projectName?: string;
+            /** Format: int32 */
+            modificationRounds?: number;
+            /** Format: int32 */
+            missedRounds?: number;
+            /** Format: int32 */
+            hitCount?: number;
+            /** Format: date-time */
+            latestHitAt?: string;
+            hasHit?: boolean;
+        };
+        Summary: {
+            /** Format: int32 */
+            withHitProjectCount?: number;
+            /** Format: int32 */
+            withoutHitProjectCount?: number;
+            /** Format: double */
+            withHitAverageModificationRounds?: number;
+            /** Format: double */
+            withHitAverageMissedRounds?: number;
+            /** Format: double */
+            withoutHitAverageModificationRounds?: number;
+            /** Format: double */
+            withoutHitAverageMissedRounds?: number;
         };
         ApiResponseBackofficeUnpricedUsageResponse: {
             /** Format: int32 */
@@ -10506,77 +10509,6 @@ export interface operations {
             };
         };
     };
-    retrievals: {
-        parameters: {
-            query?: {
-                projectId?: string;
-                from?: string;
-                to?: string;
-                page?: number;
-                size?: number;
-                sort?: string[];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeKnowledgeRetrievalResponse"];
-                };
-            };
-        };
-    };
-    health: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeVectorHealthResponse"];
-                };
-            };
-        };
-    };
-    flywheelStats: {
-        parameters: {
-            query?: {
-                page?: number;
-                size?: number;
-                sort?: string[];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseBackofficeFlywheelStatsResponse"];
-                };
-            };
-        };
-    };
     materials: {
         parameters: {
             query?: {
@@ -10645,6 +10577,77 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeMaterialSummaryResponse"];
+                };
+            };
+        };
+    };
+    retrievals: {
+        parameters: {
+            query?: {
+                projectId?: string;
+                from?: string;
+                to?: string;
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeKnowledgeRetrievalResponse"];
+                };
+            };
+        };
+    };
+    health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeVectorHealthResponse"];
+                };
+            };
+        };
+    };
+    stats: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeFlywheelStatsResponse"];
                 };
             };
         };

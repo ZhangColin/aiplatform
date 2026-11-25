@@ -41,8 +41,8 @@ import com.cartisan.core.exception.ApplicationException;
  * 模型走——候选行不自带开关列，全队列继承配置行值；缺省 false＝显式关
  * （#369 活体验收结论「维持 false」——不配置不默认拖慢首 token）。开关
  * 改配置维护面（不发版不重启），本服务每轮命令构建读行值；通道指纹含 thinking
- * 腿，改开关＝新指纹＝新实例（进行中 run 不定格）。volcengine 平台工厂与 SDK
- * 内置 provider 都从创建上下文读该值——装配不留给模型默认。</p>
+ * 腿，改开关＝新指纹＝新实例（进行中 run 不定格）。SDK
+ * 内置 provider 从创建上下文读该值——装配不留给模型默认。</p>
  */
 @Slf4j
 @Service

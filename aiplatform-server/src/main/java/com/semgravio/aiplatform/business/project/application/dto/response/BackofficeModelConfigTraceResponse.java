@@ -29,7 +29,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelConfigTrace;
 public record BackofficeModelConfigTraceResponse(
         @Schema(description = "留痕标识（TSID 十进制串）")
         String id,
-        @Schema(description = "变更前所属通道键（null＝创建痕）", example = "volcengine")
+        @Schema(description = "变更前所属通道键（null＝创建痕）", example = "deepseek")
         String oldProviderKey,
         @Schema(description = "变更前实际模型名（null＝创建痕）")
         String oldModelName,
@@ -39,7 +39,7 @@ public record BackofficeModelConfigTraceResponse(
         Boolean oldEnabled,
         @Schema(description = "变更前深度思考开关（null＝创建痕）")
         Boolean oldThinkingEnabled,
-        @Schema(description = "变更后所属通道键（null＝删除痕）", example = "volcengine")
+        @Schema(description = "变更后所属通道键（null＝删除痕）", example = "deepseek")
         String newProviderKey,
         @Schema(description = "变更后实际模型名（null＝删除痕）")
         String newModelName,

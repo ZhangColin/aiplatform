@@ -145,7 +145,7 @@ class ModelFailoverInjectionTest {
         }
     }
 
-    /** 平台注册工厂前缀（volcengine 工厂同款接线——baseUrl/key 全由创建上下文带入）。 */
+    /** 平台注册工厂前缀（SDK 公开 API ModelRegistry.registerFactory 同款接线——baseUrl/key 全由创建上下文带入）。 */
     private static final String PROBE_PREFIX = "fofail";
 
     /** 备账号通道键（同 vendor 不同账号——deepseek/deepseek-2 主备形态的测试形）。 */

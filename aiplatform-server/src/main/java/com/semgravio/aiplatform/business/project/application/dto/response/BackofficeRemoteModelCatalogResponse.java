@@ -16,7 +16,7 @@ import java.util.List;
  *     清单——提示过时，升版/改指向前处置）。</li>
  * </ul>
  *
- * <p>条目 status 如实转述上游（方舟：无 status＝活跃、Shutdown/Retiring＝下架/
+ * <p>条目 status 如实转述上游（无 status＝活跃、Shutdown/Retiring＝下架/
  * 退场中——建议入库时结合判断，接口不代拍）。</p>
  *
  * @param providerKey  通道键（拉取寻址）

@@ -149,7 +149,7 @@ class BackofficeModelChannelSeamTest {
                 .andExpect(jsonPath("$.data[1].modelName").value("deepseek-v4-pro"))
                 .andExpect(jsonPath("$.data[1].displayName").value("强模型档"));
 
-        // 未知寻址：通道/配置各自 404（volcengine 已随 V79 退场＝未知寻址）
+        // 未知寻址：通道/配置各自 404（未知键各自 404）
         signedRequest(get(PROVIDERS_PATH + "/t-none"), PROVIDERS_PATH + "/t-none", null, null, null)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(PROVIDER_NOT_FOUND_CODE));

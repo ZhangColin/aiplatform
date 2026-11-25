@@ -219,8 +219,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // stream() 收口报用量，取代只认 ModelCallEndEvent 的旧源）；子智能体
         // 复用同一实例（计量边界连续，子智能体轮次同归当轮用量）。通道注入件
         // （ADR-0031）随解析进创建上下文：baseUrl/apiKey/enableThinking 注入
-        // SDK（覆盖依赖库默认地址与环境变量），前缀路由到平台注册工厂
-        // （volcengine）或内置 provider（deepseek 等）。#557 起队列形：命令携
+        // SDK（覆盖依赖库默认地址与环境变量），前缀路由 SDK ModelRegistry
+        // 到内置 provider（deepseek/openai 等）。#557 起队列形：命令携
         // modelQueue（配置解析的整队列产物）时主模型经 failoverLayer 装配
         // （多候选＝FailoverModel 链式切换、单候选＝streamLayer 直装行为不变）
         Model model = modelQueue != null
@@ -662,8 +662,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     /**
      * 生效解析上下文（ADR-0031 通道注入腿）：通道件非空＝配置解析产物——
-     * baseUrl/apiKey/enableThinking 注入创建上下文（平台 volcengine 工厂与内置
-     * provider 都从标准字段读，key 不落环境变量）；空＝无通道语境（一次性调用
+     * baseUrl/apiKey/enableThinking 注入创建上下文（SDK 内置
+     * provider 从标准字段读，key 不落环境变量）；空＝无通道语境（一次性调用
      * 面的配置缺省串），维持仅内层重试关闭的既有上下文。
      */
     static ModelCreationContext creationContextOf(ModelChannel modelChannel) {

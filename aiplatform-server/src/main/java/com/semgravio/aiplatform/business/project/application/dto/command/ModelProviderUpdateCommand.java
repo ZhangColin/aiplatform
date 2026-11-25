@@ -26,7 +26,7 @@ public record ModelProviderUpdateCommand(
                 + "单价匹配维度随之切换——留痕前后快照可回滚）", example = "deepseek")
         String vendor,
         @Schema(description = "通道 baseUrl（终态全量替换，必填）",
-                example = "https://ark.cn-beijing.volces.com/api/v3")
+                example = "https://api.deepseek.com")
         String baseUrl,
         @Schema(description = "apiKey：写全量新值＝换 key（写面唯一明文入口）；null/空白/"
                 + "等于现值掩码形＝保持现值（读面掩码回显的 round-trip 安全语义）。"

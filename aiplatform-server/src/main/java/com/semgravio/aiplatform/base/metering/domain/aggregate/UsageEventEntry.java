@@ -60,7 +60,7 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
      * 供应商维度（ADR-0053 ②，V79 列＋历史同值回填）：与 provider 同值＝供应商即
      * 账号本体；不同值＝同供应商多账号（deepseek/deepseek-2 同填 deepseek）。
      * 单价表/峰谷规则匹配键与模型视角聚合（vendor+model）的腿——通道行将来可删、
-     * 历史事件维度自持（volcengine 行已删的教训）。
+     * 历史事件维度自持（通道行已删的教训，V79/ADR-0053）。
      */
     @Column(name = "vendor", nullable = false, updatable = false, length = 50)
     private String vendor;

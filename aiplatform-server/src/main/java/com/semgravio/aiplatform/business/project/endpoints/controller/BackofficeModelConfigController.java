@@ -58,7 +58,7 @@ public class BackofficeModelConfigController {
 
     @GetMapping("/{configKey}")
     @Operation(summary = "配置单行读面",
-            description = "该配置行。寻址键即绑定引用腿（flash/pro/doubao-flagship "
+            description = "该配置行。寻址键即绑定引用腿（flash/pro "
                     + "这类运营短名）。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"PRJ_066"})
     public ApiResponse<BackofficeModelConfigResponse> config(@PathVariable String configKey) {
@@ -70,8 +70,8 @@ public class BackofficeModelConfigController {
             description = "新建配置：语义键随体（已存在 409 PRJ_068）；所属通道必须"
                     + "已有行（PRJ_071——先建通道再挂配置）；实际模型名必填"
                     + "（PRJ_070）；显示名可空（＝回落语义键）；enabled 缺省 true。"
-                    + "创建即落痕（old 全 null）。模型版本升级（方舟名带日期后缀、"
-                    + "季度级更新）＝改配置行指向，全部引用自动跟上。X-User-Id/"
+                    + "创建即落痕（old 全 null）。模型版本升级"
+                    + "＝改配置行指向，全部引用自动跟上。X-User-Id/"
                     + "X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名"
                     + "（五头 HMAC），无签名 401")
     @ErrorCodes({"PRJ_068", "PRJ_070", "PRJ_071", "PRJ_034"})

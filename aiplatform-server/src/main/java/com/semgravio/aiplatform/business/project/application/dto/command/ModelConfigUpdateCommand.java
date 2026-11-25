@@ -17,7 +17,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  */
 public record ModelConfigUpdateCommand(
         @Schema(description = "所属通道键（终态全量替换，必填且须已存在）",
-                example = "volcengine")
+                example = "deepseek")
         String providerKey,
         @Schema(description = "实际模型名（终态全量替换，必填）",
                 example = "deepseek-v4-flash-ga-261031")

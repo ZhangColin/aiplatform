@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -60,7 +59,7 @@ class AgentscopeHarnessAgentFactoryTest {
     /**
      * 边缘模型固定桩（#366 压缩配置装配腿）：无通道语境的 deepseek 串——SDK 内置
      * provider 缺省路径，工厂测试不依赖库/通道注册（配置链装配断言归 business 侧；
-     * 走替身 builder 的实例键测试用本桩，真构建测试用 {@link #volcEdgeModels()}）。
+     * 走替身 builder 的实例键测试用本桩，真构建测试用 {@link #deepseekEdgeModels()}）。
      */
     private static final EdgeModelSupplier EDGE_MODELS = new EdgeModelSupplier() {
         @Override
@@ -71,28 +70,20 @@ class AgentscopeHarnessAgentFactoryTest {
     };
 
     /**
-     * 主通道真构建语境（#369 退场确认：真构建断言不再依赖 DEEPSEEK_API_KEY 环境
-     * 腿）：volcengine 平台工厂注册＋通道件（key 从部署环境读，与测试库通道行种子
-     * 同源；库为运行期唯一正本，测试直构无库故同源 env）。无 key 环境真构建断言
-     * 跳过（Assumption），实例键类桩测试不受影响。
+     * 主通道真构建语境（V79 后生产形态：deepseek 单通道）：SDK 内置 deepseek
+     * provider＋通道件——baseUrl/key 从创建上下文注入（覆盖依赖库缺省与环境
+     * 变量）。构建不触网、不依赖任何环境 key（key 是假值，仅装配链校验非空），
+     * 真构建断言无条件跑。
      */
-    private static ModelChannel volcChannel() {
-        VolcengineModelRegistrar.register();
-        return new ModelChannel("https://ark.cn-beijing.volces.com/api/v3",
-                System.getenv("VOLCENGINE_API_KEY"), false);
+    private static ModelChannel deepseekChannel() {
+        return new ModelChannel("https://api.deepseek.com", "sk-test-factory", false);
     }
 
-    private static void requireVolcengineKey() {
-        assumeTrue(System.getenv("VOLCENGINE_API_KEY") != null
-                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
-                "无 VOLCENGINE_API_KEY，跳过真构建断言（主通道 volcengine，#369）");
-    }
-
-    /** 真构建路径的边缘模型供数（压缩腿同走主通道——deepseek 桩串需 env key，真构建不用）。 */
-    private static EdgeModelSupplier volcEdgeModels() {
-        ModelChannel channel = volcChannel();
+    /** 真构建路径的边缘模型供数（压缩腿同走主通道）。 */
+    private static EdgeModelSupplier deepseekEdgeModels() {
+        ModelChannel channel = deepseekChannel();
         EdgeModelSupplier.EdgeModel flash =
-                new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-flash-ga-260731", channel);
+                new EdgeModelSupplier.EdgeModel("deepseek:deepseek-flash", channel);
         return new EdgeModelSupplier() {
             @Override
             public EdgeModelSupplier.EdgeModel compactionModel() {
@@ -106,15 +97,14 @@ class AgentscopeHarnessAgentFactoryTest {
     void given_state_store_when_built_then_wired_into_agent() {
         // 真构建路径（不走替身 builder）：会话恢复的落点——agent 持有的是注入的
         // store（生产为 PG 版），非框架缺省的本地 JSON 文件实现。
-        // builder().model() 即解析模型串（需通道 key），无 key 环境跳过（冒烟同款口径）
-        requireVolcengineKey();
+        // builder().model() 即解析模型串（通道件携假 key，构建不触网）
         AgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES, volcEdgeModels(),
+                stateStore, TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES, deepseekEdgeModels(),
                 new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(), null,
+                "deepseek:deepseek-flash", deepseekChannel(), null,
                 new AgentWorkspace.Local(null), null, null);
 
         assertThat(agent.getStateStore()).isSameAs(stateStore);
@@ -127,18 +117,17 @@ class AgentscopeHarnessAgentFactoryTest {
      * IllegalStateException: Pending tool calls exist without results——会话（PG 槽位）
      * 带着上次中断遗留的无结果 tool_use 续跑即炸、整轮尝试被吞。框架
      * enablePendingToolRecovery＝resume 时对无结果 pending 调用自动补 ERROR 结果
-     * 继续走（WARN 遥测落框架日志），主智能体显式开启。真构建路径（需 API key，
-     * 无 key 跳过——同 {@link #given_state_store_when_built_then_wired_into_agent} 口径）。
+     * 继续走（WARN 遥测落框架日志），主智能体显式开启。真构建路径（同
+     * {@link #given_state_store_when_built_then_wired_into_agent} 口径）。
      */
     @Test
     void given_any_build_when_built_then_pending_tool_recovery_enabled() {
-        requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
-                volcEdgeModels(), new AgentscopeProperties(), null);
+                deepseekEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(), null,
+                "deepseek:deepseek-flash", deepseekChannel(), null,
                 new AgentWorkspace.Local(null), null, null);
 
         try {
@@ -151,18 +140,17 @@ class AgentscopeHarnessAgentFactoryTest {
     /**
      * 委派位结构守护（#95）：ProjectDev（run 执行体）开子智能体（工厂不再 disableSubagents，
      * 框架装 subagent 中间件——含通用子智能体），ProjectReadOnly（主智能体对话姿态）关
-     * 子智能体（委派是 run 内机制，主智能体永不委派）。真构建路径（需 API key 建模型，
-     * 无 key 跳过——同 {@link #given_state_store_when_built_then_wired_into_agent} 口径）。
+     * 子智能体（委派是 run 内机制，主智能体永不委派）。真构建路径（同
+     * {@link #given_state_store_when_built_then_wired_into_agent} 口径）。
      */
     @Test
     void given_project_dev_when_built_then_subagents_enabled() {
-        requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
-                volcEdgeModels(), new AgentscopeProperties(), null);
+                deepseekEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent dev = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(), null,
+                "deepseek:deepseek-flash", deepseekChannel(), null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
 
         assertThat(dev.getSubagentAgentManager()).isNotNull();
@@ -170,13 +158,12 @@ class AgentscopeHarnessAgentFactoryTest {
 
     @Test
     void given_project_read_only_when_built_then_subagents_disabled() {
-        requireVolcengineKey();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, NO_MIDDLEWARES,
-                volcEdgeModels(), new AgentscopeProperties(), null);
+                deepseekEdgeModels(), new AgentscopeProperties(), null);
 
         HarnessAgent readOnly = factory.obtain("platform-agent", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(), null,
+                "deepseek:deepseek-flash", deepseekChannel(), null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
 
         assertThat(readOnly.getSubagentAgentManager()).isNull();
@@ -369,38 +356,34 @@ class AgentscopeHarnessAgentFactoryTest {
     /**
      * 压缩显式配置（#108 / ADR-0012；#366 边缘点收编）：触发阈值 400K + 压缩配置
      * 解析产物（模型来自 {@link EdgeModelSupplier} 注入，非 yml——缺省 flash 档
-     * 由配置面保证）。模型解析走主通道（volcengine 工厂，通道件携 key——
-     * #369 退场确认后无 DEEPSEEK_API_KEY 环境腿），无 key 跳过。
+     * 由配置面保证）。模型解析走主通道（SDK 内置 deepseek provider，通道件携假
+     * key——构建不触网、不依赖环境腿）。
      */
     @Test
     void given_resolved_compaction_model_when_compaction_config_then_explicit_threshold_and_model() {
-        requireVolcengineKey();
-
         CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
                 new AgentscopeProperties(),
-                new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-flash-ga-260731",
-                        volcChannel()), null);
+                new EdgeModelSupplier.EdgeModel("deepseek:deepseek-flash",
+                        deepseekChannel()), null);
 
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
         assertThat(config.getModel()).isNotNull();
         // #109 模型边界计量：压缩（摘要）模型经 MeteredModel 包装（getModelName 委托穿透）
         assertThat(config.getModel()).isInstanceOf(MeteredModel.class);
-        assertThat(config.getModel().getModelName()).isEqualTo("deepseek-v4-flash-ga-260731");
+        assertThat(config.getModel().getModelName()).isEqualTo("deepseek-flash");
     }
 
     @Test
     void given_pro_tier_compaction_model_when_compaction_config_then_resolved_string_lands() {
         // 模型来自解析产物（配置链半边）：EdgeModel 换 pro 串即落 pro——配置面改档
         // 经供数口直达装配，properties 无模型键可回
-        requireVolcengineKey();
-
         CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
                 new AgentscopeProperties(),
-                new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-pro-ga-260813",
-                        volcChannel()), null);
+                new EdgeModelSupplier.EdgeModel("deepseek:deepseek-v4-pro",
+                        deepseekChannel()), null);
 
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
-        assertThat(config.getModel().getModelName()).isEqualTo("deepseek-v4-pro-ga-260813");
+        assertThat(config.getModel().getModelName()).isEqualTo("deepseek-v4-pro");
     }
 
     @Test
@@ -409,10 +392,10 @@ class AgentscopeHarnessAgentFactoryTest {
         // 同主规格下一轮 obtain 即新实例——改配置即生效、进行中 run 不定格
         List<HarnessAgent> created = new ArrayList<>();
         ModelChannel compactionChannel =
-                new ModelChannel("https://ark.example/api/v3", "sk-a", false);
+                new ModelChannel("https://model.example/api", "sk-a", false);
         java.util.concurrent.atomic.AtomicReference<EdgeModelSupplier.EdgeModel> compaction =
                 new java.util.concurrent.atomic.AtomicReference<>(
-                        new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-flash-ga-260731",
+                        new EdgeModelSupplier.EdgeModel("deepseek:deepseek-flash",
                                 compactionChannel));
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
@@ -429,18 +412,18 @@ class AgentscopeHarnessAgentFactoryTest {
                     }
 
                 });
-        ModelChannel main = new ModelChannel("https://ark.example/api/v3", "sk-a", false);
+        ModelChannel main = new ModelChannel("https://model.example/api", "sk-a", false);
 
-        HarnessAgent first = factory.obtain("platform-agent", "sys", "volcengine:main-model",
+        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:main-model",
                 main, null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
         HarnessAgent sameCompaction = factory.obtain("platform-agent", "sys",
-                "volcengine:main-model", main, null,
+                "deepseek:main-model", main, null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
         assertThat(sameCompaction).isSameAs(first); // 同压缩档＝同规格复用
 
-        compaction.set(new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-pro-ga-260813",
+        compaction.set(new EdgeModelSupplier.EdgeModel("deepseek:deepseek-v4-pro",
                 compactionChannel));
-        HarnessAgent tierChanged = factory.obtain("platform-agent", "sys", "volcengine:main-model",
+        HarnessAgent tierChanged = factory.obtain("platform-agent", "sys", "deepseek:main-model",
                 main, null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
         assertThat(tierChanged).isNotSameAs(first); // 改压缩档＝新实例
         assertThat(created).hasSize(2);

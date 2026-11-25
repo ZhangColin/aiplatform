@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
 if (-not (Test-Path .env.local)) {
-    Write-Error "缺 aiplatform-server/.env.local（SSO 七项 + VOLCENGINE_API_KEY + BOCHA_API_KEY + OPENAPI_APP_*，DEEPSEEK_API_KEY 可选备胎，gitignored）"
+    Write-Error "缺 aiplatform-server/.env.local（SSO 七项 + DEEPSEEK_API_KEY + BOCHA_API_KEY + OPENAPI_APP_*，gitignored）"
     exit 1
 }
 

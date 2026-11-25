@@ -6,8 +6,8 @@ import java.time.LocalDateTime;
  * 模型配置＝语义键（ADR-0031，{@code prj_model_configs} 一行）：模型配置域概念，
  * 与 agentscope 框架 callOptions 的 modelConfig（重试旋钮族，#555）无涉——字面
  * 撞车纯阅读面，两类对象零交集。运营短名
- * （flash/pro/doubao-flagship）指向实际模型名＋所属模型供应商。模型版本升级
- * （方舟 Model ID 带日期后缀、季度级更新）＝改一处指向、全部引用自动跟上；
+ * （flash/pro）指向实际模型名＋所属模型供应商。模型版本升级
+ * ＝改一处指向、全部引用自动跟上；
  * 被智能体运营配置（两座 model_config_key）与边缘调用点引用，引用值＝
  * {@link #configKey()}——后台改绑定时即时校验配置键存在且启用（#367，错值
  * 写不进去，不再靠留痕回滚兜底）。

@@ -105,15 +105,15 @@ class ProjectNamingAppServiceTest {
         ArgumentCaptor<AgentCommand> flash = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(flash.capture(), any());
         assertThat(flash.getValue().modelString())
-                .isEqualTo("volcengine:deepseek-v4-flash-ga-260731");
+                .isEqualTo("deepseek:deepseek-flash");
         assertThat(flash.getValue().modelChannel()).isEqualTo(
-                new ModelChannel("https://ark.example/api/v3", "sk-test-ark", false));
+                new ModelChannel("https://api.deepseek.com", "sk-test-deepseek", false));
 
         serviceWithTier("pro").nameAsync(44L, "做个商城小程序");
         ArgumentCaptor<AgentCommand> pro = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(pro.capture(), any());
         assertThat(pro.getValue().modelString())
-                .isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+                .isEqualTo("deepseek:deepseek-v4-pro");
     }
 
     @Test
@@ -268,15 +268,15 @@ class ProjectNamingAppServiceTest {
      */
     private ProjectNamingAppService serviceWithTier(String configKey) {
         String modelName = "pro".equals(configKey)
-                ? "deepseek-v4-pro-ga-260813" : "deepseek-v4-flash-ga-260731";
+                ? "deepseek-v4-pro" : "deepseek-flash";
         // lenient：blank-requirement 形不触发解析链（零调用合法——不因桩未用报错）
         AgentConfigAppService agentConfigs = mock(AgentConfigAppService.class);
         lenient().when(agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.NAMING))
                 .thenReturn(configKey);
         ModelConfigAppService modelConfigs = mock(ModelConfigAppService.class);
         lenient().when(modelConfigs.resolveQueue(configKey)).thenReturn(new ModelCandidateQueue(
-                configKey, List.of(new ModelCandidate("volcengine", modelName,
-                        new ModelChannel("https://ark.example/api/v3", "sk-test-ark", false)))));
+                configKey, List.of(new ModelCandidate("deepseek", modelName,
+                        new ModelChannel("https://api.deepseek.com", "sk-test-deepseek", false)))));
         return new ProjectNamingAppService(agentClient, agentConfigs, modelConfigs,
                 projectRepository, eventsAppService, Runnable::run);
     }

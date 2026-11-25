@@ -151,11 +151,10 @@ class AgentscopeInnerRetryKnobTest {
      */
     private HarnessAgent assemblyAgent(AgentscopeProperties properties, ModelChannel mainChannel,
             AgentWorkspace agentWorkspace) {
-        VolcengineModelRegistrar.register();
         EdgeModelSupplier edges = new EdgeModelSupplier() {
             @Override
             public EdgeModel compactionModel() {
-                return new EdgeModel("volcengine:deepseek-v4-flash", channel());
+                return new EdgeModel("deepseek:deepseek-flash", channel());
             }
 
         };
@@ -163,7 +162,7 @@ class AgentscopeInnerRetryKnobTest {
                 new InMemoryAgentStateStore(), (agentKey, workspace, toolSpec) -> new Toolkit(),
                 (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(), edges, properties, null);
-        return factory.obtain("inner-retry-knob", "sys", "volcengine:deepseek-v4-flash",
+        return factory.obtain("inner-retry-knob", "sys", "deepseek:deepseek-flash",
                 mainChannel, null, agentWorkspace, null, null);
     }
 

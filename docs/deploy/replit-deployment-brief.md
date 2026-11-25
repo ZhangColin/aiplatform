@@ -24,7 +24,7 @@
 - 容器内 all-in-one：用户生成应用（node，**8081**）＋PG15（`/workspace/data/pg`，回环 trust）＋redis（回环）＋git。智能体不进容器，平台 JVM 经 `docker exec` 驱动文件面。
 - 镜像 `aiplatform/dev:0.17`：node:22-bookworm ＋ postgresql-15 ＋ redis ＋ pnpm@10 ＋ Playwright/Chromium 渲染器（**当前 zip 为 arm64 专用，amd64 主机需换包**，见 Dockerfile 内注释）＋ Next.js 基座模板。镜像由后端从 classpath 资源现场 `docker build`（ensureDevImage），**jar 运行形态会抛异常，须由部署流程预置镜像**（此缺口在自有服务器同样存在，属我们侧待办）。
 - 生命周期：闲置 60min 删容器保卷 → 深度唤醒（解包＋pnpm install，10min 探活窗）→ 30 天封存（`seal-archives/`，生产应挂独立卷）。
-- 出网 allow-all：容器内 pnpm install、`git clone` github；模型 API 出网在**平台进程**（ark.cn-beijing.volces.com、api.deepseek.com、api.bocha.cn 等中国大陆端点为主）。
+- 出网 allow-all：容器内 pnpm install、`git clone` github；模型 API 出网在**平台进程**（api.deepseek.com、api.bocha.cn 等端点）。
 
 ### 1.3 预览网关与子域路由
 
@@ -36,7 +36,7 @@
 ### 1.4 数据库细节
 
 - Flyway `classpath:db/migration`（V1–V45），`baseline-on-migrate: true`，历史表 `aiplatform-server_flyway_schema_history`。
-- V44 种子经 Flyway placeholder 注入 `VOLCENGINE_API_KEY`/`DEEPSEEK_API_KEY`（**首启迁移时密钥必须在场**）。
+- V44 种子经 Flyway placeholder 注入模型通道 key（**首启迁移时 `DEEPSEEK_API_KEY` 必须在场**；V44 仍引用的 `VOLCENGINE_API_KEY` placeholder 空即可，V79 随即清火山行＝净效果 deepseek 单通道）。
 - `wsp_workspaces` 表是容器/卷/库的注册表正本（清理与判定准绳）。
 - 无内置备份预期：自备 `pg_dump`。
 
@@ -55,7 +55,7 @@
 | `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` | 是 | 指向 Replit PG |
 | `PREVIEW_BASE` | 是 | 预览泛子域基域 |
 | `EMBEDDING_URL` | 是 | 指向 embedding 服务（同机 `http://127.0.0.1:9091`） |
-| `VOLCENGINE_API_KEY`、`DEEPSEEK_API_KEY` | 是 | 对话主通道（V44 迁移期注入库） |
+| `DEEPSEEK_API_KEY` | 是 | 对话主通道（V44 迁移期注入库；V79 起单通道） |
 | `BOCHA_API_KEY` | 是 | 外部资料搜索 |
 | `VERIFICATION_*` | 默认即可 | 勿全关通道 |
 | `REDIS_HOST/PORT`、`OPENAPI_*`、`SSO_*` | 不配 | 核心不依赖／不启用／不接 |
@@ -71,7 +71,7 @@
 | R4 | SSE 长连接 | `/api/events` 流式帧可达（对话直播） |
 | R5 | Java 21 | `--enable-preview` 构建并运行 |
 | R6 | 多进程单端口 | web 对外（Replit `PORT`），server＋embedding 内部；一条 run command 拉起并崩溃自愈（示例：后台依次起 embedding→java→node，`wait -n` 任一退出即整体重启） |
-| R7 | 模型 API 出网 | ark.cn-beijing.volces.com 等从部署环境可达 |
+| R7 | 模型 API 出网 | api.deepseek.com 等模型 API 端点从部署环境可达 |
 | R8 | 大陆访问冒烟 | 大陆网络直访首页（我们已有活体经验可用，保留冒烟项） |
 
 ## 3. 我们已核实的 Replit 事实与沙箱三接法

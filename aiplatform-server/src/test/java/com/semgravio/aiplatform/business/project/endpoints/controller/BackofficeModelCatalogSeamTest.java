@@ -67,7 +67,7 @@ class BackofficeModelCatalogSeamTest {
     private static final String PROVIDERS_PATH = "/api/backoffice/model-providers";
     private static final String CONFIGS_PATH = "/api/backoffice/model-configs";
 
-    /** 假上游回执（方舟实测形状的缩影：活跃无 status、下架有 Shutdown）。 */
+    /** 假上游回执（OpenAI 兼容端点实测形状的缩影：活跃无 status、下架有 Shutdown）。 */
     private static final String UPSTREAM_BODY = """
             {"data":[
               {"id":"m-current-2601","name":"m-current","object":"model","domain":"LLM"},
@@ -99,7 +99,7 @@ class BackofficeModelCatalogSeamTest {
     @BeforeEach
     void setUp() throws IOException {
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        // 假上游默认回执（方舟实测形状缩影）；未注册路径时 HttpServer 自答 404（负例用）
+        // 假上游默认回执（OpenAI 兼容端点实测形状缩影）；未注册路径时 HttpServer 自答 404（负例用）
         upstream.createContext("/models", exchange -> {
             byte[] bytes = upstreamBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -262,7 +262,7 @@ class BackofficeModelCatalogSeamTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(PROVIDER_NOT_FOUND_CODE));
 
-        mockMvc.perform(post(providersRemoteModelsPath("volcengine")))
+        mockMvc.perform(post(providersRemoteModelsPath("t-cat-nosig")))
                 .andExpect(status().isUnauthorized());
     }
 

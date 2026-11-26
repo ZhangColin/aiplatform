@@ -3675,26 +3675,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/.aiplatform/trial-notice": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 试用体验提示判定
-         * @description trial=true＝试用态（提示显），false＝已付费/未知工作区（熄/不出）。workspaceId 经 X-Preview-Workspace 头（网关注入；头缺席/畸形如实 false）。Cache-Control: no-store。访客匿名可达（裸前缀在 /api 拦截面外）。
-         */
-        get: operations["notice"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6956,17 +6936,6 @@ export interface components {
             data?: components["schemas"]["AccountResponse"][];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
-        };
-        ApiResponseTrialNoticeResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["TrialNoticeResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        TrialNoticeResponse: {
-            trial?: boolean;
         };
     };
     responses: never;
@@ -10902,28 +10871,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListAccountResponse"];
-                };
-            };
-        };
-    };
-    notice: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Preview-Workspace"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseTrialNoticeResponse"];
                 };
             };
         };

@@ -255,28 +255,23 @@ if [ "$STUB" = 1 ]; then
 fi
 ok "① 主站 semgravio.com → web：200"
 
-# ② 主预览注入（恰一次：圈注＋试用体验提示并列，#539 单规则双标签）
+# ② 主预览注入（恰一次：圈注；#539 试用提示已随 2026-11-26 拆除）
 body=$(H 4242.preview.semgravio.com /)
 grep -q "rehearsal-ws-4242" <<<"$body" || die "主预览未路由到 ws-4242（应答头 200 字：${body:0:80}）"
 n=$(grep -o 'data-aiplatform="annotation"' <<<"$body" | wc -l)
 [ "$n" -eq 1 ] || die "标注脚本注入次数应为恰 1，实际 $n"
-n=$(grep -o 'data-aiplatform="trial-notice"' <<<"$body" | wc -l)
-[ "$n" -eq 1 ] || die "试用提示注入次数应为恰 1，实际 $n（#539）"
-ok "② 主预览 {id}.preview → ws-{id}：路由通＋注入恰一次（圈注＋试用提示 #539）"
+ok "② 主预览 {id}.preview → ws-{id}：路由通＋注入恰一次（圈注）"
 
-# ④ 资产单源：共享 nginx 应答与仓内单源逐字节一致（圈注＋试用提示 #539）
+# ④ 资产单源：共享 nginx 应答与仓内单源逐字节一致（圈注）
 curl -s -H "Host: 4242.preview.semgravio.com" http://127.0.0.1/.aiplatform/annotation.js \
   | cmp -s - aiplatform-server/src/main/resources/docker/workspace/annotation.js \
   || die "annotation.js 与仓内单源不一致（资产装配劈叉？）"
-curl -s -H "Host: 4242.preview.semgravio.com" http://127.0.0.1/.aiplatform/trial-notice.js \
-  | cmp -s - aiplatform-server/src/main/resources/docker/workspace/trial-notice.js \
-  || die "trial-notice.js 与仓内单源不一致（资产装配劈叉？#539）"
-ok "④ 平台脚本资产可访问且与单源逐字节一致（annotation.js＋trial-notice.js #539）"
+ok "④ 平台脚本资产可访问且与单源逐字节一致（annotation.js）"
 
 # ③ 快照纯代理（不注入）
 body=$(H snap-777.preview.semgravio.com /)
 grep -q "rehearsal-snap-777" <<<"$body" || die "快照未路由到 snap-777"
-! grep -qE 'data-aiplatform="(annotation|trial-notice)"' <<<"$body" || die "快照不应注入平台脚本（只逛不换：圈注＋试用提示 #539）"
+! grep -qE 'data-aiplatform="annotation"' <<<"$body" || die "快照不应注入平台脚本（只逛不换：圈注）"
 ok "③ 快照 snap-{vid}.preview → snap-{vid}：纯代理不注入"
 
 # ⑤ 死子域自恢复提示页
@@ -286,7 +281,7 @@ code=$(head -1 <<<"$raw" | awk '{print $2}')
 grep -q "系统暂不可用，可能正在启动或休眠中" <<<"$raw" || die "提示页文案缺失"
 grep -qi "cache-control: no-store" <<<"$raw" || die "提示页缺 no-store"
 grep -q 'data-aiplatform="recovery"' <<<"$raw" || die "提示页缺自恢复脚本标记"
-! grep -qE 'data-aiplatform="(annotation|trial-notice)"' <<<"$raw" || die "提示页不应注入平台脚本（recovery 标记除外）"
+! grep -qE 'data-aiplatform="annotation"' <<<"$raw" || die "提示页不应注入平台脚本（recovery 标记除外）"
 ok "⑤ 死子域 → 5xx＋平台风格自恢复提示页（no-store/不注入）"
 
 # ⑧ #396 浏览器头组合探针：真实浏览器头形态（Host＋Origin=预览域＋Referer＋Sec-Fetch

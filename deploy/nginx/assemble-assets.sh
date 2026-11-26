@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 装配平台接入共享 nginx 的资产目录（#386）——供门禁第四参整体装入
-# infra 的 nginx/conf.d/aiplatform.assets/。内容五件：
+# infra 的 nginx/conf.d/aiplatform.assets/。内容四件（#539 试用体验提示脚本
+# 已随 2026-11-26 拆除）：
 #   annotation.js        圈注脚本（单源：aiplatform-server .../docker/workspace/annotation.js）
-#   trial-notice.js      试用体验提示脚本（单源：.../docker/workspace/trial-notice.js，#539）
 #   unavailable.html     上游不可达自恢复提示页（单源：.../docker/gateway/unavailable.html）
 #   gateway-proxy.conf   代理块（单源：.../docker/gateway/gateway-proxy.conf，被 aiplatform.conf include）
 #   gateway-inject.conf  注入块（单源：.../docker/gateway/gateway-inject.conf，同上）
@@ -25,7 +25,7 @@ else
   WS=$SRC_ROOT/workspace
 fi
 
-for f in annotation.js trial-notice.js; do
+for f in annotation.js; do
   [ -f "$WS/$f" ] || { echo "错误：找不到 $WS/$f" >&2; exit 1; }
 done
 for f in gateway-proxy.conf gateway-inject.conf unavailable.html; do
@@ -33,5 +33,5 @@ for f in gateway-proxy.conf gateway-inject.conf unavailable.html; do
 done
 
 mkdir -p "$OUT"
-cp -a "$WS/annotation.js" "$WS/trial-notice.js" "$GW/unavailable.html" "$GW/gateway-proxy.conf" "$GW/gateway-inject.conf" "$OUT"/
-printf '✓ 资产已装配到 %s（annotation.js / trial-notice.js / unavailable.html / gateway-proxy.conf / gateway-inject.conf）\n' "$OUT"
+cp -a "$WS/annotation.js" "$GW/unavailable.html" "$GW/gateway-proxy.conf" "$GW/gateway-inject.conf" "$OUT"/
+printf '✓ 资产已装配到 %s（annotation.js / unavailable.html / gateway-proxy.conf / gateway-inject.conf）\n' "$OUT"

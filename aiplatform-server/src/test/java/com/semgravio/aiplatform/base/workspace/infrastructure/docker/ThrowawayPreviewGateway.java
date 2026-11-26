@@ -43,9 +43,7 @@ public final class ThrowawayPreviewGateway implements AutoCloseable {
             new GatewayAsset("docker/gateway/unavailable.html",
                     "/etc/nginx/conf.d/aiplatform.assets/unavailable.html"),
             new GatewayAsset("docker/workspace/annotation.js",
-                    "/etc/nginx/conf.d/aiplatform.assets/annotation.js"),
-            new GatewayAsset("docker/workspace/trial-notice.js",
-                    "/etc/nginx/conf.d/aiplatform.assets/trial-notice.js"));
+                    "/etc/nginx/conf.d/aiplatform.assets/annotation.js"));
 
     private final String containerName;
     private final Path assetDir;

@@ -221,6 +221,8 @@ export function CommandArea({
         toolCalls: toAnswerToolCalls(pending.toolCalls),
         answer: text,
       },
+      // 提交的勾选随作答记账（已答卡回看显示自己的勾，2026-11-26 用户反馈）
+      selection,
     });
     setSelection([]);
   }
@@ -296,7 +298,9 @@ export function CommandArea({
                       : undefined
                   }
                   interactive={message === pending}
-                  selection={selection}
+                  // 勾选按卡分源：待答卡用实时勾选（Enter 作答合并用）；已答回看卡
+                  // 用它自己的作答勾选（finalSelection，水合行无＝无勾）
+                  selection={message === pending ? selection : (message.finalSelection ?? [])}
                   onSelectionChange={setSelection}
                   onAnswer={answer}
                 />

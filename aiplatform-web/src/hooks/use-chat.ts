@@ -59,13 +59,16 @@ export function usePostMessage(projectId: string) {
 
 export function useAnswerQuestion(projectId: string) {
   return useMutation({
-    mutationFn: (input: { qid: string; command: AnswerQuestionCommand }) =>
+    mutationFn: (input: { qid: string; command: AnswerQuestionCommand; selection?: string[] }) =>
       api.post<void>(`/projects/${projectId}/questions/${input.qid}/answer`, input.command),
-    onMutate: ({ command }) => {
+    onMutate: ({ command, selection }) => {
       // 作答同样是持久化动作：保存胶囊接真（B2）
       useSaveStateStore.getState().markSaving();
-      // 作答气泡锚定挂起轮 runId（水合退位的合并锚，#89）
-      const messageId = useChatStore.getState().submitAnswer(projectId, command.answer, command.runId);
+      // 作答气泡锚定挂起轮 runId（水合退位的合并锚，#89）；提交的勾选随乐观写入
+      // 记到问答卡上（已答卡回看显示自己的勾，2026-11-26 用户反馈）
+      const messageId = useChatStore
+        .getState()
+        .submitAnswer(projectId, command.answer, command.runId, selection);
       return { messageId };
     },
     onSuccess: () => {

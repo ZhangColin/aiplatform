@@ -215,7 +215,17 @@ export type ChatMessage =
       id: string;
       card: BalanceReminderCardFact;
     }
-  | (RaisedQuestion & { kind: "question"; answered: boolean });
+  | (RaisedQuestion & {
+      kind: "question";
+      answered: boolean;
+      /**
+       * 作答勾选回看面（2026-11-26 用户反馈）：submitAnswer 随乐观写入记下提交的
+       * 勾选，已答卡回看按它显示勾（区别于待答卡的实时勾选）。水合行无此字段
+       * （服务端不存——作答文本已在对话流可见）＝回看无勾；失败重开即清，未落账
+       * 的勾选不残留（其后被新问题取代也不泄漏）。
+       */
+      finalSelection?: string[];
+    });
 
 export type ProjectChat = {
   messages: ChatMessage[];
@@ -292,7 +302,7 @@ export type ChatState = {
     materials?: ChatMaterial[],
   ) => string;
   /** 作答落定：用户气泡 + 问题卡转已答 + 轮进行中。 */
-  submitAnswer: (projectId: string, text: string, runId: string) => string;
+  submitAnswer: (projectId: string, text: string, runId: string, selection?: string[]) => string;
   /** 发言起轮（智能体将回复；run-start 回声会被去重）。 */
   startTurn: (projectId: string) => void;
   /** 发送失败收轮（无会话锚的落轮口，区别于 SSE 侧 finishTurn 的 runId 判定）。 */
@@ -748,12 +758,12 @@ export const useChatStore = create<ChatState>((set) => ({
     return id;
   },
 
-  submitAnswer: (projectId, text, runId) => {
+  submitAnswer: (projectId, text, runId, selection = []) => {
     const id = localId();
     updateChat(set, projectId, (chat) => {
       const messages = chat.messages.map((message) =>
         message.kind === "question" && !message.answered
-          ? { ...message, answered: true }
+          ? { ...message, answered: true, finalSelection: [...selection] }
           : message,
       );
       return appendMessage(
@@ -779,8 +789,11 @@ export const useChatStore = create<ChatState>((set) => ({
       for (let i = chat.messages.length - 1; i >= 0; i--) {
         const message = chat.messages[i];
         if (message.kind === "question") {
+          // 失败回滚连带清勾选记账（finalSelection 只随落账的作答存在）
+          const reopened = { ...message, answered: false };
+          delete reopened.finalSelection;
           const messages = chat.messages.slice();
-          messages[i] = { ...message, answered: false };
+          messages[i] = reopened;
           return { ...chat, messages, turnActive: false };
         }
       }

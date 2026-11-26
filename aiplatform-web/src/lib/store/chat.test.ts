@@ -137,13 +137,19 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     expect(pendingQuestionOf(useChatStore.getState(), "p1")?.question).toBe("面向谁?");
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(false);
 
-    s.submitAnswer("p1", "企业客户", "run-1");
+    s.submitAnswer("p1", "企业客户", "run-1", ["企业客户"]);
     expect(pendingQuestionOf(useChatStore.getState(), "p1")).toBeUndefined();
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(true);
     expect(useChatStore.getState().chats["p1"]?.messages.at(-1)).toMatchObject({
       kind: "user",
       text: "企业客户",
     });
+    // 勾选回看记账（2026-11-26 用户反馈）：作答提交的勾选记到问答卡上——回看卡
+    // 显示自己的勾，不是待答卡的实时勾选
+    const answeredCard = useChatStore
+      .getState()
+      .chats["p1"]?.messages.find((m) => m.kind === "question");
+    expect(answeredCard).toMatchObject({ answered: true, finalSelection: ["企业客户"] });
 
     // 作答后主智能体续流：新一轮智能体气泡另起（问题卡之后不拼接）
     useChatStore.getState().appendAgentDelta("p1", "run-1", "收到，下一个问题…", "run-1:9");
@@ -156,6 +162,14 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     s.removeMessage("p1", useChatStore.getState().chats["p1"]!.messages.at(-2)!.id);
     s.reopenQuestion("p1");
     expect(pendingQuestionOf(useChatStore.getState(), "p1")?.question).toBe("面向谁?");
+    // 失败回滚连带清勾选记账（未落账的勾选不得残留），其后被新问题取代也不泄漏
+    expect(pendingQuestionOf(useChatStore.getState(), "p1")?.finalSelection).toBeUndefined();
+    s.raiseQuestion("p1", "run-1", question("run-1:11", { question: "预算?", engineRef: "reply-2" }));
+    const superseded = useChatStore
+      .getState()
+      .chats["p1"]?.messages.find((m) => m.kind === "question");
+    expect(superseded).toMatchObject({ answered: true });
+    expect(superseded?.finalSelection).toBeUndefined();
   });
 
   it("新问题取代旧未答问题（一轮一问）；重放同事件不重复成卡", () => {

@@ -25,7 +25,8 @@ export type QuestionCardProps = {
   ordinal?: number;
   /** 待答中的当前问题才可交互（尾问唯一）。 */
   interactive: boolean;
-  /** 勾选（父层持有，Enter 作答合并用；新问题时初始化为 [recommended] 或 []）。 */
+  /** 勾选（待答卡＝父层持有的实时勾选，Enter 作答合并用，新问题时初始化为
+   *  [recommended] 或 []；已答回看卡＝其作答勾选 finalSelection）。 */
   selection: readonly string[];
   onSelectionChange: (next: string[]) => void;
   onAnswer: (text: string) => void;
@@ -105,18 +106,24 @@ export function QuestionCard({
               onValueChange={(value) => onSelectionChange(value)}
               className="flex-wrap"
             >
-              {question.options.map((label) => (
-                <ToggleGroupItem
-                  key={label}
-                  value={label}
-                  aria-label={label}
-                  className="whitespace-normal data-pressed:border-primary data-pressed:bg-primary/10 data-pressed:text-primary"
-                >
-                  <Check className="size-3.5 opacity-30 group-data-pressed/toggle:opacity-100" />
-                  {label}
-                  {label === question.recommended ? <RecommendedBadge /> : null}
-                </ToggleGroupItem>
-              ))}
+              {question.options.map((label) => {
+                // 勾只在选中项上（未选中不渲染勾——淡勾仍读作「已选」，2026-11-26
+                // 用户反馈）：多选逐项出现/消失，带推荐单选勾唯一随改选移动，
+                // 已答回看卡由父层传入其作答勾选（finalSelection）照常显示
+                const picked = selection.includes(label);
+                return (
+                  <ToggleGroupItem
+                    key={label}
+                    value={label}
+                    aria-label={label}
+                    className="whitespace-normal data-pressed:border-primary data-pressed:bg-primary/10 data-pressed:text-primary"
+                  >
+                    {picked ? <Check data-slot="option-check" className="size-3.5" /> : null}
+                    {label}
+                    {label === question.recommended ? <RecommendedBadge /> : null}
+                  </ToggleGroupItem>
+                );
+              })}
             </ToggleGroup>
           ) : (
             <div className="flex flex-wrap gap-2">

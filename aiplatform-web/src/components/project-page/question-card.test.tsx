@@ -167,6 +167,76 @@ describe("QuestionCard · CC 式问答卡（#19）", () => {
     expect(html).toContain("提交");
   });
 
+  it("勾选态呈现（2026-11-26 用户反馈）：多选未勾选——任何选项不渲染勾", () => {
+    const html = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ multiple: true })}
+        interactive
+        selection={[]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+
+    expect(html).not.toContain('data-slot="option-check"');
+  });
+
+  it("勾选态呈现：勾只出现在被勾选项上（多选勾一项恰一个勾）", () => {
+    const html = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ multiple: true })}
+        interactive
+        selection={["企业客户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+
+    expect(html.match(/data-slot="option-check"/g)?.length).toBe(1);
+  });
+
+  it("勾选态呈现：带推荐的单选——勾随选中项唯一且可移动（预选项有勾、改选后勾跟走）", () => {
+    const preselected = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ recommended: "企业客户" })}
+        interactive
+        selection={["企业客户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+    expect(preselected.match(/data-slot="option-check"/g)?.length).toBe(1);
+
+    const switched = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ recommended: "企业客户" })}
+        interactive
+        selection={["个人用户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+    expect(switched.match(/data-slot="option-check"/g)?.length).toBe(1);
+  });
+
+  it("勾选态呈现：点即答单选（无推荐）无勾、已答回看按作答显示勾", () => {
+    const instant = renderToStaticMarkup(
+      <QuestionCard question={card()} interactive selection={[]} onSelectionChange={noopSelection} onAnswer={noop} />,
+    );
+    expect(instant).not.toContain('data-slot="option-check"');
+
+    const answered = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ multiple: true, answered: true })}
+        interactive={false}
+        selection={["企业客户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+    expect(answered.match(/data-slot="option-check"/g)?.length).toBe(1);
+  });
+
   it("推荐答案（#459）已答：只读终态——「已回答」、无提交钮、推荐标记仍呈现", () => {
     const html = renderToStaticMarkup(
       <QuestionCard

@@ -367,3 +367,26 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     expect(html).toContain('aria-label="附件"');
   });
 });
+
+describe("CommandArea · 回看勾选归属（2026-11-26 用户反馈）", () => {
+  it("已答卡按自己的作答勾选（finalSelection）显示勾，待答卡不受影响", () => {
+    seedChat([
+      question({
+        id: "q0",
+        engineRef: "reply-0",
+        question: "面向谁?",
+        multiple: true,
+        answered: true,
+        finalSelection: ["企业客户"],
+      }),
+      question({ id: "q1", engineRef: "reply-1", question: "预算多少?" }),
+    ]);
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+    // 按「预算多少?」（待答卡问文）切两段：已答段恰一个勾（勾在它自己的作答项上），
+    // 待答段无勾（无推荐不预选、实时勾选为空）
+    const [answeredPart, pendingPart] = html.split("预算多少?");
+    expect(answeredPart.match(/data-slot="option-check"/g)?.length).toBe(1);
+    expect(pendingPart).not.toContain('data-slot="option-check"');
+  });
+});

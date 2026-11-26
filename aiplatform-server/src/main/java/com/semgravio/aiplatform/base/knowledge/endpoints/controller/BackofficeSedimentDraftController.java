@@ -49,16 +49,16 @@ public class BackofficeSedimentDraftController {
 
     @GetMapping
     @Operation(summary = "标注队列（按项目/类别/状态过滤，分页）",
-            description = "「数据标注」人审队列（#464）：采集层自荐的沉淀草稿，三过滤"
+            description = "「数据标注」人审队列（#464）：事后提炼产出的候选沉淀草稿，三过滤"
                     + "维度可组合、均可缺省（缺省＝全量）：① projectId 来源项目 id "
                     + "精确（数值，查无＝空清单 200；畸形值宽松解析＝缺省不过滤）；② kind "
                     + "类别单选（CASE/MODULE/"
                     + "RULE，大小写不敏感，非法 400 KNW_011 带合法取值表）；③ status "
                     + "状态单选，Integer code（1=在途 2=已激活 3=已拒绝；非法 code 400 "
-                    + "带合法取值表）。排序服务端定死＝自荐时间倒序（id 倒序稳定）。行"
+                    + "带合法取值表）。排序服务端定死＝创建时间倒序（id 倒序稳定）。行"
                     + "字段：类别/标题/摘要＋来源回溯（来源项目标识与项目名快照、来源版本号、"
                     + "来源提交哈希、来源原句）＋血统三件（来源项目/run/槽位）＋扫描判定＋"
-                    + "状态＋自荐时刻；正文与扫描 findings 在详情。page 1 基（缺省 1）、"
+                    + "状态＋创建时刻；正文与扫描 findings 在详情。page 1 基（缺省 1）、"
                     + "size 缺省 20（上界 100）。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"BAD_REQUEST", "KNW_011"})
     public ApiResponse<PageResponse<BackofficeSedimentDraftSummaryResponse>> queue(

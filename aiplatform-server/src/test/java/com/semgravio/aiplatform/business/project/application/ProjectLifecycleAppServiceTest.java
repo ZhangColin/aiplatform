@@ -16,6 +16,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
+import com.cartisan.data.jpa.id.TsidGenerator;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -23,10 +24,9 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
-import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
-import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftProposal;
-import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
+import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -87,10 +87,7 @@ class ProjectLifecycleAppServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    /** 沉淀草稿用例真面（#460 删除清理）：真库 propose 走公共接口。 */
-    @Autowired
-    private SedimentDraftAppService sedimentDrafts;
-
+    /** 沉淀草稿存取真面（#460 删除清理）：真库直插走 store（写入链归事后提炼）。 */
     @Autowired
     private SedimentDraftStore sedimentDraftStore;
 
@@ -540,11 +537,13 @@ class ProjectLifecycleAppServiceTest {
     }
 
     private long proposeSediment(Long projectId, String kind) {
-        SedimentDraftReceipt receipt = sedimentDrafts.propose(new SedimentDraftProposal(
-                kind, "t6-沉淀-删除清理", "T6 删除清理口径测试摘要。", "T6 删除清理口径测试正文。",
-                projectId, "run-t6", "executor"));
-        assertThat(receipt.accepted()).as(receipt.message()).isTrue();
-        return receipt.draftId();
+        long id = TsidGenerator.newInstance().generate();
+        sedimentDraftStore.insert(new SedimentDraftRecord(
+                id, SedimentKind.byKey(kind).orElseThrow(),
+                "t6-沉淀-删除清理", "T6 删除清理口径测试摘要。", "T6 删除清理口径测试正文。",
+                Map.of(), projectId, "run-t6", "executor", "SAFE", List.of(),
+                SedimentDraftStatus.PENDING, null, null, null, null, null));
+        return id;
     }
 
     private void verifyNoRows() {

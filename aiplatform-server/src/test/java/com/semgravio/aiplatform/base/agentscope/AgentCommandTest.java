@@ -113,7 +113,7 @@ class AgentCommandTest {
     /** #118 工作消息头部标题：heading 可空透传（底座不解释）。 */
     @Test
     void given_heading_when_construct_then_kept() {
-        RunHeading heading = RunHeading.slice("商品浏览", 2, 5);
+        RunHeading heading = RunHeading.titled("商品浏览");
         AgentCommand command = new AgentCommand("run-1", "做系统", null, MODEL, null, "s-1", null,
                 null, null, Map.of(), null, null, null, "executor", false, heading, null);
 

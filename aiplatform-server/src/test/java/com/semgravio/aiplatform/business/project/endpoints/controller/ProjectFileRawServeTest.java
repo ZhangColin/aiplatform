@@ -157,7 +157,7 @@ class ProjectFileRawServeTest {
 
     @Test
     void given_design_draft_html_when_raw_then_html_content_type_frame_csp() throws Exception {
-        // 稿伺服通道（#293 设计稿画布固定画幅帧取件）：design/ 锚定 HTML 直出
+        // 稿伺服通道（#293 起立；消费面画布已随 #613 拆——死支路随保留端点存活）：design/ 锚定 HTML 直出
         // text/html（带 charset——中文稿直开不乱码）；CSP 禁脚本（default-src
         // 'none'——设计稿是帧不是网站）但放行内嵌样式与内嵌图（呈现面可达）
         byte[] html = "<!DOCTYPE html><html><body><h1>首页稿</h1></body></html>".getBytes();

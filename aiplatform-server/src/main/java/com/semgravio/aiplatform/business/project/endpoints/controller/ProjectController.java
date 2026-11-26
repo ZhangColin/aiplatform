@@ -367,10 +367,8 @@ public class ProjectController {
                     + "4=answer 5=closing 6=guide 7=quote）+ kindName 中文名随行（#186：枚举出口配 "
                     + "*Name，消费端零映射）；question = question-raised 事件"
                     + "载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = "
-                    + "run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。sessionSource "
-                    + "会话来源标识（#298，后台对接件随面携带）：2=设计会话（设计收尾卡携 drafts）、"
-                    + "null=主会话缺省——用户面前端可忽略。归档项目照读"
-                    + "（对话区只读终态）；项目不存在 404 PRJ_001")
+                    + "run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。"
+                    + "归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001")
     public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
         return ApiResponse.ok(conversationHistoryAppService.read(parseId(id)));
     }
@@ -430,7 +428,7 @@ public class ProjectController {
             description = "ADR-0049 恢复 #462 之前的<b>原确认动作形态</b>（PRD 文档面按钮"
                     + "＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口"
                     + "三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认"
-                    + "（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/"
+                    + "（钱面归段边界检查）。确认经生成编排共用派发（余额门/"
                     + "重跑同构）；确认不写任何版本数据——用户面版本由探活通过后自动成版"
                     + "（#626 git 单轴时间线），旧 PRD/Demo 版本表已随 #630 退场。"
                     + "<b>点击幂等</b>＝已点火重复确认 409 PRJ_017"
@@ -471,16 +469,17 @@ public class ProjectController {
     }
 
     @GetMapping("/{id}/files/raw")
-    @Operation(summary = "文件直出（点看图片 inline 大图 #283；设计稿 HTML 伺服 #293）",
+    @Operation(summary = "文件直出（点看图片 inline 大图 #283；曾扩设计稿 HTML 伺服 #293）",
             description = "path = 工作区相对路径。伺服面＝图片（png/jpg/webp/gif/svg，"
-                    + "扩展名判定）＋设计稿 HTML（design/ 锚定——设计稿画布固定画幅帧"
-                    + "取件，iframe 直渲）：真实 content-type + 原始字节流 inline 直出"
+                    + "扩展名判定）＋设计稿 HTML（design/ 锚定，iframe 直渲——消费面"
+                    + "设计稿画布已随 #613 拆除，该分支是挂在保留端点上的死支路，"
+                    + "去留待重建入口时再定）：真实 content-type + 原始字节流 inline 直出"
                     + "（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；src 同源"
                     + "会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本"
                     + "照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。"
-                    + "稿 HTML 伺服的脚本面收口：CSP 禁脚本（default-src 'none'）——"
-                    + "设计稿是帧不是网站，呈现面（样式/内嵌图）可达、行为面结构性"
-                    + "关闭。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/"
+                    + "HTML 伺服的脚本面收口：CSP 禁脚本（default-src 'none'）——"
+                    + "呈现面（样式/内嵌图）可达、行为面结构性关闭（查看面无脚本"
+                    + "诉求）。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/"
                     + "逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非伺服面"
                     + "扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过直出查看上限"
                     + "（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001")

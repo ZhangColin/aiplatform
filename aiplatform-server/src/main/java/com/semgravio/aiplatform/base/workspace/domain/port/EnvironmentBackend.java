@@ -51,11 +51,12 @@ public interface EnvironmentBackend {
     WorkspaceProvision createWorkspace(WorkspaceId workspaceId, EnvKind kind);
 
     /**
-     * 派生工作区副本（#351 切片并行）：从主工作区当前 HEAD 克隆一个可写的 fork
+     * 派生工作区副本（#351 起立）：从主工作区当前 HEAD 克隆一个可写的 fork
      * 容器——代码（git clone，含 .git 供收口成版）+ node_modules 复用 + PGDATA 数据
      * 副本（独立 pg/redis）+ .env 指向副本库（main 库名——库随数据而来）。返回句柄
-     * 与资源清单。并行切片各拿一 fork 隔离同跑、收口 git commit 后按序合并回主工作区。
-     * fork 是短命工作区，用完经 {@link #destroyWorkspace} 级联清理。
+     * 与资源清单。原消费方「并行切片各拿一 fork 隔离同跑、按序合并回主工作区」的
+     * 编排已随 #602 切片机器退役拆除，能力面保留（允许保留物）。fork 是短命工作区，
+     * 用完经 {@link #destroyWorkspace} 级联清理。
      */
     WorkspaceProvision forkWorkspace(WorkspaceHandle main, WorkspaceId forkId);
 

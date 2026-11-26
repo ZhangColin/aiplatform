@@ -8,8 +8,7 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 如实报错不静默压缩）、原始文件名净化（用户可控输入进工作区文件系统与响应头
  * 前的最小消毒，口径同 raw 直出文件名消毒）、落点命名（TSID 前缀防撞名——物料
  * 目录是累积面，同名上传不可覆盖既有件）、写入命令构造（stdin 灌字节、stat
- * 字节回执——回执口径同 {@link WorkspaceRenders}）。命令执行归 exec 通道
- * （stdin 形）、字节归调用方。纯函数无依赖。
+ * 字节回执）。命令执行归 exec 通道（stdin 形）、字节归调用方。纯函数无依赖。
  */
 public final class ProjectMaterials {
 
@@ -80,8 +79,7 @@ public final class ProjectMaterials {
      * 写入命令（path 须平台生成形——{@link #storedPath} 产出，此处过
      * {@link ProjectFiles#isViewable} 防御性拒绝）：stdin 字节灌入
      * {@code cat >} 落目标路径（父目录幂等落位），stdout = stat 字节回执
-     * （调用方与上传字节数核对——回执口径同 {@link WorkspaceRenders}）。路径经
-     * 单引号包裹 + 转义，无注入面。
+     * （调用方与上传字节数核对）。路径经单引号包裹 + 转义，无注入面。
      */
     public static String uploadCommand(String relativePath) {
         if (!ProjectFiles.isViewable(relativePath)) {

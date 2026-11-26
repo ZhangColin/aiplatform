@@ -493,7 +493,8 @@ class AgentscopeAgentClientTest {
         assertThat(plain.get(0).payload()).doesNotContainKey("agent");
     }
 
-    /** #118 工作消息头部标题：命令带 heading → run-start 携 slice（title + index/total）。 */
+    /** #118 工作消息头部标题：命令带 heading → run-start 携 slice（{title}——
+     *  #608 切片序号/进度收窄后唯一形状）。 */
     @Test
     void given_heading_when_converse_then_run_start_carries_slice() {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
@@ -501,11 +502,11 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, null, Map.of(), null, null, null, "CODER", false,
-                RunHeading.slice("商品浏览", 2, 5), null), frames::add);
+                RunHeading.titled("商品浏览"), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry(AgentEventTypes.SLICE_FIELD,
-                Map.of("title", "商品浏览", "index", 2, "total", 5));
+                Map.of("title", "商品浏览"));
     }
 
     @Test

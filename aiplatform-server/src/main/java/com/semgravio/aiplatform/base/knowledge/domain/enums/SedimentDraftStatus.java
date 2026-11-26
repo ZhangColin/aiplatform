@@ -10,7 +10,7 @@ import com.cartisan.core.domain.BaseEnum;
  */
 public enum SedimentDraftStatus implements BaseEnum<SedimentDraftStatus> {
 
-    /** 在途：自荐留档待审——「数据标注」人审队列的待办。 */
+    /** 在途：候选留档待审——「数据标注」人审队列的待办。 */
     PENDING(1, "在途"),
 
     /** 已激活：人审通过，升格知识素材（与来源项目脱钩的孤儿沉淀）。 */

@@ -15,6 +15,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.data.jpa.id.TsidGenerator;
 import com.cartisan.web.request.Pagination;
 
 import com.semgravio.aiplatform.base.knowledge.application.dto.response.BackofficeSedimentDraftDetailResponse;
@@ -22,9 +23,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
 import com.semgravio.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
-import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftProposal;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftQueueResult;
-import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
 
@@ -158,16 +157,13 @@ class SedimentDraftReviewAppServiceTest {
     private final SedimentDraftAppService appService =
             new SedimentDraftAppService(drafts, knowledgeAppService);
 
-    private static SedimentDraftProposal proposal(String kind, String title) {
-        return new SedimentDraftProposal(kind, title, "摘要。", "正文。", 42L, "run-abc-1",
-                "executor");
-    }
-
-    /** 种植＝propose 真链路（成功才可用）。 */
-    private SedimentDraftReceipt plant(String kind, String title) {
-        SedimentDraftReceipt receipt = appService.propose(proposal(kind, title));
-        assertThat(receipt.accepted()).as("种植须成功: %s", receipt.message()).isTrue();
-        return receipt;
+    /** 先插入一行在途草稿（store 直插——写入链归事后提炼，审结面只要在途事实）。 */
+    private long plant(String kind, String title) {
+        long id = TsidGenerator.newInstance().generate();
+        drafts.insert(new SedimentDraftRecord(id, SedimentKind.byKey(kind).orElseThrow(),
+                title, "摘要。", "正文。", Map.of(), 42L, "run-abc-1", "executor",
+                "SAFE", List.of(), SedimentDraftStatus.PENDING, null, null, null, null, null));
+        return id;
     }
 
     // ---------- queue ----------
@@ -228,10 +224,10 @@ class SedimentDraftReviewAppServiceTest {
 
     @Test
     void given_pending_draft_when_activate_then_terminal_with_trace_and_queue_exit() {
-        SedimentDraftReceipt receipt = plant("CASE", "激活案例");
+        long receipt = plant("CASE", "激活案例");
 
         BackofficeSedimentDraftDetailResponse detail = appService.activate(
-                receipt.draftId(), OPERATOR);
+                receipt, OPERATOR);
 
         assertThat(detail.status()).isEqualTo(SedimentDraftStatus.ACTIVATED.getCode());
         assertThat(detail.statusName()).isEqualTo("已激活");
@@ -243,12 +239,12 @@ class SedimentDraftReviewAppServiceTest {
         assertThat(appService.queue(null, null, SedimentDraftStatus.PENDING,
                 new Pagination(1, 20, null)).total()).isZero();
         // 全量读面仍在（终态留档可查）
-        assertThat(appService.draft(receipt.draftId()).status())
+        assertThat(appService.draft(receipt).status())
                 .isEqualTo(SedimentDraftStatus.ACTIVATED.getCode());
         // 升格（#465）：kind 随草稿、source_ref＝草稿 id、project_id 置空＝孤儿沉淀
         verify(knowledgeAppService).index(argThat(spec ->
                 spec.kind().equals("CASE")
-                        && spec.sourceRef().equals(String.valueOf(receipt.draftId()))
+                        && spec.sourceRef().equals(String.valueOf(receipt))
                         && spec.projectId() == null
                         && spec.projectName().equals("平台沉淀")
                         && spec.title().equals("激活案例")
@@ -257,10 +253,10 @@ class SedimentDraftReviewAppServiceTest {
 
     @Test
     void given_concurrent_review_won_when_activate_then_not_swallowed_as_success() {
-        SedimentDraftReceipt receipt = plant("CASE", "并发激活");
+        long receipt = plant("CASE", "并发激活");
         drafts.reviewOutcome = false;
 
-        assertThatThrownBy(() -> appService.activate(receipt.draftId(), OPERATOR))
+        assertThatThrownBy(() -> appService.activate(receipt, OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED.message());
@@ -270,10 +266,10 @@ class SedimentDraftReviewAppServiceTest {
 
     @Test
     void given_pending_draft_when_reject_then_terminal_with_reason_trimmed_and_trace() {
-        SedimentDraftReceipt receipt = plant("RULE", "拒绝规则");
+        long receipt = plant("RULE", "拒绝规则");
 
         BackofficeSedimentDraftDetailResponse detail = appService.reject(
-                receipt.draftId(), "  与已激活知识重叠，无增量价值  ", OPERATOR);
+                receipt, "  与已激活知识重叠，无增量价值  ", OPERATOR);
 
         assertThat(detail.status()).isEqualTo(SedimentDraftStatus.REJECTED.getCode());
         assertThat(detail.rejectReason()).isEqualTo("与已激活知识重叠，无增量价值");
@@ -285,27 +281,27 @@ class SedimentDraftReviewAppServiceTest {
 
     @Test
     void given_blank_or_null_reason_when_reject_then_required_error() {
-        SedimentDraftReceipt receipt = plant("RULE", "空理由规则");
+        long receipt = plant("RULE", "空理由规则");
 
-        assertThatThrownBy(() -> appService.reject(receipt.draftId(), "  ", OPERATOR))
+        assertThatThrownBy(() -> appService.reject(receipt, "  ", OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_REJECT_REASON_REQUIRED.message());
-        assertThatThrownBy(() -> appService.reject(receipt.draftId(), null, OPERATOR))
+        assertThatThrownBy(() -> appService.reject(receipt, null, OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_REJECT_REASON_REQUIRED.message());
-        assertThat(drafts.find(receipt.draftId()).status()).isEqualTo(SedimentDraftStatus.PENDING);
+        assertThat(drafts.find(receipt).status()).isEqualTo(SedimentDraftStatus.PENDING);
     }
 
     // ---------- relabel ----------
 
     @Test
     void given_pending_draft_when_relabel_then_kind_changed_and_still_pending() {
-        SedimentDraftReceipt receipt = plant("CASE", "改类案例");
+        long receipt = plant("CASE", "改类案例");
 
         BackofficeSedimentDraftDetailResponse detail = appService.relabel(
-                receipt.draftId(), "rule", OPERATOR);
+                receipt, "rule", OPERATOR);
 
         assertThat(detail.kind()).isEqualTo("RULE");
         assertThat(detail.status()).isEqualTo(SedimentDraftStatus.PENDING.getCode());
@@ -320,10 +316,10 @@ class SedimentDraftReviewAppServiceTest {
         for (int i = 1; i <= 5; i++) {
             plant("RULE", "在途规则 " + i);
         }
-        SedimentDraftReceipt caseDraft = plant("CASE", "改类不受名额限");
+        long caseDraft = plant("CASE", "改类不受名额限");
 
         BackofficeSedimentDraftDetailResponse detail = appService.relabel(
-                caseDraft.draftId(), "RULE", OPERATOR);
+                caseDraft, "RULE", OPERATOR);
 
         assertThat(detail.kind()).isEqualTo("RULE");
         assertThat(detail.status()).isEqualTo(SedimentDraftStatus.PENDING.getCode());
@@ -331,22 +327,22 @@ class SedimentDraftReviewAppServiceTest {
 
     @Test
     void given_same_kind_when_relabel_then_idempotent_noop() {
-        SedimentDraftReceipt receipt = plant("MODULE", "同类模块");
+        long receipt = plant("MODULE", "同类模块");
 
         BackofficeSedimentDraftDetailResponse detail = appService.relabel(
-                receipt.draftId(), "module", OPERATOR);
+                receipt, "module", OPERATOR);
 
         assertThat(detail.kind()).isEqualTo("MODULE");
     }
 
     @Test
     void given_invalid_or_blank_kind_when_relabel_then_400_kind_invalid() {
-        SedimentDraftReceipt receipt = plant("CASE", "非法类别案例");
+        long receipt = plant("CASE", "非法类别案例");
 
-        assertThatThrownBy(() -> appService.relabel(receipt.draftId(), "PRD", OPERATOR))
+        assertThatThrownBy(() -> appService.relabel(receipt, "PRD", OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_SEDIMENT_KIND_INVALID.message());
-        assertThatThrownBy(() -> appService.relabel(receipt.draftId(), " ", OPERATOR))
+        assertThatThrownBy(() -> appService.relabel(receipt, " ", OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_SEDIMENT_KIND_INVALID.message());
     }
@@ -355,47 +351,47 @@ class SedimentDraftReviewAppServiceTest {
 
     @Test
     void given_terminal_draft_when_any_review_action_then_already_reviewed() {
-        SedimentDraftReceipt receipt = plant("CASE", "已审结案例");
-        appService.reject(receipt.draftId(), "不采纳", OPERATOR);
+        long receipt = plant("CASE", "已审结案例");
+        appService.reject(receipt, "不采纳", OPERATOR);
 
-        assertThatThrownBy(() -> appService.activate(receipt.draftId(), OPERATOR))
+        assertThatThrownBy(() -> appService.activate(receipt, OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED.message());
-        assertThatThrownBy(() -> appService.reject(receipt.draftId(), "再拒", OPERATOR))
+        assertThatThrownBy(() -> appService.reject(receipt, "再拒", OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED.message());
-        assertThatThrownBy(() -> appService.relabel(receipt.draftId(), "RULE", OPERATOR))
+        assertThatThrownBy(() -> appService.relabel(receipt, "RULE", OPERATOR))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED.message());
         // 终态留档不可变：拒绝理由不被重审覆盖
-        assertThat(drafts.find(receipt.draftId()).rejectReason()).isEqualTo("不采纳");
+        assertThat(drafts.find(receipt).rejectReason()).isEqualTo("不采纳");
     }
 
     @Test
     void given_missing_operator_when_any_review_action_then_operator_required() {
-        SedimentDraftReceipt activate = plant("CASE", "缺操作者激活");
-        SedimentDraftReceipt reject = plant("RULE", "缺操作者拒绝");
-        SedimentDraftReceipt relabel = plant("MODULE", "缺操作者改类");
+        long activate = plant("CASE", "缺操作者激活");
+        long reject = plant("RULE", "缺操作者拒绝");
+        long relabel = plant("MODULE", "缺操作者改类");
 
-        assertThatThrownBy(() -> appService.activate(activate.draftId(),
+        assertThatThrownBy(() -> appService.activate(activate,
                 new Operator(null, null)))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_OPERATOR_REQUIRED.message());
-        assertThatThrownBy(() -> appService.reject(reject.draftId(), "理由",
+        assertThatThrownBy(() -> appService.reject(reject, "理由",
                 new Operator("700300", null)))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_OPERATOR_REQUIRED.message());
-        assertThatThrownBy(() -> appService.relabel(relabel.draftId(), "RULE",
+        assertThatThrownBy(() -> appService.relabel(relabel, "RULE",
                 new Operator(null, null)))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(KnowledgeMessage.KNOWLEDGE_OPERATOR_REQUIRED.message());
         // 三行俱不动（守卫在写口之前）
-        assertThat(drafts.find(activate.draftId()).status()).isEqualTo(SedimentDraftStatus.PENDING);
-        assertThat(drafts.find(reject.draftId()).status()).isEqualTo(SedimentDraftStatus.PENDING);
-        assertThat(drafts.find(relabel.draftId()).status()).isEqualTo(SedimentDraftStatus.PENDING);
+        assertThat(drafts.find(activate).status()).isEqualTo(SedimentDraftStatus.PENDING);
+        assertThat(drafts.find(reject).status()).isEqualTo(SedimentDraftStatus.PENDING);
+        assertThat(drafts.find(relabel).status()).isEqualTo(SedimentDraftStatus.PENDING);
     }
 
     @Test

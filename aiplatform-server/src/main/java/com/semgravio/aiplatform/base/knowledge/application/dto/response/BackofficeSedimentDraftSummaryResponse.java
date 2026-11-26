@@ -26,7 +26,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param scanVerdict       扫描判定（SAFE/CAUTION——DANGEROUS 拒写不落库）
  * @param status            状态 code（1=在途 2=已激活 3=已拒绝）
  * @param statusName        状态名（直读展示）
- * @param createdAt         自荐时刻
+ * @param createdAt         创建时刻（提炼留档时刻）
  */
 public record BackofficeSedimentDraftSummaryResponse(
         @Schema(description = "草稿柄（详情寻址，TSID 十进制串，勿做数值假设）")

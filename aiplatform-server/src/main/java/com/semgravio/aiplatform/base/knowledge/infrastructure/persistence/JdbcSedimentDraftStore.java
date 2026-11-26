@@ -24,8 +24,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftSt
 
 /**
  * 沉淀草稿存取实现（#460 数据飞轮采集层＋#464 后台「数据标注」审结面，JdbcTemplate
- * 原生 SQL，照 {@code JdbcSkillDraftStore} 先例）：单表 {@code knw_sediment_drafts}
- * 读写；payload/scan_findings JSONB 经字面量序列化出入。
+ * 原生 SQL——照旧技能草稿存取实现的形制，技能草稿链已随 V91 拆表退役）：单表
+ * {@code knw_sediment_drafts} 读写；payload/scan_findings JSONB 经字面量序列化出入。
  *
  * <p>#641 事后提炼写入＋#464 审结读面（队列/详情）与三键 CAS 翻态（激活/拒绝/改
  * 标签）——升格 knw_materials 由应用服务经 KnowledgeAppService 完成（#465），本实现

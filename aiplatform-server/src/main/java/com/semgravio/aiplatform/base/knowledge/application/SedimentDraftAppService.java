@@ -3,16 +3,12 @@ package com.semgravio.aiplatform.base.knowledge.application;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
-import com.cartisan.data.jpa.id.TsidGenerator;
 import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
@@ -24,29 +20,25 @@ import com.semgravio.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeChunker;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
-import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftProposal;
-import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
-
-import io.agentscope.harness.agent.skill.curator.SkillSecurityScanner;
 
 /**
  * 沉淀草稿用例（#460 数据飞轮采集层，现由 #641 事后提炼写入候选经验）：草稿带血统
  * （来源项目/run/槽位）、扫描回执、终态留痕。候选经验的来源五件由事后提炼填写
  * （#641：来源项目名快照/版本号/提交哈希/原句/提炼批次），人审据此回溯。
  *
- * <p><b>写入链</b>（保留的写入入口；生产候选经验由事后提炼直写；拒绝一律回执原因、不抛）：
- * 校验正本（{@link SedimentDraftProposal#violation()}）→ 静态安全扫描
- * （{@link SkillSecurityScanner}，DANGEROUS 拒写）→ 落库（TSID、在途态、verdict＋
- * findings 随草稿留档）。<b>#642 拆在途机制</b>：不再有「每项目每类最多 3 条」上限、
- * 在途序号分配与并发撞索引归一——上限只由每次提炼最多 3 条保证。run 失败不回滚已
- * 写入的草稿（照 ADR-0022 同口径：工具执行即事实落库，无 run 级回滚概念）。</p>
+ * <p><b>写入链</b>：无应用服务写入入口——#638 拆自荐写入（旧「模型自荐沉淀」
+ * propose 方法随死代码清场移除），生产候选经验由事后提炼（
+ * {@code ExperienceDistillationAppService}）校验＋静态扫描后经
+ * {@code ExperienceDistillationLedgerAppService#land} 直写 store。
+ * run 失败不回滚已写入的草稿（照 ADR-0022 同口径：工具执行即事实落库，无 run
+ * 级回滚概念）。</p>
  *
  * <p><b>purgeByProject</b>：项目删除清理未终结草稿（采集层不留僵尸行）——只清在途，
  * 终态留档；编排与失败语义归 {@code ProjectLifecycleAppService} 删除流程。</p>
  *
- * <p><b>「数据标注」审结面</b>（#464）：队列（按项目/类别/状态过滤＋分页，排序自荐
+ * <p><b>「数据标注」审结面</b>（#464）：队列（按项目/类别/状态过滤＋分页，排序创建
  * 时间倒序）＋详情（任意状态——终态留档可查）＋三键——激活（原样升格不改稿：在途
  * 翻已激活＋操作者留痕＋升格 knw_materials，#465 接通——段落分块入库、kind 随草稿、
  * 与来源项目脱钩）/拒绝（理由必填＋终态留档，库级 CHECK 双锁）/改标签（在途内调
@@ -69,54 +61,11 @@ public class SedimentDraftAppService {
 
     private final SedimentDraftStore draftStore;
     private final KnowledgeAppService knowledgeAppService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public SedimentDraftAppService(SedimentDraftStore draftStore,
             KnowledgeAppService knowledgeAppService) {
         this.draftStore = draftStore;
         this.knowledgeAppService = knowledgeAppService;
-    }
-
-    /**
-     * 写入：校验 → 扫描 → 落库（#642 起无在途上限）。回执见 {@link SedimentDraftReceipt}。
-     */
-    public SedimentDraftReceipt propose(SedimentDraftProposal proposal) {
-        var violation = proposal.violation();
-        if (violation.isPresent()) {
-            log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 校验拒：{}", proposal.projectId(),
-                    proposal.kind(), proposal.slot(), violation.get());
-            return SedimentDraftReceipt.rejected(violation.get());
-        }
-        SedimentKind kind = SedimentKind.byKey(proposal.kind()).orElseThrow();
-        SkillSecurityScanner.ScanResult scan = SkillSecurityScanner.scan(proposal.title(),
-                scanSurfaceOf(proposal), Map.of());
-        if (scan.verdict() == SkillSecurityScanner.Verdict.DANGEROUS) {
-            log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 扫描拒 DANGEROUS（{}）",
-                    proposal.projectId(), kind.key(), proposal.slot(), patternIdsOf(scan));
-            return SedimentDraftReceipt.rejected("安全扫描判定 DANGEROUS，拒写不入库。触发的"
-                    + "规则：" + patternIdsOf(scan) + "——请移除相应危险内容后重提。");
-        }
-        SedimentDraftRecord record = new SedimentDraftRecord(
-                TsidGenerator.newInstance().generate(),
-                kind,
-                proposal.title(),
-                proposal.summary(),
-                proposal.content(),
-                Map.of(),
-                proposal.projectId(),
-                proposal.runId(),
-                proposal.slot(),
-                scan.verdict().name(),
-                findingsOf(scan),
-                SedimentDraftStatus.PENDING,
-                null, null, null, null, null);
-        draftStore.insert(record);
-        log.info("[sediment-propose] 项目 {} 类别 {} 槽位 {} 扫描 {} 已留档（草稿 {}）",
-                proposal.projectId(), kind.key(), proposal.slot(), scan.verdict().name(),
-                record.id());
-        return SedimentDraftReceipt.accepted(record.id(),
-                "沉淀草稿已留档待审（后台「数据标注」人工审核激活后才入知识库；未审核"
-                        + "草稿不参与任何检索）。感谢沉淀。");
     }
 
     /**
@@ -133,7 +82,7 @@ public class SedimentDraftAppService {
 
     /**
      * 标注队列：三过滤维度（项目精确/类别单选/状态单选）可组合、均可缺省（缺省＝
-     * 全量）；排序定死＝自荐时间倒序（id 倒序稳定）；分页钳制/换算全部来自框架
+     * 全量）；排序定死＝创建时间倒序（id 倒序稳定）；分页钳制/换算全部来自框架
      * {@link Pagination}（1 基、缺省 1/20、上界 100 静默贴边），页码原样回显零
      * 手写算术（照 {@code BackofficeKnowledgeAppService#materials} 先例）。类别
      * 过滤值经 {@link SedimentKind} 解析（大小写不敏感），非法即 400 KNW_011
@@ -300,26 +249,5 @@ public class SedimentDraftAppService {
                 .orElseThrow(() -> new ApplicationException(
                         KnowledgeMessage.KNOWLEDGE_SEDIMENT_KIND_INVALID))
                 .key();
-    }
-
-    /** 扫描面＝标题＋摘要＋正文合成的草稿全文：与留档真实内容一致。 */
-    private static String scanSurfaceOf(SedimentDraftProposal proposal) {
-        return proposal.title() + "\n" + proposal.summary() + "\n\n" + proposal.content();
-    }
-
-    /** scanner Finding record → 解析态键值（JSONB 通行，读模型口径）。 */
-    private List<Map<String, Object>> findingsOf(SkillSecurityScanner.ScanResult scan) {
-        return scan.findings().stream()
-                .map(finding -> objectMapper.convertValue(finding,
-                        new TypeReference<Map<String, Object>>() { }))
-                .toList();
-    }
-
-    private static String patternIdsOf(SkillSecurityScanner.ScanResult scan) {
-        return scan.findings().stream()
-                .map(SkillSecurityScanner.Finding::patternId)
-                .distinct()
-                .toList()
-                .toString();
     }
 }

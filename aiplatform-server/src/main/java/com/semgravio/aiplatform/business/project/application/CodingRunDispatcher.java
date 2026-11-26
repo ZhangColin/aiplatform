@@ -231,7 +231,7 @@ class CodingRunDispatcher {
      *                       按寻址规则拼装传入，不再固定 {@code coder-{projectId}}）
      * @param prompt         本场提示词（单发；生成执行体只读当前项目需求文档，
      *                       不接收知识命中注入——#639）
-     * @param heading        工作消息头部标题（#118：标题 + 生成轨道进度；可空——
+     * @param heading        工作消息头部标题（#118：用户语言标题；可空——
      *                       主智能体对话轮不经本层）——随 run-start 的 slice 字段
      *                       透出
      * @param includePatch   变更清单是否携单文件只读 diff（迭代 = true；首建 = false，

@@ -41,8 +41,8 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * 为空 = 无配置语境，空工具面），并随 run-start 载荷透出（前端登记锚）；
  * {@code workspaceReadOnly}——项目工作区解析为只读面（#86 主智能体姿态：
  * 不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）；
- * {@code heading} 可空——工作消息头部标题（#118：用户语言标题 + 生成轨道切片
- * 进度），底座不解释，随 run-start 载荷透出（{@code slice} 字段，前端工作消息
+ * {@code heading} 可空——工作消息头部标题（#118：用户语言标题），底座不解释，
+ * 随 run-start 载荷透出（{@code slice} 字段＝{title}，前端工作消息
  * 头部呈现源）；{@code toolSpec} 可空——工具面规格串（#252 增强工具开关的
  * 装配腿：业务侧从运营配置解析编码，底座不解释），进工厂实例缓存键并透传
  * {@link AgentToolkitSupplier}（规格变＝实例变，开关变更下一轮命令构建即新装配；

@@ -111,9 +111,10 @@ public class WorkspaceLifecycleAppService {
     }
 
     /**
-     * 派生工作区副本（#351 切片并行）：从源工作区当前 HEAD 克隆可写 fork 容器并注册
+     * 派生工作区副本（#351 起立）：从源工作区当前 HEAD 克隆可写 fork 容器并注册
      * 为短命 READY 工作区（正常 workspaceId → 容器寻址——run 执行体经它 exec 读写 fork，
-     * 收口 git commit 落 fork 内）。并行切片各拿一 fork 隔离同跑、按序合并回源工作区；
+     * 收口 git commit 落 fork 内）。原消费方「并行切片各拿一 fork 隔离同跑、按序合并
+     * 回源工作区」的编排已随 #602 切片机器退役拆除，fork 能力面保留（允许保留物）；
      * 用完经 {@link #destroy} 级联清理。
      *
      * @param sourceWorkspaceId 源（主）工作区标识

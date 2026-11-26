@@ -36,10 +36,6 @@ export const queryKeys = {
      * run-finish 定向失效本键。
      */
     buildGate: (id: string) => ["projects", "build-gate", id] as const,
-    /** 文件树（交付文件只读清单，目录由前端合成；run 收口/PRD 写出随 projects 域失效——#27）。 */
-    files: (id: string) => ["projects", "files", id] as const,
-    /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */
-    fileContent: (id: string, path: string) => ["projects", "file-content", id, path] as const,
     /**
      * run 收口版本表（#626：git log 即正本，commitHash×runId 锚）。单轴版本
      * 时间线的唯一数据源；挂 projects 域随 run-finish 失效刷新。旧 Demo/PRD 双轴

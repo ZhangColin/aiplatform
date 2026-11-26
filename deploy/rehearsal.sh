@@ -130,7 +130,7 @@ write_envs() { # 排练 env 由本脚本全权生成（凭据分片随当前 inf
     echo "PREVIEW_BASE=preview.semgravio.com"
     echo "APP_WORKSPACE_PREVIEW_SCHEME=http"
     echo "SSO_COOKIE_SECURE=false"
-    grep -E "^(VOLCENGINE_API_KEY|DEEPSEEK_API_KEY|BOCHA_API_KEY|RESEND_API_KEY|MAIL_FROM)=" aiplatform-server/.env.local || true
+    grep -E "^(DEEPSEEK_API_KEY|BOCHA_API_KEY|RESEND_API_KEY|MAIL_FROM)=" aiplatform-server/.env.local || true
   } > "$SERVER_ENV"
   cp deploy/env.web.example "$WEB_ENV"
 }

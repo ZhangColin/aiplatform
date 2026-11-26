@@ -17,9 +17,9 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * （find 剪枝在源头排除，不进 node_modules 巨树）、内容读取命令构造（大小限读
  * 在容器侧先行，巨文件不进内存）、find 输出解析。#283 起点看判定对图片放行
  * （ADR-0027）：图片扩展名走 raw 直出（inline 大图），判定与命令构造同收此处；
- * #293 起 raw 直出面扩设计稿 HTML（稿伺服通道——设计稿画布固定画幅帧取件，
- * design/ 锚定单开判定）＋设计稿删除命令（悬卡删除）。入口文件截断判定随审查与
- * 收口组退役（#605）。纯函数无依赖。
+ * #293 起曾扩设计稿 HTML 伺服＋定稿/悬卡删除命令——消费面设计稿画布已随 #613
+ * 拆除，design/ HTML 判定与两命令成规则面上的死支路（去留待重建入口时再定）。
+ * 入口文件截断判定随审查与收口组退役（#605）。纯函数无依赖。
  */
 public final class ProjectFiles {
 
@@ -190,10 +190,12 @@ public final class ProjectFiles {
     }
 
     /**
-     * 存在性检查命令（#291 定稿守卫；path 须先过 {@link #isViewable}，此处不
-     * 代偿）：退出码 0 = 文件在、1 = 不存在——定稿选定的稿以容器事实为准（候选
-     * 稿可被悬卡删除，删除即不可定稿）。守卫结构同 {@link #contentCommand}，
-     * 命令体只有成功（无读取）。
+     * 存在性检查命令（#291 定稿守卫起立；path 须先过 {@link #isViewable}，此处不
+     * 代偿）：退出码 0 = 文件在、1 = 不存在——以容器事实为准。守卫结构同
+     * {@link #contentCommand}，命令体只有成功（无读取）。
+     *
+     * <p><b>死支路（#613 后）</b>：消费面（设计定稿守卫）已随设计线拆除，本命令
+     * 无生产触发源——规则面保留，去留待重建入口时再定。</p>
      */
     public static String existenceCommand(String path) {
         if (!isViewable(path)) {
@@ -212,15 +214,14 @@ public final class ProjectFiles {
     }
 
     /**
-     * 设计稿 HTML 伺服判定（#293 稿伺服通道）：design/ 锚定（大小写不敏感）＋
-     * html 扩展名（大小写不敏感）。设计稿画布的界面类稿＝固定画幅帧，取件走
-     * raw 路由 iframe 直渲；其余 HTML（应用源码等）不开伺服面（raw 只认图片与
-     * 本判定）。
+     * 设计稿 HTML 伺服判定（#293 稿伺服通道起立）：design/ 锚定（大小写不敏感）＋
+     * html 扩展名（大小写不敏感）——取件走 raw 路由 iframe 直渲；其余 HTML
+     * （应用源码等）不开伺服面（raw 只认图片与本判定）。
      *
-     * <p>design/ 锚定与轨道层 {@code CodingRunDispatcher.designAnchored} 同律
-     * （彼两形兼容——write_file 件相对形＋落盘锚定形，#306；本收相对形，取件面
-     * 前置 {@link #relativeFormOf} 归一——本类在 domain 层不可上引 application
-     * 包，无法共享单点；两处口径同改，互指为约）。</p>
+     * <p><b>死支路（#613 后）</b>：消费面设计稿画布已拆，本判定无生产触发源——
+     * raw 端点按 #608/ADR-0027 补记保留，本分支挂在保留端点上随端点存活，
+     * 去留待重建入口时再定。旧互指 {@code CodingRunDispatcher.designAnchored}
+     * 已随设计线删除（两形归一由 {@link #relativeFormOf} 单独承担）。</p>
      */
     public static boolean isDraftHtml(String path) {
         if (path == null || !path.toLowerCase(Locale.ROOT)
@@ -258,9 +259,12 @@ public final class ProjectFiles {
     }
 
     /**
-     * 设计稿删除命令（#293 悬卡删除；path 须先过 {@link #isViewable}，design
+     * 设计稿删除命令（#293 悬卡删除起立；path 须先过 {@link #isViewable}，design
      * 锚定判定归调用侧）：{@code rm -f} 幂等——稿已不在也 0 退出（删除的终态
      * 就是不在，重复删除不报错）。路径经单引号包裹 + 转义，无注入面。
+     *
+     * <p><b>死支路（#613 后）</b>：消费面（设计稿悬卡删除）已随设计线拆除，本命令
+     * 无生产触发源——规则面保留，去留待重建入口时再定。</p>
      */
     public static String deleteCommand(String path) {
         if (!isViewable(path)) {

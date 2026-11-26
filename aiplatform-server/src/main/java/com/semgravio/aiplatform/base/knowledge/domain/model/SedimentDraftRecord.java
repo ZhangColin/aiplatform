@@ -69,7 +69,7 @@ public record SedimentDraftRecord(
         String distillBatchId) {
 
     /**
-     * 旧形兼容构造（#460–#638 自荐/审结测试仍按原字段面造行）：来源五件缺省 null。
+     * 旧形兼容构造（测试种植与审结面按原字段面造行——来源五件缺省 null）：
      * 生产新行一律走全参构造（事后提炼填来源）。
      */
     public SedimentDraftRecord(long id, SedimentKind kind, String title, String summary,

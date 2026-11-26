@@ -28,8 +28,8 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * 拒，走不到本缝）由收口观测点调用置 {@link ForkState#PENDING}
  * ——持久可回（未选择前关页回来卡仍在）；快道直生成不置位（不出卡）、点火后
  * 不回清（卡隐藏由首建点火时点派生承担——#604 起终态失败/停止收口清点火位，
- * 卡与确认门复现：用户在点火入口重跑即恢复）。设计类终点不出卡不设门（设计轨触发律不改：PRD 收口起设计过程、
- * 全部定稿起构建）。</p>
+ * 卡与确认门复现：用户在点火入口重跑即恢复）。旧「设计类终点不出卡不设门」
+ * 分支已随 #610 设计线退役消失。</p>
  *
  * <p><b>派发门读面</b>（{@link #gateOf}，{@code GET /build-gate} 单读点）：
  * 岔路口卡＝试用态∧PENDING∧PRD 在∧首建未点火；PRD 确认按钮＝付费态∧PRD
@@ -37,7 +37,7 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * （{@link BillingAppService#trackOf}，ADR-0049——不立第二份标志）。</p>
  *
  * <p><b>确认即派发、版本机制零改动</b>：确认经 {@link GenerationAppService
- * #startGeneration} 共用编排（守卫/余额门/设计定稿门/起跑记行全同构）——确认
+ * #startGeneration} 共用编排（守卫/余额门/起跑记行全同构）——确认
  * 不写版本行（「确认即成版」#330 写表语义不复活），记行归起跑单点、版本号＝
  * 构建基准序全域一致；点击幂等＝已点火拒绝 PRJ_017（不重复派发）。#604 起首建
  * 终态失败/停止收口清点火位（{@link Project#reopenFirstBuildRequest}）——确认

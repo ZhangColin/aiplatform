@@ -235,7 +235,7 @@ class ProjectFilesTest {
     @Test
     void given_design_anchored_html_when_draft_html_then_true() {
         // 稿伺服面＝设计稿范式画布的固定画幅帧取件：design/ 锚定 + html 扩展名，
-        // 两者大小写不敏感（与 designAnchored 同律——文件系统侧无大小写约定）
+        // 两者大小写不敏感（文件系统侧无大小写约定）
         assertThat(ProjectFiles.isDraftHtml("design/home-1.html")).isTrue();
         assertThat(ProjectFiles.isDraftHtml("design/poster.HTML")).isTrue();
         assertThat(ProjectFiles.isDraftHtml("DESIGN/home.html")).isTrue();

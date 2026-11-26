@@ -91,8 +91,8 @@ public enum ProjectMessage implements CodeMessage {
      * files/content，真二进制非图片仍 PRJ_023 如实拒收）。 */
     FILE_NOT_IMAGE(400, "PRJ_038", "该文件暂不支持在线查看"),
 
-    /** 位图出口（#284 渲染内核）：渲染失败——chromium 渲染或 SVG 旁路转 PNG 未成（技术失败，非源文件缺失的 PRJ_021）。 */
-    RENDER_FAILED(500, "PRJ_039", "位图渲染失败"),
+    // PRJ_039（位图渲染失败）随 #610 设计线退役后的死代码清场移除——渲染服务
+    // （ProjectRenderAppService/WorkspaceRenders）无生产调用方，唯一消费方即其自身。
 
     // PRJ_040（终点切换需设计范围）/PRJ_041（勾选页面空集）/PRJ_042（设计类终点
     // 生成门）随 #612 终点收窄为系统单值、设计线整条退役拆除。

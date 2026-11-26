@@ -138,19 +138,10 @@ class AgentscopeEventMapperTest {
             assertThat(frame.payload()).doesNotContainKey(AgentEventTypes.SLICE_FIELD);
         }
 
-        /** #118 生成轨道切片：slice 携 title + index/total（工作消息头部「{title}（{index}/{total}）」）。 */
+        /** #118 工作消息头部标题：slice 恒为 {title}（#608 切片序号/进度收窄——
+         *  旧 index/total 形状已随切片机器退役，不再发射）。 */
         @Test
-        void given_run_start_with_slice_heading_when_built_then_carries_slice_progress() {
-            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "m", ENGINE,
-                    "executor", RunHeading.slice("商品浏览", 2, 5));
-
-            assertThat(frame.payload()).containsEntry(AgentEventTypes.SLICE_FIELD,
-                    Map.of("title", "商品浏览", "index", 2, "total", 5));
-        }
-
-        /** #118 阶段 0 / 更新 run：slice 只携 title、无 index/total（头部无进度）。 */
-        @Test
-        void given_run_start_with_title_only_heading_when_built_then_slice_without_progress() {
+        void given_run_start_with_heading_when_built_then_slice_carries_title_only() {
             AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "m", ENGINE,
                     "executor", RunHeading.titled("系统更新"));
 

@@ -13,31 +13,22 @@
 # 11-12 拉自英文站现行价：谷＝峰半价；中文站价目页是 V4 旧价已过期勿作依据；
 # ⚠ 六价位点系账单反推、未见官方 CNY 牌价正本——生产落库前必须过 #500 门禁①
 # 人工核对 DeepSeek 后台价格页）。注意父票表 pro 输出「库内」列误植 0.0000027，
-# 真值 0.000027（¥27/M÷1e6，与 volcengine 存量行 0.000027、旧 USD 行 $3.96/M
+# 真值 0.000027（¥27/M÷1e6，与 volcengine 历史行 0.000027、旧 USD 行 $3.96/M
 # 交叉印证）。时段规则（工作日两峰窗 UTC）不由本表承载——本脚本收尾经
 # backoffice-time-band-seed.sh 种入同通道（#500 AC：同脚本通道一次跑全）。
 # 存量旧 deepseek 行（#165 USD 峰值档、NULL 带、2026-01-01 起）如在库本脚本
 # 不动：通道有生效规则行后 NULL 带行不再参与匹配（引擎 #499 归段选价语义），
 # 是否停用走管理 API 运维自决。
 #
-# #288 出图按张行（tokenKind 6=image，CNY/张；2026-10-06 核对各家官方定价页）：
-#   zhipu/glm-image 0.10（docs.bigmodel.cn 定价页）｜
-#   zhipu/cogview-4-250304 0.06（#545 快档起步，ADR-0052——构建轨下放缺省模型，
-#   2026-11-17 核对 bigmodel 定价页；与 glm-image 行并存：env ZHIPU_IMAGE_MODEL
-#   覆写/运营切模型时两行各接各的按张事件，不漂移）｜
-#   volcano/doubao-seedream-5-0-260128 0.22（ark 模型价格页，Seedream 5.0 lite 档）｜
-#   dashscope/qwen-image-3.0 0.18（百炼价格页，输出张计价——文生图无输入图）。
-#   openai/gpt-image-2.5-sunburst 不种：官方按 token 计价（image output $30/1M）、
-#   无按张官方价，硬抄折算数违「实时值为准」纪律——用 OpenAI 档时经管理 API 自行
-#   开行（unpriced 警示会如实暴露）。
+# #288 出图按张价行已清出（#654，2026-11-26 裁决）：所配出图机制已整条退役
+# （#610），对全新库种入即死数据——脚本不再种按张行（tokenKind 6=image）；
+# 库中已有行不主动删（价史无害）。曾种 4 行清单见 git 史。
 #
-# #369 火山通道行（provider=volcengine＝通道键，模型名与档位行实际模型一致；
-# 2026-10-23 核对 docs.volcengine.com/docs/ark/model-pricing 在线推理常规价，
-# CNY/百万 tokens，无时段分档直取）：切换后主通道三模型 × 3 tokenKind
-# （1=input 3=cache_read 2=output），成本观测跨通道切换不断线。无峰谷通道不带
-# band 列（NULL＝不区分时段，#498 存量语义零变动）。
-#   deepseek-v4-pro-ga-260813 9/0.3/27｜deepseek-v4-flash-ga-260731 3/0.1/9｜
-#   doubao-seed-2-1-pro-260915 6/1.2/30。
+# #369 火山通道价行已清出（#654，2026-11-26 裁决「存量不补种」）：通道库行
+# V79 已清（#556/ADR-0053、1c558bbd），全新库不再种入——库中已有行保留：
+# 计量价匹配按 provider|model 键挂历史用量行，历史事件成本显示不破（#556
+# 口径「留痕跨一切存活、历史归因自持」）。曾种 9 行（3 模型 × 3 tokenKind，
+# NULL 带）清单见 git 史。
 #
 # 幂等：匹配键（provider, model, tokenKind, band）已有任意行（含已关行）即跳过
 # ——重复执行零新插；中断续跑收敛（缺哪个键补哪个键，带维度各自独立）。既有键集
@@ -45,7 +36,7 @@
 #
 # #558/ADR-0053 ②起 provider 列语义＝归一供应商（vendor）：换算匹配挂计量事件的
 # vendor 腿——同 vendor 多账号（deepseek/deepseek-2）共用本表一组行、新账号通道行
-# 零价格复制；本脚本行值（deepseek/zhipu/…）即 vendor 词表，数据与幂等口径零改动。
+# 零价格复制；本脚本行值（deepseek/…）即 vendor 词表，数据与幂等口径零改动。
 #
 # 用法：./scripts/backoffice-price-seed.sh
 # 凭据：BACKOFFICE_API_KEY / BACKOFFICE_API_SECRET（或 .env.local /
@@ -56,14 +47,12 @@ set -euo pipefail
 
 source "$(dirname "$0")/backoffice-signed-http.sh"
 
-# 默认生效起点（无峰谷通道与按张行：敞口覆盖平台存量事件；真实改价史经管理
-# API 原子改价维护，历史成本不漂移）
-DEFAULT_EFFECTIVE_FROM="2026-01-01T00:00:00Z"
 # deepseek 官方通道真值行生效起点（#500：官方通道切换日，门禁③证实此前无事件）
 DEEPSEEK_EFFECTIVE_FROM="2026-11-11T00:00:00Z"
 
-# provider model tokenKind band unitPrice currency effectiveFrom（deepseek 行＝
-# 官方通道 CNY 每 token 真值带峰谷；图片行＝官方定价页 CNY/张；band「-」＝NULL 带）
+# provider model tokenKind band unitPrice currency effectiveFrom（deepseek 官方
+# 通道 CNY 每 token 真值带峰谷）——行内 7 字段空白分隔，band 必填（1=峰 2=谷；
+# 本脚本已不种 NULL 带行，库中历史 NULL 带行仅由判重跳过）
 SEED_ROWS=(
   # -- deepseek 官方通道：deepseek-v4-pro（=DeepSeek-V4-Pro-0813）峰/谷 --
   "deepseek         deepseek-v4-pro             1  1  0.0000090    CNY  $DEEPSEEK_EFFECTIVE_FROM"
@@ -79,21 +68,6 @@ SEED_ROWS=(
   "deepseek         deepseek-flash              1  2  0.0000010    CNY  $DEEPSEEK_EFFECTIVE_FROM"
   "deepseek         deepseek-flash              3  2  0.00000002   CNY  $DEEPSEEK_EFFECTIVE_FROM"
   "deepseek         deepseek-flash              2  2  0.0000040    CNY  $DEEPSEEK_EFFECTIVE_FROM"
-  # -- 出图按张（tokenKind 6=image，CNY/张） --
-  "zhipu            cogview-4-250304            6  -  0.06         CNY  $DEFAULT_EFFECTIVE_FROM"
-  "zhipu            glm-image                   6  -  0.10         CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcano          doubao-seedream-5-0-260128  6  -  0.22         CNY  $DEFAULT_EFFECTIVE_FROM"
-  "dashscope        qwen-image-3.0              6  -  0.18         CNY  $DEFAULT_EFFECTIVE_FROM"
-  # -- volcengine 通道（无峰谷，NULL 带）--
-  "volcengine       deepseek-v4-pro-ga-260813   1  -  0.000009     CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       deepseek-v4-pro-ga-260813   3  -  0.0000003    CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       deepseek-v4-pro-ga-260813   2  -  0.000027     CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       deepseek-v4-flash-ga-260731 1  -  0.000003     CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       deepseek-v4-flash-ga-260731 3  -  0.0000001    CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       deepseek-v4-flash-ga-260731 2  -  0.000009     CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       doubao-seed-2-1-pro-260915  1  -  0.000006     CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       doubao-seed-2-1-pro-260915  3  -  0.0000012    CNY  $DEFAULT_EFFECTIVE_FROM"
-  "volcengine       doubao-seed-2-1-pro-260915  2  -  0.00003      CNY  $DEFAULT_EFFECTIVE_FROM"
 )
 
 # 既有键集（含已关行）：provider|model|tokenKind|band 每行一条（band 空串＝NULL 带
@@ -163,8 +137,6 @@ main() {
 
   for row in "${SEED_ROWS[@]}"; do
     read -r provider model kind band price currency effective_from <<< "$row"
-    # band 占位「-」＝NULL 带（无峰谷行；read 对变宽行按占位对齐字段位）
-    [[ "$band" == "-" ]] && band=""
     local key="${provider}|${model}|${kind}|${band}"
     if grep -Fqx "$key" <<< "$existing"; then
       printf '跳过 %s / %s / tokenKind %s / band %s（已有行，含已关行）\n' \

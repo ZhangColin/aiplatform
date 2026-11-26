@@ -198,19 +198,6 @@ class OrderTest {
                 .hasMessageContaining(OrderMessage.ORDER_FIELDS_INCOMPLETE.message());
     }
 
-    @Test
-    void given_system_order_when_require_design_deliverable_then_ord016() {
-        // #298 设计资产包可取守卫（聚合单点，用户面下载/后台取件共用）：系统单
-        // 交付物是源码包——ORD_016 如实；设计面两型放行
-        assertThatThrownBy(() -> pendingQuoteOrder().requireDesignDeliverable())
-                .isInstanceOf(DomainException.class)
-                .hasMessageContaining(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE.message());
-        for (OrderDeliverableType design : List.of(
-                OrderDeliverableType.DESIGN, OrderDeliverableType.SYSTEM_DESIGN)) {
-            Order.place(1L, null, null, "# PRD\n\n需求", design, 1, 1).requireDesignDeliverable(); // 不抛即过
-        }
-    }
-
     // ---------- #336：范围文本录入（后台工作副本，整组替换） ----------
 
     @Test

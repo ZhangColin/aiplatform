@@ -18,9 +18,9 @@ import { FileDownloadButton } from "./file-download";
 import { PrdConfirmGate } from "./prd-confirm-gate";
 
 /**
- * PRD 篇（#20 口径，#79 从文件模式抽出为「文档」范式正文）：markdown 正文 +
- * 修订「已更新」标记 + markSeen 兜底。文档范式（默认挂载）与文件树模式
- * （PRD 选中）共用同一篇。用户面不带角色署名（ADR 0006 方向：一个「它」）。
+ * PRD 篇（#20 口径，#79 从文件模式抽出为「文档」范式正文——旧文件树面板已拆，
+ * 文档范式是唯一挂载形态）：markdown 正文 + 修订「已更新」标记 + markSeen 兜底。
+ * 用户面不带角色署名（ADR 0006 方向：一个「它」）。
  * #542 付费轨首建 PRD 确认门恢复（ADR-0049——原动作形态回归）：付费状态项目
  * 首建未派发时文档面带「确认 PRD，开始生成」按钮（呈现条件＝GET /build-gate
  * prdConfirmable 服务端单源；确认即派发、点击幂等、确认不写版本行）——试用轨
@@ -79,7 +79,7 @@ export function PrdDoc({
             </p>
           )}
           {/* 付费轨首建确认门（#542，ADR-0049 原动作形态恢复）：付费态∧PRD 在∧
-              首建未派发——确认即派发首个构建（幂等，失败重试走「继续生成」）；
+              首建未派发——确认即派发首个构建（幂等，失败重试重走本确认门）；
               呈现条件归门件内 GET /build-gate 服务端单源 */}
           <PrdConfirmGate projectId={projectId} variant="doc" />
         </article>

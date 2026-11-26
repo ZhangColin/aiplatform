@@ -8,8 +8,10 @@ spring:
     placeholders:
       # #365 · 模型供应商通道种子 key（ADR-0031）：测试环境注入测试 key——走真
       # 解析链的集成测试（对话/生成/设计命令构建）免逐测试补 key；报错路径
-      # （key 空/停用）由 ModelTierAppServiceTest 用独立 fixture 行钉死，不依赖
+      # （key 空/停用）由 ModelConfigAppServiceTest 用独立 fixture 行钉死，不依赖
       # 种子态。只在迁移执行时求值（种子一次性 INSERT），非运行期回落。
+      # volcengineApiKey 仅为 V44 重放保留（V79 清火山行＝种子净效果 deepseek
+      # 单通道，#556/ADR-0053 ④）。
       volcengineApiKey: sk-test-ark
       deepseekApiKey: sk-test-deepseek
 

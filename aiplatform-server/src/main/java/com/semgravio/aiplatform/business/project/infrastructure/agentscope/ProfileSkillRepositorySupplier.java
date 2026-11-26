@@ -27,17 +27,15 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * <li>{@link AgentProfile#MAIN 主智能体}＝内置（PRD 写作）∪ main 槽位库技能；</li>
  * <li>{@link AgentProfile#EXECUTOR run 执行体}＝executor 槽位库技能（安装技能的
  * 主消费槽位——编码方法论等）；</li>
- * <li>{@link AgentProfile#DESIGNER 设计执行体}＝designer 槽位库技能（#289 技能
- * 指派进槽位；hasShell=false——scripts 结构性不发放，a-only 同主智能体）；</li>
- * <li>{@code verify}（子智能体槽当前唯一实例，键见 {@link
- * ProfileSubagentSupplier#VERIFY_NAME}）＝subagent 槽位库技能——<b>运行时已
- * 接线</b>（#260 装配一等化：平台工厂构建子智能体时按本键取视图挂载，指派的
- * 启用技能真实出现在验证子智能体技能清单；动态查库同款语义——指派/启停变更
- * 下一轮清单重建即生效）；</li>
  * <li>无配置语境＝空集（无技能挂载即框架不注入 {@code <available_skills>}）。</li>
  * </ul>
  *
- * <p>四个槽位视图实例长生命周期（无状态查库），随容器同生灭。</p>
+ * <p><b>subagent 槽位视图随 #604 退役、#638 技能清场落地</b>：验证子智能体装配
+ * （#260）随委派机制一并拆除，subagent 库技能视图的运行时消费面归零——本供应商
+ * 不再发放 subagent 槽视图（SkillSlot.SUBAGENT 枚举与存量指派数据已由 #638 阶段六
+ * 技能清场删除）。</p>
+ *
+ * <p>各槽位视图实例长生命周期（无状态查库），随容器同生灭。</p>
  */
 @Component
 public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySupplier {
@@ -45,16 +43,12 @@ public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySuppl
     private final AgentSkillRepository builtinSkills;
     private final AgentSkillRepository mainLibrary;
     private final AgentSkillRepository executorLibrary;
-    private final AgentSkillRepository designerLibrary;
-    private final AgentSkillRepository subagentLibrary;
 
     public ProfileSkillRepositorySupplier(BuiltinSkillCatalog builtinSkillCatalog,
             SkillStore skillStore) {
         this.builtinSkills = new BuiltinCatalogSkillRepository(builtinSkillCatalog);
         this.mainLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.MAIN);
         this.executorLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.EXECUTOR);
-        this.designerLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.DESIGNER);
-        this.subagentLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.SUBAGENT);
     }
 
     @Override
@@ -66,12 +60,6 @@ public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySuppl
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)) {
             return List.of(executorLibrary);
-        }
-        if (AgentProfile.DESIGNER.key().equals(agentKey)) {
-            return List.of(designerLibrary);
-        }
-        if (ProfileSubagentSupplier.VERIFY_NAME.equals(agentKey)) {
-            return List.of(subagentLibrary);
         }
         return List.of();
     }

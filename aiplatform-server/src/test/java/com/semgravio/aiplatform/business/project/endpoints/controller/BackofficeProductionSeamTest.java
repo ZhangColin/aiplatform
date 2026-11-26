@@ -60,7 +60,7 @@ class BackofficeProductionSeamTest {
     void given_handoff_when_detail_update_advance_flag_then_all_green_via_signed_http()
             throws Exception {
         Long projectId = projectRepository.save(Project.create("承接 seam 项目" + WORKSPACE_SEQ.get(),
-                null, null, WORKSPACE_SEQ.incrementAndGet(), 1L, null)).getId();
+                null, WORKSPACE_SEQ.incrementAndGet(), 1L, null)).getId();
         projectIds.add(projectId);
         handoffAppService.createForKickoff(projectId, 900600L);
         String base = "/api/backoffice/projects/" + projectId + "/production-handoff";
@@ -120,7 +120,7 @@ class BackofficeProductionSeamTest {
     @Test
     void given_unsigned_request_when_detail_then_rejected_by_signature_gate() throws Exception {
         Long projectId = projectRepository.save(Project.create("承接 seam 无签名项目",
-                null, null, WORKSPACE_SEQ.incrementAndGet(), 1L, null)).getId();
+                null, WORKSPACE_SEQ.incrementAndGet(), 1L, null)).getId();
         projectIds.add(projectId);
 
         mockMvc.perform(get("/api/backoffice/projects/" + projectId + "/production-handoff"))

@@ -26,8 +26,8 @@ import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapt
  * 的业务正本路径，docker exec 覆盖写——修订再执行即更新）+ 回调
  * {@link PrdArtifactAdapter#onWritten}（置「PRD 已产出」状态位 + 发 document-updated
  * ——#542 首建派发门：#462 的首产自动派发回调整段退役，落盘只登记事实、点火归
- * 用户）+ 修订事实登记（{@link PrdRevisionFacts}——summary 必传，平台从工具调用
- * 事实观测「改没改、改了什么」入交接物，#52）+ <b>快道事实登记</b>（
+ * 用户）+ 失败事实登记（{@link PrdRevisionFacts}——落盘/登记失败留痕，访谈期悬空
+ * 补救的命名依据；修订摘要观测随旧迭代受理链退场，#625）+ <b>快道事实登记</b>（
  * {@link FastLaneFacts}——{@code fastLane=true} 即快道收口〔用户明确收敛令/付费
  * 「直接开始做」视同确认〕，收口观测直派首个构建、不出卡不确认；缺席＝自然收口，
  * 试用态出岔路口三选卡、付费态确认门在场——#542，ADR-0048/0049）+ <b>五问承诺闸</b>
@@ -35,7 +35,7 @@ import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapt
  * 用户收敛令即拒，拒因模型可见、不落盘不置位；2026-11-17 用户裁决：「已答 N/5」
  * 是明示承诺，除非用户明确不要否则问满）。
  * 落盘/回调任一失败回错误结果（模型
- * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_edit 必调哲学）。
+ * 可见，可再次调用重试）；summary 漏传校验报错逼补（必填校验哲学——同旧 finish_edit 必调先例，该工具已随 #604 退役）。
  *
  * <p>无需用户确认（权限自检恒放行）：PRD 产出是访谈协议的预期终点，保存动作本身
  * 不设工具点确认——去门化（#462）后产出不再自动进入生成（#542 派发门：快道直派、
@@ -86,7 +86,7 @@ public class SavePrdTool extends ToolBase {
                         + "完整 PRD markdown 全文（结构与写法遵循 prd-writing 技能）；"
                         + "summary 传本轮说明（markdown 变更说明——修订：改了什么、覆盖"
                         + "哪些意见；首次产出：PRD 覆盖了什么——界面层按 markdown 渲染"
-                        + "呈现，勿出源码记号）——必传，平台经此观测修订事实；fastLane "
+                        + "呈现，勿出源码记号）——必传；fastLane "
                         + "仅在用户明确下了收敛令（「不用再问了/直接出 PRD/直接开始做」"
                         + "——试用态未问满五问时唯一合法的提前收口形）或付费态「直接开始"
                         + "做」视同确认时传 true——平台直接开始生成、不出岔路口卡；问满"
@@ -173,7 +173,8 @@ public class SavePrdTool extends ToolBase {
             return Mono.just(ToolResultBlock.error("PRD 已写入但业务登记失败，可重试保存: "
                     + e.getMessage()));
         }
-        prdRevisions.record(workspaceId, String.valueOf(summary));
+        // 成功落盘即清同轮失败事实（重试成功＝PRD 终究成了；失败腿供访谈期悬空补救）
+        prdRevisions.clearFailure(workspaceId);
         if (fastLane) {
             fastLaneFacts.record(workspaceId);
         }

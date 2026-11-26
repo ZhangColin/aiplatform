@@ -54,10 +54,10 @@ describe("BalanceReminderCard · 余额提醒卡（#537 计费③段间硬门）
     expect(html).toContain("data-balance-reminder-recharge"); // 充值引导照常在
   });
 
-  it("车道文案分岔：咨询称「咨询」、作用域改稿称「设计改稿」", () => {
+  it("车道文案分岔：咨询称「咨询」、意见称「修改意见」", () => {
     expect(render(message({ lane: "INQUIRY", prompt: "地址是什么" })))
       .toContain("被拦下的咨询");
-    expect(render(message({ lane: "DESIGN_REVISION", prompt: "改大气些", designItem: 2 })))
-      .toContain("被拦下的设计改稿");
+    expect(render(message({ lane: "OPINION", prompt: "改大气些" })))
+      .toContain("被拦下的修改意见");
   });
 });

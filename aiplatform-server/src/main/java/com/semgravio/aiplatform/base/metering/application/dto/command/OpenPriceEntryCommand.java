@@ -14,7 +14,7 @@ import com.semgravio.aiplatform.base.metering.domain.enums.TokenKind;
  * 开行）。字段合法性由聚合守卫裁决（METER_004/METER_010），不在命令层重复
  * 校验——同 {@code RepricePriceEntryCommand} 形制。
  *
- * @param provider      模型提供方
+ * @param provider      供应商（vendor，ADR-0053 ②——单价匹配挂事件 vendor 腿；存量行通道键同值）
  * @param model         模型
  * @param tokenKind     档位（契约 Integer code：1=input 2=output 3=cache_read
  *                      4=cache_write 5=reasoning 6=image〔按张，#288〕，TokenKind 房规）

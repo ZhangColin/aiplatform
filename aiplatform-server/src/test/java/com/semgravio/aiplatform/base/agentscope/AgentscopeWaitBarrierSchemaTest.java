@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 
 import io.agentscope.core.message.ToolResultBlock;
@@ -238,55 +237,19 @@ class AgentscopeWaitBarrierSchemaTest {
         assertThat(stub.calls).hasSize(1);
     }
 
-    // ---------- 缝 D：子智能体真构建接线（mock 模型，无需通道 key） ----------
-
-    @Test
-    void given_child_built_when_final_toolkit_then_wait_schema_relaxed(
-            @TempDir Path tempDir) throws Exception {
-        // 接线守护：框架 build() 在子级工具面合并后整体注册内置件（含
-        // wait_async_results）——构建收口后平台覆写必须已生效（校验面与模型面
-        // 同源 AgentTool.getParameters()，一覆两得）
-        SubagentDeclaration noAllowlist = SubagentDeclaration.builder()
-                .name("verify")
-                .description("probe")
-                .inlineAgentsBody("probe body")
-                .build();
-        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                noAllowlist, new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
-                new Toolkit(), (agentKey, workspace, toolSpec) -> new Toolkit(),
-                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("verify");
-
-        try {
-            AgentTool waitTool = child.getToolkit().getTool(WAIT_TOOL);
-            assertThat(waitTool).as("空 allowlist 声明＝全放行，内置件应在面").isNotNull();
-            assertThat(requiredOf(waitTool)).doesNotContain(TIMEOUT_PARAM);
-        } finally {
-            child.close();
-        }
-    }
-
-    // ---------- 缝 E：主装配真构建接线（需通道 key，同既有口径 assumption） ----------
-
-    /** 主通道真构建语境（同 AgentscopeHarnessAgentFactoryTest 口径）。 */
-    private static void requireVolcengineKey() {
-        assumeTrue(System.getenv("VOLCENGINE_API_KEY") != null
-                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
-                "无 VOLCENGINE_API_KEY，跳过真构建断言（主通道 volcengine，#369）");
-    }
+    // ---------- 缝 E：主装配真构建接线（通道件携假 key——构建不触网，无环境腿） ----------
+     // （缝 D 子智能体真构建接线随 #604 subagentFactory 一并退役）
 
     @Test
     void given_real_build_when_built_then_wait_schema_relaxed() {
         // 主装配（obtain → buildAgent）接线守护：全部形态构建后内核件 schema 已覆写
-        requireVolcengineKey();
-        VolcengineModelRegistrar.register();
+        // （同 AgentscopeHarnessAgentFactoryTest 口径：SDK 内置 deepseek provider＋假 key 通道）
+        ModelChannel channel = new ModelChannel("https://api.deepseek.com", "sk-test-factory", false);
         EdgeModelSupplier.EdgeModel flash = new EdgeModelSupplier.EdgeModel(
-                "volcengine:deepseek-v4-flash-ga-260731",
-                new ModelChannel("https://ark.cn-beijing.volces.com/api/v3",
-                        System.getenv("VOLCENGINE_API_KEY"), false));
+                "deepseek:deepseek-flash", channel);
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), (agentKey, workspace, toolSpec) -> new Toolkit(),
-                (agentKey, workspace) -> List.of(), (agentKey, workspace) -> List.of(),
+                (agentKey, workspace) -> List.of(),
                 (agentKey, workspace) -> List.of(),
                 new EdgeModelSupplier() {
                     @Override
@@ -294,22 +257,11 @@ class AgentscopeWaitBarrierSchemaTest {
                         return flash;
                     }
 
-                    @Override
-                    public EdgeModel precheckModel() {
-                        return flash;
-                    }
-
-                    @Override
-                    public EdgeModel subagentModel() {
-                        return null;
-                    }
-                }, new AgentscopeProperties());
+                }, new AgentscopeProperties(), null);
 
         HarnessAgent agent = factory.obtain("platform-agent-wait", "sys",
-                "volcengine:deepseek-v4-flash-ga-260731",
-                new ModelChannel("https://ark.cn-beijing.volces.com/api/v3",
-                        System.getenv("VOLCENGINE_API_KEY"), false),
-                new AgentWorkspace.Local(null), null, null);
+                "deepseek:deepseek-flash", channel,
+                null, new AgentWorkspace.Local(null), null, null);
 
         try {
             AgentTool waitTool = agent.getToolkit().getTool(WAIT_TOOL);

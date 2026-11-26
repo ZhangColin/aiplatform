@@ -53,7 +53,7 @@ import reactor.core.scheduler.Schedulers;
  * 压缩链全真）＋脚本化模型（{@link MeteredModel} 包装的最底层替身，流从
  * boundedElastic 发信号＝真实 HTTP 异步边界的形态）——converse 整链上<b>每次</b>
  * 模型调用都进当轮计量，逐条对账（usage 事件条数＝模型流数、seq 逐调用递增、
- * model 档位各自归位）。与 {@link AgentscopeAgentClientTest} 的脚本事件流形态
+ * model 配置各自归位）。与 {@link AgentscopeAgentClientTest} 的脚本事件流形态
  * （stub agent 同线程同步吐事件）互补：本类钉「真实订阅链装配线程不定」的计量
  * 传递形态（ThreadLocal 装配态读取在该形态下静默漏计——只计首个模型流的现场
  * 取证即此形态，绿测＝能跑教训的防回归面）。
@@ -93,7 +93,7 @@ class AgentscopeMeteringReconcileTest {
         properties.setDefaultSystemPrompt("你是平台智能体。");
         properties.setTimeout(Duration.ofSeconds(60));
         client = new AgentscopeAgentClient(factory, properties, workspaceLifecycleAppService,
-                inMemoryStateStore(), sink, new LandedFileFacts(), CLOCK);
+                inMemoryStateStore(), sink, CLOCK);
     }
 
     /**
@@ -155,7 +155,7 @@ class AgentscopeMeteringReconcileTest {
     /**
      * 验收锚点（#324 压缩链跨线程）：工具轮后压缩触发——压缩摘要模型流（框架
      * onReasoning 中间件内直调，装配线程＝第 1 流信号线程）与主循环后续流都计量，
-     * 且压缩模型与主模型档位各自归位（不并桶）。
+     * 且压缩模型与主模型配置各自归位（不并桶）。
      */
     @Test
     void given_compaction_triggered_mid_run_when_converse_then_compaction_stream_metered() {
@@ -175,6 +175,10 @@ class AgentscopeMeteringReconcileTest {
                         .triggerMessages(3)
                         .keepTokens(1)
                         .flushBeforeCompact(false)
+                        // 压缩前 offload 关停——与平台工厂 compactionConfig 同形（#379）。框架缺省
+                        // 开：把被逐消息经 SessionTree 落盘到工作区根，Windows 上与本例 @TempDir
+                        // 清理竞态（#553 起已知的全量偶发红，#599 修）
+                        .offloadBeforeCompact(false)
                         .model(MeteredModel.wrap(compactionModel, "deepseek:deepseek-v4-flash"))
                         .build())
                 .build());
@@ -233,7 +237,7 @@ class AgentscopeMeteringReconcileTest {
 
     /** 真实 HarnessAgent 挂进工厂 stub（模型＝MeteredModel 包装的脚本模型）。 */
     private void mountAgent(HarnessAgent agent) {
-        when(factory.obtain(any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
     }
 
     private HarnessAgent.Builder agentBuilder(Model model) {

@@ -5,20 +5,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
-import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
 import com.cartisan.core.exception.ApplicationException;
 
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.semgravio.aiplatform.base.agentscope.FileChange;
 import com.semgravio.aiplatform.base.agentscope.RunHeading;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
-import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.business.billing.application.BalanceGateAppService;
 import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.domain.enums.SegmentType;
-import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
@@ -27,474 +26,353 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 迭代编排（#26 迭代环① → #43 链必达收口 → #46 结束工具收口）：需求侧判定内化
- * 主智能体，派发权归平台——意见轮收口（无追问挂起）由 {@link MainAgentAppService}
- * 观测并自动调用本服务派修正 run，不依赖模型自觉调用派发工具（startFixRun 已撤）。
- * 交接物三要素（#52，CONTEXT.md「交接物」）：意见原文清单 + 主智能体的需求侧判定
- * （PRD 改没改、改了什么——{@link PrdRevisionFacts} 从 savePrd 工具调用事实观测）
- * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——执行体重读约定见
- * 配置），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时逐轮
- * 配对全保留——各轮「意见 → 修订说明」一一对应，未修订轮显式占位，#55）。
- * 修正 run 与生成同机制（每次新会话（#114 更新 run 每次新会话）与同工作区——
- * run 执行体在迭代链上上下文有界；知识命中前置注入 / 失败静默重试 / 计量全走
- * 共用尝试环 {@link CoderRunAttempts}）。
+ * 迭代编排（#623 对话面交指令 → 内核重跑；#625 旧迭代受理链拆除后只剩这一条从
+ * 对话面到内核的路径）：对话面把用户说清楚的修改蒸馏成自足指令，经
+ * {@link #handOffModification} 交来——空闲即起一轮内核重跑，在途（含首建在途）
+ * 进平台内存待办、成功收口后合并补派恰好一场；失败/停止不自动补派、待办保留，
+ * 用户重说即触发下一轮（不造第三层重试）。
  *
- * <p><b>收口以 finish_edit 工具事实为准</b>（#46）：执行体判定本轮要不要动系统
- * ——动则修改后报 changed=true+改了什么，不动（纯文档性修订、系统现状已满足等）也
- * 必报 changed=false+原因，判定从工具调用事实观测（{@link FinishEditFacts}），不解析
- * 自由文本。未调用即 run 未正常收口，按既有静默重试/终态机制处理；判定结果
- * （changed 与原因）的呈现归收口扩载权威化（#88 收尾卡判定行）。</p>
+ * <p><b>内核装配形态</b>（#601，ADR-0054/0055）：迭代 run 按生成内核装配形态派发
+ * （{@link CodingRunDispatcher.RunSeat#kernel()}——系统提示权威版本、工具恰四件、
+ * 循环语义中间件、装配键不带 executor 旧中间件）；收尾＝平台侧机器判据双件
+ * （{@link KernelClosingCriteria}：{@code pnpm build} 过＋8081 探活）。</p>
  *
- * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334「小迭代基准＝当前已确认
- * 版本」随停派整段退役，ADR-0039/#450 裁决 A）</b>：范围级新草稿不再停派待确认
- * ——意见轮收口一律受理即派（判定权归主智能体工作协议）；修正 run 以工作区
- * {@code docs/PRD.md} 正本为需求基准（路径引用、执行体重读约定见配置）。原
- * 漂移判定组件 {@code PrdDraftBaseline} 随两消费路径退役一并注销；Demo 类 run
- * 起跑自动记 PRD 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，
- * 版本号＝构建基准序——起跑时的新草稿即成新基准快照），Demo 版本锚捕获读
- * 「最新版」。</p>
- *
- * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（主智能体回复用户「已排入下一轮」）；
- * 当前 run 收口后（无论成败）排空队列、合并为一场修正 run 续派——用户在 run 中
- * 连提多条意见不会被丢弃，也不会每条各烧一场 run。轨道状态（在途标记 + 队列）是
- * 进程内事实，重启即清（run 无表口径）：重启后进行中 run 标失败，用户重新提意见
- * 即重新起轨。</p>
- *
- * <p><b>超限终态恢复出口</b>（#48）：修正 run 重试超限转终态时，终态那场的交接
- * 任务记入 {@link #terminallyFailedHandoffs}（成功收工即清），恢复出口
- * {@link #restartFixRun} 据此重派——交接物沿用、新 runId 随响应回（与新 run 的
- * 链路锚）。仅终态可达：修正在途（进行中/排队中）拒绝 PRJ_025、无终态账（未派过/
- * 已成功/重启丢账）拒绝 PRJ_026——正常流程全自动，不出现任何手动触发，故障态留
- * 最后一条生路。终态收口事件 {@code run-failed} 与终态账同事实点发射（#56）：事件到
- * ⟺ 恢复出口可达——排队合并续派的中途超限不发（轨道仍在途，「重新修改」出口
- * 零闪现）。</p>
- *
- * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归主智能体协议（配置），
- * 平台不设门。</p>
+ * <p><b>PRD 维护</b>（#624）：任务提示要求内核完成改动后把本轮需求并入 PRD 对应
+ * 章节、保持完整文档；平台不写 PRD，收口对比工作区 PRD 与起跑快照，有变化才发
+ * 既有 document-updated。</p>
  */
 @Service
 @Slf4j
 public class IterationAppService {
 
     /**
-     * 重试续作 prompt（修正轨的重试口径；#221 原地修——携带错误现场；#323 重试携
-     * 进展现场——retryScene 为尝试环拼装的错误事实＋已干多久/干到哪的进展事实）：
-     * 同工作区不丢数据、不重做已对的工作，针对上次错误在现有成果上继续修完本轮修正。
+     * 迭代任务提示的 PRD 维护句（#624）：完成改动后把本轮需求并入 PRD 对应章节，
+     * 让 PRD 始终是一份完整文档——需求写进相应位置、不在文末堆积原始意见；内核
+     * 如需保留历史留痕可自行安排，平台不强制固定章节。平台不写 PRD，本文只是
+     * 对内核的任务要求。
      */
-    static String fixRetryPrompt(String retryScene) {
-        return "上一次修正尝试失败。\n" + retryScene + "\n工作区内已完成的成果"
-                + "仍然有效——不要重做已对的工作。请先检查现状（代码、依赖、数据、8081 "
-                + "端口服务是否在跑），针对该错误在现有成果上继续修复、完成本轮修正，"
-                + "直至修正落实、服务在 8081 端口可访问，最后调用 finish_edit 工具收口"
-                + "（动了系统传 changed=true 并说明改了什么；判定无需改动也必须调用，"
-                + "传 changed=false 并说明原因）。";
-    }
+    static final String PRD_MERGE_INSTRUCTION =
+            "\n完成改动后，把本轮需求并入 " + ProjectArtifacts.PRD
+                    + " 的对应章节，让 PRD 始终是一份完整文档（需求写进相应位置、"
+                    + "不在文末堆积原始意见；如需保留改动留痕可自行安排，平台不要求"
+                    + "固定章节）。";
 
-    /**
-     * lint 修轮窄修 prompt（#472 更新轨同盖——#425 收口携 lint 面，修轮在本轨
-     * 真实触发）：窄修四要素经 {@link CoderRunAttempts#lintFixPromptCore} 单源，
-     * 修正轨收口尾句＝finish_edit 事实（同 {@link #fixRetryPrompt} 口径）。
-     * 终验修复轮（TrackFinalVerification）复用本模板——其收口同携 lint 面。
-     */
-    static String lintFixRetryPrompt(String lintRetryScene) {
-        return CoderRunAttempts.lintFixPromptCore("本轮修正", lintRetryScene)
-                + "修完后调用 finish_edit 工具收口（动了系统传 changed=true 并说明改了什么；"
-                + "判定无需改动也必须调用，传 changed=false 并说明原因）。";
-    }
-
-    /** 修正轨会话寻址（#114 更新 run 每次新会话）：runId 逐场换新 → 会话逐场换新，重试续本 run 会话。 */
+    /** 迭代内核会话寻址（#114 更新 run 每次新会话）：runId 逐场换新 → 会话逐场换新。 */
     static String fixSession(Long projectId, String runId) {
-        return CoderRunAttempts.SESSION_PREFIX + projectId + "-fix-" + runId;
+        return CodingRunDispatcher.SESSION_PREFIX + projectId + "-fix-" + runId;
     }
 
     /**
-     * 更新 run 工作消息头部标题（#118）：平台生成（标题来源实施时定——判定跟职责走：
-     * 更新 run 的收口判定归 finish_edit 事实、标题不做自由文本解析），用户语言
-     * 「系统更新」（对应用户面「更新」词条），无切片进度。
+     * 更新 run 工作消息头部标题（#118）：平台生成（判定跟职责走——收口判定归平台
+     * 机器判据双件、标题不做自由文本解析），用户语言「系统更新」（对应用户面
+     * 「更新」词条），无切片进度。
      */
     static final String FIX_TITLE = "系统更新";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
-    private final CoderRunAttempts coderRunAttempts;
-    private final FinishEditFacts finishFacts;
+    private final CodingRunDispatcher codingRunDispatcher;
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
-    private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
-    private final DesignSpecAppService designSpecs;
-    private final DemoVersionAppService demoVersionAppService;
-    private final PrdVersionAppService prdVersionAppService;
+    /** PRD 起跑快照读取与收口变化比对（#624，读工作区 docs/PRD.md 单点）。 */
+    private final ProjectQueryAppService projectQueryAppService;
+    /** 用户面版本自动成版（#626 单轴时间线：探活通过即记录版本）。 */
+    private final ProjectVersionAppService projectVersionAppService;
     private final DemoSeedAppService demoSeed;
-    private final ProofOfOutputGate proofGate;
-    private final VerificationPresenceGate verificationPresence;
-    private final RobustKitLintAppService robustKitLint;
-    private final TrackFinalVerificationAppService finalVerification;
     private final BalanceGateAppService balanceGate;
+    /** 内核收尾判据（#601 接线消费 #597 落位件）：build 过＋8081 探活双件。 */
+    private final KernelClosingCriteria kernelClosingCriteria;
 
-    /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
-    private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
+    /** 对话面在途入待办的轻提示落对话史（刷新/回访不丢，#89 闭史口径）。 */
+    private final ConversationHistoryAppService conversationHistory;
+
+    /** 通知发射（#624：迭代收口 PRD 变化 → document-updated）。 */
+    private final EventsAppService eventsAppService;
+
     /**
-     * 超限终态那场的交接物（projectId → 终态交接物）：恢复出口的重派依据，
-     * 成功收工即清。进程内态与轨道状态同口径——重启丢账，恢复出口 409 指路重提
-     * 意见（既有兜底不变）。
+     * 对话面交指令的待办（#623，projectId → 按到达序待派的自足修改指令）：生成/迭代
+     * run 在途（含首建在途）时先记在此并发轻提示「已记下，下一轮生效」；当前 run
+     * <b>成功</b>收口后由 {@link #drainPendingModificationsAfterSuccess} 合并为恰好
+     * 一场后续 run 补派。失败/停止不自动补派、待办保留，用户重说即触发下一轮。
+     * 进程内态与轨道状态同口径——重启即清，用户重说即恢复。
      */
-    private final Map<Long, FixHandoff> terminallyFailedHandoffs = new ConcurrentHashMap<>();
+    private final Map<Long, List<ModificationHandoffFacts.Instruction>> pendingModifications =
+            new ConcurrentHashMap<>();
+
     /**
-     * 余额闸暂存的修正 intent（#537 段边界余额门，projectId → 被拦交接物）：段
-     * 边界源池≤0 时派发/恢复出口被拦的交接物暂存于此，充值回正经
-     * {@link #drainBalanceBlocked} 自动重派（不手动重试）。进程内锚形态（同
-     * 轨道状态口径）——重启丢账属既有兜底哲学。多场被拦合并暂存（交接物
-     * {@link FixHandoff#merge} 口径——不丢轮）。
+     * 段边界余额闸暂存的对话面修改 intent（#537 计费③口径沿用，projectId → 被拦
+     * 指令集）：源池≤0 时起跑被拦、暂存于此，充值回正经 {@link #drainBalanceBlocked}
+     * 自动重派（不手动重试）。多场被拦按到达序合并（不丢条）。进程内态，重启即清。
      */
-    private final Map<Long, FixHandoff> balanceBlockedFixRuns = new ConcurrentHashMap<>();
+    private final Map<Long, List<ModificationHandoffFacts.Instruction>> balanceBlockedModifications =
+            new ConcurrentHashMap<>();
+
+    /** 对话面交指令在途入待办后的平台轻提示文案（#623，guide-reply 复用）。 */
+    static final String MODIFICATION_QUEUED_NOTICE = "已记下，下一轮生效";
 
     public IterationAppService(ProjectRepository projectRepository,
-            AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
-            FinishEditFacts finishFacts, AgentEventBridge eventBridge,
+            AgentSessionExecutor sessionExecutor, CodingRunDispatcher codingRunDispatcher,
+            AgentEventBridge eventBridge,
             CodingRunTrack codingRunTrack,
-            WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            DesignSpecAppService designSpecs,
-            DemoVersionAppService demoVersionAppService,
-            PrdVersionAppService prdVersionAppService,
+            ProjectQueryAppService projectQueryAppService,
+            ProjectVersionAppService projectVersionAppService,
             DemoSeedAppService demoSeed,
-            ProofOfOutputGate proofGate,
-            VerificationPresenceGate verificationPresence,
-            RobustKitLintAppService robustKitLint,
-            TrackFinalVerificationAppService finalVerification,
-            BalanceGateAppService balanceGate) {
+            BalanceGateAppService balanceGate,
+            KernelClosingCriteria kernelClosingCriteria,
+            ConversationHistoryAppService conversationHistory,
+            EventsAppService eventsAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
-        this.coderRunAttempts = coderRunAttempts;
-        this.finishFacts = finishFacts;
+        this.codingRunDispatcher = codingRunDispatcher;
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
-        this.workspaceLifecycleAppService = workspaceLifecycleAppService;
-        this.designSpecs = designSpecs;
-        this.demoVersionAppService = demoVersionAppService;
-        this.prdVersionAppService = prdVersionAppService;
+        this.projectQueryAppService = projectQueryAppService;
+        this.projectVersionAppService = projectVersionAppService;
         this.demoSeed = demoSeed;
-        this.proofGate = proofGate;
-        this.verificationPresence = verificationPresence;
-        this.robustKitLint = robustKitLint;
-        this.finalVerification = finalVerification;
         this.balanceGate = balanceGate;
+        this.kernelClosingCriteria = kernelClosingCriteria;
+        this.conversationHistory = conversationHistory;
+        this.eventsAppService = eventsAppService;
     }
 
     /**
-     * 派修正任务（意见轮收口的平台自动派发入口，#43 链必达）：修正 run 空闲即
-     * 起跑（runId 随派发生成，过程事件经 SSE）；在途则排入队列、当前 run 收口后
-     * 合并续派。交接物三要素中的需求侧判定随派发携带：{@code prdRevisionSummary}
-     * = 主智能体轮 savePrd 的 summary 终值（null = 本轮未修订）。
+     * 对话面交指令（#623，ADR-0056 修改交接的唯一出口）：对话面把已说清楚的修改
+     * 蒸馏成自足指令后交来本方法——<b>空闲即起一轮内核重跑</b>；有 run 在途
+     * （含首建在途、或首建失败尚未生成的空闲态）<b>进平台内存待办</b>并发一条
+     * 轻提示「已记下，下一轮生效」（guide-reply 复用），当前生成不打断。当前 run
+     * <b>成功</b>收口后由 {@link #drainPendingModificationsAfterSuccess} 合并为一场
+     * 后续 run 补派；失败/停止不自动补派、待办保留，用户重说即触发下一轮。
      *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
-     *                              PRJ_019 系统从未生成（迭代在首次生成完成后
-     *                              才开始——意见收口侧对未生成项目静默止于对话，
-     *                              此处守卫兜其余调用面）
+     * <p><b>段边界余额门照旧</b>（#537 计费③，ADR-0047）：起跑前源池≤0 拦下暂存
+     * 并推余额提醒卡，充值回正自动重派（同 {@link #drainBalanceBlocked}）；在途被
+     * 排队的指令等到真正起跑时再查门。待办是进程内态，平台重启即清——用户重说
+     * 即恢复。</p>
+     *
+     * @param dialogRunId 对话面本轮 runId（在途轻提示的对话面锚；空闲直接起跑时
+     *                    仅为回执锚，不需提示）
      */
-    public FixDispatch startFixRun(Long projectId, String task, String prdRevisionSummary) {
-        Project project = requireFixableProject(projectId);
-        return dispatch(project, new FixHandoff(
-                List.of(new FixHandoff.Round(task.strip(), prdRevisionSummary))));
+    public void handOffModification(Project project,
+            List<ModificationHandoffFacts.Instruction> instructions, String dialogRunId) {
+        if (instructions == null || instructions.isEmpty()) {
+            return;
+        }
+        Long projectId = project.getId();
+        boolean queued = false;
+        synchronized (codingRunTrack) {
+            // 同一临界区内取最新项目事实（对话轮可能跨过首建收口瞬间：陈旧快照会把
+            // 「刚生成完、轨道已释放」误记为未生成而滞留待办——排空钩子已经跑过，
+            // 无人再来取）。取舍：一次主键 SELECT 在轨道锁内，换零滞留窗口。
+            Project current = projectRepository.findById(projectId).orElse(project);
+            if (current.getArchivedAt() != null) {
+                log.info("[modify] 项目 {} 已归档，对话面交指令不收（修改出口关闭）", projectId);
+                return;
+            }
+            // 在途（含首建点火在途）或尚未生成（首建失败空闲态）——进待办：
+            // 前者当前 run 不打断、成功收口后补派；后者待首建成功收口后作第一轮
+            // 迭代补派（首建失败后待办保留，重新点火成功即补派）
+            if (codingRunTrack.isInFlight(projectId) || current.getGeneratedAt() == null) {
+                pendingModifications.computeIfAbsent(projectId, key -> new ArrayList<>())
+                        .addAll(instructions);
+                queued = true;
+            }
+        }
+        if (queued) {
+            log.info("[modify] 项目 {} run 在途（或未生成），修改指令入待办 {} 条（成功收口后"
+                    + "合并补派，对话轮锚 {}）", projectId, instructions.size(), dialogRunId);
+            notifyModificationQueued(project, dialogRunId);
+            return;
+        }
+        dispatchModification(project, instructions, dialogRunId);
     }
 
     /**
-     * 携完整交接物的修正派发（#360 首 Demo 在途意见的排空口）：与
-     * {@link #startFixRun} 同守卫同轨道，差异只在交接物粒度——多轮意见由调用方
-     * 逐轮配对成 {@link FixHandoff}（首 Demo 在途期间收口的各意见轮，生成收口后
-     * 合并为一场更新 run 补派）；在途口径同款（修正 run 在途即排队进
-     * {@link #queuedFixRuns}，那场收口排空时自然合并——竞态零丢失）。
+     * 当前 run 成功收口后的待办排空（#623）：首建成功（{@code generated_at} 已落）
+     * 或迭代 run 成功后由轨道调用——待办非空且当前无 run 在途，即合并为恰好一场
+     * 后续 run 补派（多轮指令合并进同一场，不逐条烧 run）。失败/停止不调用本
+     * 方法（待办保留，用户重说即触发下一轮)；未生成（首建失败/停止）直接返回。
      */
-    FixDispatch startFixRun(Long projectId, FixHandoff handoff) {
-        Project project = requireFixableProject(projectId);
-        return dispatch(project, handoff);
-    }
-
-    /**
-     * 修正 run 超限终态的恢复出口（#48）：重派终态那场的交接物（交接物沿用、
-     * 每次新会话，#114），新 runId 随响应回——与新 run 的链路锚（同
-     * {@code /generate} 口径），重派事实落日志可追溯。仅终态可达：修正在途（进行
-     * 中/排队中）PRJ_025；无终态账（未派过修正/已成功收工/重启丢账）PRJ_026；
-     * 归档/未生成守卫同 {@link #startFixRun}。
-     */
-    public FixDispatch restartFixRun(Long projectId) {
-        Project project = requireFixableProject(projectId);
-        FixHandoff handoff;
-        String firstRunId;
+    public void drainPendingModificationsAfterSuccess(Long projectId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null || project.getArchivedAt() != null || project.getGeneratedAt() == null) {
+            return; // 未成功收口（首建失败/停止）或已归档——待办保留
+        }
+        List<ModificationHandoffFacts.Instruction> pending;
         synchronized (codingRunTrack) {
             if (codingRunTrack.isInFlight(projectId)) {
-                throw new ApplicationException(ProjectMessage.FIX_RESTART_IN_FLIGHT);
+                return; // 仍有 run 在途——等那场成功收口再排空（不并发起轨）
             }
-            handoff = terminallyFailedHandoffs.get(projectId);
-            if (handoff == null) {
-                throw new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE);
-            }
-            // 段边界余额门（#537 计费③）：恢复出口同守段间硬门——欠费不空翻终态账
-            // （PRJ_026 账保留），交接物转余额闸暂存（充值回正 drainBalanceBlocked
-            // 自动重派〔不手动重试〕），BILL_025 指路充值
-            BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
-            if (gate.blocked()) {
-                terminallyFailedHandoffs.remove(projectId, handoff);
-                balanceBlockedFixRuns.merge(projectId, handoff,
-                        (oldHeld, newHeld) -> FixHandoff.merge(List.of(oldHeld, newHeld)));
-                String blockedRunId = EventsAppService.newRunId();
-                eventBridge.emitBalanceReminder(project,
-                        BalanceReminderAppService.BalanceReminderCard.forRunBlock(
-                                gate.blockedBalanceFen(), blockedRunId));
-                log.info("[fix] 项目 {} 余额提醒（run 场）：恢复出口被拦，交接物已暂存，充值回正自动重派",
-                        projectId);
-                throw new ApplicationException(BillingMessage.BALANCE_BLOCKED);
-            }
-            terminallyFailedHandoffs.remove(projectId);
-            codingRunTrack.begin(projectId);
-            firstRunId = EventsAppService.newRunId();
+            pending = pendingModifications.remove(projectId);
         }
-        log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接 {} 轮，源自超限终态）",
-                projectId, firstRunId, handoff.rounds().size());
-        beginFixTrack(project, firstRunId, handoff);
-        return new FixDispatch(firstRunId, false);
-    }
-
-    /** 修正派发结果（起跑 runId / 是否排入下一轮）。 */
-    public record FixDispatch(String runId, boolean queued) {
-    }
-
-    /**
-     * 修正 run 交接物（#52，CONTEXT.md「交接物」）：需求侧收口后交给修正的任务
-     * 载体——逐轮配对的「意见原文 → 该轮判定结果」（{@link Round}，#55）：一轮
-     * 派发一条意见一份判定，配对关系由平台代码在拼装时锚定，不依赖意见清单与
-     * 说明清单的位置对齐——某轮零修订不再引起后续轮错位。summary null = 该轮
-     * 无 savePrd 调用事实（即未修订；占位呈现归 {@link #fixRunPrompt}）。PRD
-     * 引用不随物携带（路径固定 {@link ProjectArtifacts#PRD}，prompt 拼装时引用）。
-     */
-    record FixHandoff(List<Round> rounds) {
-
-        /** 一轮派发的一条交接：意见原文 + 该轮 PRD 修订说明（null = 该轮未修订）。 */
-        record Round(String opinion, String prdRevisionSummary) {
+        if (pending == null || pending.isEmpty()) {
+            return;
         }
-
-        /** 排队合并：各轮按派发序成对串联（#55 逐轮配对）——跨轮各轮的判定
-         * 描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、B 轮在其上再改 Y），只留
-         * 最新会让修正侧漏掉早期轮的需求侧变更（#53）；未修订轮不丢不串位
-         * （null 槽保留轮位，占位呈现归 prompt 拼装）——丢轮即后续全部错位。
-         * 同轮多次 savePrd 的「取终值」在捕获层（{@link PrdRevisionFacts}
-         * 后写胜出）处理，不在此层。 */
-        static FixHandoff merge(List<FixHandoff> handoffs) {
-            return new FixHandoff(handoffs.stream()
-                    .flatMap(handoff -> handoff.rounds().stream())
-                    .toList());
-        }
+        log.info("[modify] 项目 {} 前一场 run 成功收口，排空待办修改指令 {} 条合并补派一轮",
+                projectId, pending.size());
+        dispatchModification(project, pending, null);
     }
 
     // ---------- 内部 ----------
 
-    /** 迭代态守卫：未归档 / 已生成（修正 run 的对象是已生成的系统）。 */
-    private Project requireFixableProject(Long projectId) {
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
-        if (project.getArchivedAt() != null) {
-            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
-        }
-        if (project.getGeneratedAt() == null) {
-            throw new ApplicationException(ProjectMessage.FIX_RUN_NOT_GENERATED);
-        }
-        return project;
-    }
-
-    /** 迭代态守卫过后的派发：空闲即起跑，在途即排队。 */
-    private FixDispatch dispatch(Project project, FixHandoff handoff) {
+    /**
+     * 对话面修改批次的派发（空闲入口与成功排空共用）：段边界余额门 → 与残留待办
+     * 合并 → 占轨起跑。占轨失败（收口窗口内别处已起跑）即连同已取出的残留待办一起
+     * 回填待办，并给对话轮补轻提示——零丢失；那场 run 成功收口后再排空。
+     */
+    private void dispatchModification(Project project,
+            List<ModificationHandoffFacts.Instruction> incoming, String dialogRunId) {
         Long projectId = project.getId();
-        // 段边界余额门（#537 计费③，ADR-0047 段间硬门）：修正 run 起跑前查门——
-        // 源池≤0 拦下暂存（多场被拦合并不丢轮）＋余额提醒卡直达对话面（显负额＋
-        // 充值入口），充值回正经 drainBalanceBlocked 自动重派（不手动重试）；试用
-        // 恒放行。段内绝不检查绝不中断——本门只在此（段起跑前）被消费。
         BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
         if (gate.blocked()) {
-            balanceBlockedFixRuns.merge(projectId, handoff,
-                    (oldHeld, newHeld) -> FixHandoff.merge(List.of(oldHeld, newHeld)));
-            String runId = EventsAppService.newRunId();
+            balanceBlockedModifications.merge(projectId, new ArrayList<>(incoming),
+                    (held, fresh) -> {
+                        held.addAll(fresh);
+                        return held;
+                    });
+            String blockedRunId = EventsAppService.newRunId();
             eventBridge.emitBalanceReminder(project,
                     BalanceReminderAppService.BalanceReminderCard.forRunBlock(
-                            gate.blockedBalanceFen(), runId));
-            log.info("[fix] 项目 {} 余额提醒（run 场）：修正 intent 已暂存，充值回正自动重派",
+                            gate.blockedBalanceFen(), blockedRunId));
+            log.info("[modify] 项目 {} 余额提醒（run 场）：对话面修改 intent 已暂存，充值回正自动重派",
                     projectId);
-            return new FixDispatch(runId, false);
+            return;
         }
-        String firstRunId;
+        List<ModificationHandoffFacts.Instruction> batch = new ArrayList<>();
+        String firstRunId = null;
         synchronized (codingRunTrack) {
+            List<ModificationHandoffFacts.Instruction> retained =
+                    pendingModifications.remove(projectId);
+            if (retained != null) {
+                batch.addAll(retained);
+            }
+            batch.addAll(incoming);
             if (!codingRunTrack.begin(projectId)) {
-                queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).add(handoff);
-                return new FixDispatch(null, true);
+                pendingModifications.merge(projectId, batch, (existing, fresh) -> {
+                    List<ModificationHandoffFacts.Instruction> merged = new ArrayList<>(existing);
+                    merged.addAll(fresh); // 保持到达序：先前待办在前
+                    return merged;
+                });
             }
-            firstRunId = EventsAppService.newRunId();
+            else {
+                firstRunId = EventsAppService.newRunId();
+            }
         }
-        beginFixTrack(project, firstRunId, handoff);
-        return new FixDispatch(firstRunId, false);
+        if (firstRunId == null) {
+            log.info("[modify] 项目 {} 轨道在收口窗口被占用，修改指令回填待办（成功收口后补派）",
+                    projectId);
+            notifyModificationQueued(project, dialogRunId);
+            return;
+        }
+        log.info("[modify] 项目 {} 起一轮修改 run（{} 条指令合并，runId={}）", projectId,
+                batch.size(), firstRunId);
+        submitModificationTrack(project, firstRunId, batch);
     }
 
     /**
-     * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
-     * 余额闸暂存的修正 intent 逐项目重派（触发时门已过〔入账事件〕，重派自然再守
-     * 全守卫与在途口径）。重派失败（项目已归档等）intent 丢弃并记日志——用户重提
-     * 即新段（段边界门判定自然接管）。入账事件（AFTER_COMMIT 监听）触发。
+     * 在途入待办的平台轻提示（#623，guide-reply 复用型）：同步落对话史（刷新回访
+     * 不丢）＋发 guide-reply 事件（锚对话面本轮 runId，prompt 不携带——用户气泡已
+     * 自落，平台只补回执一条）。发射失败只记日志不反噬待办事实；无对话轮锚（成功
+     * 排空路径）不提示。
      */
-    public void drainBalanceBlocked() {
-        for (Map.Entry<Long, FixHandoff> entry : balanceBlockedFixRuns.entrySet()) {
-            Long projectId = entry.getKey();
-            if (balanceGate.assess(projectId).blocked()) {
-                continue; // 未回正——暂存保持待下一次入账（入账的可能是别项目的池）
-            }
-            if (!balanceBlockedFixRuns.remove(projectId, entry.getValue())) {
-                continue; // 并发已被排空——不重复重派
-            }
-            try {
-                Project project = projectRepository.findById(projectId)
-                        .orElseThrow(() -> new ApplicationException(
-                                ProjectMessage.PROJECT_NOT_FOUND));
-                FixHandoff handoff = entry.getValue();
-                log.info("[fix] 项目 {} 余额回正：暂存修正 intent 自动重派（交接 {} 轮）",
-                        projectId, handoff.rounds().size());
-                dispatch(project, handoff);
-            }
-            catch (RuntimeException e) {
-                log.warn("[fix] 项目 {} 余额回正排空重派失败（intent 丢弃，重提即新段）：{}",
-                        projectId, e.toString());
-            }
+    private void notifyModificationQueued(Project project, String dialogRunId) {
+        if (dialogRunId == null) {
+            return;
+        }
+        try {
+            conversationHistory.recordGuideNotice(project.getId(), dialogRunId,
+                    MODIFICATION_QUEUED_NOTICE);
+            eventBridge.emitGuideReply(project, dialogRunId, /* prompt= */ null,
+                    DispatchAppService.GUIDE_LABEL, MODIFICATION_QUEUED_NOTICE);
+        }
+        catch (RuntimeException e) {
+            log.warn("[modify] 项目 {} 在途修改回执发射失败（不反噬待办）：{}",
+                    project.getId(), e.toString());
         }
     }
 
+    /** 修改轨道提交（异步，同执行器/停止登记面）。 */
+    private void submitModificationTrack(Project project, String firstRunId,
+            List<ModificationHandoffFacts.Instruction> firstBatch) {
+        Future<?> trackTask = sessionExecutor.submitGeneration(
+                CodingRunDispatcher.SESSION_PREFIX + project.getId(),
+                () -> {
+                    try {
+                        runModificationTrack(project, firstRunId, firstBatch);
+                    }
+                    catch (RunShutdownException e) {
+                        // 关停收口（#477）：排队残局是进程内态（重启即清），在途场保持
+                        // 待跑（中断可续跑态，不发终态事件）
+                        log.info("[modify] 项目 {} 修改轨道因平台关停中断（runId={}）——待办保留",
+                                project.getId(), e.runId());
+                    }
+                });
+        codingRunTrack.registerTask(project.getId(), trackTask);
+    }
+
     /**
-     * 修正轨道（异步轨道内）：当前任务跑完（含重试超限）后排空队列——有排队任务
-     * 即合并为一场修正 run 续跑，队列空即收工。收工时按末场成败结算终态账（#48）：
-     * 超限终态即记下该场交接物（恢复出口 {@link #restartFixRun} 的重派依据），
-     * 成功即清账（正常态无恢复面）。
-     *
-     * <p><b>在途标记的释放在两处，各自唯一负责一种收场</b>：正常收工在排空块
-     * 内——「查队列空 + 清标记」同一临界区，起跑侧的 add 也在同锁内分岔，任务
-     * 要么赶在本轨道收工前并入合并、要么在收工后自起新轨，不滞留；异常收场
-     * （轨道任务本身炸，会话执行器吞掉记日志）在 finally——此时标记自 add 起一
-     * 直属于本轨道，直接清不会误伤（{@code released} 防的正是「正常收工后继任
-     * 轨道已 add、旧 finally 再盲清一次」的双释放）。</p>
+     * 修改轨道（#623）：整场内核重跑至收尾判据双件全过（同生成轨装配、同收口
+     * 回调）。成功后若待办非空，合并为<b>恰好一场</b>后续 run 续派（多轮待办合并，
+     * 不逐条烧 run）；失败/停止即终态——不自动补派、待办保留（用户重说即新一轮，
+     * 不造第三层重试）。
      */
-    private void runFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
+    private void runModificationTrack(Project project, String firstRunId,
+            List<ModificationHandoffFacts.Instruction> firstBatch) {
         Long projectId = project.getId();
-        // 本轨收口判定从零起算：上一轨/生成 run 的事实残留不进本轨（#46）
-        finishFacts.clear(Long.toString(project.getWorkspaceId()));
         boolean released = false;
         try {
-            FixHandoff handoff = firstHandoff;
+            List<ModificationHandoffFacts.Instruction> batch = firstBatch;
             String runId = firstRunId;
             while (true) {
-                // 循环内再赋值的局部不进 lambda：本场交接物取逐轮快照（判定行随场）
-                FixHandoff currentHandoff = handoff;
-                // Demo 类 run 起跑自动记行（#462 去门化，ADR-0039）：快照当时工作区
-                // PRD 全文为构建基准（同文幂等跳过）——记行先行，随后锚捕获读到的
-                // 「最新版」即本场基准；best-effort：失败只记日志不反噬本场
+                List<ModificationHandoffFacts.Instruction> current = batch;
+                // 起跑 PRD 快照（#624）：读当时工作区 PRD 全文作收口变化比对基准——
+                // 读不出（未产出/环境故障）保守为 null（收口判未变，不误发通知）
+                String prdBaseline = readPrdBaselineQuietly(projectId, runId);
+                // 迭代版本标签（#626）：本轮修改指令的用户原话（多轮合并展示）
+                String versionLabel = modificationVersionLabel(current);
+                CodingRunDispatcher.RunResult result;
                 try {
-                    prdVersionAppService.recordOnDemoRunStart(projectId, runId);
-                }
-                catch (RuntimeException e) {
-                    log.warn("[fix] 项目 {} run {} 起跑记行失败（不反噬本场）：{}",
-                            projectId, runId, e.toString());
-                }
-                // Demo 版本锚捕获（#333；#462 读法顺延）：本场起跑时最新 PRD 版本——
-                // 在途场照跑完收口绑起跑时版本
-                Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
-                CoderRunAttempts.RunResult result;
-                try {
-                    // 产出证明闸（#420 更新轨同盖）：本场判定件——起跑捕获段起点
-                    //（工作区 HEAD），拒绝史跨尝试累计
-                    ProofOfOutputGate.Checking proof =
-                            proofGate.forRun(project.getWorkspaceId());
-                    result = coderRunAttempts.run(project, runId,
+                    result = codingRunDispatcher.run(project, runId,
                             fixSession(projectId, runId),
-                            new CoderRunAttempts.Prompts(fixRunPrompt(handoff),
-                                    IterationAppService::fixRetryPrompt,
-                                    IterationAppService::lintFixRetryPrompt),
-                            (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
-                                    currentHandoff, prdVersionNo, proof),
-                            "fix", true, CoderRunAttempts.RunSeat.executor(),
-                            RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN);
-                    if (result.succeeded()) {
-                        // #427 更新轨收口后复走整轨终验（防修 A 坏 B）：以现行计划的
-                        // 核心旅程清单为轴复验——fail 自动起终验修复 run 修→复走，
-                        // 预算耗尽已知缺陷随末轮终验收尾卡如实呈现；无旅程轴（存量
-                        // 计划/锚漂）跳过。仍在 try 内：复走途中用户停止走下方停止账
-                        finalVerification.verifyAfterUpdateRun(project);
-                    }
+                            modificationRunPrompt(current),
+                            (attemptRunId, attemptChanges) -> closeKernelFix(project,
+                                    attemptRunId, prdBaseline, versionLabel,
+                                    attemptChanges),
+                            "fix", CodingRunDispatcher.RunSeat.kernel(),
+                            RunHeading.titled(FIX_TITLE), SegmentType.GENERATION_RUN,
+                            /* includePatch= */ true);
                 }
                 catch (RunStoppedException e) {
-                    // 停止收口（#359 生成取消）：失败账口径——本场（＋排队残队的意见
-                    // 合并，意见零丢失）记终态账，「继续更新」恢复出口照常可达；释放
-                    // 与账同临界区（同正常收工口径，不出现「已释放无账」窗口）；
-                    // run-failed(stopped) 与终态账同事实点发射
                     synchronized (codingRunTrack) {
-                        List<FixHandoff> pending = queuedFixRuns.remove(projectId);
-                        FixHandoff stopped = pending == null || pending.isEmpty()
-                                ? currentHandoff
-                                : FixHandoff.merge(Stream.concat(
-                                        Stream.of(currentHandoff), pending.stream()).toList());
-                        terminallyFailedHandoffs.put(projectId, stopped);
                         codingRunTrack.end(projectId);
                         released = true;
                     }
                     eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     return;
                 }
-                // #477 重派上限：通道全死（整场 run 全尝试 llmMs=0——未发生任何真实
-                // 模型调用）的秒败终态不续派排队残局——并入终态账（恢复出口
-                // 「继续更新」一次带走，意见零丢失），不形成「转终态→重派→秒败」
-                // 循环；有真实模型工作的失败不受影响（排队合并续派口径不变）
-                if (!result.succeeded() && CoderRunAttempts.instantTerminalFailure(result.failure())) {
+                if (!result.succeeded()) {
                     synchronized (codingRunTrack) {
-                        List<FixHandoff> pending = queuedFixRuns.remove(projectId);
-                        FixHandoff merged = pending == null || pending.isEmpty()
-                                ? currentHandoff
-                                : FixHandoff.merge(Stream.concat(
-                                        Stream.of(currentHandoff), pending.stream()).toList());
-                        terminallyFailedHandoffs.put(projectId, merged);
                         codingRunTrack.end(projectId);
                         released = true;
                     }
-                    log.info("[fix] 项目 {} 修正 run 通道级秒败终态（全尝试无真实模型调用）——"
-                            + "排队残局并入终态账停派，恢复出口「继续更新」一次带走", projectId);
                     eventBridge.emitRunFailed(project, runId, result.failure());
                     return;
                 }
-                List<FixHandoff> queued;
-                boolean terminalFailure = false;
+                // 成功收口：待办（含收口窗口内新到的交指令）合并为恰好一场后续 run
+                List<ModificationHandoffFacts.Instruction> pending;
+                boolean done;
                 synchronized (codingRunTrack) {
-                    List<FixHandoff> pending = queuedFixRuns.remove(projectId);
-                    queued = pending != null ? pending : List.of();
-                    if (queued.isEmpty()) {
+                    pending = pendingModifications.remove(projectId);
+                    done = pending == null || pending.isEmpty();
+                    if (done) {
                         codingRunTrack.end(projectId);
                         released = true;
-                        // 终态账与释放同临界区结算：恢复出口（同锁内「查在途+取账+占位」）
-                        // 要么见释放前已落的账、要么在收工后自起新轨——不出现「已释放
-                        // 无账」的假 PRJ_026 窗口，也不被先收工的旧轨覆盖
-                        if (result.succeeded()) {
-                            terminallyFailedHandoffs.remove(projectId);
-                        }
-                        else {
-                            terminallyFailedHandoffs.put(projectId, handoff);
-                            terminalFailure = true;
-                        }
                     }
                 }
-                if (queued.isEmpty()) {
-                    if (terminalFailure) {
-                        // 终态收口事件（#56）：与终态账同事实点发射——事件到 ⟺ 恢复出口
-                        // 可达（点击不被 PRJ_025/026 挡回）；排队合并续派的中途超限
-                        // 不发（轨道仍在途，「重新修改」零闪现）。锚 = 该场 run 的
-                        // 用户面标识（首试 runId，#84 重试不换新锚）
-                        eventBridge.emitRunFailed(project, runId, result.failure());
-                    }
+                if (done) {
                     return;
                 }
-                int mergedRounds = queued.stream()
-                        .mapToInt(next -> next.rounds().size()).sum();
-                log.info("[fix] 项目 {} 修正轨道续派（合并 {} 轮排队意见）",
-                        projectId, mergedRounds);
-                handoff = FixHandoff.merge(queued);
+                log.info("[modify] 项目 {} 修改 run 成功收口，合并待办 {} 条续派一场", projectId,
+                        pending.size());
+                batch = pending;
                 runId = EventsAppService.newRunId();
             }
         }
@@ -508,140 +386,153 @@ public class IterationAppService {
     }
 
     /**
-     * 修正收口（#46 + #88 判定行 + #420 产出证明 + #424 验证在场）：以 finish_edit
-     * 工具事实为准——无事实 = run 未正常收口，抛出即该次尝试失败（走共用尝试环的
-     * 静默重试/终态，与生成 8081 核验同口径）；产出证明闸（#420 更新轨同盖）与验证
-     * 在场（#424 片轻验常开——更新轨/fix run 同盖）先于 finish_edit 事实消费——
-     * 零 diff＋无「能力已存在」确认＝结构性拒绝、无验证登记不准收口（拒绝回执喂回
-     * 执行体同 run 补做；拒绝不消费 finish_edit 事实，重试轮事实连续），changed=false
-     * 的合法收口须有豁免依据（验证确认能力已存在——其本身即验证登记，在场自洽）或
-     * 本场实有改动。事实在即返回收口判定的权威事实——系统改没改 = finish_edit 的
-     * changed + 说明，PRD 改没改 = 本场交接物各轮的修订说明（null = 未修订轮；
-     * 排队合并的多轮说明以「；」连缀——判定结果以平台可观测的工具调用事实为准，
-     * 不由模型自报）。changed=false（判定无需改动）的呈现归收口扩载权威化
-     * （#88 收尾卡判定行），本层只记事实日志。
-     *
-     * <p><b>Demo 版本化（#333）</b>：系统实动（changed=true）的收口即迭代轮成版
-     * ——递增插 Demo 版本行、锚本场起跑时最新 PRD 版本；changed=false 无新系统
-     * 状态即无新版本。成版 best-effort：失败记日志不反噬收口判定（版本缺位由下轮
-     * 收口补位，markGenerated 同口径）。</p>
+     * 迭代版本标签（#626）：本轮修改指令的用户原话——多条（合并待办补派）按到达
+     * 序以「；」合并展示；空/全空白回落「更新系统」。
      */
-    private CoderRunAttempts.ClosingJudgment closeFixRun(Project project, String attemptRunId,
-            FixHandoff handoff, Integer prdVersionNo, ProofOfOutputGate.Checking proof) {
-        Map<String, Object> proofAnnotation = proof.proof();
-        verificationPresence.requirePresence(Long.toString(project.getWorkspaceId()));
-        FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
-        if (fact == null) {
-            // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环
-            // 重试；重试超限由轨道层发 run-failed 收口终态（#56）——用户面要么清楚
-            // （成功收口）要么出结果（唯一失败终态）
-            throw new IllegalStateException("修正 run 未以 finish_edit 结束工具收口");
-        }
-        if (!fact.changed()) {
-            log.info("[fix] 项目 {} 修正收口：系统未动（{}）——判定呈现归收口扩载（#88）",
-                    project.getId(), fact.text());
-        }
-        else {
-            try {
-                demoVersionAppService.closeOnIteration(project.getId(), attemptRunId, prdVersionNo);
-            }
-            catch (RuntimeException e) {
-                log.warn("[fix] 项目 {} Demo 版本成版失败（不反噬收口，下轮补位）：{}",
-                        project.getId(), e.toString());
-            }
-        }
-        // 演示种子预置（#340）：迭代收口补位——系统实动后可能有新空表（幂等引擎
-        // 只补空表，未动系统的收口自然空转）；失败不阻断收工。
-        demoSeed.seedSandbox(project);
-        List<String> prdNotes = handoff.rounds().stream()
-                .map(FixHandoff.Round::prdRevisionSummary)
-                .filter(summary -> summary != null && !summary.isBlank())
-                .toList();
-        return CoderRunAttempts.ClosingJudgment.update(
-                !prdNotes.isEmpty(),
-                prdNotes.isEmpty() ? null : String.join("；", prdNotes),
-                fact.changed(),
-                fact.text())
-                // 产出证明判别标注（#420：空转拒绝史／豁免依据——正常干活收口 null 不携带）
-                .withProofOfOutput(proofAnnotation)
-                // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
-                // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
-                .withDesignLint(designSpecs.lintClosingPayload(project))
-                // 基座 lint 两档扫描事实（#425——更新轨同盖：强制档违规修不完＝收口
-                // 被拒（尝试环判定），预置档如实标注不拦收口；存量工作区 null 不携带）
-                .withRobustKitLint(robustKitLint.lintClosingPayload(project.getWorkspaceId()));
+    static String modificationVersionLabel(List<ModificationHandoffFacts.Instruction> instructions) {
+        String merged = instructions.stream()
+                .map(ModificationHandoffFacts.Instruction::userWords)
+                .filter(words -> words != null && !words.isBlank())
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.joining("；"));
+        return ProjectVersionAppService.cleanUserSentence(merged, "更新系统");
     }
 
     /**
-     * 修正任务 prompt：交接物三要素结构化拼装（#52，#55 逐轮配对）——每条意见
-     * 原文后紧跟该轮的需求侧判定（已修订带修订说明、未修订显式「本轮无修订」
-     * 占位——哪条意见被哪轮处理了一目了然，不静默缺席）+ PRD 基准引用 + 收口
-     * 判据复述（8081 常驻 + 结束工具必调）。
-     *
-     * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334 基准两形〔内联已确认
-     * 版/正本引用〕随停派退役收敛为单形）</b>：修正 run 一律以工作区
-     * {@code docs/PRD.md} 正本为准（路径引用、不注全文，执行体重读约定见配置）——
-     * 范围级新草稿照派照跑，记行（构建基准快照）由派发处在起跑时先行完成。</p>
+     * 修改 run 任务提示（#623）：逐条携<b>用户原话＋平台整理的自足修改指令</b>（附件
+     * 定位说明有则附），要求内核在现有工作区完成修改、其余部分保持可用；需求正本
+     * 引用工作区 PRD、收口判据句同内核口径（{@code pnpm build}＋8081 探活双件）。
+     * #624 起追加 PRD 维护句——内核把需求整合进 PRD 对应章节，PRD 恒为完整文档。
      */
-    static String fixRunPrompt(FixHandoff handoff) {
+    static String modificationRunPrompt(List<ModificationHandoffFacts.Instruction> instructions) {
         StringBuilder prompt = new StringBuilder(
-                "系统修正：系统已生成并可操作，用户提出了如下修正意见（每条意见后紧跟"
-                        + "该轮的需求侧判定），请在现有工作区内完成修正（系统的其余部分"
-                        + "保持可用）：");
-        for (int index = 0; index < handoff.rounds().size(); index++) {
-            FixHandoff.Round round = handoff.rounds().get(index);
-            prompt.append("\n").append(index + 1).append(". 意见原文：").append(round.opinion())
-                    .append("\n   需求侧判定（主智能体已收口）：")
-                    .append(round.prdRevisionSummary() != null
-                            ? "PRD 已修订——" + round.prdRevisionSummary()
-                            : "本轮无修订（未触发 PRD 变更）");
+                "系统修改：系统已生成并可操作，用户提出了如下修改要求（每条含用户的原始说法"
+                        + "与平台整理出的自足修改指令），请在现有工作区内完成修改（系统的其余"
+                        + "部分保持可用）：");
+        for (int index = 0; index < instructions.size(); index++) {
+            ModificationHandoffFacts.Instruction instruction = instructions.get(index);
+            prompt.append("\n").append(index + 1).append(". 用户原话：")
+                    .append(instruction.userWords())
+                    .append("\n   修改指令：").append(instruction.instruction());
+            if (instruction.location() != null && !instruction.location().isBlank()) {
+                prompt.append("\n   定位说明：").append(instruction.location());
+            }
         }
         prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
-                .append("，以正本与上述意见为准。");
-        prompt.append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
-                .append("\n收尾必须调用 finish_edit 工具：动了系统传 changed=true 并说明改了什么；")
-                .append("判定无需改动系统也必须调用，传 changed=false 并说明原因——")
-                .append("不调用即本轮修正未收口。");
+                .append("（本轮完成后要更新的完整文档），以正本与上述修改要求为准。");
+        prompt.append(PRD_MERGE_INSTRUCTION);
+        prompt.append("\n完成后用 pnpm build 验证可构建、用 curl http://localhost:8081 "
+                + "确认有响应——双件全过本轮修改才算完成。");
         return prompt.toString();
     }
 
     /**
-     * 修正轨道起手（设计规范物化＋AGENTS.md 资产就位 + 异步提交，{@link #dispatch}
-     * 与 {@link #restartFixRun} 共用）：与生成轨同口径——设计规范派发物化（#296：
-     * 定稿触发的更新 run 按稿对齐——:root 刷值＝换肤先行、裸色残留交执行体修）＋
-     * AGENTS.md 平台约定幂等覆写（#214 既有工作区自动刷新新物理规则，无需重建
-     * 工作区），失败即环境故障口径如实上抛并释放在途标记（run 不起跑）。
+     * 充值回正排空（#537——「充值到账后下一段自动放行〔不手动重试〕」run 场面）：
+     * 余额闸暂存的对话面修改 intent 逐项目重派（触发时门已过〔入账事件〕，重派自然
+     * 再守全守卫与在途口径）。重派失败（项目已归档等）intent 丢弃并记日志——用户
+     * 重提即新段（段边界门判定自然接管）。入账事件（AFTER_COMMIT 监听）触发。
      */
-    private void beginFixTrack(Project project, String firstRunId, FixHandoff handoff) {
-        Long projectId = project.getId();
-        try {
-            GenerationAppService.writeConventionAssets(workspaceLifecycleAppService,
-                    designSpecs, project);
-        } catch (RuntimeException e) {
-            synchronized (codingRunTrack) {
-                codingRunTrack.end(projectId);
+    public void drainBalanceBlocked() {
+        for (Map.Entry<Long, List<ModificationHandoffFacts.Instruction>> entry
+                : balanceBlockedModifications.entrySet()) {
+            Long projectId = entry.getKey();
+            if (balanceGate.assess(projectId).blocked()) {
+                continue;
             }
-            throw e;
+            if (!balanceBlockedModifications.remove(projectId, entry.getValue())) {
+                continue;
+            }
+            try {
+                Project project = projectRepository.findById(projectId)
+                        .orElseThrow(() -> new ApplicationException(
+                                ProjectMessage.PROJECT_NOT_FOUND));
+                if (project.getArchivedAt() != null) {
+                    continue;
+                }
+                log.info("[modify] 项目 {} 余额回正：暂存对话面修改 intent 自动重派（{} 条）",
+                        projectId, entry.getValue().size());
+                dispatchModification(project, entry.getValue(), null);
+            }
+            catch (RuntimeException e) {
+                log.warn("[modify] 项目 {} 余额回正排空重派失败（intent 丢弃，重提即新段）：{}",
+                        projectId, e.toString());
+            }
         }
-        submitFixTrack(project, firstRunId, handoff);
     }
 
-    private void submitFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
-        // 主轨任务登记停止面（#359）：requestStop 的 cancel(true) 经此中断在途执行
-        // 线程——修正轨停止同样是真断流（不只标志位）
-        Future<?> trackTask = sessionExecutor.submitGeneration(CoderRunAttempts.SESSION_PREFIX + project.getId(),
-                () -> {
-                    try {
-                        runFixTrack(project, firstRunId, firstHandoff);
-                    }
-                    catch (RunShutdownException e) {
-                        // 关停收口（#477）：宽限窗内不拉起排队意见——排队残局是进程内
-                        // 态（重启即清，用户重提即兜底——既有口径），在途场保持待跑
-                        //（中断可续跑态，不发终态事件）
-                        log.info("[fix] 项目 {} 修正轨道因平台关停中断（runId={}）——在途场保持待跑",
-                                project.getId(), e.runId());
-                    }
-                });
-        codingRunTrack.registerTask(project.getId(), trackTask);
+    /**
+     * 内核收口判据回调（#601 接线，ADR-0054）：run 正常返回后的平台侧机器核验
+     * ——{@code pnpm build} 过＋8081 探活双件全过才判完成（{@link KernelClosingCriteria}）；
+     * 未过即抛——该场 run 失败转终态（#604 单发：不自动重跑）。系统改没改以派发器
+     * 的平台可观测文件改动事实为准（{@code attemptChanges} 非空——不依赖模型自报）；
+     * 实动即 Demo 迭代轮成版（#333 同口径）＋演示种子补位（#340）。逐件判据结果
+     * （#617）随收口判据回给派发器，进收尾卡「判据结果」。
+     *
+     * <p>#624：收口对比工作区 PRD 与起跑快照（{@code prdBaseline}），有变化才发既有
+     * document-updated（右栏按现有失效逻辑刷新）；平台自己不写 PRD，变化只由内核按
+     * 任务提示整合带来。失败判据先抛——PRD 变化通知只在 run 成功后发。</p>
+     */
+    private CodingRunDispatcher.ClosingJudgment closeKernelFix(Project project, String attemptRunId,
+            String prdBaseline, String versionLabel,
+            List<FileChange> attemptChanges) {
+        KernelClosingCriteria.KernelClosingResult closing =
+                kernelClosingCriteria.assess(project.getWorkspaceId());
+        if (!closing.complete()) {
+            throw new IllegalStateException("收尾判据未过：pnpm build "
+                    + (closing.buildPassed() ? "通过" : "未通过") + "、8081 探活"
+                    + (closing.probePassed() ? "有响应" : "无响应")
+                    + "——按完成判据继续修复后再收口");
+        }
+        // 探活通过＝一次完整交付（#626 自动成版）：run-finish 发出前把工作区记为用户面
+        // 版本 vN（主题＝本轮用户原话）；成版失败降级不反噬收口。旧 Demo 版本行随旧
+        // 版本表退场（#630）——版本序列只此一条（git 单轴）。
+        projectVersionAppService.commitUserVersion(project, attemptRunId, versionLabel);
+        // 迭代后 PRD 仍是完整文档（#624）：内核按任务提示把需求整合进 PRD 对应章节，
+        // 收口比对起跑快照——变了才发既有 document-updated；无变化不发（不误刷新右栏）。
+        emitDocumentUpdatedIfPrdChanged(project, prdBaseline);
+        // 演示种子预置（#340）：迭代收口补位——系统实动后可能有新空表（幂等引擎
+        // 只补空表）；失败不阻断收工。
+        demoSeed.seedSandbox(project);
+        return new CodingRunDispatcher.ClosingJudgment(
+                closing.buildPassed(), closing.probePassed());
+    }
+
+    /**
+     * 迭代收口 PRD 变化通知（#624）：工作区 PRD 与起跑快照不同即发既有
+     * document-updated（载荷与 savePrd 同源，前端失效文档域重拉 PRD 全文）；
+     * 无变化/读取失败保守不发，通知发射失败不反噬收口。
+     */
+    private void emitDocumentUpdatedIfPrdChanged(Project project, String prdBaseline) {
+        try {
+            // 起跑快照缺失即保守判未变（不误发）；收口读取失败同样判未变（run 照常成功）
+            if (prdBaseline == null
+                    || prdBaseline.equals(projectQueryAppService.currentPrdContent(project.getId()))) {
+                return;
+            }
+            eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED,
+                    ProjectEventTypes.documentUpdatedPayload(project,
+                            ProjectEventTypes.DOCUMENT_TYPE_PRD));
+            log.info("[fix] 项目 {} 迭代收口 PRD 已变化，发 document-updated", project.getId());
+        }
+        catch (RuntimeException e) {
+            log.warn("[fix] 项目 {} PRD 变化通知发射失败（不反噬收口）：{}",
+                    project.getId(), e.toString());
+        }
+    }
+
+    /**
+     * 起跑 PRD 快照读取（#624）：工作区 {@code docs/PRD.md} 全文；未产出/环境故障
+     * 一律返回 null（best-effort——记行是 run 起跑的次生事实，不反噬本场）。
+     */
+    private String readPrdBaselineQuietly(Long projectId, String runId) {
+        try {
+            return projectQueryAppService.currentPrdContent(projectId);
+        }
+        catch (RuntimeException e) {
+            log.warn("[modify] 项目 {} run {} 起跑读取 PRD 基准失败（本场判未变）：{}",
+                    projectId, runId, e.toString());
+            return null;
+        }
     }
 }

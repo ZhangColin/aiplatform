@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RaisedQuestion } from "@/lib/chat/qa";
 
-import { pendingQuestionOf, useChatStore, toWorkClosing, type ChatMessage, type WorkClosing } from "./chat";
+import { pendingQuestionOf, toWorkClosing, useChatStore, type ChatMessage } from "./chat";
 
 function question(id: string, overrides: Partial<RaisedQuestion> = {}): RaisedQuestion {
   return {
@@ -63,73 +63,6 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     expect(agents.find((m) => m.text === "我在这里帮您…")?.label).toBe("平台");
   });
 
-  it("受理动作卡（#87）：受理事件落卡（受理中）→ 该轮收口（run-finish/error）落定；重放同事件不重复；问答挂起不落定", () => {
-    playMainTurn("p1", "run-1", "把系统的主色调改成绿色");
-    const s = useChatStore.getState();
-    s.noteAcceptance("p1", "run-1", "run-1:0");
-    s.noteAcceptance("p1", "run-1", "run-1:0"); // 重放同事件 id 只收一次
-    s.appendAgentDelta("p1", "run-1", "我来处理这个需求", "run-1:3");
-    s.raiseQuestion("p1", "run-1", question("run-1:5")); // 追问挂起：受理仍在途，卡不落定
-    s.submitAnswer("p1", "要薄荷绿", "run-1");
-    // 续跑收口：桥在收口事件处合成收轮 + 受理卡落定（受理完成——衔接更新 run
-    // 工作消息）；异 run 落定为无操作（每卡锚自己的受理轮）
-    s.finishTurn("p1", "run-1");
-    s.settleAcceptance("p1", "run-1");
-    s.settleAcceptance("p1", "run-9");
-
-    const chat = useChatStore.getState().chats["p1"];
-    const cards = chat?.messages.filter((m): m is Extract<ChatMessage, { kind: "acceptance" }> => m.kind === "acceptance");
-    expect(cards).toHaveLength(1);
-    expect(cards?.[0]).toMatchObject({ kind: "acceptance", runId: "run-1", settled: true });
-    // 呈现序：用户气泡 → 受理卡 → 解说（动作卡先于解说——意见已接住的反馈先出）
-    expect(chat?.messages.map((m) => m.kind)).toEqual(["user", "acceptance", "agent", "question", "user"]);
-  });
-
-  it("受理卡落定幂等（收口与失败事件双达不闪换）；error 落定同路（炸轮不死转）", () => {
-    useChatStore.getState().noteAcceptance("p1", "run-1", "run-1:0");
-    useChatStore.getState().settleAcceptance("p1", "run-1");
-    useChatStore.getState().settleAcceptance("p1", "run-1");
-
-    const cards = useChatStore.getState().chats["p1"]?.messages.filter(
-      (m): m is Extract<ChatMessage, { kind: "acceptance" }> => m.kind === "acceptance",
-    );
-    expect(cards).toHaveLength(1);
-    expect(cards?.[0].settled).toBe(true);
-  });
-
-  it("发送失败撤尾卡（#87 code-review）：受理事件已到而提交失败——尾随未落定卡随乐观气泡同撤；已落定/非尾卡不动", () => {
-    const s = useChatStore.getState();
-    s.appendUserMessage("p1", "把系统的主色调改成绿色");
-    s.noteAcceptance("p1", "run-1", "run-1:0"); // 服务端守卫后发出、提交随即失败
-    s.removeTrailingAcceptance("p1");
-
-    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind)).toEqual(["user"]);
-
-    // 已落定的尾卡（历史轮）不撤；解说之后的卡非尾卡（受理在途的正常序）不撤
-    s.noteAcceptance("p1", "run-2", "run-2:0");
-    s.settleAcceptance("p1", "run-2");
-    s.removeTrailingAcceptance("p1");
-    s.noteChatRun("p1", "run-3");
-    s.noteAcceptance("p1", "run-3", "run-3:0");
-    s.appendAgentDelta("p1", "run-3", "受理中", "run-3:1"); // 解说落在卡后（正常序）
-    s.removeTrailingAcceptance("p1"); // 尾条是解说非卡 → 无操作
-
-    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind)).toEqual([
-      "user", "acceptance", "acceptance", "agent",
-    ]);
-  });
-
-  it("重放序：受理事件先于 run-start 到达时，用户气泡插到受理卡上方（#87——意见在卡上）", () => {
-    const s = useChatStore.getState();
-    s.noteChatRun("p1", "run-1");
-    s.noteAcceptance("p1", "run-1", "run-1:1"); // 服务端守卫后即发：事件序在前
-    s.ingestRunStart("p1", "run-1", "把系统的主色调改成绿色"); // 重放重建用户气泡
-    s.appendAgentDelta("p1", "run-1", "我来处理", "run-1:3");
-
-    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind)).toEqual([
-      "user", "acceptance", "agent",
-    ]);
-  });
 
   it("未登记 run 的 text / finish 不进对话（runId 锚定；编码 run 的解说不进对话）", () => {
     playMainTurn("p1", "run-1", "需求");
@@ -204,13 +137,19 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     expect(pendingQuestionOf(useChatStore.getState(), "p1")?.question).toBe("面向谁?");
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(false);
 
-    s.submitAnswer("p1", "企业客户", "run-1");
+    s.submitAnswer("p1", "企业客户", "run-1", ["企业客户"]);
     expect(pendingQuestionOf(useChatStore.getState(), "p1")).toBeUndefined();
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(true);
     expect(useChatStore.getState().chats["p1"]?.messages.at(-1)).toMatchObject({
       kind: "user",
       text: "企业客户",
     });
+    // 勾选回看记账（2026-11-26 用户反馈）：作答提交的勾选记到问答卡上——回看卡
+    // 显示自己的勾，不是待答卡的实时勾选
+    const answeredCard = useChatStore
+      .getState()
+      .chats["p1"]?.messages.find((m) => m.kind === "question");
+    expect(answeredCard).toMatchObject({ answered: true, finalSelection: ["企业客户"] });
 
     // 作答后主智能体续流：新一轮智能体气泡另起（问题卡之后不拼接）
     useChatStore.getState().appendAgentDelta("p1", "run-1", "收到，下一个问题…", "run-1:9");
@@ -223,6 +162,14 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     s.removeMessage("p1", useChatStore.getState().chats["p1"]!.messages.at(-2)!.id);
     s.reopenQuestion("p1");
     expect(pendingQuestionOf(useChatStore.getState(), "p1")?.question).toBe("面向谁?");
+    // 失败回滚连带清勾选记账（未落账的勾选不得残留），其后被新问题取代也不泄漏
+    expect(pendingQuestionOf(useChatStore.getState(), "p1")?.finalSelection).toBeUndefined();
+    s.raiseQuestion("p1", "run-1", question("run-1:11", { question: "预算?", engineRef: "reply-2" }));
+    const superseded = useChatStore
+      .getState()
+      .chats["p1"]?.messages.find((m) => m.kind === "question");
+    expect(superseded).toMatchObject({ answered: true });
+    expect(superseded?.finalSelection).toBeUndefined();
   });
 
   it("新问题取代旧未答问题（一轮一问）；重放同事件不重复成卡", () => {
@@ -321,6 +268,7 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
       }),
       entry(4, "answer", { text: "企业客户" }),
       entry(5, "agent", { text: "好的，按企业客户梳理" }),
+      // 旧载荷（#617 前落库）：平台句式摘要 + 判定键——读侧回落可读
       entry(6, "closing", {
         text: undefined,
         closing: {
@@ -342,9 +290,15 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     const pending = pendingQuestionOf(useChatStore.getState(), "p1");
     expect(pending?.question).toBe("面向谁?");
     expect(pending?.engineRef).toBe("reply-1");
-    // 收尾卡（#89 归对话流常驻）
+    // 收尾卡（#89 归对话流常驻）：旧载荷回落——旧 summary 作内核自述文本、
+    // 判据按收口不变式回落双 ✓（旧对话史不出坏卡）
     expect(chat?.messages.find((m) => m.kind === "closing")).toMatchObject({
-      closing: { summary: "首次生成了系统" },
+      closing: {
+        narrative: "首次生成了系统",
+        criteria: { buildPassed: true, previewPassed: true },
+        files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
+        durationMs: 183_420,
+      },
     });
     // 轻引导带「平台」标签
     expect(chat?.messages.find((m) => m.kind === "agent" && m.label === "平台")).toMatchObject({
@@ -468,10 +422,9 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
       entry(1, "user", { text: "第一句" }, "run-1"),
       entry(2, "agent", { text: "第一答" }, "run-1"),
     ]);
-    // 新一轮在途（乐观 + 受理卡 + 流式）
+    // 新一轮在途（乐观 + 流式）
     s.appendUserMessage("p1", "第二句");
     s.noteChatRun("p1", "run-2");
-    s.noteAcceptance("p1", "run-2", "run-2:0");
     s.ingestRunStart("p1", "run-2");
     s.appendAgentDelta("p1", "run-2", "受理中…", "run-2:3");
 
@@ -480,18 +433,23 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
       entry(1, "user", { text: "第一句" }, "run-1"),
       entry(2, "agent", { text: "第一答" }, "run-1"),
       entry(3, "user", { text: "更早的排队意见" }, "run-9"),
-      entry(4, "closing", { closing: { summary: "更新了系统", prdChanged: false, systemChanged: true, files: [], durationMs: 1 } }, "run-9"),
+      entry(4, "closing", { closing: { narrative: "更新了系统", criteria: { buildPassed: true, previewPassed: true }, files: [], durationMs: 1 } }, "run-9"),
     ]);
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages.map((m) => m.kind)).toEqual([
-      "user", "agent", "user", "closing", "user", "acceptance", "agent",
+      "user", "agent", "user", "closing", "user", "agent",
     ]);
   });
 
   it("live 收尾卡被水合同 run 块接管（不双卡）：断线补发的 run-finish 回声不双卡", () => {
     const s = useChatStore.getState();
-    const closing = { summary: "更新了系统", prdChanged: false, systemChanged: true, files: [], durationMs: 5 };
+    const closing = {
+      narrative: "更新了系统",
+      criteria: { buildPassed: true, previewPassed: true },
+      files: [],
+      durationMs: 5,
+    };
     // live 到达（bridge：run-finish 携 closing → appendClosing）
     s.appendClosing("p1", "run-1", closing, "run-1:9");
     s.appendClosing("p1", "run-1", closing, "run-1:9"); // 补发回声：事件 id 只收一次
@@ -600,144 +558,6 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
   });
 });
 
-describe("chat store · 收尾卡稿清单（#289 扩载、#290 呈现：live 与水合同形）", () => {
-  beforeEach(() => {
-    useChatStore.setState({ chats: {} });
-  });
-
-  const entry = (
-    id: number,
-    kind: "closing",
-    overrides: Record<string, unknown> = {},
-    runId: string | null = "run-1",
-  ) => ({ id: String(id), kind, runId, answered: false, ...overrides });
-
-  const designClosing = {
-    summary: "完成设计物：首页主视觉",
-    prdChanged: false,
-    systemChanged: false,
-    systemNote: "完成设计物：首页主视觉",
-    files: [{ path: "/design/home-1.html", added: 120, removed: 0 }],
-    durationMs: 95_000,
-    drafts: [
-      { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
-      { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
-    ],
-  };
-
-  it("live 到达（appendClosing）：稿清单随收尾卡入流原样保留", () => {
-    useChatStore.getState().appendClosing("p1", "run-1", toWorkClosing(designClosing)!, "run-1:9");
-
-    const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
-    expect(card).toMatchObject({ runId: "run-1" });
-    expect((card as { closing: WorkClosing }).closing.drafts).toEqual([
-      { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
-      { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
-    ]);
-  });
-
-  it("刷新回访经对话史水合：稿清单完整（closed history 以 REST 为准，#89）", () => {
-    useChatStore.getState().hydrate("p1", [entry(1, "closing", { closing: designClosing })]);
-
-    const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
-    expect((card as { closing: WorkClosing }).closing.drafts).toHaveLength(2);
-    expect((card as { closing: WorkClosing }).closing.drafts?.[1]).toMatchObject({
-      media: "image",
-      path: "/design/home-hero-2.png",
-    });
-  });
-
-  it("定稿收尾卡（#291）：version 锚与 drafts 单条 triggers 透传（live 与水合同形）", () => {
-    const finalizeClosing = {
-      ...designClosing,
-      summary: "定稿设计物：首页主视觉",
-      version: "abc123def456",
-      drafts: [
-        {
-          item: "首页主视觉",
-          media: "html",
-          path: "/design/home-2.html",
-          triggers: ["设计已全部定稿，可以确认下单了"],
-        },
-      ],
-    };
-
-    const live = toWorkClosing(finalizeClosing)!;
-    expect(live.version).toBe("abc123def456");
-    expect(live.drafts?.[0]).toEqual({
-      item: "首页主视觉",
-      media: "html",
-      path: "/design/home-2.html",
-      triggers: ["设计已全部定稿，可以确认下单了"],
-    });
-
-    useChatStore.getState().hydrate("p1", [entry(1, "closing", { closing: finalizeClosing })]);
-    const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
-    expect((card as { closing: WorkClosing }).closing.version).toBe("abc123def456");
-    expect((card as { closing: WorkClosing }).closing.drafts?.[0].triggers)
-        .toEqual(["设计已全部定稿，可以确认下单了"]);
-  });
-
-  it("triggers 容错收窄（#291）：非数组回落缺省、非字符串条目剔除", () => {
-    const narrowed = toWorkClosing({
-      ...designClosing,
-      drafts: [{ item: "首页主视觉", media: "html", path: "/design/a.html",
-        triggers: ["已开始构建", 42, null] }],
-    })?.drafts;
-    expect(narrowed?.[0].triggers).toEqual(["已开始构建"]);
-    expect(toWorkClosing({
-      ...designClosing,
-      drafts: [{ item: "首页主视觉", media: "html", path: "/design/a.html", triggers: "nope" }],
-    })?.drafts?.[0].triggers).toBeUndefined();
-  });
-
-  it("drafts 容错收窄：非数组回落缺省（编码 run 形态）；坏条目剔除不出坏行", () => {
-    expect(toWorkClosing({ ...designClosing, drafts: "nope" })?.drafts).toBeUndefined();
-    expect(
-      toWorkClosing({
-        ...designClosing,
-        drafts: [
-          { item: "ok", media: "html", path: "/design/a.html" },
-          { item: "无路径", media: "html" },
-          { item: "坏形态", media: "video", path: "/design/b.mp4" },
-          "not-an-object",
-        ],
-      })?.drafts,
-    ).toEqual([{ item: "ok", media: "html", path: "/design/a.html" }]);
-  });
-
-  it("designLint 容错收窄（#296）：三态照收、坏条目剔除、非对象/坏状态回落缺省", () => {
-    const passed = toWorkClosing({
-      ...designClosing,
-      drafts: undefined,
-      designLint: { status: "passed", retried: true },
-    })?.designLint;
-    expect(passed).toEqual({ status: "passed", retried: true, total: undefined, violations: undefined });
-
-    const violating = toWorkClosing({
-      ...designClosing,
-      drafts: undefined,
-      designLint: {
-        status: "violations",
-        total: 2,
-        violations: [
-          { file: "src/app/page.tsx", line: 3, rule: "no-raw-colors", message: "raw palette" },
-          { file: "no-line.tsx", rule: "no-inline-styles", message: "inline" },
-        ],
-      },
-    })?.designLint;
-    expect(violating?.total).toBe(2);
-    expect(violating?.violations).toEqual([
-      { file: "src/app/page.tsx", line: 3, rule: "no-raw-colors", message: "raw palette" },
-      { file: "no-line.tsx", line: 0, rule: "no-inline-styles", message: "inline" },
-    ]);
-
-    expect(toWorkClosing({ ...designClosing, designLint: { status: "weird" } })?.designLint)
-        .toBeUndefined();
-    expect(toWorkClosing({ ...designClosing, designLint: "nope" })?.designLint).toBeUndefined();
-  });
-});
-
 describe("chat store · 试用拦截卡（#533 计费②门②）", () => {
   beforeEach(() => {
     useChatStore.setState({ chats: {} });
@@ -827,5 +647,86 @@ describe("chat store · 试用拦截卡（#533 计费②门②）", () => {
 
     const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
     expect(messages.map((m) => m.kind)).toEqual(["intercept", "agent"]);
+  });
+});
+
+describe("toWorkClosing · 变更清单真实 diff 收窄（#619）", () => {
+  it("携 patch / patchOmitted / filesUnavailable：按可选字段收窄，行数保留", () => {
+    const closing = toWorkClosing({
+      narrative: "修正完成",
+      criteria: { buildPassed: true, previewPassed: true },
+      files: [
+        { path: "/src/App.jsx", added: 4, removed: 0, patch: "diff --git a/src/App.jsx\n+新\n" },
+        { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true },
+      ],
+      filesUnavailable: true,
+      durationMs: 1000,
+    });
+
+    expect(closing?.files).toEqual([
+      { path: "/src/App.jsx", added: 4, removed: 0, patch: "diff --git a/src/App.jsx\n+新\n" },
+      { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true },
+    ]);
+    expect(closing?.filesUnavailable).toBe(true);
+  });
+
+  it("旧载荷（无 patch / 无 filesUnavailable）：文件级行数照读，不凭空标降级", () => {
+    const closing = toWorkClosing({
+      summary: "更新了系统",
+      files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
+      durationMs: 1,
+    });
+
+    expect(closing?.files).toEqual([{ path: "/src/App.jsx", added: 40, removed: 0 }]);
+    expect(closing?.filesUnavailable).toBeUndefined();
+    expect(closing?.narrative).toBe("更新了系统");
+  });
+});
+
+describe("toWorkClosing · 首建目录汇总收窄（#620）", () => {
+  it("携 directories：按目录/文件数/± 行数收窄（文件清单照常在场供展开）", () => {
+    const closing = toWorkClosing({
+      criteria: { buildPassed: true, previewPassed: true },
+      files: [
+        { path: "/src/App.jsx", added: 4, removed: 0 },
+        { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+      ],
+      directories: [
+        { path: "/src", fileCount: 1, added: 4, removed: 0 },
+        { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+      ],
+      durationMs: 1,
+    });
+
+    expect(closing?.directories).toEqual([
+      { path: "/src", fileCount: 1, added: 4, removed: 0 },
+      { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+    ]);
+    expect(closing?.files).toHaveLength(2);
+  });
+
+  it("无 directories（迭代/旧载荷）：不凭空造目录", () => {
+    const closing = toWorkClosing({
+      files: [{ path: "/src/App.jsx", added: 4, removed: 0, patch: "diff --git a/src/App.jsx\n+新\n" }],
+      durationMs: 1,
+    });
+
+    expect(closing?.directories).toBeUndefined();
+  });
+
+  it("畸形目录条目（缺 path / 非数字）跳过，不坏整卡", () => {
+    const closing = toWorkClosing({
+      files: [],
+      directories: [
+        { path: "/src", fileCount: 1, added: 2, removed: 0 },
+        { fileCount: 3 },
+        { path: 7, fileCount: 1 },
+      ],
+      durationMs: 1,
+    });
+
+    expect(closing?.directories).toEqual([
+      { path: "/src", fileCount: 1, added: 2, removed: 0 },
+    ]);
   });
 });

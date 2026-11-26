@@ -5,7 +5,7 @@ import java.util.List;
 import com.cartisan.core.stereotype.Port;
 import com.cartisan.core.stereotype.PortType;
 
-import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
 
@@ -31,10 +31,27 @@ public interface KnowledgePort {
     /**
      * 混检检索（#465 自纯向量升级）：向量＋三元组关键词双通道 RRF 融合，全局
      * 跨项目 topK（不配额，A5 §3）——CASE/MODULE/RULE 沉淀素材与 PRD 同池命中；
-     * query 为任务 prompt 全文（超长截断由调用方处理）。仅启用素材的块参与
+     * query 为需求描述全文（超长截断由调用方处理）。仅启用素材的块参与
      * 命中——停用素材整体退出（#153 状态过滤，面内恒开）。
+     *
+     * <p>#639 起返回「命中列表＋是否降级」：向量服务不可用或检索异常＝降级，
+     * 与成功但 0 条命中可区分。降级恒返回空命中列表、不抛错。</p>
      */
-    List<KnowledgeHit> retrieve(String query, int topK);
+    KnowledgeRetrieval retrieve(String query, int topK);
+
+    /**
+     * 命中留痕（#639）：每次主智能体开场检索写一条记录——项目、时间、命中
+     * 条目、是否降级。检索成功但 0 条也记；检索失败记降级。写入失败不反噬
+     * 调用方主流程（调用方降级）。
+     */
+    void recordRetrieval(String projectId, KnowledgeRetrieval retrieval);
+
+    /**
+     * 该项目最近一次命中留痕（#639）：会话装配时据此重建注入块，服务重启后
+     * 继续同一场访谈仍拿到同一份块、不重检索。无记录返回
+     * {@link KnowledgeRetrieval#empty()}。
+     */
+    KnowledgeRetrieval latestRetrieval(String projectId);
 
     /**
      * 停用素材（#153 可逆开关）：全部块退出检索命中，落最近管理动作操作者；
@@ -48,7 +65,8 @@ public interface KnowledgePort {
     void enable(String kind, String sourceRef, Operator operator);
 
     /**
-     * 按项目级联清理全部知识块（项目 DELETE 入口，A5 §5）。
+     * 按项目级联清理全部知识块与命中留痕（项目 DELETE 入口，A5 §5；#639 起
+     * 命中记录一并清理，不留孤儿数据）。
      */
     void purgeByProject(String projectId);
 }

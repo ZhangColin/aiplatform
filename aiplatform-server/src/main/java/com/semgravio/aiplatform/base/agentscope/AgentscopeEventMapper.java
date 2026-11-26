@@ -128,7 +128,7 @@ final class AgentscopeEventMapper {
      * recommended 可缺省（#459 推荐答案），前端问答卡
      * 契约——multiple 恒 false / custom 恒 true：ask_user 一次一题开放可自由输入；
      * custom 必须显式 true，否则无选项题整题被前端收窄丢弃）。摘要口径 = 问题文本
-     * （截断保短）。恢复入参（模型档位/会话寻址/计量）由业务编排从项目侧事实重建，
+     * （截断保短）。恢复入参（模型配置/会话寻址/计量）由业务编排从项目侧事实重建，
      * 不随事件携带。</p>
      */
     AgentEvent suspension(RequireUserConfirmEvent event) {
@@ -233,15 +233,16 @@ final class AgentscopeEventMapper {
     /**
      * run 开始事件：引擎信息归一——engine/model 之外携带智能体配置键
      * {@code agent}（业务侧 AgentCommand 的配置键，可空不携带；前端工作消息/
-     * 对话面的锚定判据）与工作消息头部标题 {@code slice}（#118：标题 + 生成轨道
-     * 切片进度，可空不携带——前端工作消息头部呈现源，无则回落「正在做」）。
+     * 对话面的锚定判据）与工作消息头部标题 {@code slice}（#118：{title}——
+     * 可空不携带，前端工作消息头部呈现源，无则回落「正在做」；切片序号/进度
+     * 已随 #602/#608 切片机器退役不再发射）。
      */
     static AgentEvent runStart(String runId, String prompt, String model, String engine,
             String agentKey, RunHeading heading) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
-        payload.put("prompt", prompt);
-        payload.put("model", model);
+        payload.put(AgentEventTypes.RUN_PROMPT_FIELD, prompt);
+        payload.put(AgentEventTypes.RUN_MODEL_FIELD, model);
         payload.put(AgentEventTypes.ENGINE_FIELD, engine);
         if (agentKey != null && !agentKey.isBlank()) {
             payload.put(AgentEventTypes.AGENT_FIELD, agentKey);
@@ -252,17 +253,9 @@ final class AgentscopeEventMapper {
         return new AgentEvent(AgentEventTypes.RUN_START, payload);
     }
 
-    /** slice 载荷（#118）：title 恒在场；index/total 仅生成轨道切片携带（缺省不携带）。 */
+    /** slice 载荷（#118）：恒为 {title}（SSE 事件清单正本形状）。 */
     private static Map<String, Object> slicePayload(RunHeading heading) {
-        Map<String, Object> slice = new LinkedHashMap<>();
-        slice.put("title", heading.title());
-        if (heading.index() != null) {
-            slice.put("index", heading.index());
-        }
-        if (heading.total() != null) {
-            slice.put("total", heading.total());
-        }
-        return slice;
+        return Map.of("title", heading.title());
     }
 
     static AgentEvent runFinish(String runId, String sessionId, String finish, String engine) {

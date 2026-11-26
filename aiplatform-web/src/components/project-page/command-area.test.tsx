@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatState, ChatMessage, ProjectChat } from "@/lib/store/chat";
 import type { PrdNoticesState } from "@/lib/store/prd-notices";
@@ -13,6 +13,7 @@ const seed = vi.hoisted(() => ({
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   works: {} as Record<string, unknown>,
+  quota: null as { answered: number; total: number } | null,
 }));
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
@@ -55,7 +56,7 @@ vi.mock("@/hooks/use-balance-reminder", () => ({
   usePendingBalanceReminder: () => ({ data: null }),
 }));
 vi.mock("@/hooks/use-interview-quota", () => ({
-  useInterviewQuota: () => ({ data: null }),
+  useInterviewQuota: () => ({ data: seed.quota }),
 }));
 vi.mock("@/hooks/use-build-gate", () => ({
   useBuildGate: () => ({ data: null }),
@@ -69,22 +70,14 @@ vi.mock("@/hooks/use-chat", () => ({
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-// 收尾卡版本控件（#92/#93）的请求面：服务端直读种子渲染，无 QueryClient 可挂——
-// 收尾卡用例只断言呈现序，版本动作不发请求
-vi.mock("@/hooks/use-version", () => ({
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: {
-      mutate: vi.fn(),
-      isPending: false,
-      isError: false,
-      data: undefined,
-      reset: vi.fn(),
-    },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
+// 收尾卡预览入口（#617）：取既有预览查询——SSR 无 QueryClient 可挂，直给未就绪态
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
 }));
+
+afterEach(() => {
+  seed.quota = null;
+});
 
 function question(overrides: Partial<Extract<ChatMessage, { kind: "question" }>> = {}) {
   return {
@@ -175,28 +168,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(html).toContain("回答上面的问题");
   });
 
-  it("受理动作卡（#87）：受理中在意见下方呈现「正在处理」；落定（收口推导）转「意见已受理」", () => {
-    seedChat([
-      { kind: "user", id: "u1", text: "把系统的主色调改成绿色" },
-      { kind: "acceptance", id: "run-1:1", runId: "run-1", settled: false },
-      { kind: "agent", id: "b1", text: "我来处理这个需求" },
-    ]);
-
-    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
-
-    expect(html).toContain("已收到你的意见，正在处理");
-    expect(html.indexOf("把系统的主色调改成绿色")).toBeLessThan(
-      html.indexOf("已收到你的意见，正在处理"),
-    ); // 意见在卡上（卡承接这条意见）
-
-    seedChat([
-      { kind: "user", id: "u1", text: "把系统的主色调改成绿色" },
-      { kind: "acceptance", id: "run-1:1", runId: "run-1", settled: true },
-    ]);
-
-    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain("意见已受理");
-  });
-
   it("轮进行中：打字指示无角色前缀；无问题时常规输入条", () => {
     seedChat([{ kind: "user", id: "u1", text: "加个功能" }], true);
 
@@ -220,7 +191,7 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(archived).toContain("disabled");
   });
 
-  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——解说 + 动作卡）", () => {
+  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——工具动作流；#608 模型文本不直播）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "把主色调改成绿色" },
       { kind: "agent", id: "b1", text: "已接住意见，开始处理。" },
@@ -230,7 +201,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         runId: "run-1",
         frozen: false,
         parts: [
-          { kind: "text", id: "run-1:3", text: "正在调整全局配色。" },
           {
             kind: "action",
             id: "run-1:4",
@@ -246,7 +216,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
     expect(html).toContain("正在做");
-    expect(html).toContain("正在调整全局配色。");
     expect(html).toContain("修改【全局样式】");
     expect(html).toContain("进行中");
   });
@@ -259,9 +228,8 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         id: "run-1:9",
         runId: "run-1",
         closing: {
-          summary: "主色调已改为绿色",
-          prdChanged: false,
-          systemChanged: true,
+          narrative: "主色调已改为绿色",
+          criteria: { buildPassed: true, previewPassed: true },
           files: [],
           durationMs: 5000,
         },
@@ -272,13 +240,12 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         runId: "run-1",
         frozen: true,
         parts: [
-          { kind: "text", id: "run-1:3", text: "正在调整全站配色。" },
           {
             kind: "action",
             id: "run-1:4",
             toolCallId: "tc-1",
             toolName: "edit_file",
-            state: "running",
+            state: "failed",
             label: "修改【全局样式】",
           },
         ],
@@ -287,12 +254,12 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
-    expect(html).toContain("正在调整全站配色。");
-    expect(html).toContain("本轮完成");
+    expect(html).toContain("没做成");
+    expect(html).toContain("生成完成");
     // 定格的工作消息上承意见、下启收尾卡——过程在上、结果卡在下
-    expect(html.indexOf("正在调整全站配色。")).toBeLessThan(html.indexOf("本轮完成"));
-    // 收尾卡已入流：活性行随定格沉没——截断动作不留残骸（#235）
-    expect(html).not.toContain("修改【全局样式】");
+    expect(html.indexOf("修改【全局样式】")).toBeLessThan(html.indexOf("生成完成"));
+    // 收尾卡已入流：活性行随定格沉没——失败红行留驻、无在跑残骸（#235）
+    expect(html).not.toContain("进行中");
     expect(html).not.toContain("animate-pulse");
   });
 
@@ -306,7 +273,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
         runId: "run-1",
         frozen: true,
         parts: [
-          { kind: "text", id: "run-1:3", text: "正在调整全站配色。" },
           {
             kind: "action",
             id: "run-1:4",
@@ -321,7 +287,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
-    expect(html).toContain("正在调整全站配色。");
     expect(html).toContain("修改【全局样式】"); // 保留末行
     expect(html).not.toContain("进行中"); // 静态末行：定格卡不自称在跑
     expect(html).not.toContain("animate-spin");
@@ -376,18 +341,17 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     expect(iterated).not.toContain("访谈中");
   });
 
-  it("轨道变体（#299 设计主线）：track=design 梳设计物清单、迭代即改稿；缺省系统形", () => {
-    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
+  it("生成后（stage=iterate）不显示五问额度 chip、问答卡不标「第 N 问」（#622）", () => {
+    seedChat([question({ ordinal: 2, id: "q2" })]);
+    seed.quota = { answered: 1, total: 5 };
 
-    const system = renderToStaticMarkup(<CommandArea projectId="p1" />);
-    expect(system).toContain("把要点整理成需求文档");
+    const interview = renderToStaticMarkup(<CommandArea projectId="p1" stage="interview" />);
+    expect(interview).toContain("已答 1/5 问");
+    expect(interview).toContain("第 2 问");
 
-    const design = renderToStaticMarkup(<CommandArea projectId="p1" track="design" />);
-    expect(design).toContain("把要点整理成设计物清单");
-    const designIterated = renderToStaticMarkup(
-      <CommandArea projectId="p1" track="design" stage="iterate" />,
-    );
-    expect(designIterated).toContain("改稿与定稿都在这里聊");
+    const iterated = renderToStaticMarkup(<CommandArea projectId="p1" stage="iterate" />);
+    expect(iterated).not.toContain("已答");
+    expect(iterated).not.toContain("第 2 问");
   });
 
   it("发送框 = 共享 Composer（立体卡片）——首页/项目页同一组件", () => {
@@ -401,5 +365,28 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     expect(html).not.toContain('aria-label="做系统"');
     // 附件入口（#286 真上传）：回形针可见——选文件即上传、随话发出
     expect(html).toContain('aria-label="附件"');
+  });
+});
+
+describe("CommandArea · 回看勾选归属（2026-11-26 用户反馈）", () => {
+  it("已答卡按自己的作答勾选（finalSelection）显示勾，待答卡不受影响", () => {
+    seedChat([
+      question({
+        id: "q0",
+        engineRef: "reply-0",
+        question: "面向谁?",
+        multiple: true,
+        answered: true,
+        finalSelection: ["企业客户"],
+      }),
+      question({ id: "q1", engineRef: "reply-1", question: "预算多少?" }),
+    ]);
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+    // 按「预算多少?」（待答卡问文）切两段：已答段恰一个勾（勾在它自己的作答项上），
+    // 待答段无勾（无推荐不预选、实时勾选为空）
+    const [answeredPart, pendingPart] = html.split("预算多少?");
+    expect(answeredPart.match(/data-slot="option-check"/g)?.length).toBe(1);
+    expect(pendingPart).not.toContain('data-slot="option-check"');
   });
 });

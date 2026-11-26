@@ -2,109 +2,31 @@ import { describe, expect, it } from "vitest";
 
 import {
   PRD_PATH,
-  RAW_IMAGE_SIZE_LIMIT_BYTES,
-  buildFileTree,
-  formatFileSize,
-  isAncestorDir,
-  isImagePath,
   downloadFileUrl,
   downloadFileNameOf,
+  formatFileSize,
   rawFileUrl,
-  selectableFile,
-  type FileTreeDir,
-  type FileTreeFile,
-  type WorkspaceFile,
+  relativeFormOf,
 } from "./files";
 
-// 文件树浏览（#27 文件模式）：树构建/选中保持/祖先展开判定——纯逻辑，目录由
-// 文件路径段合成（后端只列文件），排序目录先、同级按名代码点序（与后端一致）。
+// 工作区文件取件口径（#608 呈现面清场后：文件树与内容点看退役，只留取件 URL /
+// 落盘名 / 字节数的纯逻辑）。
 
-const files: WorkspaceFile[] = [
-  { path: "AGENTS.md", size: 7 },
-  { path: "docs/PRD.md", size: 12 },
-  { path: "src/app/page.tsx", size: 340 },
-  { path: "src/index.ts", size: 96 },
-  { path: "src/lib/util.ts", size: 40 },
-];
-
-describe("buildFileTree · 目录合成与排序", () => {
-  it("目录由路径段合成、目录先于文件、同级按名排序", () => {
-    const tree = buildFileTree(files);
-
-    expect(tree.map((n) => n.kind)).toEqual(["dir", "dir", "file"]);
-    const docs = tree[0] as FileTreeDir;
-    const src = tree[1] as FileTreeDir;
-    const agents = tree[2] as FileTreeFile;
-    expect(docs).toMatchObject({ kind: "dir", name: "docs", path: "docs" });
-    expect(src).toMatchObject({ kind: "dir", name: "src", path: "src" });
-    expect(agents).toMatchObject({ kind: "file", name: "AGENTS.md", path: "AGENTS.md", size: 7 });
-
-    // docs 下唯一文件；src 下先目录（app、lib）后文件（index.ts），各自按名排
-    expect(docs.children.map((c) => c.path)).toEqual(["docs/PRD.md"]);
-    expect(src.children.map((c) => c.path)).toEqual(["src/app", "src/lib", "src/index.ts"]);
-    expect((src.children[0] as FileTreeDir).children.map((c) => c.path)).toEqual([
-      "src/app/page.tsx",
-    ]);
-  });
-
-  it("空清单 = 空树（成果区未长出的正常态）", () => {
-    expect(buildFileTree([])).toEqual([]);
+describe("PRD_PATH", () => {
+  it("与后端 WorkspaceLayout.PRD 同值", () => {
+    expect(PRD_PATH).toBe("docs/PRD.md");
   });
 });
 
-describe("selectableFile · 选中保持与缺省", () => {
-  it("无历史选中时缺省落 PRD（#20 文件模式延续）", () => {
-    expect(selectableFile(files, null)).toBe(PRD_PATH);
-  });
-
-  it("历史选中仍在树上则保持（不因刷新被拽走）", () => {
-    expect(selectableFile(files, "src/index.ts")).toBe("src/index.ts");
-  });
-
-  it("历史选中已被移除（修正删文件）则回缺省", () => {
-    expect(selectableFile(files, "src/gone.ts")).toBe(PRD_PATH);
-    expect(selectableFile([{ path: "src/index.ts", size: 1 }], "src/gone.ts")).toBe("src/index.ts");
-    expect(selectableFile([], "src/gone.ts")).toBeNull();
-  });
-});
-
-describe("isAncestorDir · 祖先目录判定", () => {
-  it("仅认目录前缀，不认同前缀字符串", () => {
-    expect(isAncestorDir("docs", "docs/PRD.md")).toBe(true);
-    expect(isAncestorDir("src", "src/app/page.tsx")).toBe(true);
-    expect(isAncestorDir("docs", "docs-x/PRD.md")).toBe(false);
-    expect(isAncestorDir("docs/PRD.md", "docs/PRD.md")).toBe(false);
-  });
-});
-
-describe("formatFileSize · 大小人文可读", () => {
-  it("B/KB/MB 阶梯，一位小数", () => {
-    expect(formatFileSize(0)).toBe("0 B");
+describe("formatFileSize", () => {
+  it("B/KB/MB 三档，一位小数", () => {
     expect(formatFileSize(512)).toBe("512 B");
-    expect(formatFileSize(1024)).toBe("1 KB");
-    expect(formatFileSize(12 * 1024 + 512)).toBe("12.5 KB");
+    expect(formatFileSize(1536)).toBe("1.5 KB");
     expect(formatFileSize(2 * 1024 * 1024)).toBe("2 MB");
   });
 });
 
-describe("isImagePath · 点看判定（#283 图片放行）", () => {
-  it("五格式大小写不敏感放行；文本/无扩展名/二进制非图片不在面内", () => {
-    expect(isImagePath("materials/ref.png")).toBe(true);
-    expect(isImagePath("materials/ref.PNG")).toBe(true);
-    expect(isImagePath("design/poster.Jpg")).toBe(true);
-    expect(isImagePath("a/b/c.webp")).toBe(true);
-    expect(isImagePath("logo.svg")).toBe(true);
-    expect(isImagePath("anim.gif")).toBe(true);
-
-    expect(isImagePath("docs/PRD.md")).toBe(false);
-    expect(isImagePath("src/app/page.tsx")).toBe(false);
-    expect(isImagePath("assets/logo.bin")).toBe(false);
-    expect(isImagePath("no-extension")).toBe(false);
-    expect(isImagePath("png")).toBe(false); // 文件名恰好叫 png，不是扩展名
-  });
-});
-
-describe("rawFileUrl · 图片直出 URL（#283）", () => {
+describe("rawFileUrl · 文件直出 URL", () => {
   it("同源 /api 直链，path 整体编码（不经 api client——二进制不走 JSON）", () => {
     expect(rawFileUrl("p1", "materials/ref.png")).toBe(
       "/api/projects/p1/files/raw?path=materials%2Fref.png",
@@ -115,18 +37,10 @@ describe("rawFileUrl · 图片直出 URL（#283）", () => {
     );
   });
 
-  it("工作区锚定形（前导 /）归一为相对形——收尾卡稿清单/画布稿卡携锚定形直取", () => {
-    // #293 画布取件暴露的 #290 遗留缝：drafts.path 是锚定形「/design/x.png」，
-    // 后端 isViewable 拒绝对路径——单点归一（两形同收，消费面不再各自转换）
-    expect(rawFileUrl("p1", "/design/home-1.html")).toBe(
-      "/api/projects/p1/files/raw?path=design%2Fhome-1.html",
+  it("工作区锚定形（前导 /）归一为相对形——工作区锚定路径单点归一", () => {
+    expect(rawFileUrl("p1", "/assets/home-1.html")).toBe(
+      "/api/projects/p1/files/raw?path=assets%2Fhome-1.html",
     );
-  });
-});
-
-describe("RAW_IMAGE_SIZE_LIMIT_BYTES · 前端预检上界", () => {
-  it("与后端 PRJ_022 图片查看上限同值（25 MiB）", () => {
-    expect(RAW_IMAGE_SIZE_LIMIT_BYTES).toBe(25 * 1024 * 1024);
   });
 });
 
@@ -136,9 +50,16 @@ describe("downloadFileUrl · 单文件下载 URL（#287 支付门）", () => {
       `/api/projects/p1/files/download?path=${encodeURIComponent("exports/海报-终稿.png")}`,
     );
     // 锚定形归一同 rawFileUrl
-    expect(downloadFileUrl("p1", "/design/home-1.html")).toBe(
-      "/api/projects/p1/files/download?path=design%2Fhome-1.html",
+    expect(downloadFileUrl("p1", "/assets/home-1.html")).toBe(
+      "/api/projects/p1/files/download?path=assets%2Fhome-1.html",
     );
+  });
+});
+
+describe("relativeFormOf · 两形归一", () => {
+  it("锚定形剥前导斜杠；相对形原样", () => {
+    expect(relativeFormOf("/a/b")).toBe("a/b");
+    expect(relativeFormOf("a/b")).toBe("a/b");
   });
 });
 

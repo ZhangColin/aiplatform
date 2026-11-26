@@ -1,0 +1,35 @@
+package com.semgravio.aiplatform.business.project.application.dto.command;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+
+/**
+ * 模型配置创建命令（#367，POST——语义键随体，已存在即 409 PRJ_068；所属通道
+ * 必须已有行，PRJ_071）。语义键即引用腿：智能体运营配置（两座智能体＋边缘点）绑定的就是它
+ * ——建行后即可被绑定（即时校验放行）。
+ *
+ * @param configKey         语义键（运营短名，如 flash/pro）
+ * @param providerKey     所属通道键（必须已存在——先建通道行再挂配置）
+ * @param modelName       实际模型名（如 deepseek-flash）
+ * @param displayName     运营显示名（可空＝回落语义键）
+ * @param enabled         启用态（缺省 true）
+ * @param thinkingEnabled 深度思考开关（#370；缺省 false＝显式关）
+ */
+public record ModelConfigCreateCommand(
+        @Schema(description = "配置语义键（引用腿——两座智能体/边缘点绑定的值）",
+                example = "flash")
+        String configKey,
+        @Schema(description = "所属通道键（必须已存在——先建通道行再挂配置）",
+                example = "deepseek")
+        String providerKey,
+        @Schema(description = "实际模型名（通道侧 Model ID——版本升级"
+                + "改此处指向、全部引用自动跟上）", example = "deepseek-flash")
+        String modelName,
+        @Schema(description = "运营显示名（后台绑定下拉的人话标签；可空＝回落语义键）",
+                example = "快模型档")
+        String displayName,
+        @Schema(description = "启用态（缺省 true；停用＝既有绑定装配报错、新绑定被即时校验拒绝）")
+        Boolean enabled,
+        @Schema(description = "深度思考开关（#370：跟配置/模型走；缺省 false＝显式关——不配置"
+                + "不默认拖慢首 token，开态影响首轮延迟/质量/token，细测对比后按档开启）")
+        Boolean thinkingEnabled) {
+}

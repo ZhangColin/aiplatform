@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # ============================================================================
-# #367 模型供应商/档位后台维护面·机机签名 curl 演示与操作脚本（spec #364-T3，
+# #367 模型供应商/模型配置后台维护面·机机签名 curl 演示与操作脚本（spec #364-T3，
 # ADR-0031）。两件事：
-#   1. demo —— 一次性全流程演示（建通道 → 建档位 → 改档位 → 读回掩码 → 留痕 →
+#   1. demo —— 一次性全流程演示（建通道 → 建配置 → 改配置 → 读回掩码 → 留痕 →
 #      绑定即时校验负例 → 清场），全部走 t-demo* 可弃键，跑完即删，对 dev 配置
 #      零副作用——验收票 #367 AC「机机签名 curl 全流程可 demo」的执行面；
 #   2. 单动词 —— 真实运维操作（list/get/create-channel/rotate-key/set-channel/
-#      create-tier/set-tier/traces-*/delete-*），动的是真配置行。
+#      create-config/set-config/候选队列 add|set|enable|move|delete|list|traces/
+#      traces-*/delete-*），动的是真配置行。
+#
+# 候选队列（#559/ADR-0053 ③ 后台写面）：模型配置＝有序候选队列（主备＝前两名），
+# 增删/排序/启停经 /candidates 子资源，留痕快照完整可回滚（旧值写回＝一次新
+# 变更）；改完下一轮命令构建即生效、不发版不重启、进行中 run 不定格。
 #
 # apiKey 安全口径：请求体可携全量 key（写面唯一明文入口），回执与留痕只出掩码
 # （尾 4 位）；本脚本打印的响应体经 show_response 原样展示——掩码形即全部可见
@@ -25,7 +30,7 @@ source "$(dirname "$0")/backoffice-signed-http.sh"
 OP_ID="${OP_ID:-700299}"
 OP_NAME="${OP_NAME:-运营·通道demo}"
 PROVIDERS_PATH="/api/backoffice/model-providers"
-TIERS_PATH="/api/backoffice/model-tiers"
+CONFIGS_PATH="/api/backoffice/model-configs"
 
 body_file() { mktemp -t modelchannel.XXXXXX; }
 
@@ -58,7 +63,7 @@ require_ok() {
 mask_note() { printf '\n（apiKey 回执只出掩码——明文仅库内正本，全链无泄漏面）\n'; }
 
 # ---------------------------------------------------------------------------
-# demo：全流程（可弃键 t-demo-channel/t-demo-tier，跑完清场）
+# demo：全流程（可弃键 t-demo-channel/t-demo-config，跑完清场）
 # ---------------------------------------------------------------------------
 demo() {
   step "0. 通道清单（种子行——apiKey 一律掩码）"
@@ -70,16 +75,16 @@ demo() {
     '{"providerKey":"t-demo-channel","baseUrl":"https://demo.example/api/v3","apiKey":"sk-demo-full-value-0001","enabled":true}')"
   mask_note
 
-  step "2. 建档位 t-demo-tier（挂新通道；建行即可被绑定）"
-  show "$(call_json POST "$TIERS_PATH" \
-    '{"tierKey":"t-demo-tier","providerKey":"t-demo-channel","modelName":"demo-model-2601","displayName":"演示档"}')"
+  step "2. 建配置 t-demo-config（挂新通道；建行即可被绑定）"
+  show "$(call_json POST "$CONFIGS_PATH" \
+    '{"configKey":"t-demo-config","providerKey":"t-demo-channel","modelName":"demo-model-2601","displayName":"演示档"}')"
 
-  step "3. 改档位（升模型版本＝改一处指向，显示名随改）"
-  show "$(call_json PUT "$TIERS_PATH/t-demo-tier" \
+  step "3. 改配置（升模型版本＝改一处指向，显示名随改）"
+  show "$(call_json PUT "$CONFIGS_PATH/t-demo-config" \
     '{"providerKey":"t-demo-channel","modelName":"demo-model-2602","displayName":"演示档 v2"}')"
 
-  step "3b. 开深度思考（#370：开关跟档位走、缺省保持现值；改完下一轮命令构建即生效）"
-  show "$(call_json PUT "$TIERS_PATH/t-demo-tier" \
+  step "3b. 开深度思考（#370：开关跟配置走、缺省保持现值；改完下一轮命令构建即生效）"
+  show "$(call_json PUT "$CONFIGS_PATH/t-demo-config" \
     '{"providerKey":"t-demo-channel","modelName":"demo-model-2602","thinkingEnabled":true}')"
 
   step "4. 读回掩码（通道 GET——key 只出尾 4 位）"
@@ -91,29 +96,50 @@ demo() {
     '{"baseUrl":"https://demo.example/api/v3","apiKey":"sk-demo-full-value-0002"}')"
   mask_note
 
+  step "5b. 建第二账号通道 t-demo-channel-2（vendor 同填归一供应商——按模型统计/单价匹配的维度腿）"
+  show "$(call_json POST "$PROVIDERS_PATH" \
+    '{"providerKey":"t-demo-channel-2","vendor":"t-demo","baseUrl":"https://demo2.example/api/v3","apiKey":"sk-demo2-full-0003","enabled":true}')"
+  mask_note
+
+  step "5c. 增备选候选（追加队尾 priority 2——主备配在模型配置、备选匹配能力档）"
+  show "$(call_json POST "$CONFIGS_PATH/t-demo-config/candidates" \
+    '{"providerKey":"t-demo-channel-2","modelName":"demo-model-2602"}')"
+
+  step "5d. 启停（行级——false＝读面剔除不参队；缺省保持语义只携 enabled 即可）"
+  show "$(call_json PUT "$CONFIGS_PATH/t-demo-config/candidates/2" '{"enabled":false}')"
+  show "$(call_json PUT "$CONFIGS_PATH/t-demo-config/candidates/2" '{"enabled":true}')"
+
+  step "5e. 排序（备选上提 priority 1——区间顺移＋配置行现列镜像跟随）"
+  show "$(call_json PUT "$CONFIGS_PATH/t-demo-config/candidates/2" '{"priority":1}')"
+  show "$(call_get "$CONFIGS_PATH/t-demo-config")"
+
+  step "5f. 候选编排留痕（身份轴前后快照＋操作者——备账号被烧运营可查）"
+  show "$(call_get "$CONFIGS_PATH/t-demo-config/candidates/traces")"
+
+  step "5g. 回滚（旧值写回＝一次新变更留新痕——不做版本树）"
+  show "$(call_json PUT "$CONFIGS_PATH/t-demo-config/candidates/1" '{"priority":2}')"
+  show "$(call_json DELETE "$CONFIGS_PATH/t-demo-config/candidates/2" '{}')"
+  show "$(call_json DELETE "$PROVIDERS_PATH/t-demo-channel-2" '{}')"
+
   step "6. 留痕读面（前后快照＋操作者；key 快照亦掩码）"
   show "$(call_get "$PROVIDERS_PATH/t-demo-channel/traces")"
-  show "$(call_get "$TIERS_PATH/t-demo-tier/traces")"
+  show "$(call_get "$CONFIGS_PATH/t-demo-config/traces")"
 
   step "6b. 清单拉取负例（假上游——502 PRJ_077 明确报错不静默；真拉走 pull-models <通道键>）"
   show "$(call_json POST "$PROVIDERS_PATH/t-demo-channel/remote-models" '{}')"
 
-  step "7. 绑定即时校验负例（写不存在的档位键——400 PRJ_074，零写入）"
-  show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"modelId":"t-no-such-tier"}')"
+  step "7. 绑定即时校验负例（写不存在的配置键——400 PRJ_074，零写入）"
+  show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"modelId":"t-no-such-config"}')"
 
   step "8. 绑定合法新档（即时校验放行——演示档生效）"
-  show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"modelId":"t-demo-tier"}')"
+  show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"modelId":"t-demo-config"}')"
 
-  step "8b. 路由结构性信号开关（#454：缺省关＝观测值照留但不参与升档判定，失败重试升档不受影响；清场步 PUT {} 回落缺省关）"
-  show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"routingFileCountSignalEnabled":true,"routingSizeLabelSignalEnabled":true}')"
-  show "$(call_get "/api/backoffice/agent-configs/executor")"
+  step "9. 删除守卫（配置被绑定——409 PRJ_073）"
+  show "$(call_json DELETE "$CONFIGS_PATH/t-demo-config" '{}')"
 
-  step "9. 删除守卫（档位被绑定——409 PRJ_073）"
-  show "$(call_json DELETE "$TIERS_PATH/t-demo-tier" '{}')"
-
-  step "10. 清场（解绑 → 删档位 → 删通道）"
+  step "10. 清场（解绑 → 删配置 → 删通道）"
   show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{}')"
-  show "$(call_json DELETE "$TIERS_PATH/t-demo-tier" '{}')"
+  show "$(call_json DELETE "$CONFIGS_PATH/t-demo-config" '{}')"
   show "$(call_json DELETE "$PROVIDERS_PATH/t-demo-channel" '{}')"
   step "demo 完（服务端日志同步可查：变更行 [model-channel] 均掩码，无明文 key）"
 }
@@ -121,14 +147,15 @@ demo() {
 # ---------------------------------------------------------------------------
 # 单动词（真实运维操作）
 # ---------------------------------------------------------------------------
-list() { show "$(call_get "$PROVIDERS_PATH")"; show "$(call_get "$TIERS_PATH")"; }
+list() { show "$(call_get "$PROVIDERS_PATH")"; show "$(call_get "$CONFIGS_PATH")"; }
 
 get_channel() { show "$(call_get "$PROVIDERS_PATH/$1")"; }
-get_tier() { show "$(call_get "$TIERS_PATH/$1")"; }
+get_config() { show "$(call_get "$CONFIGS_PATH/$1")"; }
 
-create_channel() { # <key> <baseUrl> [apiKey]
+create_channel() { # <key> <baseUrl> [apiKey] [vendor]
   local body="{\"providerKey\":\"$1\",\"baseUrl\":\"$2\""
   [[ -n "${3:-}" ]] && body="$body,\"apiKey\":\"$3\""
+  [[ -n "${4:-}" ]] && body="$body,\"vendor\":\"$4\""
   show "$(call_json POST "$PROVIDERS_PATH" "$body}")"
 }
 
@@ -142,43 +169,71 @@ rotate_key() { # <key> <newApiKey>（现 baseUrl 从 GET 取，apiKey null 语�
   mask_note
 }
 
-set_channel() { # <key> <baseUrl> [enabled=true|false]（不携 apiKey＝保持现值）
+set_channel() { # <key> <baseUrl> [enabled=true|false] [vendor]（不携 apiKey＝保持现值）
   local body="{\"baseUrl\":\"$2\""
   [[ -n "${3:-}" ]] && body="$body,\"enabled\":$3"
+  [[ -n "${4:-}" ]] && body="$body,\"vendor\":\"$4\""
   show "$(call_json PUT "$PROVIDERS_PATH/$1" "$body}")"
 }
 
-create_tier() { # <tierKey> <providerKey> <modelName> [displayName]
-  local body="{\"tierKey\":\"$1\",\"providerKey\":\"$2\",\"modelName\":\"$3\""
+create_config() { # <configKey> <providerKey> <modelName> [displayName]
+  local body="{\"configKey\":\"$1\",\"providerKey\":\"$2\",\"modelName\":\"$3\""
   [[ -n "${4:-}" ]] && body="$body,\"displayName\":\"$4\""
-  show "$(call_json POST "$TIERS_PATH" "$body}")"
+  show "$(call_json POST "$CONFIGS_PATH" "$body}")"
 }
 
-set_tier() { # <tierKey> <providerKey> <modelName> [displayName] [enabled]
+set_config() { # <configKey> <providerKey> <modelName> [displayName] [enabled]
   local body="{\"providerKey\":\"$2\",\"modelName\":\"$3\""
   [[ -n "${4:-}" ]] && body="$body,\"displayName\":\"$4\""
   [[ -n "${5:-}" ]] && body="$body,\"enabled\":$5"
-  show "$(call_json PUT "$TIERS_PATH/$1" "$body}")"
+  show "$(call_json PUT "$CONFIGS_PATH/$1" "$body}")"
 }
 
 traces_channel() { show "$(call_get "$PROVIDERS_PATH/$1/traces")"; }
-traces_tier() { show "$(call_get "$TIERS_PATH/$1/traces")"; }
+traces_config() { show "$(call_get "$CONFIGS_PATH/$1/traces")"; }
 
-pull_models() { # <providerKey> 手动拉取远端模型清单（对照库内档位；每次全量真拉）
+# 候选队列（#559：配置子资源——增删/排序/启停＋留痕，回滚＝旧值写回即新痕）
+list_candidates() { # <configKey> 候选队列读面（priority 升序＝队列序）
+  show "$(call_get "$CONFIGS_PATH/$1/candidates")"
+}
+
+add_candidate() { # <configKey> <providerKey> <modelName> [priority]（缺省追加队尾）
+  local body="{\"providerKey\":\"$2\",\"modelName\":\"$3\""
+  [[ -n "${4:-}" ]] && body="$body,\"priority\":$4"
+  show "$(call_json POST "$CONFIGS_PATH/$1/candidates" "$body}")"
+}
+
+set_candidate() { # <configKey> <priority> <providerKey> <modelName>（换指向；缺省保持其余）
+  show "$(call_json PUT "$CONFIGS_PATH/$1/candidates/$2" \
+    "{\"providerKey\":\"$3\",\"modelName\":\"$4\"}")"
+}
+
+enable_candidate() { # <configKey> <priority> <true|false>（行级启停）
+  show "$(call_json PUT "$CONFIGS_PATH/$1/candidates/$2" "{\"enabled\":$3}")"
+}
+
+move_candidate() { # <configKey> <priority> <newPriority>（排序——区间顺移＋镜像跟随）
+  show "$(call_json PUT "$CONFIGS_PATH/$1/candidates/$2" "{\"priority\":$3}")"
+}
+
+delete_candidate() { # <configKey> <priority>（队列压实；最后候选不可删）
+  show "$(call_json DELETE "$CONFIGS_PATH/$1/candidates/$2" '{}')"
+}
+
+traces_candidates() { # <configKey> 候选编排留痕读面（回滚依据）
+  show "$(call_get "$CONFIGS_PATH/$1/candidates/traces")"
+}
+
+pull_models() { # <providerKey> 手动拉取远端模型清单（对照库内配置；每次全量真拉）
   show "$(call_json POST "$PROVIDERS_PATH/$1/remote-models" '{}')"
 }
 
 delete_channel() { show "$(call_json DELETE "$PROVIDERS_PATH/$1" '{}')"; }
-delete_tier() { show "$(call_json DELETE "$TIERS_PATH/$1" '{}')"; }
+delete_config() { show "$(call_json DELETE "$CONFIGS_PATH/$1" '{}')"; }
 
 AGENT_CONFIGS_PATH="/api/backoffice/agent-configs"
 
-set_signal_switches() { # <fileCount true|false> <sizeLabel true|false>（#454 路由结构性信号开关；缺省关）
-  show "$(call_json PUT "$AGENT_CONFIGS_PATH/executor" \
-    "{\"routingFileCountSignalEnabled\":$1,\"routingSizeLabelSignalEnabled\":$2}")"
-}
-
-get_agent_config() { # <agentKey> 智能体配置读面（生效值＋覆盖标记＋缺省预览＋信号开关生效态）
+get_agent_config() { # <agentKey> 智能体配置读面（生效值＋覆盖标记＋缺省预览）
   show "$(call_get "$AGENT_CONFIGS_PATH/$1")"
 }
 
@@ -186,24 +241,36 @@ usage() {
   cat <<'USAGE'
 用法：backoffice-model-channel.sh <动词> [参数…]
   demo                                    全流程演示（t-demo* 可弃键，自动清场）
-  list                                    通道＋档位清单（掩码形）
-  get-channel <key> / get-tier <key>      单行读面
-  create-channel <key> <baseUrl> [key]    建通道（apiKey 全量值；缺＝暂不配置）
+  list                                    通道＋配置清单（掩码形）
+  get-channel <key> / get-config <key>      单行读面
+  create-channel <key> <baseUrl> [key] [vendor]
+                                          建通道（apiKey 全量值；vendor 受控值缺省＝
+                                          providerKey 同值——同供应商多账号行显式同填）
   rotate-key <key> <newApiKey>            换 key（现 baseUrl 自动携带）
-  set-channel <key> <baseUrl> [enabled]   改 baseUrl/停启用（apiKey 保持）
-  create-tier <tierKey> <providerKey> <modelName> [displayName]
-  set-tier <tierKey> <providerKey> <modelName> [displayName] [enabled]
-  traces-channel <key> / traces-tier <key> 留痕读面（回滚依据）
-  pull-models <key>                          手动拉取远端模型清单（对照库内档位；
-                                            trackedTierKeys 空＝建议入库，勾选后走
-                                            create-tier，modelName 填条目 modelId）
-  delete-channel <key> / delete-tier <key> 删除（被引用即 409）
-  set-signal-switches <fileCount> <sizeLabel>
-                                            路由结构性信号开关（#454；true|false——缺省
-                                            关＝不参与升档判定，失败重试升档不受影响；
-                                            traces 前后快照含两开关，回滚腿完整）
-  get-agent-config <agentKey>               智能体配置读面（executor 行含两信号开关生效态）
+  set-channel <key> <baseUrl> [enabled] [vendor]
+                                          改 baseUrl/停启用/换归一（apiKey/vendor 保持）
+  create-config <configKey> <providerKey> <modelName> [displayName]
+  set-config <configKey> <providerKey> <modelName> [displayName] [enabled]
+  list-candidates <configKey>               候选队列读面（priority 升序＝队列序）
+  add-candidate <configKey> <providerKey> <modelName> [priority]
+                                          增候选（缺省追加队尾；显式序＝插位顺移）
+  set-candidate <configKey> <priority> <providerKey> <modelName>
+                                          换候选指向（通道/实际模型名；备选模型升级）
+  enable-candidate <configKey> <priority> <true|false>
+                                          行级启停（false＝读面剔除不参队）
+  move-candidate <configKey> <priority> <newPriority>
+                                          排序（区间顺移＋配置行镜像跟随）
+  delete-candidate <configKey> <priority>   删候选（队列压实；最后候选不可删）
+  traces-candidates <configKey>             候选编排留痕读面（回滚＝旧值写回即新痕）
+  traces-channel <key> / traces-config <key> 留痕读面（回滚依据）
+  pull-models <key>                          手动拉取远端模型清单（对照库内配置；
+                                            trackedConfigKeys 空＝建议入库，勾选后走
+                                            create-config，modelName 填条目 modelId）
+  delete-channel <key> / delete-config <key> 删除（被引用即 409）
+  get-agent-config <agentKey>               智能体配置读面
 环境：BACKOFFICE_API_KEY/SECRET（同 backoffice-quote.sh）、OP_ID/OP_NAME（写留痕）
+候选面主备配法（运维口诀）：add-candidate flash <备通道> <同档模型> → 队列即主备；
+改完下一轮命令构建即生效、进行中 run 不定格。
 USAGE
 }
 
@@ -212,18 +279,24 @@ case "${1:-}" in
   demo) demo ;;
   list) list ;;
   get-channel) get_channel "$2" ;;
-  get-tier) get_tier "$2" ;;
+  get-config) get_config "$2" ;;
   create-channel) shift; create_channel "$@" ;;
   rotate-key) shift; rotate_key "$@" ;;
   set-channel) shift; set_channel "$@" ;;
-  create-tier) shift; create_tier "$@" ;;
-  set-tier) shift; set_tier "$@" ;;
+  create-config) shift; create_config "$@" ;;
+  set-config) shift; set_config "$@" ;;
+  list-candidates) list_candidates "$2" ;;
+  add-candidate) shift; add_candidate "$@" ;;
+  set-candidate) shift; set_candidate "$@" ;;
+  enable-candidate) shift; enable_candidate "$@" ;;
+  move-candidate) shift; move_candidate "$@" ;;
+  delete-candidate) delete_candidate "$2" ;;
+  traces-candidates) traces_candidates "$2" ;;
   traces-channel) traces_channel "$2" ;;
-  traces-tier) traces_tier "$2" ;;
+  traces-config) traces_config "$2" ;;
   pull-models) pull_models "$2" ;;
   delete-channel) delete_channel "$2" ;;
-  delete-tier) delete_tier "$2" ;;
-  set-signal-switches) shift; set_signal_switches "$@" ;;
+  delete-config) delete_config "$2" ;;
   get-agent-config) get_agent_config "$2" ;;
   *) usage ;;
 esac

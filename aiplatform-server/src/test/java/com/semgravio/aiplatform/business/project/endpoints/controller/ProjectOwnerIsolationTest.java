@@ -215,9 +215,9 @@ class ProjectOwnerIsolationTest {
     void given_both_owner_columns_set_when_insert_then_rejected_by_check() {
         // 互斥约束：账户与访客归属至多一方落值（违规插入库层拒绝）
         assertThatThrownBy(() -> jdbcTemplate.update(
-                "INSERT INTO prj_projects (id, name, type, endpoint_type, workspace_id, "
+                "INSERT INTO prj_projects (id, name, type, workspace_id, "
                         + "owner_account_id, owner_guest_id, created_at, updated_at) "
-                        + "VALUES (?, ?, 1, 2, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        + "VALUES (?, ?, 1, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 SQL_SEEDED_PROJECT_ID, "双主违规行", 932_699L, ACCOUNT_A, 932_999L))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -227,9 +227,9 @@ class ProjectOwnerIsolationTest {
         // 访客列读写映射（皆可空：仅访客归属合法——访客域表体与写入方属 #326，
         // 本票直插行钉列在聚合上的映射不丢）
         jdbcTemplate.update(
-                "INSERT INTO prj_projects (id, name, type, endpoint_type, workspace_id, "
+                "INSERT INTO prj_projects (id, name, type, workspace_id, "
                         + "owner_guest_id, created_at, updated_at) "
-                        + "VALUES (?, ?, 1, 2, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        + "VALUES (?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 SQL_SEEDED_PROJECT_ID, "访客项目", 932_698L, 932_888L);
 
         Project project = projectRepository.findById(SQL_SEEDED_PROJECT_ID).orElseThrow();

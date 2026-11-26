@@ -63,6 +63,16 @@ final class MeteringScope {
         return context.getOrDefault(CONTEXT_KEY, null);
     }
 
+    /** run 寻址（包内消费：#557 切换留痕的 run 上下文腿——同订阅态来源）。 */
+    String runId() {
+        return runId;
+    }
+
+    /** 会话寻址（包内消费：同 {@link #runId()}）。 */
+    String sessionId() {
+        return sessionId;
+    }
+
     /**
      * 判死标记（#374 可观测兜底）：runTurn 判死（超时/异常）路径调用。此后收口的
      * 模型调用即僵尸调用证据（取消盲区：SSE 阻塞读等下一行、非流式调用自然完成）
@@ -74,11 +84,12 @@ final class MeteringScope {
 
     /**
      * 一次模型 {@code stream()} 收口报恰一条 UsageEvent（幂等键 = 前缀 + 本轮自增
-     * 序号；零用量/无 usage 跳过——不发明零事件）。provider/model 取模型边界的
-     * 自身档位（压缩 flash 与主循环 pro 各自归位，不并桶）。判死后（#374）收口
-     * 照报＋WARN（僵尸调用只烧 token 产出全弃，事实必须可见）。
+     * 序号；零用量/无 usage 跳过——不发明零事件）。provider/model/vendor 取模型
+     * 边界的自身配置（压缩 flash 与主循环 pro 各自归位，不并桶；vendor 随候选
+     * 的通道行走——同供应商多账号共用供应商级定价与模型视角合并，ADR-0053 ②）。
+     * 判死后（#374）收口照报＋WARN（僵尸调用只烧 token 产出全弃，事实必须可见）。
      */
-    void report(ModelRef modelRef, ChatUsage usage) {
+    void report(ModelRef modelRef, String vendor, ChatUsage usage) {
         TokenUsage tokens = AgentscopeUsageMapper.toTokenUsage(usage);
         if (tokens.total() <= 0) {
             return;
@@ -95,8 +106,11 @@ final class MeteringScope {
                 runId,
                 sessionId,
                 modelRef.provider(),
+                vendor,
                 modelRef.modelId(),
                 usageContext.dims(),
-                tokens));
+                tokens,
+                0,
+                0));
     }
 }

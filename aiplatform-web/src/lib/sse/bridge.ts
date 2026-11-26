@@ -7,7 +7,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore, toWorkPlanSteps, DRAFT_WRITING_TOOLS } from "@/lib/store/work-message";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { orderStatusToastText, REPRICED_TOAST_TEXT } from "@/lib/orders/status";
 
@@ -45,7 +45,7 @@ const ORDER_INVALIDATIONS = [
  */
 const NOTIFICATION_INVALIDATIONS = {
   "workspace-created": [queryKeys.projects.all],
-  // 预览地址由切片收口事件推 URL（#105 载荷写入口，见下方 NOTIFICATION_PAYLOAD_
+  // 预览地址由 run 收口事件推 URL（#105 载荷写入口，见下方 NOTIFICATION_PAYLOAD_
   // WRITERS）；不在此失效 projects 前缀——preview() 每次成功仍会发本事件，失效即
   // 重拉预览查询 → 又成功 → 又发事件——自反馈死循环（写缓存非失效，不重拉 preview）
   "preview-ready": [],
@@ -80,7 +80,7 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
     if (event.payload.documentType !== "PRD") return;
     usePrdNoticesStore.getState().notePrdWritten(event.payload.projectId);
   },
-  // 预览 URL 事件驱动拿取（#105）：切片收口推 URL 直接写预览查询缓存——免 3s
+  // 预览 URL 事件驱动拿取（#105）：run 收口推 URL 直接写预览查询缓存——免 3s
   // 轮询；写缓存非失效，不会重拉 preview 再发事件（消自反馈循环顾虑）。缺省该
   // 写入方 = 空登忽略（旧口径），现在 URL 由事件推送而非 REST 副作用唯一来源
   "preview-ready": (event, queryClient) => {
@@ -171,25 +171,6 @@ function epochMsOf(ts: string): number | undefined {
   return Number.isNaN(ms) ? undefined : ms;
 }
 
-/** 该 run 是否锚定的设计会话（#290）：工作消息座席＋runId 双锚——designer 收口的
- * 失效面判定（件状态落轨道表，重拉进计划区）；生成面（generation store）不涉。 */
-function isDesignerWork(projectId: string, runId: string): boolean {
-  const work = useWorkMessageStore.getState().works[projectId];
-  return work?.seat === "designer" && work.runId === runId;
-}
-
-/** 该部件事件是否设计轨的稿落盘完成（#294）：designer 锚定＋写动作族＋completed
- * ——文件树失效的窄条件（编码轨照旧 run-finish 才失效、读类与失败动作不触发）。 */
-function isDesignerDraftWritten(projectId: string, runId: string, toolName: unknown,
-    state: unknown): boolean {
-  return (
-    isDesignerWork(projectId, runId)
-    && typeof toolName === "string"
-    && DRAFT_WRITING_TOOLS.has(toolName)
-    && state === "completed"
-  );
-}
-
 /**
  * 智能体事件 → chat store + generation store + 工作消息 store 分发（事件 id =
  * SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键（引擎信息归一）
@@ -213,26 +194,16 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         // 配置键 = 呈现形态的登记锚（引擎信息归一，#82 起 run-start 唯一携带）：
         // executor → 编码 run（生成面登记 + 工作消息起锚）；main → 对话面 run
-        // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）；
-        // designer → 设计会话（#290 同构直播卡：座席落锚，计划区＝设计物清单）
+        // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
         if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
           // run 级时钟起锚（#225）：run-start 信封 ts——单一 run 起点锚
           // （ADR-0010 窄修订），缺 ts（测试/异常信封）不落锚、时钟不渲染
           work.startWork(payload.projectId, payload.runId, payload.slice, epochMsOf(envelope.ts));
-          // 四态投影回「生成中」（#222）：起跑即失效项目域——补产轮收口再派的
-          // 轨道落库无对话面事件可搭，靠本失效收尾（点击路径的失效在 mutation）
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-          // 构建基准记行失效（#462 去门化）：Demo 类 run 起跑自动记 PRD 版本行
-          // （服务端记行先于 run-start 发出）——documents 域只靠 document-updated
-          // 失效与记行存在竞态（savePrd 通知早于记行落库），阶段门「首个 Demo 在途」
-          // 事实源（prdVersions 非空）随本失效即时解锁，不卡到刷新
-          void queryClient.invalidateQueries({ queryKey: queryKeys.documents.all });
-        } else if (payload.agent === "designer") {
-          // 设计会话起锚（#290）：座席＝designer（计划区/活性行的呈现分岔锚）；
-          // 起跑即失效项目域——清单落表（收口自动起设计的清单章解析）晚于
-          // document-updated 失效，重拉才带设计物清单进计划区
-          work.startWork(payload.projectId, payload.runId, payload.slice, epochMsOf(envelope.ts), "designer");
+          // 生成态投影回「生成中」（#222）＋首建阶段门解锁（#630 起读生成态）：
+          // 起跑即失效项目域——收口观测直派的轨道落库无对话面事件可搭，靠本失效
+          // 收尾（点击路径的失效在 mutation）。旧 PRD 版本记行随 #630 退场，不再
+          // 连带失效 documents 域（PRD 变更由 document-updated 单路驱动）。
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
@@ -256,14 +227,10 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         // 编码 run 的 error = 事件序异常（#84：尝试环内中间错误不出用户面事件流，
         // 服务端投影失守的防御位）——不写任何 UI（中途闪错即本票防的回归），
-        // run 层唯一失败终态仍归 run-failed；设计会话同款（#290：重试全程静默，
-        // 中间错误不进对话面）
+        // run 层唯一失败终态仍归 run-failed
         if (isCoderRun(generation, payload.projectId, payload.runId)) return;
-        if (isDesignerWork(payload.projectId, payload.runId)) return;
         // 对话轮失败（非重试族）：对话面收轮 + 失败气泡；生成面不写状态（#84）
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
-        // 受理卡落定不死转（#87）：受理轮炸——中断提示已是兜底呈现，卡不悬转
-        chat.settleAcceptance(payload.projectId, payload.runId);
         return;
       }
       case "run-failed": {
@@ -274,12 +241,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFailed(payload.projectId, payload.message, payload.stopped);
-          // 四态投影回「生成中断」（#222）：终态落轨道表即失效项目域——「继续
-          // 生成」出口由投影派生（刷新后仍在，不依赖本事件）
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-        } else if (isDesignerWork(payload.projectId, payload.runId)) {
-          // 设计轨失败终态（#289 失败不跳件）：件状态落轨道表 → 失效项目域
-          //（计划区 ✗ 推进；恢复出口＝用户重提意见走收口链，无前端按钮）
+          // 终态收口即失效项目域（#222）：服务端在途标记已清——未生成的项目投影
+          // 回「从未生成」（#604 起失败不落投影，失败档只由本事件的会话态呈现）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
         // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）；
@@ -290,9 +253,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       case "run-finish": {
         const { payload } = platform;
         chat.finishTurn(payload.projectId, payload.runId);
-        // 受理卡落定（#87）：受理轮收口（受理完成——追问挂起轮不发本事件，挂起
-        // 期间卡保持受理中）；更新 run 随收口自动派发，工作消息即视觉衔接
-        chat.settleAcceptance(payload.projectId, payload.runId);
         // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88/#89
         // 收尾卡权威事实归对话流随后入流，工作消息原地定格留驻 #117，非锚定 run
         // 的收口在 store 内忽略）
@@ -306,12 +266,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           generation.noteCoderFinish(payload.projectId, event.id);
           // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
           // 预览地址域随之刷新；预览重挂由 generation store 纪元驱动）
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-        } else if (isDesignerWork(payload.projectId, payload.runId) || closing?.drafts) {
-          // 设计会话收口（#290）：件状态落轨道表 → 失效项目域（计划区 ✓ 推进
-          //——逐件收口即逐件亮灯，对偶编码 run 收口失效）；closing.drafts 在场
-          //（#291 定稿收尾卡——平台侧发射、无锚定直播卡）同判：件状态转已定稿
-          //（finalized_path 透出）也经项目域重拉进计划区
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
         // 轮收口即对话史有新条目（发言+回复 / 收尾卡落库）——失效对话域，水合增量
@@ -337,14 +291,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           payload.text,
           event.id,
         );
-        return;
-      }
-      case "acceptance-start": {
-        // 受理动作卡（#87）：受理轮开场受理事实——意见已接住、正在受理（服务端
-        // 守卫全过后、受理动作前发，先于 run-start 到达）。落定不出专事件：该轮
-        // run-finish / error 收口即落定（见上两分支）；咨询轮与纯追问轮服务端不发
-        const { payload } = platform;
-        chat.noteAcceptance(payload.projectId, payload.runId, event.id);
         return;
       }
       case "intercept-card": {
@@ -380,7 +326,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             holdId: payload.holdId,
             lane: payload.lane,
             prompt: payload.prompt,
-            designItem: payload.designItem,
             sourcePoolBalance: payload.sourcePoolBalance,
             runId: payload.runId,
           },
@@ -391,16 +336,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       // ---- 消息部件（parts 契约）→ 工作消息 store ----
       // 部件全事件流恒挂（主智能体对话轮也产部件）——store 侧锚定守卫只收编码 run。
-      case "part-text": {
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
-            source: payload.source },
-          { kind: "text", text: payload.text },
-        );
-        return;
-      }
+      // 呈现面清场（#608）：part-text / part-check / part-plan 已退役——旧事件按
+      // 未知平台类型忽略，部件只余脱轨信号与工具动作两件。
       case "part-signal": {
         // 脱轨信号（#240）：入 parts 流水（活性行脱轨变体的推导源）——呈现归组件
         // 投影（静态面无痕），本路由不做转译（载荷只有发生事实，无原文）
@@ -415,14 +352,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "part-action": {
         const { payload } = platform;
-        // 设计轨稿落盘完成 → 失效文件树（#294 渐进长出：画布在途稿随写随显——
-        // 树是新稿的存在性正本，窄条件只作用 designer 锚定的写动作收口）
-        if (isDesignerDraftWritten(payload.projectId, payload.runId,
-            payload.toolName, payload.state)) {
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.projects.files(payload.projectId),
-          });
-        }
         work.notePart(
           payload.projectId,
           { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
@@ -434,32 +363,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             state: payload.state,
             label: payload.label,
             error: payload.error, // 失败留痕（#229）：仅 failed 携带，其余态缺省
+            path: payload.path, // 写文件目标路径（#618 预览跟随）：仅写文件类携带
           },
-        );
-        return;
-      }
-      case "part-check": {
-        // 自检播报（#85）：收口判据核验「检查中 → ✅/❌」——平台侧产出（无 engine
-        // 字段）；一场 run 一个自检部件，跨状态原位换装归 store
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id },
-          { kind: "check", state: payload.state },
-        );
-        return;
-      }
-      // part-hint（#437 决策时微指令）2026-11-12 退役：微指令是模型面指引、用户面
-      // 只添噪（后端已停发）——历史存量事件按未知平台类型忽略（不进 parts 流水）
-      case "part-plan": {
-        // 步骤清单快照（#236）：整表替换落 `plan`（不进 parts 流水——不走动作行、
-        // 不留动作痕、不单独播报）；断线补发按事件序重放，最后快照即终态
-        const { payload } = platform;
-        work.notePlan(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
-            source: payload.source },
-          toWorkPlanSteps(payload.steps),
         );
         return;
       }

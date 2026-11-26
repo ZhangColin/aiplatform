@@ -24,7 +24,6 @@ const seed = vi.hoisted(() => ({
     updatedAt: string;
     readiness?: { blocking: { text: string }[]; minor: { text: string }[]; dimensions: { dimension: string; status: string }[] };
   } | null | undefined,
-  prdVersions: [] as { versionNo: number }[],
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   works: {} as Record<string, unknown>,
@@ -37,7 +36,6 @@ vi.mock("@/hooks/use-project", () => ({
 
 vi.mock("@/hooks/use-prd", () => ({
   usePrd: () => ({ data: seed.prd, isPending: false }),
-  usePrdVersions: () => ({ data: seed.prdVersions }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -104,28 +102,23 @@ vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
-vi.mock("@/hooks/use-version", () => ({
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: { mutate: vi.fn(), isPending: false, isError: false, data: undefined, reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-}));
-
 /** 标准播种：闲聊期（无 PRD）项目。 */
 function seedChatOnlyProject() {
   seed.detail = { id: "p1", name: "宠物医院预约管理系统" } as ProjectDetail;
   seed.prd = null;
-  seed.prdVersions = [];
   seed.chats = { chats: {} };
   seed.notices = { seen: {}, pending: {} };
   seed.works = {};
 }
 
-/** 标准播种：PRD 已产出（尚无构建基准记行）。 */
+/** 标准播种：PRD 已产出（首个构建 run 未起跑）。 */
 function seedPrdProducedProject() {
-  seed.detail = { id: "p1", name: "宠物医院预约管理系统", prdProducedAt: "2026-10-18T01:00:00Z" } as ProjectDetail;
+  seed.detail = {
+    id: "p1",
+    name: "宠物医院预约管理系统",
+    prdProducedAt: "2026-10-18T01:00:00Z",
+    generationState: "never",
+  } as ProjectDetail;
   seed.prd = {
     content: "## 需求背景\n背景正文。\n## 验收与待确认\n暂无。",
     updatedAt: "2026-10-18T01:00:00Z",
@@ -141,7 +134,6 @@ function seedPrdProducedProject() {
       ],
     },
   };
-  seed.prdVersions = [];
   seed.chats = { chats: {} };
   seed.notices = { seen: {}, pending: {} };
   seed.works = {};
@@ -199,25 +191,26 @@ describe("需求分析页 · 首产 PRD 双栏滑出", () => {
     expect(screen.queryByText(/前往 Demo 体验/)).toBeNull();
   });
 
-  it("首个构建基准记行（版本清单非空）：徽标 vN＋主 CTA「前往 Demo 体验」，并自动切 Demo 页一次", () => {
+  it("首个构建 run 起跑（生成态）：徽标仍「PRD 草稿」＋主 CTA「前往 Demo 体验」，并自动切 Demo 页一次", () => {
     const { rerender } = render(<RequirementAnalysisPage projectId="p1" />);
     seedPrdProducedProject();
     rerender(<RequirementAnalysisPage projectId="p1" />);
-    // 草稿态：尚未记行——不跳
+    // 未起跑：无 CTA——不跳
+    expect(screen.queryByText(/前往 Demo 体验/)).toBeNull();
     expect(seed.push).not.toHaveBeenCalled();
 
-    // 首个构建 run 起跑自动记行 → 版本清单由空转非空
-    seed.prdVersions = [{ versionNo: 1 }];
+    // 首个构建 run 起跑（生成态由 never 转 generating，#630 起不写旧版本记行）
+    seed.detail = { ...seed.detail!, generationState: "generating" };
     rerender(<RequirementAnalysisPage projectId="p1" />);
 
-    expect(screen.getByText("PRD 构建基准 v1")).toBeTruthy();
+    expect(screen.getByText("PRD 草稿")).toBeTruthy();
     const link = screen.getByRole("link", { name: /前往 Demo 体验/ });
     expect(link.getAttribute("href")).toBe("/projects/p1/demo");
     // 自动切页（转换点一次）：推 Demo 体验页
     expect(seed.push).toHaveBeenCalledWith("/projects/p1/demo");
 
-    // 可切回：后续版本递增不再重复跳（仅空→非空转换点一次）
-    seed.prdVersions = [{ versionNo: 2 }, { versionNo: 1 }];
+    // 可切回：后续生成态推进（generating→generated）不再重复跳
+    seed.detail = { ...seed.detail!, generationState: "generated" };
     rerender(<RequirementAnalysisPage projectId="p1" />);
     expect(seed.push).toHaveBeenCalledTimes(1);
   });

@@ -9,7 +9,7 @@ import io.agentscope.core.shutdown.ShutdownState;
  * 平台单点读口——SIGTERM 后 JVM 钩子（{@code AgentScopeJvmShutdownHook}）置
  * {@code SHUTTING_DOWN} 并中断在飞模型调用（{@link AgentShuttingDownException}），
  * 随后在宽限窗内等待在途请求收口。<b>宽限窗内的一切编码 run 收场都按「中断」
- * 处置</b>（不重试、不烧尝试预算、不升档、不触发下一轮派发），否则关停错误被
+ * 处置</b>（不重试、不烧尝试预算、不触发下一轮派发），否则关停错误被
  * 重试环当普通失败消费——2026-11-12 19:03 生产实录：升档秒败×3 烧满转终态、
  * 排队轮在宽限窗内继续拉起各烧 3 次，6m50s 进度报废（本应落「中断可续跑」态）。
  *

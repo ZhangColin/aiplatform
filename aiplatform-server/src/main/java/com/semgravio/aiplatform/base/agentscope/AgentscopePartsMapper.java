@@ -20,28 +20,28 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 /**
  * 部件映射表单点（parts 契约的生产方）：AgentScope 事件 → 平台消息部件事件
  * （词汇正本 = eventhub {@link AgentEventTypes} 部件组；词根取 agentscope 原生
- * part 族，薄翻译不套某家词表）。解说切段与动作行内核独立承载
- * （{@link NarrationSegments} / {@link ToolActionLines}）；步骤清单快照内核
- * {@link PlanSnapshots}（#236）。工具动作<b>开始即出事件</b>（动作卡全生命周期），
- * 以 toolCallId 锚定跨状态（开始/进行中/完成/失败）。
- * 全事件流恒挂（不限编码 run）——消息 = 有序部件集合是全部智能体事件的呈现地基。
+ * part 族，薄翻译不套某家词表）。动作行内核独立承载（{@link ToolActionLines}）。
+ * 工具动作<b>开始即出事件</b>（动作卡全生命周期），以 toolCallId 锚定跨状态
+ * （开始/进行中/完成/失败）。全事件流恒挂（不限编码 run）——消息 = 有序部件集合
+ * 是全部智能体事件的呈现地基。
  *
  * <table border="1">
  *   <caption>AgentScope 事件 → 消息部件事件</caption>
  *   <tr><th>AgentScope 事件</th><th>部件 type</th><th>部件字段</th></tr>
- *   <tr><td>TextBlockDelta（累积切段，机器语法段守卫丢弃——#234）</td><td>{@code part-text}</td><td>text（完整段）</td>
  *   <tr><td>TextBlockDelta（机器语法吞段开始——#240）</td><td>{@code part-signal}</td><td>signal=derailed（人话留痕，不携带原文）</td>
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
- *   <tr><td>ToolCallEnd（update_plan——#236）</td><td>{@code part-plan}</td><td>steps（全量快照，参数落定点出）</td>
  *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed（failed 携 error——错误/stderr 首行截断，#229）</td>
  * </table>
  *
- * <p>思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的呈现位随
- * 需要扩表。工具参数与结果文本增量只累积不出部件（label 在边界点取、error 在
- * 终 failed 提取，#229）。动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
- * 调用方 {@link #drain()} 出尾段（幂等）。步骤分组已退役（#115：步骤序号对
- * 用户零信息，部件按序竖排）。</p>
+ * <p>写文件类动作（write_file／edit_file）在参数落定与终态另携可选 path——path
+ * 参数原形，前端纯函数据此映射应用路由（#618 预览跟随，非页面文件不切页）；命令
+ * 类与读类不携带。思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的
+ * 呈现位随需要扩表。工具参数与结果文本增量只累积不出部件（label 在边界点取、
+ * error 在终 failed 提取，#229）。模型文本一律不直播（ADR-0057）：解说切段内核
+ * （{@link NarrationSegments}）只留机器语法守卫半边——人话段不出部件，吞段照出
+ * 脱轨信号；步骤分组已退役（#115）；步骤清单快照部件随 update_plan 工具一并退役
+ * （#604），事件类型随 #608 呈现面清场退役。</p>
  */
 final class AgentscopePartsMapper {
 
@@ -51,7 +51,6 @@ final class AgentscopePartsMapper {
 
     private final NarrationSegments narration = new NarrationSegments();
     private final ToolActionLines actions = new ToolActionLines();
-    private final PlanSnapshots plans = new PlanSnapshots();
 
     AgentscopePartsMapper(String runId, String sessionId, String engine) {
         this.runId = runId;
@@ -66,17 +65,11 @@ final class AgentscopePartsMapper {
         // 呈现归属）
         String source = AgentscopeEventMapper.sourceOf(event);
         if (event instanceof TextBlockDeltaEvent delta) {
-            return textParts(narration.offer(delta, source));
+            return signalParts(narration.offer(delta, source));
         }
         if (event instanceof ToolCallDeltaEvent delta) {
-            // 工具参数增量只累积不出部件（短语/快照在边界点取）：update_plan 归计划
-            // 内核（不出动作行），其余归动作行内核
-            if (PlanSnapshots.handles(delta.getToolCallName())) {
-                plans.onDelta(delta);
-            }
-            else {
-                actions.onDelta(delta);
-            }
+            // 工具参数增量只累积不出部件（短语/快照在边界点取）
+            actions.onDelta(delta);
             return List.of();
         }
         if (event instanceof ToolResultTextDeltaEvent delta) {
@@ -86,19 +79,13 @@ final class AgentscopePartsMapper {
         }
         List<AgentEvent> parts = new ArrayList<>();
         if (event instanceof ToolCallStartEvent start) {
-            drainNarrationInto(parts);
             actionPart(parts, start.getToolCallName(), start.getToolCallId(),
                     AgentEventTypes.PART_ACTION_STATE_STARTED, false, source);
             return parts;
         }
         if (event instanceof ToolCallEndEvent end) {
-            drainNarrationInto(parts);
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
                     AgentEventTypes.PART_ACTION_STATE_RUNNING, false, source);
-            // 步骤清单快照在参数落定点出（#236）：全量快照、不走动作行不留动作痕
-            if (PlanSnapshots.handles(end.getToolCallName())) {
-                planPart(parts, end.getToolCallId(), source);
-            }
             return parts;
         }
         if (event instanceof ToolResultEndEvent end) {
@@ -111,11 +98,6 @@ final class AgentscopePartsMapper {
         }
         // 其余事件（思考/读类工具/块尾/挂起等）：不出部件
         return List.of();
-    }
-
-    /** run 收尾（run-finish / error / 挂起前）：出解说余段部件（幂等，无尾段即空）。 */
-    List<AgentEvent> drain() {
-        return textParts(narration.drain());
     }
 
     // ---------- 内部 ----------
@@ -139,14 +121,16 @@ final class AgentscopePartsMapper {
 
     /** 动作部件（封闭表内工具才有；label 无时态，时态由 state 表达——非终态从累积
      *  参数重算取最新（在途 → 通用对象、落定 → 具体对象），终态取走参数复述同一
-     *  具体对象：动作卡跨状态同一行，不闪换文案）。 */
+     *  具体对象：动作卡跨状态同一行，不闪换文案。写文件类落定/终态另携目标路径
+     *  （#618 预览跟随——path 参数原形，参数在途无路径则缺省）。 */
     private void actionPart(List<AgentEvent> parts, String toolName, String toolCallId,
             String state, boolean consumeArgs, String source) {
-        Optional<String> phrase = actions.objectPhrase(nvl(toolName), nvl(toolCallId), consumeArgs);
-        if (phrase.isEmpty()) {
+        Optional<ToolActionLines.ActionLine> line = actions.actionLine(
+                nvl(toolName), nvl(toolCallId), consumeArgs);
+        if (line.isEmpty()) {
             return;
         }
-        String label = phrase.get();
+        String label = line.get().label();
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
@@ -158,6 +142,9 @@ final class AgentscopePartsMapper {
         payload.put(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, nvl(toolName));
         payload.put(AgentEventTypes.PART_ACTION_STATE_FIELD, state);
         payload.put(AgentEventTypes.PART_ACTION_LABEL_FIELD, label);
+        if (line.get().path() != null) {
+            payload.put(AgentEventTypes.PART_ACTION_PATH_FIELD, line.get().path());
+        }
         // 失败留痕（#229）：仅 failed 携带 error——错误/stderr 首行截断（与 label
         // 各管各的额度）；completed 终态取走丢弃（结果文本生命周期同参数）
         actions.errorPhrase(nvl(toolCallId),
@@ -167,37 +154,23 @@ final class AgentscopePartsMapper {
     }
 
     /**
-     * 步骤清单部件（#236）：update_plan 参数落定 → 全量快照（执行中再调即整表
-     * 替换——消费端不合并）；解析不出 / 空表不出部件（不产就不显示）。与来源
-     * 解耦：不携带计划来源（v1 run 执行体提示词直产）。
+     * 文本增量 → 脱轨信号部件（ADR-0057 模型文本不直播）：人话段不出部件；机器
+     * 语法吞段每次起点出一件 part-signal（只报发生事实、不携带原文）。
      */
-    private void planPart(List<AgentEvent> parts, String toolCallId, String source) {
-        List<Map<String, Object>> steps = plans.takeSnapshot(toolCallId);
-        if (steps.isEmpty()) {
-            return;
-        }
-        parts.add(frame(AgentEventTypes.PART_PLAN, AgentEventTypes.PART_PLAN_STEPS_FIELD,
-                steps, source));
-    }
-
-    private List<AgentEvent> textParts(List<NarrationSegments.Outcome> outcomes) {
+    private List<AgentEvent> signalParts(List<NarrationSegments.Outcome> outcomes) {
         List<AgentEvent> parts = new ArrayList<>();
         for (NarrationSegments.Outcome outcome : outcomes) {
             // 穷尽 switch（sealed）：Outcome 加新变体时编译期强制扩展分派
             switch (outcome) {
-                case NarrationSegments.Outcome.Narration narration -> parts.add(frame(
-                        AgentEventTypes.PART_TEXT, AgentEventTypes.PART_TEXT_FIELD,
-                        narration.text(), narration.source()));
+                case NarrationSegments.Outcome.Narration ignored -> {
+                    // 解说段不呈现（不直播模型文本，ADR-0057）
+                }
                 case NarrationSegments.Outcome.Derailed derailed -> parts.add(frame(
                         AgentEventTypes.PART_SIGNAL, AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
                         AgentEventTypes.PART_SIGNAL_DERAILED, derailed.source()));
             }
         }
         return parts;
-    }
-
-    private void drainNarrationInto(List<AgentEvent> parts) {
-        parts.addAll(textParts(narration.drain()));
     }
 
     private AgentEvent frame(String type, String field, Object value, String source) {

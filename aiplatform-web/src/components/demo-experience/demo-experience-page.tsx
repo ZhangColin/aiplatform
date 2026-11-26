@@ -10,15 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MobileAreaSwitch } from "@/components/shell/mobile-area-switch";
 import { CommandArea } from "@/components/project-page/command-area";
 import { SystemPanel } from "@/components/project-page/system-panel";
-import { useConfirmDemoVersion, useDemoVersions } from "@/hooks/use-demo-version";
 import { usePlaceOrder } from "@/hooks/use-order";
-import { usePrdVersions } from "@/hooks/use-prd";
 import { useProject } from "@/hooks/use-project";
+import { useConfirmVersion, useGitVersions } from "@/hooks/use-version";
 import { errorText } from "@/lib/api/api-error";
 import { isBindingGateError } from "@/lib/orders/binding-gate";
 import { confirmOrderVisible } from "@/lib/projects/confirm-order";
-import { planAreaOfDesignItems } from "@/lib/projects/detail";
-import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
 import { lockRowOf } from "@/lib/orders/lock";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
@@ -29,7 +26,6 @@ import { cn } from "@/lib/utils";
 
 import { DeliveryBaselineCard } from "./delivery-baseline-card";
 import { DemoConfirmCard } from "./demo-confirm-card";
-import { DemoFilesDrawer } from "./demo-files-drawer";
 import { DemoHeader, type DemoHeaderStatus } from "./demo-header";
 
 /** Demo 体验页 P04/P05（#347）：预览/同页等待在左 8 列，基准、对话与确认在右 4 列。
@@ -38,13 +34,11 @@ import { DemoHeader, type DemoHeaderStatus } from "./demo-header";
 export function DemoExperiencePage({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
-  const { data: demoVersions } = useDemoVersions(projectId);
-  const { data: prdVersions } = usePrdVersions(projectId);
-  const confirmDemoVersion = useConfirmDemoVersion(projectId);
+  const { data: gitVersions } = useGitVersions(projectId);
+  const confirmVersion = useConfirmVersion(projectId);
   const placeOrder = usePlaceOrder(projectId);
   const openM01 = useM01Store((s) => s.openM01);
   const openVersionRecord = useVersionRecordStore((s) => s.openVersionRecord);
-  const [filesOpen, setFilesOpen] = useState(false);
 
   useAgentEventChannel(projectId);
   const agentStatus = useSseStatus("agent");
@@ -86,11 +80,12 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
     );
   }
 
-  const versions = demoVersions ?? [];
+  const versions = gitVersions ?? [];
   const latest = versions[0];
   const generationState = detail?.generationState;
   const generating = generationState === "generating" || coderStatus === "running";
-  const failed = generationState === "interrupted" || coderStatus === "error";
+  // 失败只认会话态（#604：run 失败不落投影，只经 SSE run-failed 明确呈现）
+  const failed = coderStatus === "error";
   const status: DemoHeaderStatus = failed
     ? "interrupted"
     : generating
@@ -98,7 +93,7 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
       : generationState === "generated"
         ? "ready"
         : "waiting";
-  const confirmed = latest?.confirmedAt != null;
+  const confirmed = latest?.confirmed === true;
   const confirmVisible = confirmOrderVisible({
     generatedAt: detail?.generatedAt,
     archived: detail?.archived,
@@ -118,8 +113,8 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
 
   const onConfirm = () => {
     if (!latest || latest.versionNo == null || confirmDisabled) return;
-    confirmDemoVersion.mutate(latest.versionNo, {
-      // ORD_019 前置序：确认标记落地才建单（无 Demo 确认版本不可下单）
+    confirmVersion.mutate(latest.versionNo, {
+      // ORD_019 前置序：确认标记落地才建单（无已确认用户面版本不可下单）
       onSuccess: placeOrderThenGo,
     });
   };
@@ -138,7 +133,7 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
         status={status}
         loading={isPending}
         confirmDisabled={orderMissing ? false : confirmDisabled}
-        confirmPending={orderMissing ? placeOrder.isPending : confirmDemoVersion.isPending}
+        confirmPending={orderMissing ? placeOrder.isPending : confirmVersion.isPending}
         confirmLabel={orderMissing ? "重新提交订单" : undefined}
         onConfirm={orderMissing ? placeOrderThenGo : onConfirm}
         onStageSave={openVersionRecord}
@@ -172,8 +167,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
               coderStatus={coderStatus}
               coderStoppedByUser={coderStopped}
               failureReason={failureReason}
-              onGenerated={() => {}}
-              onOpenFiles={() => setFilesOpen(true)}
               variant="demo"
             />
           )}
@@ -191,9 +184,7 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
             <Skeleton className="h-72 w-full rounded-2xl" />
           ) : (
             <DeliveryBaselineCard
-              segments={detail?.segments}
               versions={versions}
-              prdVersionNo={latest ? latest.prdVersionNo : prdVersions?.[0]?.versionNo}
               generating={generating}
               failed={failed}
             />
@@ -212,9 +203,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
                 projectId={projectId}
                 lock={lock}
                 stage="iterate"
-                track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
-                plan={detail?.segments}
-                designPlan={planAreaOfDesignItems(detail?.designItems)}
                 variant="stage"
               />
             </div>
@@ -222,7 +210,7 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
 
           <DemoConfirmCard
             disabled={confirmDisabled}
-            pending={confirmDemoVersion.isPending}
+            pending={confirmVersion.isPending}
             confirmed={confirmed}
             onConfirm={onConfirm}
             orderMissing={orderMissing}
@@ -231,7 +219,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
           />
         </aside>
       </div>
-      <DemoFilesDrawer projectId={projectId} open={filesOpen} onOpenChange={setFilesOpen} />
     </div>
   );
 }

@@ -7,77 +7,125 @@ import type { WorkClosing } from "@/lib/store/chat";
 
 import { ClosingCard } from "./closing-card";
 
-// 版本动作 hook 契约面 mock（设计会话恒无 version 不出控件——mock 只为 hook 契约面成立）
-vi.mock("@/hooks/use-version", () => ({
-  useStartVersionView: () => ({
-    isPending: false,
-    isError: false,
-    data: undefined,
-    mutate: vi.fn(),
-    reset: vi.fn(),
-  }),
-  useStopVersionView: () => ({ mutate: vi.fn() }),
-  useRollbackVersion: () => ({ mutate: vi.fn() }),
-  useVersionViewSession: () => ({
-    startView: { isPending: false, isError: false, data: undefined, mutate: vi.fn(), reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
+// 预览入口（#617）：取既有预览查询的 URL——未就绪禁用、就绪走既有「新窗口打开」
+// 动作（#126），触碰先行（#182 先 refetch 再开窗）
+const previewState = vi.hoisted(() => ({
+  data: undefined as { url?: string } | undefined,
+  refetch: vi.fn(),
+}));
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => previewState,
 }));
 
-/** 设计会话收尾载荷（#289 closing.drafts 扩载形）。 */
-function designClosing(drafts: WorkClosing["drafts"]): WorkClosing {
+function card(overrides: Partial<WorkClosing> = {}): WorkClosing {
   return {
-    summary: "完成设计物：首页主视觉",
-    prdChanged: false,
-    systemChanged: false,
+    narrative: "生成完成",
+    criteria: { buildPassed: true, previewPassed: true },
     files: [],
-    durationMs: 95_000,
-    drafts,
+    durationMs: 60_000,
+    ...overrides,
   };
 }
 
-function renderCard(card: WorkClosing) {
+function renderCard(value: WorkClosing) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <ClosingCard closing={card} projectId="100" />
+      <ClosingCard closing={value} projectId="100" />
     </QueryClientProvider>,
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  previewState.data = undefined;
+  vi.restoreAllMocks();
+});
 
-describe("ClosingCard · 稿清单交互（#290 设计会话收尾卡：去向直看＋长清单展开）", () => {
-  const sevenDrafts = Array.from({ length: 7 }, (_, index) => ({
-    item: "首页主视觉",
-    media: (index % 2 === 0 ? "html" : "image") as "html" | "image",
-    path: `/design/home-${index + 1}.${index % 2 === 0 ? "html" : "png"}`,
-  }));
+describe("ClosingCard · 单文件只读 diff（#619）", () => {
+  const files = [
+    {
+      path: "/src/App.jsx",
+      added: 4,
+      removed: 0,
+      patch: "diff --git a/src/App.jsx b/src/App.jsx\n@@ -1 +1,4 @@\n+新增一行\n",
+    },
+    { path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true },
+  ];
 
-  it("图像稿行＝去向直看链接：平台文件服务 raw 直链、新窗口打开（未付费照看——门只盖下载面）；界面稿行不可点（raw 只伺服图片）", () => {
-    renderCard(
-      designClosing([
-        { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
-        { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
-      ]),
-    );
+  it("点单个文件展开只读 diff，再点收起", () => {
+    renderCard(card({ files }));
 
-    const link = screen.getByRole("link", { name: /home-hero-2\.png/ });
-    expect(link.getAttribute("href")).toBe("/api/projects/100/files/raw?path=design%2Fhome-hero-2.png");
-    expect(link.getAttribute("target")).toBe("_blank");
-    // 界面稿不出直链（渲染式呈现归 #293 设计稿范式）——无可用链接即不出 role=link
-    expect(screen.queryByRole("link", { name: /home-1\.html/ })).toBeNull();
-    expect(screen.getByText(/文件区可看/)).toBeTruthy();
+    expect(screen.queryByText("+新增一行")).toBeNull();
+    const toggle = screen.getByRole("button", { name: "查看 /src/App.jsx 的差异" });
+    fireEvent.click(toggle);
+    expect(screen.getByText("+新增一行")).toBeTruthy();
+    expect(screen.getByText("diff --git a/src/App.jsx b/src/App.jsx")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起 /src/App.jsx 的差异" }));
+    expect(screen.queryByText("+新增一行")).toBeNull();
   });
 
-  it("多稿长清单：默认五条、「查看全部 7 稿」点击展开全量、再点收起", () => {
-    renderCard(designClosing(sevenDrafts));
+  it("超限文件（patchOmitted）没有 diff 展开入口，只标注「diff 过大」", () => {
+    renderCard(card({ files }));
 
-    expect(screen.queryByText("home-6.png")).toBeNull(); // 五条之外收起
-    fireEvent.click(screen.getByRole("button", { name: /查看全部 7 稿/ }));
-    expect(screen.getByText("home-6.png")).toBeTruthy();
-    expect(screen.getByText("home-7.html")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
-    expect(screen.queryByText("home-6.png")).toBeNull();
+    expect(screen.getByText("diff 过大")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Huge\.jsx 的差异/ })).toBeNull();
+  });
+
+  it("变更清单不可用：显示降级文案，不显示文件行", () => {
+    renderCard(card({ files: [], filesUnavailable: true }));
+
+    expect(screen.getByText("变更清单不可用")).toBeTruthy();
+  });
+});
+
+describe("ClosingCard · 首建目录展开（#620）", () => {
+  const files = [
+    { path: "/src/App.jsx", added: 4, removed: 0 },
+    { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+  ];
+  const directories = [
+    { path: "/src", fileCount: 1, added: 4, removed: 0 },
+    { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+  ];
+
+  it("点目录展开到该目录文件（首建无 diff 入口），再点收起", () => {
+    renderCard(card({ files, directories }));
+
+    // 默认不裸列文件
+    expect(screen.queryByText("/src/App.jsx")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开 /src 目录" }));
+    expect(screen.getByText("/src/App.jsx")).toBeTruthy();
+    // 首建不携 patch——文件行没有 diff 展开入口
+    expect(screen.queryByRole("button", { name: /App\.jsx 的差异/ })).toBeNull();
+    // 只展开所选目录：嵌套目录的文件不混入
+    expect(screen.queryByText("/src/pages/Orders.jsx")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起 /src 目录" }));
+    expect(screen.queryByText("/src/App.jsx")).toBeNull();
+  });
+});
+
+describe("ClosingCard · 预览入口（#617）", () => {
+  it("未就绪：入口禁用（无地址可开）", () => {
+    renderCard(card());
+
+    const button = screen.getByRole("button", { name: "在新窗口打开预览" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("就绪：点入口先 refetch 预览查询，再新窗口打开真实地址", () => {
+    previewState.data = { url: "https://preview.example.com/" };
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    renderCard(card());
+
+    fireEvent.click(screen.getByRole("button", { name: "在新窗口打开预览" }));
+
+    expect(previewState.refetch).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith("https://preview.example.com/", "_blank", "noopener");
+    // 调用序：refetch 先于 window.open
+    expect(previewState.refetch.mock.invocationCallOrder[0]).toBeLessThan(
+      open.mock.invocationCallOrder[0],
+    );
   });
 });

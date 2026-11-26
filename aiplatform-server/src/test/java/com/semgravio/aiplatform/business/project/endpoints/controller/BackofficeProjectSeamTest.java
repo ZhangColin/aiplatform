@@ -404,7 +404,7 @@ class BackofficeProjectSeamTest {
     /** 建项目（真库写入，workspaceId 占位自增、归属账号可空）。 */
     private Project newProject(String name, Long ownerAccountId) {
         return projectRepository.save(
-                Project.create(name, ProjectType.WEBSITE, null, workspaceSeq++, ownerAccountId, null));
+                Project.create(name, ProjectType.WEBSITE, workspaceSeq++, ownerAccountId, null));
     }
 
     /** 已归档项目（真聚合 archive() 路径落 archived_at）。 */
@@ -433,10 +433,10 @@ class BackofficeProjectSeamTest {
                 Long.toString(projectId), "# PRD\n\n需求背景：后台项目 seam。",
                 Instant.parse("2026-09-13T01:00:00Z"),
                 PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n需求背景：后台项目 seam。"))));
-        // 下单前置双确认缺省桩（#335）：已确认 PRD v1＋Demo v1
-        when(projectQueryAppService.latestVersionRefs(projectId)).thenReturn(
-                new ProjectQueryAppService.LatestVersionRefs(
-                        1, "# PRD\n\n需求背景：后台项目 seam。", 1));
+        // 下单前置缺省桩（#629）：PRD 全文＋已确认用户面版本 v1
+        when(projectQueryAppService.orderFreezeRefs(projectId)).thenReturn(
+                new ProjectQueryAppService.OrderFreezeRefs(
+                        "# PRD\n\n需求背景：后台项目 seam。", 1));
         try {
             // 下单绑定缺省账号会话——owner 路由键非空（发布口强制校验）
             return RequestContext.runFor(

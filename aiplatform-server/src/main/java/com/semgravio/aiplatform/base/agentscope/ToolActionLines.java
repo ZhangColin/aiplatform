@@ -17,9 +17,7 @@ import io.agentscope.core.event.ToolResultTextDeltaEvent;
  * 累积 + 参数提取——平台不加翻译机器。write_file / edit_file 经参数增量
  * （ToolCallDelta）累积解析 path，取文件名去扩展名为标签 →「编写【标签】」；
  * execute（内核 shell，命令直通——#219 透明面化）→ 命令原文首行（剥壳·截断，
- * #228：滚动行成为 claude code / replit 式 live tail）；generate_image（出图
- * 工具件，#292 发放真跑——设计轨的稿产出动作，与写文件件同为「正在出第 N 稿」
- * 的稿序口径）→「出图【对象】」（name 参数优先、回落画面描述截断）；read_file /
+ * #228：滚动行成为 claude code / replit 式 live tail）；read_file /
  * grep / glob / list 等读类不播（对客户是噪音）。行文为动作对象短语（无时态
  * ——「编写【订单管理】」，时态由动作部件的 state 表达）；失败留痕原料（工具
  * 结果文本增量，#229）同表累积——终 failed 提取错误/stderr 首行截断进 error 字段。
@@ -33,18 +31,10 @@ final class ToolActionLines {
     private static final String EDIT_FILE_TOOL = "edit_file";
     /** 命令工具名（harness 内核 shell 注册名）。 */
     private static final String COMMAND_TOOL = "execute";
-    /** 出图工具名（#292 出图工具件——注册名与业务侧 GenerateImageTool.NAME 字面
-     * 同源；base 不依赖 business，同源性由装配面测试锚定）。 */
-    private static final String GENERATE_IMAGE_TOOL = "generate_image";
-
     /** 参数通用标签（解析不出 path / 参数未到达时的兜底）。 */
     private static final String GENERIC_FILE_LABEL = "代码文件";
     /** 命令通用标签（参数在途 / 解析不出 command 时的兜底）。 */
     private static final String GENERIC_COMMAND_LABEL = "运行命令";
-    /** 出图通用标签（参数在途 / name 与 prompt 都解析不出时的兜底）——「设计图」是
-     * Avoid 词（CONTEXT.md 设计稿词条，用户可见面），回落「设计稿」。 */
-    private static final String GENERIC_IMAGE_LABEL = "设计稿";
-
     /**
      * 命令标签定宽（#228 单行定宽截断，含省略号）：事件载荷的长度界——视觉截断
      * 由前端行内样式兜底，走查票校准观感（#232）。
@@ -86,38 +76,43 @@ final class ToolActionLines {
                 .append(nvl(delta.getDelta()));
     }
 
-    /** 该工具是否播（封闭表成员：写文件类 + 命令 + 出图件；读类不播）。 */
+    /** 该工具是否播（封闭表成员：写文件类 + 命令；读类不播）。 */
     static boolean broadcastable(String toolName) {
         return WRITE_FILE_TOOL.equals(toolName) || EDIT_FILE_TOOL.equals(toolName)
-                || COMMAND_TOOL.equals(toolName) || GENERATE_IMAGE_TOOL.equals(toolName);
+                || COMMAND_TOOL.equals(toolName);
     }
 
     /**
-     * 动作对象短语（无时态）：写文件类「编写【标签】」（args 为空/解析不出 →
+     * 动作行（短语 + 写文件类可选目标路径，#618 预览跟随）：label = 人话对象短语
+     * （无时态——时态由 state 表达）；path = write_file／edit_file 的 path 参数
+     * 原形（未落定/解析不出为 null——可缺省不携带），命令类恒 null。
+     */
+    record ActionLine(String label, String path) {}
+
+    /**
+     * 动作行（无时态）：写文件类「编写【标签】」（args 为空/解析不出 →
      * 通用标签——动作开始点参数未到达即此形态）；命令 = 原文首行（剥壳·截断；
-     * 参数在途/解析不出 → 通用标签）；出图件「出图【对象】」（name 词干优先、
-     * 回落画面描述首行截断——稿序呈现归前端「正在出第 N 稿」，label 是回落面）；
-     * 不播工具返回空。
+     * 参数在途/解析不出 → 通用标签）；不播工具返回空。写文件类同时带目标路径
+     * （#618 预览跟随的路径来源——参数原形，标签仍由文件名派生）。
      *
      * @param consume true = 取走累积参数（终态——动作关闭，参数生命周期结束）；
      *                false = 保留（非终态——参数仍在途或已落定，重算取最新）
      */
-    Optional<String> objectPhrase(String toolName, String toolCallId, boolean consume) {
+    Optional<ActionLine> actionLine(String toolName, String toolCallId, boolean consume) {
         if (!broadcastable(toolName)) {
             return Optional.empty();
         }
         StringBuilder args = takeArgs(toolCallId, consume);
         if (COMMAND_TOOL.equals(toolName)) {
             String label = commandLabel(args);
-            return Optional.of(label != null ? label : GENERIC_COMMAND_LABEL);
+            return Optional.of(new ActionLine(label != null ? label : GENERIC_COMMAND_LABEL, null));
         }
-        if (GENERATE_IMAGE_TOOL.equals(toolName)) {
-            return Optional.of("出图【" + imageLabel(args) + "】");
-        }
-        return Optional.of("编写【" + pathLabel(args) + "】");
+        JsonNode parsed = parseArgs(args);
+        String path = textField(parsed, "path");
+        return Optional.of(new ActionLine("编写【" + labelOfPath(path) + "】", path));
     }
 
-    /** 累积参数取值（consume 语义见 {@link #objectPhrase}）。 */
+    /** 累积参数取值（consume 语义见 {@link #actionLine}）。 */
     private StringBuilder takeArgs(String toolCallId, boolean consume) {
         return consume ? toolArgs.remove(nvl(toolCallId)) : toolArgs.get(nvl(toolCallId));
     }
@@ -139,21 +134,39 @@ final class ToolActionLines {
 
     /** 累积参数 → 命令标签（原文首行·剥壳·定宽截断；解析不出/空白回落 null → 通用标签）。 */
     private static String commandLabel(StringBuilder args) {
+        String command = textField(parseArgs(args), "command");
+        if (command == null) {
+            return null;
+        }
+        String label = truncate(unwrap(command), COMMAND_LABEL_MAX);
+        return label.isBlank() ? null : label;
+    }
+
+    /** 累积参数 → JSON（空/不完整/非 JSON → null，走通用形态）。 */
+    private static JsonNode parseArgs(StringBuilder args) {
         if (args == null || args.isEmpty()) {
             return null;
         }
         try {
-            JsonNode command = JSON.readTree(args.toString()).path("command");
-            if (!command.isTextual()) {
-                return null;
-            }
-            String label = truncate(unwrap(command.asText()), COMMAND_LABEL_MAX);
-            return label.isBlank() ? null : label;
+            return JSON.readTree(args.toString());
         }
         catch (Exception ignored) {
-            // 参数流不完整/非 JSON：走通用标签
+            // 参数流不完整/非 JSON：走通用形态
             return null;
         }
+    }
+
+    /** JSON 顶层文本字段（非文本/空白 → null）。 */
+    private static String textField(JsonNode parsed, String field) {
+        if (parsed == null) {
+            return null;
+        }
+        JsonNode node = parsed.path(field);
+        if (!node.isTextual()) {
+            return null;
+        }
+        String text = node.asText();
+        return text.isBlank() ? null : text;
     }
 
     /**
@@ -182,47 +195,13 @@ final class ToolActionLines {
         return text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }
 
-    /** 累积参数 → path 标签（文件名去扩展名；解析不出回落通用标签）。 */
-    private static String pathLabel(StringBuilder args) {
-        String label = null;
-        if (args != null && !args.isEmpty()) {
-            try {
-                JsonNode path = JSON.readTree(args.toString()).path("path");
-                if (path.isTextual()) {
-                    label = labelOf(path.asText());
-                }
-            }
-            catch (Exception ignored) {
-                // 参数流不完整/非 JSON：走通用标签
-            }
+    /** path → 标签（文件名去扩展名；无路径回落通用标签）。 */
+    private static String labelOfPath(String path) {
+        if (path == null) {
+            return GENERIC_FILE_LABEL;
         }
-        return label != null && !label.isBlank() ? label : GENERIC_FILE_LABEL;
-    }
-
-    /**
-     * 累积参数 → 出图对象标签：name（落盘词干提示）优先——即稿名；缺省回落
-     * prompt 首行截断（描述即对象）；两者都在途/解析不出 → 通用标签。
-     */
-    private static String imageLabel(StringBuilder args) {
-        if (args == null || args.isEmpty()) {
-            return GENERIC_IMAGE_LABEL;
-        }
-        try {
-            JsonNode root = JSON.readTree(args.toString());
-            JsonNode name = root.path("name");
-            if (name.isTextual() && !name.asText().isBlank()) {
-                return name.asText().strip();
-            }
-            JsonNode prompt = root.path("prompt");
-            if (prompt.isTextual() && !prompt.asText().isBlank()) {
-                String line = prompt.asText().lines().findFirst().map(String::strip).orElse("");
-                return line.isBlank() ? GENERIC_IMAGE_LABEL : truncate(line, COMMAND_LABEL_MAX);
-            }
-        }
-        catch (Exception ignored) {
-            // 参数流不完整/非 JSON：走通用标签
-        }
-        return GENERIC_IMAGE_LABEL;
+        String label = labelOf(path);
+        return label.isBlank() ? GENERIC_FILE_LABEL : label;
     }
 
     /** 路径 → 文件名去扩展名（标签）：取末段、剥最后一个扩展名与点分隐藏前缀。 */

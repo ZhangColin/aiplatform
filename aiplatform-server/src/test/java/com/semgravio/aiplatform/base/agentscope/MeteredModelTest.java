@@ -100,12 +100,31 @@ class MeteredModelTest {
         assertThat(event.runId()).isEqualTo("run-1");
         assertThat(event.sessionId()).isEqualTo("s-1");
         assertThat(event.provider()).isEqualTo("deepseek");
+        // 无通道语境（测试形）vendor 回落前缀同值——V79 历史回填同款语义
+        assertThat(event.vendor()).isEqualTo("deepseek");
         assertThat(event.model()).isEqualTo("deepseek-v4-flash");
         assertThat(event.dims()).containsEntry("agentKind", "ba");
         // DeepSeek 协议归一化：input = prompt(100) − cacheHit(20) = 80，cacheRead = 20
         assertThat(event.tokens().input()).isEqualTo(80);
         assertThat(event.tokens().output()).isEqualTo(40);
         assertThat(event.tokens().cacheRead()).isEqualTo(20);
+    }
+
+    @Test
+    void given_vendor_when_wrapped_with_vendor_then_event_attributed_to_account_and_vendor() {
+        // ADR-0053 ② 双维度归因：failover 切备账号后事件按实际命中通道行归因
+        // （provider＝deepseek-2）＋供应商维度随通道行（vendor＝deepseek——按模型
+        // 统计与单价匹配键）
+        when(delegate.stream(any(), any(), any()))
+                .thenReturn(Flux.just(response(new ChatUsage(100, 40, 0, 0.5))));
+
+        subscribeWithScope("run-1", Map.of(),
+                MeteredModel.wrap(delegate, "deepseek-2:deepseek-flash", "deepseek")
+                        .stream(List.of(), null, null));
+
+        verify(sink).report(usageCaptor.capture());
+        assertThat(usageCaptor.getValue().provider()).isEqualTo("deepseek-2");
+        assertThat(usageCaptor.getValue().vendor()).isEqualTo("deepseek");
     }
 
     @Test

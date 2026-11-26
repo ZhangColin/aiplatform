@@ -305,12 +305,12 @@ class EventsAppServiceTest {
     @Test
     void given_guest_owned_agent_event_when_guest_reconnect_then_replayed() {
         // 断线补发同谓词：访客维度的智能体事件进缓冲，重连只补到本人访客
-        appService.publishAgentEvent(AgentEventTypes.PART_TEXT, Map.of(
+        appService.publishAgentEvent(AgentEventTypes.PART_SIGNAL, Map.of(
                 EventsAppService.PROJECT_FIELD, "7",
                 EventsAppService.RUN_FIELD, "run-g",
                 EventsAppService.OWNER_FIELD, "",
                 EventsAppService.OWNER_GUEST_FIELD, GUEST,
-                "text", "访客项目的对话内容"));
+                "signal", AgentEventTypes.PART_SIGNAL_DERAILED));
 
         SseEmitter reconnected = appService.subscribe(null, GUEST, "7", null, "run-0:0");
 
@@ -372,22 +372,22 @@ class EventsAppServiceTest {
      */
     @Test
     void given_agent_event_of_other_owner_when_reconnect_with_own_filter_then_not_replayed() {
-        appService.publishAgentEvent(AgentEventTypes.PART_TEXT, Map.of(
+        appService.publishAgentEvent(AgentEventTypes.PART_SIGNAL, Map.of(
                 EventsAppService.PROJECT_FIELD, "7",
                 EventsAppService.RUN_FIELD, "run-9",
                 EventsAppService.OWNER_FIELD, OTHER_OWNER,
-                "text", "别家同 projectId 的对话内容"));
-        appService.publishAgentEvent(AgentEventTypes.PART_TEXT, Map.of(
+                "signal", AgentEventTypes.PART_SIGNAL_DERAILED));
+        appService.publishAgentEvent(AgentEventTypes.PART_SIGNAL, Map.of(
                 EventsAppService.PROJECT_FIELD, "7",
                 EventsAppService.RUN_FIELD, "run-9",
                 EventsAppService.OWNER_FIELD, OWNER,
-                "text", "我的对话内容"));
+                "signal", AgentEventTypes.PART_SIGNAL_DERAILED));
 
         SseEmitter subscription = appService.subscribe(OWNER, null, "7", null, "run-0:0");
 
         assertThat(sender.eventFramesOf(subscription)).hasSize(1);
         EventEnvelope envelope = (EventEnvelope) sender.eventFramesOf(subscription).get(0).data();
-        assertThat(envelope.payload()).containsEntry("text", "我的对话内容");
+        assertThat(envelope.payload()).containsEntry("signal", AgentEventTypes.PART_SIGNAL_DERAILED);
     }
 
     /**

@@ -12,13 +12,12 @@ import com.semgravio.aiplatform.business.project.domain.model.ReadinessDimension
 /**
  * 「验收与待确认」章解析（#331；<b>#462 去门化：阻碍级语义删除</b>——ADR-0039/
  * #450 决议：待定项不设替代门，本章保留为纯呈现面＝记录已做的关键假设与待确认
- * 事项，不再分级拦截；清单章解析 {@link DesignChecklist} 同构先例）：PRD 第七章
- * 「验收与待确认」解析为条目集＋维度态（对偶 DesignChecklist：不另存正本、随
- * PRD 演进重产）。新产 PRD 的技能模板已同步改单级（条目直列、无级分组子标题，
- * prd-writing 技能 #462 起）——存量 PRD 里的「阻碍/次要」级分组子标题仍被容忍
- * 解析（条目照收，不再分级）。
+ * 事项，不再分级拦截）：PRD 末章「验收与待确认」解析为条目集＋维度态
+ * （不另存正本、随 PRD 演进重产）。新产 PRD 的技能模板已同步改单级（条目直列、
+ * 无级分组子标题，prd-writing 技能 #462 起）——存量 PRD 里的「阻碍/次要」级分组
+ * 子标题仍被容忍解析（条目照收，不再分级）。
  *
- * <p><b>解析口径</b>（与 DesignChecklist 同源的有限宽容）：章标题行（任意层级，
+ * <p><b>解析口径</b>（有限宽容）：章标题行（任意层级，
  * 可带中文/阿拉伯序号前缀——#304 同源教训：PRD 技能只钉章节名不钉标题行格式）
  * 定界、下一章止；章内子标题仅作界标（级分组语义已删——「阻碍」「次要」锚只用于
  * 跳过标题行本身）；编号条目行（1. / 1、等）取<b>首行全文</b>作条目，前导
@@ -51,15 +50,15 @@ public record PrdReadiness(List<PendingItem> blocking, List<PendingItem> minor,
     public record DimensionState(ReadinessDimension dimension, Status status) {
     }
 
-    /** 章名（PRD 固定章节模板之末——「待定项」章升级形；系统形八章节、设计形七章节）。 */
+    /** 章名（PRD 固定章节模板之末——「待定项」章升级形；系统形八章节为唯一形态）。 */
     static final String CHAPTER_TITLE = "验收与待确认";
 
     /** 章内任意层级标题行（章界与子标题界标的候选形态）。 */
     private static final Pattern ANY_HEADING = Pattern.compile("^#{1,6}\\s+.*");
 
     /**
-     * 章标题行的可选序号前缀（中文/阿拉伯序号＋可选分隔符——与 DesignChecklist
-     * 同形，#304 序号前缀容忍票先例）。
+     * 章标题行的可选序号前缀（中文/阿拉伯序号＋可选分隔符——#304 序号前缀
+     * 容忍票先例）。
      */
     private static final String OPTIONAL_CHAPTER_ORDINAL =
             "(?:[一二三四五六七八九十百零〇]+|\\d{1,3})?\\s*[、.．:：)）]?\\s*";

@@ -28,12 +28,10 @@ public enum KnowledgeMessage implements CodeMessage {
             "拒绝理由不能为空（终态留档，拒绝须有据）"),
 
     KNOWLEDGE_SEDIMENT_KIND_INVALID(400, "KNW_011",
-            "沉淀物类别非法，合法取值：CASE（需求案例）/MODULE（功能模块）/RULE（业务规则）"),
-
-    KNOWLEDGE_SEDIMENT_TARGET_KIND_FULL(409, "KNW_012",
-            "目标类别在途草稿已满 3 条——先审结该类别在途草稿再改标签");
+            "沉淀物类别非法，合法取值：CASE（需求案例）/MODULE（功能模块）/RULE（业务规则）");
 
     // KNW_007 曾是「无效的知识素材过滤参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
+    // KNW_012 曾是「目标类别在途草稿已满」，随 #642 拆在途名额机制注销，码位不复用
 
     private final int httpStatus;
     private final String code;

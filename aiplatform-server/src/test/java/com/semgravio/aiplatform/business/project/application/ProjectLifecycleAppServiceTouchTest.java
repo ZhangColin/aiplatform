@@ -14,7 +14,6 @@ import com.cartisan.event.ApplicationEventPublisher;
 
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
-import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.business.identity.application.GuestAppService;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
 import com.semgravio.aiplatform.base.workspace.application.ConvergenceFace;
@@ -25,13 +24,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.repository.DemoVersionRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignSpecRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanDeferralRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanJourneyRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,30 +70,6 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private ConversationHistoryAppService conversationHistory;
-
-    @Mock
-    private GenerationSegmentRepository generationSegments;
-
-    @Mock
-    private GenerationPlanJourneyRepository generationPlanJourneys;
-
-    @Mock
-    private GenerationPlanDeferralRepository generationPlanDeferrals;
-
-    @Mock
-    private DesignItemRepository designItems;
-
-    @Mock
-    private DesignSpecRepository designSpecs;
-
-    @Mock
-    private PrdVersionRepository prdVersions;
-
-    @Mock
-    private DemoVersionRepository demoVersions;
-
-    @Mock
-    private SkillDraftAppService skillDrafts;
 
     @Mock
     private SedimentDraftAppService sedimentDrafts;
@@ -214,7 +182,7 @@ class ProjectLifecycleAppServiceTouchTest {
     // ---------- 测试数据 ----------
 
     private Project project(boolean generated) {
-        Project project = Project.create("测试项目", null, null, 900L, 1L, null);
+        Project project = Project.create("测试项目", null, 900L, 1L, null);
         if (generated) {
             project.markGenerated();
         }
@@ -225,10 +193,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, generationSegments, generationPlanJourneys,
-                generationPlanDeferrals, designItems,
-                designSpecs, prdVersions,
-                demoVersions, skillDrafts, sedimentDrafts, orderQueryAppService, guestAppService,
-                transactionTemplate, new CodingRunTrack());
+                conversationHistory, sedimentDrafts, orderQueryAppService,
+                guestAppService, transactionTemplate, new CodingRunTrack());
     }
 }

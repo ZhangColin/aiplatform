@@ -100,8 +100,9 @@ class BackofficeProjectContentSeamTest {
                 Map.of("engineRef", "reply-1", "data", Map.of("toolCalls", List.of()))));
         entries.save(ConversationEntry.answer(id, "run-1", "选 A：三页官网"));
         entries.save(ConversationEntry.closing(id, "run-2", Map.of(
-                "summary", "首次生成了系统", "prdChanged", false,
-                "systemChanged", true, "files", List.of(), "durationMs", 183420L)));
+                "narrative", "首次生成了系统",
+                "criteria", Map.of("buildPassed", true, "previewPassed", true),
+                "files", List.of(), "durationMs", 183420L)));
         entries.save(ConversationEntry.guide(id, "run-3", "确认下单请点「立即下单」"));
 
         signedGet("/api/backoffice/projects/" + id + "/conversation")
@@ -115,46 +116,10 @@ class BackofficeProjectContentSeamTest {
                 .andExpect(jsonPath("$.data[2].question.engineRef").value("reply-1"))
                 .andExpect(jsonPath("$.data[2].answered").value(false))
                 // 收尾卡＝run-finish 扩载同载荷（版本详情锚定的权威事实）
-                .andExpect(jsonPath("$.data[4].closing.summary").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data[4].closing.systemChanged").value(true))
+                .andExpect(jsonPath("$.data[4].closing.narrative").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[4].closing.criteria.buildPassed").value(true))
                 .andExpect(jsonPath("$.data[4].closing.durationMs").value(183420))
                 .andExpect(jsonPath("$.data[5].text").value("确认下单请点「立即下单」"));
-    }
-
-    @Test
-    void given_design_closing_entries_when_signed_conversation_then_session_source_tagged()
-            throws Exception {
-        // #298 会话来源标识（降级口径——存储不同构）：设计会话收尾卡（首产/改稿/
-        // 定稿，closing 携 drafts 稿清单）标 2=设计会话；编码收尾卡（无 drafts）
-        // 与其余条目 null＝主会话缺省——后台据此分组或标注设计过程始末
-        Long id = newProject("设计会话项目").getId();
-        entries.save(ConversationEntry.userUtterance(id, "run-1", "帮我做一张海报"));
-        entries.save(ConversationEntry.closing(id, "run-d1", Map.of(
-                "summary", "完成设计物：活动海报", "prdChanged", false,
-                "systemChanged", false, "files", List.of(), "durationMs", 60000L,
-                "drafts", List.of(Map.of("item", "活动海报", "media", "image",
-                        "path", "/design/poster.png")))));
-        entries.save(ConversationEntry.closing(id, "run-d2", Map.of(
-                "summary", "定稿设计物：活动海报", "prdChanged", false,
-                "systemChanged", false, "files", List.of(), "durationMs", 1000L,
-                "drafts", List.of(Map.of("item", "活动海报", "media", "image",
-                        "path", "/design/poster.png", "triggers", List.of())))));
-        entries.save(ConversationEntry.closing(id, "run-c1", Map.of(
-                "summary", "完成切片：首页", "prdChanged", false,
-                "systemChanged", true, "files", List.of(), "durationMs", 183420L)));
-
-        signedGet("/api/backoffice/projects/" + id + "/conversation")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(4))
-                // 设计会话收尾卡（首产/定稿两形）→ 2=设计会话＋中文名随行
-                .andExpect(jsonPath("$.data[1].sessionSource").value(2))
-                .andExpect(jsonPath("$.data[1].sessionSourceName").value("设计会话"))
-                .andExpect(jsonPath("$.data[2].sessionSource").value(2))
-                .andExpect(jsonPath("$.data[2].sessionSourceName").value("设计会话"))
-                // 编码收尾卡（无 drafts）与用户发言 → null＝主会话缺省不假装归属
-                .andExpect(jsonPath("$.data[3].sessionSource").value(nullValue()))
-                .andExpect(jsonPath("$.data[3].sessionSourceName").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].sessionSource").value(nullValue()));
     }
 
     @Test
@@ -166,7 +131,8 @@ class BackofficeProjectContentSeamTest {
             if (command.contains("PRD.md")) {
                 out.stdout = "1756100000\n# 归档项目的 PRD\n";
             } else {
-                out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");
+                out.stdout = rollbackLogLine(HASH_1, 1700000100L,
+                        "回滚到「更早的版本」", HASH_2);
             }
         });
 
@@ -266,27 +232,24 @@ class BackofficeProjectContentSeamTest {
     // ---------- 版本列表（新→旧） ----------
 
     @Test
-    void given_run_and_rollback_versions_when_signed_versions_then_newest_first()
+    void given_rollback_versions_when_signed_versions_then_newest_first()
             throws Exception {
         Long id = newProject("版本项目").getId();
         stubExec((command, out) -> out.stdout =
                 rollbackLogLine(HASH_3, 1700000300L, "回滚到「首次生成了系统」", HASH_1)
-                        + logLine(HASH_2, 1700000200L, "更新了系统", "222")
-                        + logLine(HASH_1, 1700000100L, "首次生成了系统", "111"));
+                        + rollbackLogLine(HASH_2, 1700000200L, "回滚到「更新了系统」", HASH_3)
+                        + rollbackLogLine(HASH_1, 1700000100L, "回滚到「更早的版本」", HASH_2));
 
         signedGet("/api/backoffice/projects/" + id + "/versions")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.length()").value(3))
-                // git log 原生序＝新→旧（回滚成版最近、首次成版最旧）
+                // git log 原生序＝新→旧（最新回滚最近、最早回滚最旧）
                 .andExpect(jsonPath("$.data[*].commitHash", contains(HASH_3, HASH_2, HASH_1)))
                 // 回滚版本：runId 空、rollbackFrom 锚定源版本
                 .andExpect(jsonPath("$.data[0].runId").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].rollbackFrom").value(HASH_1))
-                // run 版本：runId 锚定收尾卡、rollbackFrom 空
-                .andExpect(jsonPath("$.data[1].runId").value("222"))
-                .andExpect(jsonPath("$.data[1].rollbackFrom").value(nullValue()))
-                .andExpect(jsonPath("$.data[2].subject").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[2].subject").value("回滚到「更早的版本」"))
                 .andExpect(jsonPath("$.data[2].committedAt").value(localAt(1700000100L)));
     }
 
@@ -302,30 +265,6 @@ class BackofficeProjectContentSeamTest {
     }
 
     // ---------- 版本详情（收尾卡＋rollbackFrom） ----------
-
-    @Test
-    void given_version_with_closing_card_when_signed_detail_then_full_payload()
-            throws Exception {
-        Long id = newProject("收尾卡版本项目").getId();
-        stubExec((command, out) -> out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111"));
-        entries.save(ConversationEntry.closing(id, "111", Map.of(
-                "summary", "首次生成了系统", "systemChanged", true,
-                "files", List.of("src/app.js"), "durationMs", 183420L)));
-
-        signedGet("/api/backoffice/projects/" + id + "/versions/" + HASH_1)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.commitHash").value(HASH_1))
-                .andExpect(jsonPath("$.data.subject").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data.runId").value("111"))
-                .andExpect(jsonPath("$.data.rollbackFrom").value(nullValue()))
-                .andExpect(jsonPath("$.data.committedAt").value(localAt(1700000100L)))
-                // 收尾卡载荷完整（Run-Id 联接对话史 closing 条目——#88 同载荷复用）
-                .andExpect(jsonPath("$.data.closing.summary").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data.closing.systemChanged").value(true))
-                .andExpect(jsonPath("$.data.closing.files[0]").value("src/app.js"))
-                .andExpect(jsonPath("$.data.closing.durationMs").value(183420));
-    }
 
     @Test
     void given_rollback_version_when_signed_detail_then_run_id_empty_and_rollback_from()
@@ -383,7 +322,7 @@ class BackofficeProjectContentSeamTest {
     /** 建项目（真库写入，workspaceId 占位自增、归属账号可空）。 */
     private Project newProject(String name) {
         return projectRepository.save(
-                Project.create(name, ProjectType.WEBSITE, null, workspaceSeq++, null, null));
+                Project.create(name, ProjectType.WEBSITE, workspaceSeq++, null, null));
     }
 
     /** 已归档项目（真聚合 archive() 路径落 archived_at）。 */
@@ -399,11 +338,6 @@ class BackofficeProjectContentSeamTest {
         Project loaded = projectRepository.findById(project.getId()).orElseThrow();
         loaded.markPrdProduced();
         return projectRepository.save(loaded);
-    }
-
-    /** git log 单行（字段 \u001f 分隔、记录 \u001e 收尾——与 WorkspaceVersions 格式同源）。 */
-    private static String logLine(String hash, long at, String subject, String runId) {
-        return hash + FS + at + FS + subject + FS + "Run-Id: " + runId + "\n" + RS;
     }
 
     /** git log 单行的回滚变体（Rollback-From trailer，runId 空）。 */

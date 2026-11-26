@@ -30,13 +30,13 @@ import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
 import com.semgravio.aiplatform.business.order.domain.model.Operator;
 
 /**
- * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即冻结双版本
- * 引用＋PRD 确认版全文冗余拷贝＋交付物类型入单（#335 引用语义——订单自含，
- * 不依赖版本表与工作区存亡）；系统单源码不快照（交付经 source-package 实时
- * 取），设计面交付物在下单冻结时打包（#297 设计资产包——暂存/落名编排归应用
- * 层，聚合只记类型）；金额单位分（Long）、v1 恒 CNY，随报价落值。projectId
- * 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户
- * 查）。
+ * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即冻结已确认
+ * 用户面版本号＋当前工作区 PRD 全文冗余拷贝＋交付物类型入单（#629 商业面改接，
+ * ADR-0056——订单自含，不依赖版本表与工作区存亡；历史订单沿用旧 PRD/Demo 双
+ * 版本引用列照读）；源码不快照（交付经 source-package 实时取，
+ * #611 交付物类型收窄为系统单值）；金额单位分（Long）、v1 恒 CNY，随报价落值。
+ * projectId 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余下单
+ * 账号（按用户查）。
  *
  * <p>状态机（五态单向，骨架不动、语义重对位见 {@link OrderStatus}）：{@link
  * #cancel}（取消门＝未支付态聚合腿；合同签署完成后关门＋取消联动活跃合同
@@ -95,9 +95,8 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     private OrderStatus status;
 
     /**
-     * 交付物类型（#297，下单即冻结自项目终点类型；只插不改）：决定下单冻结面——
-     * 设计＝设计资产包、系统＋设计＝统一部件容器（源码＋选定设计稿）、系统＝
-     * 源码包实时取零冻结件。不参与交易机制（报价/改价/状态机/取消同一律）。
+     * 交付物类型（#297 下单即冻结；只插不改；#611 收窄为系统单值）：交付物是
+     * 源码包实时取、零冻结件。不参与交易机制（报价/改价/状态机/取消同一律）。
      */
     @Column(name = "deliverable_type", nullable = false, updatable = false)
     private OrderDeliverableType deliverableType;
@@ -107,20 +106,28 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     private String prdSnapshot;
 
     /**
-     * 下单时已确认 PRD 版本引用（#335：prj_prd_versions 软引用）——{@link #prdSnapshot}
-     * 的语义正身＝该版本全文的冗余拷贝（订单自含，不依赖版本表存亡）。只插不改；
-     * null＝确认制（V32）之前下的遗留单，如实缺省不虚构引用。
+     * 下单时已确认 PRD 版本引用（#335 历史沿用：#629 起新单不再写入——版本引用收敛
+     * 为 {@link #confirmedVersionNo}）。只插不改；null＝新单/确认制之前下的遗留单。
+     * 历史订单照常可读。
      */
     @Column(name = "prd_version_no", updatable = false)
     private Integer prdVersionNo;
 
     /**
-     * 下单时已确认 Demo 版本引用（#335：下单时项目确认指针〔prj_projects.
-     * confirmed_demo_version_no〕的定格值——「确认此版本，准备签约」随单冻结）。
-     * 只插不改；null＝遗留单同 {@link #prdVersionNo}。
+     * 下单时已确认 Demo 版本引用（#335 历史沿用：#629 起新单不再写入——版本引用收敛
+     * 为 {@link #confirmedVersionNo}）。只插不改；null＝新单/遗留单。
      */
     @Column(name = "demo_version_no", updatable = false)
     private Integer demoVersionNo;
+
+    /**
+     * 下单时已确认的用户面版本号（#629，ADR-0056 商业面改接）：下单时项目确认指针
+     * 的定格值——「确认此版本，准备签约」随单冻结。旧的两套版本引用（PRD 版本号＋
+     * Demo 版本号）收敛为这一个用户面版本号。只插不改；null＝遗留单（沿用
+     * {@link #prdVersionNo}/{@link #demoVersionNo} 双列照读）。
+     */
+    @Column(name = "confirmed_version_no", updatable = false)
+    private Integer confirmedVersionNo;
 
     /** 当前总价（分；待报价 NULL，报价落值、改价取最新价目行）。 */
     @Column(name = "amount")
@@ -204,11 +211,12 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     private Order(Long projectId, Long ownerAccountId, Long ownerGuestId, String prdSnapshot,
-            OrderDeliverableType deliverableType, int prdVersionNo, int demoVersionNo) {
+            OrderDeliverableType deliverableType, Integer prdVersionNo, Integer demoVersionNo,
+            Integer confirmedVersionNo) {
         if (projectId == null || prdSnapshot == null || prdSnapshot.isBlank()
                 || deliverableType == null
                 || (ownerAccountId != null && ownerGuestId != null)
-                || prdVersionNo <= 0 || demoVersionNo <= 0) {
+                || !validVersionRefs(prdVersionNo, demoVersionNo, confirmedVersionNo)) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
         this.projectId = projectId;
@@ -219,22 +227,43 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         this.prdSnapshot = prdSnapshot;
         this.prdVersionNo = prdVersionNo;
         this.demoVersionNo = demoVersionNo;
+        this.confirmedVersionNo = confirmedVersionNo;
+    }
+
+    /** 版本引用合法性：新单＝已确认用户面版本号正整数；遗留单＝PRD/Demo 双正整数。 */
+    private static boolean validVersionRefs(Integer prdVersionNo, Integer demoVersionNo,
+            Integer confirmedVersionNo) {
+        if (confirmedVersionNo != null) {
+            return confirmedVersionNo > 0;
+        }
+        return prdVersionNo != null && prdVersionNo > 0
+                && demoVersionNo != null && demoVersionNo > 0;
     }
 
     /**
-     * 下单（确认动作的落库事实，#335 引用语义）：待报价起步，PRD 快照＋双版本
-     * 引用＋交付物类型在此冻结——{@code prdSnapshot}＝{@code prdVersionNo} 指向的
-     * 已确认版本全文的冗余拷贝（订单自含，不依赖版本表与工作区存亡），{@code
-     * demoVersionNo}＝下单时项目确认指针的 Demo 版本（下单前置门在应用层，聚合
-     * 只收已过门的正整数版本号）。此后 PRD 修订与项目终点变更均不影响本单
-     * （取消再下 = 新单新快照新引用新类型）。下单者归属 owner 双列（账户/访客
-     * 互斥，随请求上下文其一，#326）。
+     * 下单（确认动作的落库事实，#629 商业面改接）：待报价起步，PRD 快照＋<b>已确认
+     * 用户面版本号</b>＋交付物类型在此冻结——{@code prdSnapshot}＝下单时当前工作区
+     * PRD 全文的冗余拷贝（订单自含，不依赖工作区存亡），{@code confirmedVersionNo}
+     * ＝下单时项目确认指针的用户面版本（下单前置门在应用层，聚合只收已过门的正整数
+     * 版本号）。旧的两套版本引用（PRD 版本号＋Demo 版本号）收敛为这一个用户面版本号。
+     * 此后 PRD 修订不影响本单（取消再下 = 新单新快照新引用）。下单者归属 owner
+     * 双列（账户/访客互斥，随请求上下文其一，#326）。
+     */
+    public static Order place(Long projectId, Long ownerAccountId, Long ownerGuestId,
+            String prdSnapshot, OrderDeliverableType deliverableType, int confirmedVersionNo) {
+        return new Order(projectId, ownerAccountId, ownerGuestId, prdSnapshot, deliverableType,
+                null, null, confirmedVersionNo);
+    }
+
+    /**
+     * 下单（历史双版本引用形，测试/遗留数据用）：保留旧 PRD/Demo 双版本引用语义，
+     * 新单走 {@link #place(Long, Long, Long, String, OrderDeliverableType, int)}。
      */
     public static Order place(Long projectId, Long ownerAccountId, Long ownerGuestId,
             String prdSnapshot, OrderDeliverableType deliverableType,
             int prdVersionNo, int demoVersionNo) {
         return new Order(projectId, ownerAccountId, ownerGuestId, prdSnapshot, deliverableType,
-                prdVersionNo, demoVersionNo);
+                prdVersionNo, demoVersionNo, null);
     }
 
     /** 是否终态（已归档/已取消）——未终结订单唯一性的判定口径。 */
@@ -256,17 +285,6 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         }
         this.status = OrderStatus.CANCELLED;
         this.cancelledAt = LocalDateTime.now();
-    }
-
-    /**
-     * 设计资产包可取守卫（#297 用户面下载 / #298 后台取件共用单点——纯判定先于
-     * 支付门与取件）：交付物含设计面（设计/系统＋设计）即过；系统单交付物是
-     * 源码包（实时取口径），ORD_016 如实——寻址成功而类型不符不假装有包。
-     */
-    public void requireDesignDeliverable() {
-        if (!deliverableType.designInvolved()) {
-            throw new DomainException(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE);
-        }
     }
 
     /**

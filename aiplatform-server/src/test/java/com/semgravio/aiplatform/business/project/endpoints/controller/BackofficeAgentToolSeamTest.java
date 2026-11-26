@@ -12,10 +12,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
-import com.semgravio.aiplatform.base.agentscope.HarnessBuiltinTools;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
 import com.semgravio.aiplatform.business.project.infrastructure.agentscope.ProfileToolkitSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,21 +28,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * （签名闸/会话豁免/强制拦截器）＋真应用服务＋aiplatform_test 真库。本测试类独写
  * {@code prj_agent_configs}/{@code prj_agent_config_traces}——teardown 整面清即净。
  *
- * <p>六面钉死（#252 验收面）：</p>
+ * <p>五面钉死（#252 验收面；#604 起槽位只余两槽——executor 槽随 run 尝试体旧机制
+ * 退役、subagent 槽随委派机制退役）：</p>
  * <ul>
- * <li><b>清单可观测</b>：四槽位分组（main/executor/designer/subagent，#289 designer
- * 槽——平台件 generate_image＋harness 内建文件工具呈现、无 execute）——main 平台九件
- * （骨架七＋增强两，含 propose_skill 技能自荐 #263 三槽位齐开）、executor 平台
- * 三件（骨架，含 propose_skill 技能自荐 #259）
- * ＋harness 内建编码工具（注册自省，含
- * read_file/execute）、subagent＝verify 声明八件（含 report_verification 验证登记
- * 与 propose_skill——平台资产件类别归正本 SKELETON）；增强 enabled 按生效开关、
- * 骨架/内建恒 true；</li>
+ * <li><b>清单可观测</b>：唯一槽位 main（#610 起 designer 槽随设计线整条退役；
+ * #638 技能清场后自荐两件退场）——平台七件（骨架五＋增强两）；
+ * 增强 enabled 按生效开关、骨架/内建恒 true；</li>
  * <li><b>开关生效装配断言</b>：PUT 关 web_search → 清单 enabled=false ＋ 真装配链
  * （{@link AgentConfigAppService#effectiveOf} 取生效规格 →
  * {@link ProfileToolkitSupplier#toolkitFor} 真装配）不含 web_search、fetch_url 与
  * 骨架不动；PUT 开 → 回归（装配含回）；</li>
- * <li><b>骨架锁死</b>：骨架工具名（ask_user/savePrd/finish_edit/update_plan 等）与
+ * <li><b>骨架锁死</b>：骨架工具名（ask_user/savePrd 等）与
  * harness 内建名（read_file/execute）接口层拒绝 403 PRJ_036（ADR-0021 编排权
  * 不下放配置）；</li>
  * <li><b>留痕共机制</b>：开关变更走配置留痕（值面四件全量快照＋操作者）、幂等
@@ -85,27 +79,26 @@ class BackofficeAgentToolSeamTest {
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
     }
 
-    // ---------- 清单可观测：三槽位分组、类别与挂载态 ----------
+    // ---------- 清单可观测：两槽位分组、类别与挂载态 ----------
 
     @Test
-    void given_defaults_when_signed_get_inventory_then_four_slots_with_expected_tools()
+    void given_defaults_when_signed_get_inventory_then_main_slot_with_expected_tools()
             throws Exception {
         signedGet()
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data", hasSize(4)))
-                // 四槽位键序（与技能槽位同键；#289 designer 居 executor 后）
+                // #604 起 executor 槽随 run 尝试体旧机制退役、subagent 槽随委派机制
+                // 退役；#610 designer 槽随设计线整条退役——现存唯一槽位＝main
+                .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].slot").value("main"))
-                .andExpect(jsonPath("$.data[1].slot").value("executor"))
-                .andExpect(jsonPath("$.data[2].slot").value("designer"))
-                .andExpect(jsonPath("$.data[3].slot").value("subagent"))
-                // main：平台十件（骨架八恒挂载——含 propose_skill #263 与
-                // propose_sediment #460 自荐三槽位齐开＋增强两件按生效开关缺省开）
-                .andExpect(jsonPath("$.data[0].tools", hasSize(10)))
-                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_sediment')].kind")
-                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[?(@.slot == 'executor')]").isEmpty())
+                .andExpect(jsonPath("$.data[?(@.slot == 'designer')]").isEmpty())
+                // main：平台七件（#602 saveBuildPlan 随切片机器出局；#638 自荐两件退场；
+                // 骨架五恒挂载＋增强两件按生效开关缺省开）
+                .andExpect(jsonPath("$.data[0].tools", hasSize(7)))
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')]").doesNotExist())
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_sediment')]")
+                        .doesNotExist())
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].kind")
                         .value("ENHANCEMENT"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].enabled")
@@ -115,50 +108,7 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].enabled").value(true))
-                // executor：平台四件（骨架——含 propose_skill 技能自荐 #259 与
-                // propose_sediment 沉淀自荐 #460）＋harness 内建编码工具（注册自省）
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'finish_edit')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'propose_skill')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'propose_sediment')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'read_file')].kind")
-                        .value("HARNESS_BUILTIN"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'execute')].kind")
-                        .value("HARNESS_BUILTIN"))
-                // #545 构建轨出图件（ADR-0052 图片下放）：executor 槽在册为增强件、
-                // 缺省挂载；与 designer 槽同名骨架件并存（按槽位呈现，不串类别）
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].kind")
-                        .value("ENHANCEMENT"))
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].enabled")
-                        .value(true))
-                // harness 内建件数与自省一致（平台五件之外全是内建呈现）
-                .andExpect(jsonPath("$.data[1].tools.length()").value(
-                        5 + harnessBuiltinCount()))
-                // designer（#289）：平台件 generate_image（骨架，ADR-0026 档位表落
-                // 提示词层）＋harness 内建文件工具（写文件件——注册自省，含
-                // write_file）；无 shell——execute 不在设计面（结构性关闭的呈现同源）
-                .andExpect(jsonPath("$.data[2].slotName").value("设计执行体"))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].enabled")
-                        .value(true))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'write_file')].kind")
-                        .value("HARNESS_BUILTIN"))
-                .andExpect(jsonPath("$.data[2].tools.length()").value(
-                        1 + fileBuiltinCount()))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'execute')]").doesNotExist())
-                // subagent：verify 声明八件（同源引用声明常量——#352 验证登记与
-                // #263 自荐经声明接入；平台资产件类别归正本 SKELETON，其余 harness 内建口径）
-                .andExpect(jsonPath("$.data[3].tools", hasSize(
-                        ProfileSubagentSupplier.VERIFY_TOOLS.size())))
-                .andExpect(jsonPath("$.data[3].tools[?(@.name == 'propose_skill')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[3].tools[?(@.name == 'report_verification')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[3].tools[?(@.name == 'execute')].kind")
-                        .value("HARNESS_BUILTIN"));
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'generate_image')]").doesNotExist());
     }
 
     // ---------- 开关生效：关→退出装配面、开→回归（装配断言） ----------
@@ -187,7 +137,7 @@ class BackofficeAgentToolSeamTest {
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), spec.toolSpec());
         assertThat(toolkit.getToolNames()).doesNotContain("web_search");
         assertThat(toolkit.getToolNames()).contains("fetch_url", "ask_user", "savePrd",
-                "saveBuildPlan", "list_workspace_files", "read_workspace_file",
+                "list_workspace_files", "read_workspace_file",
                 "query_project_facts");
 
         // 开：回归（装配含回）
@@ -199,72 +149,13 @@ class BackofficeAgentToolSeamTest {
         assertThat(toolkitBack.getToolNames()).contains("web_search");
     }
 
-    // ---------- #545 构建轨出图开关：关→executor 槽不挂载、设计执行体不受影响 ----------
-
-    @Test
-    void given_generate_image_toggled_off_when_inventory_and_assembly_then_executor_exits_designer_stays()
-            throws Exception {
-        // 同名件两词条：designer 槽骨架（恒挂载）与 executor 槽增强（可关）——窄幅
-        // 写口按增强件解析，落到 executor 行 generate_image_enabled
-        signedPut("generate_image", "{\"enabled\": false}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.name").value("generate_image"))
-                .andExpect(jsonPath("$.data.kind").value("ENHANCEMENT"))
-                .andExpect(jsonPath("$.data.enabled").value(false));
-
-        // 清单面：executor 槽在册未挂载；designer 槽同名件恒挂载不受影响
-        signedGet()
-                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'generate_image')].enabled")
-                        .value(false))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].kind")
-                        .value("SKELETON"))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].enabled")
-                        .value(true));
-        // 写的是 executor 行
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT agent_key FROM prj_agent_configs WHERE generate_image_enabled = FALSE",
-                String.class)).isEqualTo("executor");
-
-        // 装配断言：真装配链——executor/ProjectDev 无 generate_image，骨架四件不动；
-        // designer/ProjectDesign 同名工具照挂（发放面行为不变的回归）
-        var spec = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        var executorToolkit = profileToolkitSupplier.toolkitFor(AgentProfile.EXECUTOR.key(),
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), spec.toolSpec());
-        assertThat(executorToolkit.getToolNames()).doesNotContain("generate_image");
-        assertThat(executorToolkit.getToolNames()).containsExactlyInAnyOrder(
-                "finish_edit", "update_plan", "propose_skill", "propose_sediment");
-        var designerToolkit = profileToolkitSupplier.toolkitFor(AgentProfile.DESIGNER.key(),
-                new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), spec.toolSpec());
-        assertThat(designerToolkit.getToolNames()).containsExactly("generate_image");
-
-        // 留痕共机制：toggle 走配置留痕（old=true 缺省态 → new=false），全量快照含本开关
-        mockMvc.perform(BackofficeSignatures.signed(
-                get("/api/backoffice/agent-configs/executor/traces"),
-                "/api/backoffice/agent-configs/executor/traces", null))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].oldGenerateImageEnabled").value(true))
-                .andExpect(jsonPath("$.data[0].newGenerateImageEnabled").value(false));
-
-        // 开＝回归（幂等同值零落痕——再关再开后只 2 痕）
-        signedPut("generate_image", "{\"enabled\": true}")
-                .andExpect(jsonPath("$.data.enabled").value(true));
-        var specBack = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
-        var toolkitBack = profileToolkitSupplier.toolkitFor(AgentProfile.EXECUTOR.key(),
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), specBack.toolSpec());
-        assertThat(toolkitBack.getToolNames()).contains("generate_image");
-        mockMvc.perform(BackofficeSignatures.signed(
-                get("/api/backoffice/agent-configs/executor/traces"),
-                "/api/backoffice/agent-configs/executor/traces", null))
-                .andExpect(jsonPath("$.data", hasSize(2)));
-    }
-
     // ---------- 留痕共机制：开关变更走配置留痕、幂等零落痕 ----------
 
     @Test
     void given_tool_toggle_when_traces_then_config_trace_mechanism_shared() throws Exception {
         // 先落一条 prompt 覆盖（开关写口必须不碰其余值面——同表共留痕的对照基础）
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_config_key)
                 VALUES ('main', '主智能体覆盖协议 V1：每轮先复述目标。', null)
                 """);
         signedPut("fetch_url", "{\"enabled\": false}").andExpect(status().isOk());
@@ -306,8 +197,8 @@ class BackofficeAgentToolSeamTest {
             throws Exception {
         // 骨架（编排链路件——main 与 executor 各抽查）与 harness 内建（呈现口径件）
         // 一律 403 PRJ_036：ADR-0021 编排权不下放配置，结构性锁死
-        for (String toolName : new String[]{"ask_user", "savePrd", "saveBuildPlan",
-                "query_project_facts", "finish_edit", "update_plan", "read_file", "execute"}) {
+        for (String toolName : new String[]{"ask_user", "savePrd",
+                "query_project_facts", "read_file", "execute"}) {
             signedPut(toolName, "{\"enabled\": false}")
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.code").value(TOOL_TOGGLE_FORBIDDEN_CODE))
@@ -363,16 +254,6 @@ class BackofficeAgentToolSeamTest {
     }
 
     // ---------- 夹具 ----------
-
-    /** harness 内建编码工具件数（自省单源——清单断言不手工抄数）。 */
-    private static int harnessBuiltinCount() {
-        return HarnessBuiltinTools.codingToolNames().size();
-    }
-
-    /** harness 内建文件工具件数（#289 designer 槽呈现口径——不含 shell，自省单源）。 */
-    private static int fileBuiltinCount() {
-        return HarnessBuiltinTools.fileTools().size();
-    }
 
     private ResultActions signedGet() throws Exception {
         String path = "/api/backoffice/agent-tools";

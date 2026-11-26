@@ -12,6 +12,7 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.business.billing.application.BalanceReminderAppService;
 import com.semgravio.aiplatform.business.billing.application.TrialInterceptAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,6 +24,9 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class AgentEventBridge {
+
+    /** 平台侧动作（#627 回滚复用工作消息呈现）的 engine/model 占位值：非内核 run。 */
+    static final String PLATFORM_ENGINE = "platform";
 
     private final EventsAppService eventsAppService;
 
@@ -56,28 +60,27 @@ public class AgentEventBridge {
     }
 
     /**
-     * run-failed 发射（编码 run 重试超限·终态收口，#56）：轨道层在真终态落定点
-     * 调用——修正轨道与终态账（恢复出口 {@code restartFixRun} 的重派依据）同
-     * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道超限即终态。
-     * runId = 该场 run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚，
-     * 中间尝试的内部标识不出用户面）。前端恢复出口只认本事件，run 失败为唯一
-     * 失败终态（重试全程静默，中间失败不出事件）。
+     * run-failed 发射（编码 run 终态失败收口，#56；#604 起生成/更新 run 单发无重试
+     * ——失败/停止即终态）：轨道层在真终态落定点调用；生成轨道失败/停止即终态，
+     * 迭代修改轨失败/停止即终态（不自动补派，用户重说即新一轮）。
+     * runId = 该场 run 的用户面标识。前端恢复出口只认本事件，run 失败为唯一
+     * 失败终态（#604 明确展示：失败原因随本事件呈现，不自动重跑）。
      *
-     * <p><b>失败原因随事件（#355 机制检查）</b>：失败面的 {@code error}（末次
-     * 尝试的错误现场，原样留档于终态日志/失败留账）经
+     * <p><b>失败原因随事件（#355 机制检查）</b>：失败面的 {@code error}（该场尝试
+     * 的错误现场，原样留档于终态日志/失败留账）经
      * {@link #userFacingRunFailure(String)} 映射为一句用户面原因随
      * {@code message} 键携带（映射不中则截断原文首行；空则缺省不带）——终态
      * 失败不再零原因，用户可分辨「模型没写好」与「服务侧故障」。</p>
      *
      * <p><b>失败面同载荷落库（#418 失败片落库面）</b>：{@code failure}（逐尝试
-     * 墙钟/档位/失败原因/本场累计——尝试环装配；轨道级失败携最小面）随事件
+     * 墙钟/配置/失败原因/本场累计——尝试环装配；轨道级失败携最小面）随事件
      * {@code failure} 键扩载，并以<b>同一 map</b> 落对话史失败留账行（同收尾卡
      * 「SSE 扩载与落库同载荷」先例）——先落库后发事件（收尾卡同序：重拉不撞
      * 未落库空窗）；落库 quietly（观测面缺行不牵连终态收口）。
      */
     public void emitRunFailed(Project project, String runId, Map<String, Object> failure) {
         Map<String, Object> payload = runScopedPayload(project, runId);
-        String reason = userFacingRunFailure(CoderRunAttempts.errorOf(failure));
+        String reason = userFacingRunFailure(CodingRunDispatcher.errorOf(failure));
         if (reason != null) {
             payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, reason);
         }
@@ -90,7 +93,7 @@ public class AgentEventBridge {
      * ——事件复用 {@code run-failed}（失败账口径：停止的 run 如实留账计量与终态
      * 状态），载荷加 {@code stopped=true} 标记（前端失败档文案分岔「已停止」）＋
      * 定型一句人话（非错误现场映射——停止是用户动作，无失败原因可报）。runId =
-     * 被停场次的用户面标识（首试 runId），恢复出口（继续生成/继续更新）照常只认
+     * 被停场次的用户面标识，恢复出口（继续生成/继续更新）照常只认
      * 本事件。停止的失败面（#418）同载荷落库与扩载（同 {@link #emitRunFailed}）。
      */
     public void emitRunStopped(Project project, String runId, Map<String, Object> failure) {
@@ -157,10 +160,10 @@ public class AgentEventBridge {
     }
 
     /**
-     * error 发射（失败家族——非重试族的失败表达）：意见链收口后派发修正 run 失败
+     * error 发射（失败家族——非重试族的失败表达）：主智能体轮收口派发失败
      * （#51 → #82 失败家族归位：dispatch-failed 阶段族退役，失败信号归本事件）——
-     * 意见锚已消费、不自动重试，用户重提即兜底；锚定收口对话轮的 runId（对话面
-     * 已登记，失败提示随对话呈现）。
+     * 不自动重试，用户重提即兜底；锚定收口对话轮的 runId（对话面已登记，失败提示
+     * 随对话呈现）。
      */
     public void emitError(Project project, String runId, String message) {
         eventsAppService.publishAgentEvent(AgentEventTypes.ERROR, Map.of(
@@ -170,6 +173,48 @@ public class AgentEventBridge {
                 EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId,
                 AgentEventTypes.ERROR_MESSAGE_FIELD, message));
+    }
+
+    /**
+     * 平台侧异步动作的「工作消息起点」（#627 回滚复用工作消息呈现）：回滚等平台动作
+     * 不是内核 run，但复用现有工作消息壳呈现进度——run-start 携 {@code agent=executor}
+     * （前端据此起工作消息、登记编码 run 状态）＋ {@code slice.title}（标题
+     * 「回到版本 vN」）。engine/model 给 {@code platform} 占位（无真实模型/引擎）；
+     * 不新增 SSE 事件类型。发射失败只记日志（呈现面不承担正确性）。
+     */
+    public void emitPlatformActionStarted(Project project, String runId, String title) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.RUN_PROMPT_FIELD, title);
+        payload.put(AgentEventTypes.RUN_MODEL_FIELD, PLATFORM_ENGINE);
+        payload.put(AgentEventTypes.ENGINE_FIELD, PLATFORM_ENGINE);
+        payload.put(AgentEventTypes.AGENT_FIELD, AgentProfile.EXECUTOR.key());
+        payload.put(AgentEventTypes.SLICE_FIELD, Map.of("title", title));
+        publishQuietly(AgentEventTypes.RUN_START, payload);
+    }
+
+    /**
+     * 平台侧异步动作的「工作消息收口」（#627 回滚复用工作消息呈现）：run-finish
+     * <b>不携 closing</b>——平台动作不是内核 run、不出收尾卡；工作消息原地定格。
+     * sessionId 用 coder- 前缀的会话寻址（断线补发窗口的补建判据同口径）。
+     */
+    public void emitPlatformActionFinished(Project project, String runId, String sessionId) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
+        payload.put(AgentEventTypes.ENGINE_FIELD, PLATFORM_ENGINE);
+        payload.put(AgentEventTypes.FINISH_FIELD, "end");
+        publishQuietly(AgentEventTypes.RUN_FINISH, payload);
+    }
+
+    /**
+     * 平台侧异步动作失败终态（#627 回滚失败）：复用 run-failed 明确展示——message
+     * 由调用方给定（失败原因＋两条恢复路）。不携 failure 扩载、不落失败留账行
+     * （平台动作不是内核 run、无尝试账，避免对话面出现无归属的失败行）；平台分析
+     * 面只记日志（调用方记录）。
+     */
+    public void emitPlatformActionFailed(Project project, String runId, String message) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, message);
+        publishQuietly(AgentEventTypes.RUN_FAILED, payload);
     }
 
     /**
@@ -249,52 +294,10 @@ public class AgentEventBridge {
         if (card.prompt() != null) {
             payload.put(AgentEventTypes.BALANCE_PROMPT_FIELD, card.prompt());
         }
-        if (card.designItem() != null) {
-            payload.put(AgentEventTypes.BALANCE_DESIGN_ITEM_FIELD, card.designItem());
-        }
         if (card.sourcePoolBalance() != null) {
             payload.put(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD, card.sourcePoolBalance());
         }
         publishQuietly(AgentEventTypes.BALANCE_REMINDER, payload);
-    }
-
-    /**
-     * acceptance-start 发射（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理
-     * 事实——意见已接住、主智能体正在受理（追问或改 PRD 的过程呈现位，衔接收口
-     * 自动派的更新 run 工作消息）。纯呈现事件：受理落定不出新事件（该轮
-     * run-finish / error 即收口）；发射走 {@link #publishQuietly}——失败只记日志
-     * 不断受理（其余 emit* 是语义关键事件，失败如实上抛不静默）。
-     */
-    public void emitAcceptanceStarted(Project project, String runId) {
-        publishQuietly(AgentEventTypes.ACCEPTANCE_START, Map.of(
-                EventsAppService.PROJECT_FIELD, project.getId().toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
-                EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerGuestId()),
-                EventsAppService.RUN_FIELD, runId));
-    }
-
-    /**
-     * 定稿收尾卡发射（#291 定稿机制——平台侧显式动作的收口呈现）：定稿不是智能体
-     * run（无 run-start、无过程事件），收尾卡经 {@code run-finish} 载 closing 直达
-     * 对话流——事件封闭集零新增（收口即 run-finish 的既有语义，#88 收尾卡复用）。
-     * runId ＝ 定稿锚（成版 commit 的 Run-Id trailer 对偶锚定本卡——版本详情联接
-     * 对话史 closing 条目同锚）；sessionId 携该设计物的设计会话标识（归属可读，
-     * 非续跑锚）。发射走 {@link #publishQuietly}——呈现面失败不牵连定稿事实
-     * （件状态与成版已落定，回访经对话史水合）。
-     */
-    public void emitClosingCard(Project project, String runId,
-            String sessionId, Map<String, Object> closing) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
-        payload.put(EventsAppService.OWNER_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerAccountId()));
-        payload.put(EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerGuestId()));
-        payload.put(EventsAppService.RUN_FIELD, runId);
-        payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
-        payload.put(AgentEventTypes.CLOSING_FIELD, closing);
-        publishQuietly(AgentEventTypes.RUN_FINISH, payload);
     }
 
     /**

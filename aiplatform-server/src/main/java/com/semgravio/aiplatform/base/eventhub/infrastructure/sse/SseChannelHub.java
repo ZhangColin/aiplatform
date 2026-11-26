@@ -62,8 +62,16 @@ public class SseChannelHub {
     /** SSE name 恒为 event（统一信封，前端每连接一个 listener）。 */
     public static final String EVENT_NAME = "event";
 
-    /** 心跳注释行：每 15s 发 {@code :ping}，防代理掐空闲连接（ADR-0001）。 */
-    public static final String PING_COMMENT = "ping";
+    /**
+     * 心跳具名事件（#652 起改形，原注释行 {@code :ping}）：无 id、空 data 的
+     * {@code event: ping}。具名事件原生 EventSource 可观测（注释行对浏览器不可见），
+     * 客户端看门狗据此检测「开着但沉默」的僵死连接；不带 id 不推进 Last-Event-ID
+     * 重连锚、不进重放缓冲与前端去重集；空 data 行保证跨 SSE 实现派发（无 data 的
+     * 具名事件派发行为有差异）。防代理掐空闲连接的保活语义不变（ADR-0001）。
+     */
+    public static final String PING_EVENT_NAME = "ping";
+
+    private static final SseServerEvent PING_FRAME = SseServerEvent.of(null, PING_EVENT_NAME, "");
 
     public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
@@ -125,8 +133,9 @@ public class SseChannelHub {
 
     /**
      * 订阅一个通道。filter 为订阅过滤谓词（作用于事件 payload），null 视为全量。
-     * 不超时（断连由心跳发送失败逐出）；连接建立即刻发一条 {@code :ping}，
-     * 冲刷响应头并作即时存活信号。
+     * 不超时（断连由心跳发送失败逐出）；连接建立即刻发一条具名 ping 事件
+     * （{@link #PING_EVENT_NAME}，冲刷响应头并作即时存活信号——#652 起客户端
+     * 看门狗的起搏点）。
      *
      * <p><b>断线补发（#89 重放缓冲降级）</b>：{@code afterEventId} 非空（浏览器断线
      * 重连自动携带的 Last-Event-ID）且通道已注册重放缓冲（{@link #registerReplay}）
@@ -147,7 +156,7 @@ public class SseChannelHub {
         emitter.onTimeout(() -> state.subscriptions.remove(subscription));
         emitter.onError(throwable -> state.subscriptions.remove(subscription));
 
-        sendOrEvict(state, subscription, SseServerEvent.comment(PING_COMMENT));
+        sendOrEvict(state, subscription, PING_FRAME);
         deliverBacklog(state, subscription, backlog);
         return emitter;
     }
@@ -319,7 +328,7 @@ public class SseChannelHub {
                         continue;
                     }
                     try {
-                        sender.send(subscription.emitter, SseServerEvent.comment(PING_COMMENT));
+                        sender.send(subscription.emitter, PING_FRAME);
                     } catch (Exception ex) {
                         log.debug("SSE 心跳失败，逐出订阅（channel={}）：{}",
                                 subscription.channel, ex.getMessage());

@@ -164,7 +164,7 @@ class SavePrdToolTest {
         assertThat(blank.getState()).isEqualTo(ToolResultState.ERROR);
         assertThat(exec.commands).isEmpty();
         assertThat(port.callbacks).isEmpty();
-        assertThat(prdRevisions.consume("42")).as("漏传不落修订事实").isNull();
+        assertThat(prdRevisions.consumeFailure("42")).as("漏传不落失败事实").isFalse();
     }
 
     @Test
@@ -179,7 +179,7 @@ class SavePrdToolTest {
         assertThat(resultText(result)).contains("平台拒绝").contains("2/5").contains("ask_user");
         assertThat(exec.commands).isEmpty();
         assertThat(port.callbacks).isEmpty();
-        assertThat(prdRevisions.consume("42")).isNull();
+        assertThat(prdRevisions.consumeFailure("42")).isFalse();
         assertThat(fastLaneFacts.consume("42")).isFalse();
     }
 
@@ -202,24 +202,16 @@ class SavePrdToolTest {
 
         assertThat(resupplied.getState()).isNotEqualTo(ToolResultState.ERROR);
         assertThat(exec.commands).hasSize(1);
-        assertThat(prdRevisions.consume("42")).isEqualTo("补传的修订说明");
+        assertThat(prdRevisions.consumeFailure("42")).isFalse();
     }
 
     @Test
-    void given_successful_save_when_called_then_revision_fact_recorded() {
-        // #52 修订事实从工具调用面观测：成功即登记（平台侧交接物的「改了什么」来源）
+    void given_successful_save_when_called_then_no_failure_fact() {
+        // 落盘成功＝PRD 终究成了：不落失败事实（悬空补救只看失败腿，#625 起修订摘要
+        // 观测随旧迭代受理链退场）
         call("# PRD", "按意见把主色调改为绿");
 
-        assertThat(prdRevisions.consume("42")).isEqualTo("按意见把主色调改为绿");
-    }
-
-    @Test
-    void given_multiple_saves_in_one_round_when_consumed_then_latest_summary_wins() {
-        // 一轮多次 savePrd：交接物取终值不混杂（后写胜出——同 FinishEditFacts 口径）
-        call("# PRD v1", "第一次修订说明");
-        call("# PRD v2", "第二次修订说明（终值）");
-
-        assertThat(prdRevisions.consume("42")).isEqualTo("第二次修订说明（终值）");
+        assertThat(prdRevisions.consumeFailure("42")).isFalse();
     }
 
     @Test
@@ -233,7 +225,6 @@ class SavePrdToolTest {
         assertThat(result.getState()).isEqualTo(ToolResultState.ERROR);
         assertThat(resultText(result)).contains("写入工作区失败");
         assertThat(port.callbacks).isEmpty();
-        assertThat(prdRevisions.consume("42")).isNull();
         // 失败事实登记（ADR-0032 悬空补救的分形依据）：轮收口无问无 PRD 时据此刻画
         // 「刚才写 PRD 一步失败了」点名形文案
         assertThat(prdRevisions.consumeFailure("42")).isTrue();
@@ -264,7 +255,6 @@ class SavePrdToolTest {
         ToolResultBlock result = call("# PRD", "重试成功的产出");
 
         assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
-        assertThat(prdRevisions.consume("42")).isEqualTo("重试成功的产出");
         assertThat(prdRevisions.consumeFailure("42")).isFalse();
     }
 

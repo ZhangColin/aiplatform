@@ -3,8 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { hasCredentialCookie } from "@/lib/auth/cookies";
 import { buildLoginRedirectUrl } from "@/lib/auth/login-redirect";
 
-/** 被删旧路由前缀（issue #17 前端清场）：书签 / 外链 302 回 /，不带 returnTo。 */
-const DELETED_ROUTE_PREFIXES = ["/dev", "/opc", "/admin", "/prototype"];
+/** 被删旧路由前缀（issue #17 前端清场；#608 起含一次性原型 /proto）：书签 / 外链 302 回 /，不带 returnTo。 */
+const DELETED_ROUTE_PREFIXES = ["/dev", "/opc", "/admin", "/prototype", "/proto"];
 
 /** 前缀命中 = 前缀本身或其子路径（等值/加斜杠判定，/developer 不误伤）。 */
 function isDeletedRoute(pathname: string): boolean {
@@ -20,14 +20,6 @@ function isDeletedRoute(pathname: string): boolean {
  * 出口兜底。（Next.js 16 起 middleware 文件约定更名为 proxy，行为一致。）
  */
 export function proxy(request: NextRequest) {
-  // 一次性原型路由（#68 过程可见性走查，/proto/*）：仅开发环境放行，随原型归档一并删除。
-  if (
-    process.env.NODE_ENV !== "production" &&
-    (request.nextUrl.pathname === "/proto" || request.nextUrl.pathname.startsWith("/proto/"))
-  ) {
-    return NextResponse.next();
-  }
-
   if (isDeletedRoute(request.nextUrl.pathname)) {
     return NextResponse.redirect(new URL("/", request.url), 302);
   }
@@ -54,7 +46,7 @@ export function proxy(request: NextRequest) {
 
 /**
  * 白名单：/auth/*（代理路径，拦了死循环）、/api/*、_next、favicon.ico、静态资源。
- * 被删旧路由（/dev /opc /admin /prototype）须进 proxy 才能吃到 302 回 /。
+ * 被删旧路由（/dev /opc /admin /prototype /proto）须进 proxy 才能吃到 302 回 /。
  * matcher 正则以 (?:/|$) 锚定前缀，避免误伤相似前缀路径。
  */
 export const config = {

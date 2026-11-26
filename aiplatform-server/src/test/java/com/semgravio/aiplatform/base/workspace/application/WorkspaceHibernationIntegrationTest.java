@@ -35,7 +35,6 @@ import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceReposi
 import com.semgravio.aiplatform.base.workspace.infrastructure.archive.LocalDiskSealPackageStore;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
 import com.semgravio.aiplatform.business.project.application.CodingRunTrack;
-import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -326,7 +325,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedReadyWorkspace(LocalDateTime.now().minusMinutes(5));
 
         // 归档 + 已生成项目挂同名工作区：归档与休眠正交——归档项目不筛、同一判定
-        Project archived = Project.create("已归档项目", ProjectType.WEBSITE, null, id.id(), null, null);
+        Project archived = Project.create("已归档项目", ProjectType.WEBSITE, id.id(), null, null);
         archived.markGenerated();
         archived.archive();
         projectRepository.save(archived);
@@ -397,14 +396,12 @@ class WorkspaceHibernationIntegrationTest {
                 sealPackageStore(), newConvergenceService(backend));
     }
 
-    /** 组合根真实例（真库 + 假面 docker + 真收敛；快照清扫假面——归档正交只验休眠侧）。 */
+    /** 组合根真实例（真库 + 假面 docker + 真收敛）。 */
     private WorkspaceHibernationScheduler newScheduler(FakeDockerCli backend) {
         return new WorkspaceHibernationScheduler(
                 newHibernationService(backend),
-                mock(VersionSnapshotAppService.class),
                 new CodingRunTrack(),
-                projectRepository,
-                new WorkspaceProperties());
+                projectRepository);
     }
 
     /** 种一棵 READY 工作区（真库），last-touch 拨到给定时刻。 */

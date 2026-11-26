@@ -12,7 +12,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.format.FormatterRegistry;
@@ -56,7 +55,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 后台订单机机面 REST 契约（#29 交易环②，#157 扩取消写口；#298 清单/详情带
- * 交付物类型＋设计资产包取件端点）：七端点形状 +
+ * 交付物类型；#611 设计交付物包取件端点退场）：七端点形状 +
  * cartisan-openapi 五头 HMAC 签名闸全链（真 Filter + 真 Interceptor + 真签名计算；凭据源与 nonce 存储用
  * {@link BackofficeSignatureTestConfig}、签名头计算用 {@link BackofficeSignatures}
  * ——均 #152 seam 测试件，全上下文走法见 {@code BackofficeSeamContractTest}）
@@ -106,9 +105,9 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.items[0].ownerExternalId").value("sub-user-1"))
                 .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value("文野"))
                 .andExpect(jsonPath("$.data.items[0].status").value(1))
-                // #298 交付物类型列加：code + 中文名随行（筛选维度不加）
-                .andExpect(jsonPath("$.data.items[0].deliverableType").value(3))
-                .andExpect(jsonPath("$.data.items[0].deliverableTypeName").value("系统＋设计"))
+                // #298 交付物类型列加：code + 中文名随行（#611 收窄为系统单值）
+                .andExpect(jsonPath("$.data.items[0].deliverableType").value(2))
+                .andExpect(jsonPath("$.data.items[0].deliverableTypeName").value("系统"))
                 .andExpect(jsonPath("$.data.total").value("1")) // Long 全局序列化为字符串
                 .andExpect(jsonPath("$.data.page").value(1))
                 .andExpect(jsonPath("$.data.size").value(20));
@@ -157,8 +156,8 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.ownerExternalId").value("sub-user-1"))
                 .andExpect(jsonPath("$.data.ownerDisplayName").value("文野"))
                 .andExpect(jsonPath("$.data.status").value(2))
-                .andExpect(jsonPath("$.data.deliverableType").value(3))
-                .andExpect(jsonPath("$.data.deliverableTypeName").value("系统＋设计"))
+                .andExpect(jsonPath("$.data.deliverableType").value(2))
+                .andExpect(jsonPath("$.data.deliverableTypeName").value("系统"))
                 // #391 双版本引用列加：随单冻结值直读（遗留单 null 如实——归 seam 测试钉）
                 .andExpect(jsonPath("$.data.prdVersionNo").value(3))
                 .andExpect(jsonPath("$.data.demoVersionNo").value(2))
@@ -194,36 +193,11 @@ class BackofficeOrderControllerTest {
     }
 
     @Test
-    void given_signed_request_when_get_design_package_then_gzip_stream_with_order_filename()
-            throws Exception {
-        // #298 设计资产包取件（对偶源码包端点）：二进制流不走 JSON 信封，文件名锚
-        // 订单号（冻结件按单定格）
-        byte[] bytes = new byte[] {0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xc0};
-        when(queryAppService.designPackage(900L)).thenReturn(bytes);
-
-        MockHttpServletResponse response = mockMvc.perform(BackofficeSignatures
-                        .signed(get("/api/backoffice/orders/900/design-package"),
-                                "/api/backoffice/orders/900/design-package", null))
-                .andExpect(status().isOk())
-                .andExpect(content().contentType("application/gzip"))
-                .andReturn().getResponse();
-
-        assertThat(response.getContentAsByteArray()).containsExactly(bytes);
-        assertThat(response.getHeader("Content-Disposition")).contains("900-design.tar.gz");
-    }
-
-    @Test
-    void given_system_order_when_get_design_package_then_404_ord016() throws Exception {
-        // 系统单交付物是源码包：ORD_016 如实（纯判定先于取件——交付物类型不匹配
-        // 不假装有包，守卫归 Order 聚合单点）；守卫在应用服务缝，冻结件零触达
-        when(queryAppService.designPackage(900L))
-                .thenThrow(new DomainException(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE));
-
+    void given_signed_request_when_get_retired_design_package_then_not_found() throws Exception {
+        // #611 设计交付物包退场：端点不再注册——签名合法的取件请求如实 404
         mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders/900/design-package"),
                         "/api/backoffice/orders/900/design-package", null))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message")
-                        .value(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE.message()));
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -367,14 +341,14 @@ class BackofficeOrderControllerTest {
     private static BackofficeOrderSummaryResponse summary() {
         return new BackofficeOrderSummaryResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.PENDING_QUOTE, "待报价",
-                OrderDeliverableType.SYSTEM_DESIGN, "系统＋设计", null, null,
+                OrderDeliverableType.SYSTEM, "系统", null, null,
                 LocalDateTime.of(2026, 9, 1, 9, 0), null);
     }
 
     private static BackofficeOrderDetailResponse backofficeDetail() {
         return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.QUOTED, "已报价",
-                OrderDeliverableType.SYSTEM_DESIGN, "系统＋设计", 3, 2, 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 List.of(
                         new BackofficePriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",
@@ -388,7 +362,7 @@ class BackofficeOrderControllerTest {
 
     private static OrderResponse quotedOrder() {
         return new OrderResponse("900", "100", OrderStatus.QUOTED, "已报价",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 99000L, "CNY", "调整：去掉导入功能",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 99000L, "CNY", "调整：去掉导入功能",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(
@@ -402,7 +376,7 @@ class BackofficeOrderControllerTest {
     /** #157 取消回执：用户面同构（无取消原因——运营内部口径不进用户面响应形）。 */
     private static OrderResponse cancelledOrder() {
         return new OrderResponse("900", "100", OrderStatus.CANCELLED, "已取消",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
@@ -414,7 +388,7 @@ class BackofficeOrderControllerTest {
     /** #158 重试归档回执：用户面同构（归档操作者不进用户面响应形）。 */
     private static OrderResponse archivedOrder() {
         return new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",

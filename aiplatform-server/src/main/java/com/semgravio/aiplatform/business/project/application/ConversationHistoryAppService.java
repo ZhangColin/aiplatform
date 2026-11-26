@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -24,7 +25,6 @@ import com.semgravio.aiplatform.business.project.application.dto.command.Message
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
-import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessionSource;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -167,7 +167,7 @@ public class ConversationHistoryAppService {
     }
 
     /**
-     * 失败留账落库（#418 失败片落库面）：run 失败终态的失败面——逐尝试墙钟/档位/
+     * 失败留账落库（#418 失败片落库面）：run 失败终态的失败面——逐尝试墙钟/配置/
      * 失败原因/本场累计，与 run-failed SSE 扩载同载荷（同收尾卡先例；调用点在
      * 事件桥 emitRunFailed/Stopped——先落库后发事件）。异步轨道写：失败只记日志
      * （观测面缺行不牵连终态收口）。
@@ -209,26 +209,23 @@ public class ConversationHistoryAppService {
     }
 
     /**
-     * 已收口成果清单读口（#223 存量恢复的对照源）：项目收尾卡（kind=closing）的
-     * summary → 收口 run 锚（同叙事多次收口——往次重发起服——以后到为准）。收尾卡
-     * 是平台侧收口权威事实（git 收口 commit 经 Run-Id trailer 锚定同一收尾卡，
-     * 旁证同源）——存量在途项目（生成早于轨道表、无持久化计划）补产计划落库时
-     * 对照此清单标已完片、只补缺口。
+     * 问答卡的会话标识读口（#622 作答路由的持久信号）：该 run 落过的问答卡
+     * （question-raised payload 原样）里携带的 sessionId——对话面卡为
+     * {@code dialog-{projectId}}、访谈卡为 {@code main-{projectId}}。作答端点据此在
+     * 进程内登记丢失（重启）后仍把答复续回正确的会话。无卡/载荷无 sessionId 返回空。
      */
-    public Map<String, String> closedGenerationSummaries(Long projectId) {
-        Map<String, String> summaries = new LinkedHashMap<>();
-        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
-                ConversationEntryKind.CLOSING)) {
-            if (entry.getClosing() == null) {
-                continue;
-            }
-            // 载荷键是收口扩载契约的 String summary（#88）；非 String 视同缺失——
-            // 不 String.valueOf 铸假匹配键（对照是逐字精确匹配）
-            if (entry.getClosing().get(CoderRunAttempts.CLOSING_SUMMARY_FIELD) instanceof String summary) {
-                summaries.put(summary, entry.getRunId());
-            }
+    public Optional<String> questionSessionOf(Long projectId, String runId) {
+        if (runId == null || runId.isBlank()) {
+            return Optional.empty();
         }
-        return summaries;
+        return entries.findFirstByProjectIdAndRunIdAndKindOrderByIdDesc(projectId, runId,
+                        ConversationEntryKind.QUESTION)
+                .map(ConversationEntry::getQuestion)
+                .filter(question -> question != null) // 残档防御：坏行不炸作答路由
+                .map(question -> question.get(AgentEventTypes.SESSION_FIELD))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .filter(sessionId -> !sessionId.isBlank());
     }
 
     /**
@@ -342,12 +339,21 @@ public class ConversationHistoryAppService {
     }
 
     /**
+     * 用户最初那句需求（#626 首建版本标签）：对话史第一条用户发言原文；无发言/
+     * 读取异常返回 null——调用方回落「首次生成」。
+     */
+    public String firstUserUtterance(Long projectId) {
+        return entries.findByProjectIdAndKindOrderByIdAsc(projectId, ConversationEntryKind.USER)
+                .stream()
+                .findFirst()
+                .map(ConversationEntry::getText)
+                .filter(text -> text != null && !text.isBlank())
+                .orElse(null);
+    }
+
+    /**
      * 对话史读口（水合载荷）：项目全量按 id 升序（写入序即对话序）。归档项目照读
-     * （对话区只读终态）。会话来源标识随行（#298 后台对接件——对话史含设计会话）：
-     * 设计会话收尾卡（closing 携 {@code drafts} 稿清单——SSE 收口扩载契约键，仅
-     * 设计轨道拼装）标设计会话来源；其余条目 null＝主会话缺省（作用域改稿发言无
-     * 结构标记、设计会话完整稿本在智能体会话存储——存储不同构，读面推导降级
-     * 口径见 {@link ConversationSessionSource}）。
+     * （对话区只读终态）。#610 设计线整条退役：会话来源标识随设计会话一并拆除。
      *
      * @throws ApplicationException PRJ_001 项目不存在
      */
@@ -357,18 +363,9 @@ public class ConversationHistoryAppService {
         }
         Map<Long, Integer> ordinalByEntryId = questionOrdinalByEntryId(projectId);
         return entries.findByProjectIdOrderByIdAsc(projectId).stream()
-                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry),
+                .map(entry -> ConversationEntryResponse.of(entry,
                         ordinalByEntryId.get(entry.getId())))
                 .toList();
-    }
-
-    /** 会话来源推导单点：设计收尾卡（closing 携 drafts）⇔ 设计会话；其余 null。 */
-    private static ConversationSessionSource sessionSourceOf(ConversationEntry entry) {
-        return entry.getKind() == ConversationEntryKind.CLOSING
-                && entry.getClosing() != null
-                && entry.getClosing().containsKey(CoderRunAttempts.CLOSING_DRAFTS_FIELD)
-                ? ConversationSessionSource.DESIGN
-                : null;
     }
 
     /**

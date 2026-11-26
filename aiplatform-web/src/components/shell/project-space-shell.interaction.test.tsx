@@ -17,30 +17,19 @@ import { ProjectSpaceShell } from "./project-space-shell";
 
 const seed = vi.hoisted(() => ({
   detail: {} as ProjectDetail,
-  prdVersions: [] as { versionNo?: number }[],
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1" }));
 vi.mock("@/hooks/use-project", () => ({
   useProject: () => ({ data: seed.detail, isPending: false }),
 }));
-vi.mock("@/hooks/use-prd", () => ({
-  usePrdVersions: () => ({ data: seed.prdVersions }),
-  // 版本记录抽屉（#344）条目详情面——壳测试不出条目弹窗，桩空
-  usePrdVersion: () => ({ data: null, isPending: false }),
-}));
-// Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
-vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: [] }),
-}));
-// 抽屉 Demo 条目「查看当时」动作面（#344）——壳测试不点条目，桩空
+// 单轴版本时间线数据/动作面（#626）——壳测试只断言挂载与开合，桩空
 vi.mock("@/hooks/use-version", () => ({
   useGitVersions: () => ({ data: [], isPending: false, isError: false }),
-  useVersionViewSession: () => ({
-    startView: { mutate: vi.fn(), reset: vi.fn(), data: undefined, isPending: false, isError: false },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
+  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
@@ -48,7 +37,6 @@ vi.mock("@/hooks/use-me", () => ({
 
 beforeEach(() => {
   seed.detail = {} as ProjectDetail;
-  seed.prdVersions = [];
 });
 
 afterEach(() => {
@@ -86,8 +74,8 @@ describe("ProjectSpaceShell · 灰置点击说明原因", () => {
     expect(await screen.findByText(/付款完成后开放/)).toBeTruthy();
   });
 
-  it("#343 验收闭合：PRD 已确认（#330 版本列表非空）→ Demo 体验不再灰置、指到阶段页", () => {
-    seed.prdVersions = [{ versionNo: 1 }];
+  it("#343 验收闭合：首个构建已起跑（生成态，旧版本记行随 #630 退场）→ Demo 体验不再灰置、指到阶段页", () => {
+    seed.detail = { generationState: "generated" } as ProjectDetail;
     mountShell();
     const demo = screen.getAllByText("Demo 体验")[0];
     expect(demo.closest("a")?.getAttribute("href")).toBe("/projects/p1/demo");
@@ -124,20 +112,21 @@ describe("ProjectSpaceShell · 五行导航与侧栏重复面（原型如此）"
   });
 });
 
-describe("ProjectSpaceShell · 版本记录抽屉挂载与顶栏挂点（#344）", () => {
-  it("顶栏出「版本记录」；点击开抽屉（store 契约＝Demo chip 双挂点共用）", () => {
+describe("ProjectSpaceShell · 版本时间线挂载与顶栏挂点（#626 单轴）", () => {
+  it("顶栏出「版本记录」；点击开时间线（store 契约＝版本 chip 同挂点共用）", () => {
     mountShell();
     fireEvent.click(screen.getByRole("button", { name: "版本记录" }));
     expect(useVersionRecordStore.getState().open).toBe(true);
   });
 
-  it("壳挂载抽屉本体：store 开后两组在场（PRD/Demo）", () => {
+  it("壳挂载时间线本体：store 开后出「版本」标题与空态；旧双轴 PRD/Demo 组不再呈现", () => {
     mountShell();
     fireEvent.click(screen.getByRole("button", { name: "版本记录" }));
     // 抽屉标题（heading 位）——顶栏按钮同名不误伤
-    expect(screen.getByRole("heading", { name: "版本记录" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "PRD 版本" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Demo 版本" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "版本" })).toBeTruthy();
+    expect(screen.getByText(/尚无版本/)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "PRD 版本" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Demo 版本" })).toBeNull();
   });
 });
 

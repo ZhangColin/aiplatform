@@ -2,8 +2,6 @@ package com.semgravio.aiplatform.business.project.application;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.sql.Timestamp;
 import java.util.Currency;
 import java.util.List;
 import java.util.Map;
@@ -34,9 +32,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
-import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
@@ -44,7 +39,6 @@ import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,9 +65,6 @@ class ProjectQueryAppServiceTest {
     private ProjectRepository projectRepository;
 
     @Autowired
-    private PrdVersionRepository prdVersionRepository;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     /** 计量查询缝：mock 用例本体（MeteringLocalAdapter 是 sink+query 双端口 bean，整替会断 sink 注入）。 */
@@ -88,9 +79,6 @@ class ProjectQueryAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
-        jdbcTemplate.update("DELETE FROM prj_generation_segments");
-        jdbcTemplate.update("DELETE FROM prj_design_items");
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -179,11 +167,12 @@ class ProjectQueryAppServiceTest {
         Project requirement = persistedProject(8118L, "需求分析项目");
         Project demo = persistedProject(8119L, "Demo 体验项目");
         Project supplement = persistedProject(8120L, "待补充项目");
+        // PRD 阶段门事实（#630 起＝首个构建 run 已起跑，读生成态）：demo/supplement 已生成
         for (Project project : List.of(demo, supplement)) {
-            prdVersionRepository.save(PrdVersion.recorded(project.getId(), 1,
-                    "# PRD\n\n已确认范围。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
+            project.markGenerated();
+            projectRepository.save(project);
         }
-        supplement.confirmDemoVersion(1);
+        supplement.confirmVersion(1);
         supplement.flagNeedsUserSupplement(true);
         projectRepository.save(supplement);
 
@@ -215,176 +204,67 @@ class ProjectQueryAppServiceTest {
 
     // ---------- 详情 ----------
 
-    @Test
-    void given_segment_rows_when_detail_then_plan_list_returned_in_ord_order() {
-        // #225 计划区只读读模型：库中片行 → 片清单（序号/描述/状态 + *Name），
-        // ord 升序（0 = 阶段 0，1..N = 切片）——「最近一次尝试的结局」原样透出
-        Project project = persistedProject(8301L, "轨道项目");
-        project.markPrdProduced();
-        project = projectRepository.save(project);
-        Long projectId = project.getId();
-        insertSegment(projectId, 0, "系统初始化", 2, "run-a", project.getPrdProducedAt());
-        insertSegment(projectId, 2, "用户能下单支付", 1, null, project.getPrdProducedAt());
-        insertSegment(projectId, 1, "用户能注册登录", 3, "run-b", project.getPrdProducedAt());
-
-        var segments = appService.detail(projectId).segments();
-
-        assertThat(segments).extracting(seg -> seg.ord())
-                .containsExactly(0, 1, 2); // ord 升序（插入乱序不漂移）
-        assertThat(segments).extracting(seg -> seg.description())
-                .containsExactly("系统初始化", "用户能注册登录", "用户能下单支付");
-        assertThat(segments).extracting(seg -> seg.status())
-                .containsExactly(GenerationSegmentStatus.CLOSED, GenerationSegmentStatus.FAILED,
-                        GenerationSegmentStatus.PENDING);
-        assertThat(segments).extracting(seg -> seg.statusName())
-                .containsExactly("已收口", "失败", "待跑");
-    }
+    // ---------- #629：下单冻结面（orderFreezeRefs——当前 PRD＋已确认用户面版本） ----------
 
     @Test
-    void given_stale_plan_anchor_when_detail_then_segments_null() {
-        // PRD 已演进（锚不一致 = 旧计划过期）→ 不透出：不拿旧计划对进度
-        // （锚门口径与 GenerationAppService#resolvePlan 一致）
-        Project project = persistedProject(8302L, "锚漂项目");
-        project.markPrdProduced();
-        project = projectRepository.save(project);
-        // 片行锚固定早 5 秒（确定性漂移）：现行 PRD 锚晚于计划锚 = 计划过期
-        insertSegment(project.getId(), 0, "系统初始化", 2, "run-a",
-                project.getPrdProducedAt().minusSeconds(5));
-
-        assertThat(appService.detail(project.getId()).segments()).isNull();
-    }
-
-    @Test
-    void given_no_segment_rows_when_detail_then_segments_null() {
-        // 无片行（PRD 未产出/计划未落库）= 无计划：null——前端不渲染计划区
-        Long projectId = persistedProject(8303L, "无轨道项目").getId();
-
-        assertThat(appService.detail(projectId).segments()).isNull();
-    }
-
-    /** 直插轨道片行（#220 表事实，绕开计划落库编排）。 */
-    private void insertSegment(Long projectId, int ord, String description, int status,
-            String runId, LocalDateTime prdProducedAt) {
-        jdbcTemplate.update(
-                "INSERT INTO prj_generation_segments (id, project_id, ord, description, status, "
-                        + "run_id, prd_produced_at, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                9_400_000_000_000_000L + projectId % 1_000_000L * 10 + ord, projectId, ord,
-                description, status, runId, Timestamp.valueOf(prdProducedAt));
-    }
-
-    // ---------- #335：下单冻结面（latestVersionRefs——双确认引用集） ----------
-
-    @Test
-    void given_confirmed_versions_when_confirmed_version_refs_then_refs_with_full_text() {
-        // 已确认 PRD 版本（多版取最新）＋Demo 确认指针 → 引用集：版本号＋确认版
-        // 全文（冗余拷贝源＝版本行正文）＋Demo 版本号
-        Project project = persistedProject(8501L, "双确认项目");
-        prdVersionRepository.save(PrdVersion.recorded(project.getId(), 1,
-                "# PRD v1\n\n旧版。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
-        PrdVersion latest = prdVersionRepository.save(PrdVersion.recorded(project.getId(), 2,
-                "# PRD v2\n\n下单引用的最新确认版全文。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
-        project.confirmDemoVersion(3);
+    void given_prd_produced_and_confirmed_version_when_order_freeze_refs_then_current_prd_and_version() {
+        // 下单冻结面（#629）：快照源＝当前工作区 PRD 全文（直读 docs/PRD.md）＋
+        // 项目确认指针的已确认用户面版本号（不再读旧 PRD/Demo 版本表）
+        Project project = prdMarkedProject(8501L, "下单冻结项目");
+        project.confirmVersion(3);
         projectRepository.save(project);
+        when(workspaceLifecycleAppService.exec(eq("8501"), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100000\n# PRD 正文\n\n下单冻结标的。\n", "", 0));
 
-        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(project.getId());
+        ProjectQueryAppService.OrderFreezeRefs refs = appService.orderFreezeRefs(project.getId());
 
-        assertThat(refs.prdVersionNo()).isEqualTo(2);
-        assertThat(refs.prdContent()).isEqualTo(latest.getContent());
-        assertThat(refs.demoVersionNo()).isEqualTo(3);
+        assertThat(refs.prdContent()).isEqualTo("# PRD 正文\n\n下单冻结标的。\n");
+        assertThat(refs.confirmedVersionNo()).isEqualTo(3);
     }
 
     @Test
-    void given_unconfirmed_project_when_confirmed_version_refs_then_nulls_reported() {
-        // 从未确认 PRD 版本/未确认 Demo（含确认制前遗留项目）：如实上报 null——
-        // 门判定归订单侧，本口不虚构引用
-        Long projectId = persistedProject(8502L, "未确认项目").getId();
+    void given_prd_not_produced_when_order_freeze_refs_then_nulls_without_exec() {
+        // PRD 未产出（标志未落）：prdContent 如实 null，不触工作区；未确认版本同 null
+        Long projectId = persistedProject(8502L, "未产 PRD 项目").getId();
 
-        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(projectId);
+        ProjectQueryAppService.OrderFreezeRefs refs = appService.orderFreezeRefs(projectId);
 
-        assertThat(refs.prdVersionNo()).isNull();
         assertThat(refs.prdContent()).isNull();
-        assertThat(refs.demoVersionNo()).isNull();
+        assertThat(refs.confirmedVersionNo()).isNull();
+        verify(workspaceLifecycleAppService, never()).exec(anyString(), any(WorkspaceExecCommand.class));
     }
 
     @Test
-    void given_prd_confirmed_demo_not_when_confirmed_version_refs_then_partial_refs() {
-        // 单腿确认：PRD 已确认而 Demo 未确认——各腿如实上报（订单侧逐腿拦截）
-        Long projectId = persistedProject(8503L, "单腿项目").getId();
-        prdVersionRepository.save(PrdVersion.recorded(projectId, 1, "# PRD v1",
-                LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
+    void given_prd_produced_but_file_missing_when_order_freeze_refs_then_null_prd() {
+        // 标志在、工作区文件没：prdContent 如实 null（订单侧按缺 PRD 拦截）
+        Long projectId = prdMarkedProject(8503L, "文件缺项目").getId();
+        when(workspaceLifecycleAppService.exec(eq("8503"), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "test -f 失败", 1));
 
-        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(projectId);
-
-        assertThat(refs.prdVersionNo()).isEqualTo(1);
-        assertThat(refs.prdContent()).isEqualTo("# PRD v1");
-        assertThat(refs.demoVersionNo()).isNull();
+        assertThat(appService.orderFreezeRefs(projectId).prdContent()).isNull();
     }
 
     @Test
-    void given_missing_project_when_confirmed_version_refs_then_prj_001() {
-        assertThatThrownBy(() -> appService.latestVersionRefs(-1L))
+    void given_dead_container_when_order_freeze_refs_then_wsp_002() {
+        Long projectId = prdMarkedProject(8504L, "死容器项目").getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "docker: No such container", 125));
+
+        assertThatThrownBy(() -> appService.orderFreezeRefs(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+    }
+
+    @Test
+    void given_missing_project_when_order_freeze_refs_then_prj_001() {
+        assertThatThrownBy(() -> appService.orderFreezeRefs(-1L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+        assertThatThrownBy(() -> appService.currentPrdContent(-1L))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
-    // ---------- #290 设计轨道件清单读模型（计划区对偶透出） ----------
-
-    @Test
-    void given_design_item_rows_when_detail_then_item_list_returned_in_ord_order() {
-        // #290 计划区只读读模型：库中件行 → 设计物清单（序号/标题/状态 + *Name），
-        // ord 升序（1..N = 首产推进序）——「最近一次尝试的结局」原样透出（对偶片清单）
-        Project project = persistedProject(8401L, "设计项目");
-        project.markPrdProduced();
-        project = projectRepository.save(project);
-        Long projectId = project.getId();
-        insertDesignItem(projectId, 2, "logo 主标识", 1, null, project.getPrdProducedAt());
-        insertDesignItem(projectId, 1, "首页主视觉", 2, "run-d1", project.getPrdProducedAt());
-        insertDesignItem(projectId, 3, "包装盒平面", 3, "run-d3", project.getPrdProducedAt());
-
-        var items = appService.detail(projectId).designItems();
-
-        assertThat(items).extracting(item -> item.ord())
-                .containsExactly(1, 2, 3); // ord 升序（插入乱序不漂移）
-        assertThat(items).extracting(item -> item.title())
-                .containsExactly("首页主视觉", "logo 主标识", "包装盒平面");
-        assertThat(items).extracting(item -> item.status())
-                .containsExactly(DesignItemStatus.CLOSED, DesignItemStatus.PENDING,
-                        DesignItemStatus.FAILED);
-        assertThat(items).extracting(item -> item.statusName())
-                .containsExactly("已收口", "待跑", "失败");
-    }
-
-    @Test
-    void given_stale_design_checklist_anchor_when_detail_then_design_items_null() {
-        // PRD 已演进（锚不一致 = 旧清单过期）→ 不透出：不拿旧清单对进度（对偶 segments）
-        Project project = persistedProject(8402L, "锚漂设计项目");
-        project.markPrdProduced();
-        project = projectRepository.save(project);
-        insertDesignItem(project.getId(), 1, "首页主视觉", 2, "run-d1",
-                project.getPrdProducedAt().minusSeconds(5));
-
-        assertThat(appService.detail(project.getId()).designItems()).isNull();
-    }
-
-    @Test
-    void given_no_design_item_rows_when_detail_then_design_items_null() {
-        // 无件行（清单未落库/系统终点项目）= 无清单：null——前端不渲染计划区
-        Long projectId = persistedProject(8403L, "无设计轨项目").getId();
-
-        assertThat(appService.detail(projectId).designItems()).isNull();
-    }
-
-    /** 直插设计轨道件行（#289 表事实，绕开清单落库编排）。 */
-    private void insertDesignItem(Long projectId, int ord, String title, int status,
-            String runId, LocalDateTime prdProducedAt) {
-        jdbcTemplate.update(
-                "INSERT INTO prj_design_items (id, project_id, ord, title, status, "
-                        + "run_id, prd_produced_at, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                9_500_000_000_000_000L + projectId % 1_000_000L * 10 + ord, projectId, ord,
-                title, status, runId, Timestamp.valueOf(prdProducedAt));
-    }
 
     @Test
     void given_any_project_when_detail_then_fields_and_derived_status() {
@@ -427,9 +307,9 @@ class ProjectQueryAppServiceTest {
     @Test
     void given_no_filter_when_list_then_desc_order_with_derived_status() {
         projectRepository.save(Project
-                .create("老项目", ProjectType.WEBSITE, null, 1L, null, null));
+                .create("老项目", ProjectType.WEBSITE, 1L, null, null));
         projectRepository.save(Project
-                .create("新项目", ProjectType.ECOMMERCE, null, 2L, null, null));
+                .create("新项目", ProjectType.ECOMMERCE, 2L, null, null));
 
         List<ProjectResponse> list = appService.list(null);
 
@@ -760,6 +640,6 @@ class ProjectQueryAppServiceTest {
     /** 携归属的项目夹具（#325 owner 过滤测试用）。 */
     private Project persistedProject(long workspaceId, String name, Long ownerAccountId) {
         return projectRepository.save(Project
-                .create(name, ProjectType.WEBSITE, null, workspaceId, ownerAccountId, null));
+                .create(name, ProjectType.WEBSITE, workspaceId, ownerAccountId, null));
     }
 }

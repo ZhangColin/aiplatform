@@ -11,17 +11,21 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 /**
  * 容器内 git 管道（#91 版本层地基）的规则单点，照 {@link ProjectFiles} 形制：
  * 命令构造归本类纯函数、执行归 exec 通道（{@code EnvironmentBackend.exec}）、
- * 输出解析归本类。收拢九件事——幂等仓库初始化（懒初始化：存量工作区与容器重建
- * 自愈同覆盖，repo-local 身份配置随卷持久）、收口成版提交（摘要主题 + Run-Id
- * trailer 锚定收尾卡，{@code --allow-empty} 保每轮收口必成版）、版本序列读取
- * （git log 即正本）、单版本元数据读取、回滚到此（#93 复位工作树到目标 commit
- * 并追加新版本——Rollback-From trailer 锚定源版本，历史只追加不改写）、段起点
- * 捕获与无 HEAD 锚定、失败现场留账、段失败回滚（#353 后四件：段级自愈的
- * 「留账＋干净回退」——机制面，不进用户面版本序列）。
+ * 输出解析归本类。收拢保留四件事——幂等仓库初始化（懒初始化：存量工作区与
+ * 容器重建自愈同覆盖，repo-local 身份配置随卷持久；<b>跑前快照链的阶段四施工
+ * 留存工具</b>）、版本序列读取（git log 即正本）、单版本元数据读取、回滚代码复位
+ * （{@link #restoreCommand}：#627 回滚只复位 tracked 文件，成版由回滚编排在
+ * build＋起服＋探活全过后经 {@link #commitVersionCommand} 落定——历史只追加不改写）。
  *
- * <p>版本序列只收带 {@value #RUN_ID_TRAILER} 或 {@value #ROLLBACK_TRAILER} trailer
- * 的成版 commit：智能体 shell 面技术上可跑 git，野 commit 不进版本序列。git
- * 跟踪面 = 交付物全集——
+ * <p><b>版本语义（#605 退役→#626 重建，ADR-0056）</b>：旧 Run-Id trailer 成版随
+ * 审查与收口组出局（#605）；阶段四重建为<b>用户面版本</b>——每轮生成探活通过后
+ * 平台自动成版（{@link #commitVersionCommand}：{@code Platform-Version}＋
+ * {@code Run-Id} trailer），版本序列＝按标记过滤的 git log。旧回滚版本带
+ * {@code Rollback-From} trailer（历史兼容；#627 起新回滚成功后经
+ * {@link #commitVersionCommand} 以 {@code Platform-Version} 成版）。段起点／段失败
+ * 回滚／fork 补丁等旧生成栈 git 辅助件随切片与轨道机器（#602）一并清场。</p>
+ *
+ * <p>git 跟踪面 = 交付物全集——
  * .gitignore 由 {@link WorkspaceLayout#NON_DELIVERABLE_DIRS} + {@link WorkspaceLayout#ENV_FILE}
  * 单一事实派生（数据/平台产物/可重建依赖/机密不入版，与源码包、文件树同口径），
  * 外加物料目录（输入面不入 git，ADR-0027——文件区/源码包仍含物料，仅版本流不跟）；
@@ -32,11 +36,15 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  */
 public final class WorkspaceVersions {
 
-    /** 成版 commit 的收尾卡锚定 trailer（版本序列的成员判据）。 */
-    public static final String RUN_ID_TRAILER = "Run-Id: ";
-
-    /** 回滚 commit 的源版本锚定 trailer（#93 回滚到此——版本序列的第二成员判据）。 */
+    /** 旧回滚 commit 的源版本锚定 trailer（#93 历史成员判据；#627 起新回滚改用
+     * {@link #VERSION_TRAILER} 成版——本 trailer 只用于识别存量回滚版本）。 */
     public static final String ROLLBACK_TRAILER = "Rollback-From: ";
+
+    /** 用户面版本标记 trailer（#626 自动成版——版本序列的成员判据，值为 vN）。 */
+    public static final String VERSION_TRAILER = "Platform-Version: ";
+
+    /** 成版 run 标识 trailer（#626：版本提交带 run 标识，随版本标记一并携带）。 */
+    public static final String RUN_TRAILER = "Run-Id: ";
 
     /** 「零版本 / 版本不存在」守卫退出码（与真实 git 故障分道）。 */
     public static final int EXIT_NO_VERSION = 3;
@@ -63,15 +71,17 @@ public final class WorkspaceVersions {
      * 写入无条件执行</b>（#430——生产实测「Author identity unknown」致片级收口成版
      * 必败的根因）：身份原本藏在 init-if 内，而 fork 克隆（#351 {@code git clone}
      * 不携 repo-local config）与存量仓库的 .git 早已存在，if 内配置被整体跳过；
-     * 移出 if 后每条写路径前置的本命令天然自愈（收口成版 / 段起点锚共用本管道，
-     * fork 副本收口亦同覆盖）。平台统一署名 {@code semgravio-builder}（可审计）。
-     * 排除名单写入 {@code .git/info/exclude}（repo-local 且不在工作树——不与应用
-     * 脚手架自带的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版
-     * 生效）：非交付名单＋机密之外，物料目录与导出物目录不入版本流（ADR-0027
-     * 版本化规则——刀＝可再生性：上传物料是输入面、exports/ 是可再生衍生〔#294
-     * 下载图位图化落点，#297 设计资产包同面〕，git 不跟踪；代价如实：「查看当时」
-     * 对两者不快照、回滚不触〔restore 只动 tracked 文件〕，均以工作区卷为唯一
-     * 正本随封存保全）。
+     * 移出 if 后每条写路径前置的本命令天然自愈。平台统一署名
+     * {@code semgravio-builder}（可审计）。排除名单写入 {@code .git/info/exclude}
+     * （repo-local 且不在工作树——不与应用脚手架自带的 .gitignore 冲突，也随卷
+     * 持久；每次重写，名单演进即随下次成版生效）：非交付名单＋机密之外，物料
+     * 目录与导出物目录不入版本流（ADR-0027 版本化规则——刀＝可再生性：上传物料
+     * 是输入面、exports/ 是可再生衍生〔#294 下载图位图化落点，#297 设计资产包
+     * 同面〕，git 不跟踪；代价如实：回滚不触两者〔restore 只动 tracked 文件〕，
+     * 均以工作区卷为唯一正本随封存保全）。
+     *
+     * <p>#605 起收口成版提交退役，本命令作为阶段四跑前快照链的工具层留存件
+     * （界面侧每轮 run 开始前自动 commit 的仓库初始化前置）。</p>
      */
     public static String ensureRepoCommand() {
         String excludeEntries = Stream.concat(
@@ -88,19 +98,6 @@ public final class WorkspaceVersions {
     }
 
     /**
-     * 收口成版提交：全量暂存 → 提交（主题 = 收口摘要，正文 = Run-Id trailer；
-     * {@code --allow-empty}——「本轮系统无需改动」轮也成版，版本 ↔ 收尾卡 1:1
-     * 锚定不缺位）→ 回读 HEAD hash（成版锚点，随收口扩载回传）。stdout = commit
-     * hash（exitCode 0 时）。subject 经单引号转义；runId 为平台生成的 TSID
-     * 数字串（非用户输入）。
-     */
-    public static String commitCommand(String subject, String runId) {
-        return "cd " + WorkspaceLayout.ROOT
-                + " && git add -A"
-                + " && " + commitTail(subject, RUN_ID_TRAILER + runId);
-    }
-
-    /**
      * 版本序列读取：零版本（无 HEAD）exit {@value #EXIT_NO_VERSION} 与真实故障
      * 分道；否则 git log 全量（原生序 = 新→旧 = 版本序列）。
      */
@@ -112,151 +109,45 @@ public final class WorkspaceVersions {
     }
 
     /**
-     * 回滚到此（#93）：把工作树与索引复位到目标 commit 的树（{@code git restore
-     * --source --staged --worktree}——只动 tracked 文件：数据 / node_modules /
-     * .env / .platform 等非交付物不在跟踪面，原样保留），再提交为一个<b>新</b>
-     * commit（HEAD 不动，历史只追加不改写——无 rebase/force 类操作），携
-     * Rollback-From trailer 锚定源版本。{@code --allow-empty} 兜「回滚到当前
-     * HEAD」（树同形、空提交）的边界。stdout = 新版本 commit hash。
+     * 用户面版本提交（#626 自动成版）：把当时工作区全量提交为一个用户面版本——
+     * 提交主题＝「用户那句话」，正文携平台版本标记（{@code Platform-Version: vN}）
+     * 与成版 run 标识（{@code Run-Id:}）；仓库初始化（幂等）随命令前置，保证提交
+     * 身份在场。stdout = 新版本 commit hash。
      *
-     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝——用户
-     *                                  可控入参不进 shell）
+     * <p>成版失败降级归调用方：提交失败不阻断生成，下一轮成功交付的提交覆盖
+     * 累计后的工作区现状。subject 已由调用方清洗为单行（换行会污染提交主题）。</p>
+     *
+     * @param versionNo 版本号（v1/v2/v3 递增——调用方按已有版本最大值 +1 计算）
+     * @param runId     成版 run 标识（用户面 runId）
+     * @param subject   提交主题＝「用户那句话」（单行、已清洗）
      */
-    public static String rollbackCommand(String ref, String subject) {
-        if (ref == null || !VALID_REF.matcher(ref).matches()) {
-            throw new IllegalArgumentException("版本引用必须是 commit hash（hex）: " + ref);
-        }
-        return "cd " + WorkspaceLayout.ROOT
-                + " && git restore --source='" + ref + "' --staged --worktree ."
-                + " && " + commitTail(subject, ROLLBACK_TRAILER + ref);
-    }
-
-    /**
-     * 工作树脏检（#100 回滚并发守卫）：{@code git status --porcelain} 全量输出，
-     * stdout 逐行 = 工作树/索引相对 HEAD 的改动（含 untracked {@code ??} 行——
-     * restore 不触 untracked，故解析时过滤）。
-     */
-    public static String statusCommand() {
-        return "cd " + WorkspaceLayout.ROOT + " && git status --porcelain";
-    }
-
-    /**
-     * fork 副本切片改动 diff（#351 合并输入）：fork 收口成版后 HEAD 即切片 commit、
-     * HEAD^ 即克隆基线（fork 只多这一次提交）——输出统一 diff（含完整 blob 哈希，
-     * {@code --full-index} 供 {@code git apply --3way} 三方合并定位基线）。stdout =
-     * patch 文本。
-     */
-    public static String forkDiffCommand() {
-        return "cd " + WorkspaceLayout.ROOT + " && git diff --full-index HEAD^ HEAD";
-    }
-
-    /**
-     * 段起点捕获（#353 失败回滚本段起点）：回读 HEAD ref。{@code --verify} 让
-     * 「无 HEAD」（全新工作区首段——git 懒初始化、尚无收口成版）以非 0 退出，
-     * 与「有 HEAD」分道（调用方据此走 {@link #anchorStartCommand} 锚定）。stdout
-     * = HEAD hash（exitCode 0 时）。
-     */
-    public static String headRefCommand() {
-        return "cd " + WorkspaceLayout.ROOT + " && git rev-parse --verify HEAD";
-    }
-
-    /**
-     * 无 HEAD 时的段起点锚（#353）：全量提交把基座现状钉成段起点 commit——
-     * <b>无 trailer</b>（版本序列只收带 Run-Id / Rollback-From 的成版 commit，
-     * 锚 commit 不进版本流、不出用户面版本列表），{@code --allow-empty} 兜空
-     * 工作区边界。此后段失败回滚恒有 ref 可回。stdout = 锚 commit hash。
-     */
-    public static String anchorStartCommand() {
-        return "cd " + WorkspaceLayout.ROOT
+    public static String commitVersionCommand(int versionNo, String runId, String subject) {
+        return ensureRepoCommand()
                 + " && git add -A"
-                + " && git commit -q --allow-empty -m '平台段起点锚（失败回滚基准，非版本）'"
+                + " && git commit -q --allow-empty -m '" + escapeSingleQuote(subject) + "'"
+                + " -m '" + VERSION_TRAILER + versionNo + "'"
+                + " -m '" + RUN_TRAILER + escapeSingleQuote(runId == null ? "" : runId) + "'"
                 + " && git rev-parse HEAD";
     }
 
     /**
-     * 失败现场留账（#353 留账口径——回滚不丢证据）：索引全量暂存（{@code add -A}
-     * 让段内新建文件进索引——{@code --cached} diff 才可见新建件）→ 相对段起点的
-     * 全量 diff 落盘 patch。git 排除面（数据/依赖/平台产物/.env/物料/导出物）天然
-     * 不进场；patch 落 {@code .platform/}（平台产物目录，git 排除面内——随后回滚的
-     * {@code clean -fd} 不扫它）。scenePath 为平台拼装的锚定形（段号 + 时间戳，无
-     * 用户可控片段）。
+     * 回滚代码复位（#627 异步回滚的第一步）：把工作树与索引复位到目标 commit 的
+     * 树（{@code git restore --source --staged --worktree}——只动 tracked 文件：
+     * 数据 / node_modules / .env / .platform 等非交付物不在跟踪面，原样保留）。
+     * 不提交——回滚的「记为新版本」要等停旧进程、重新 build、起服、探活全过后由
+     * {@link #commitVersionCommand} 落定（成功才成版，失败不记版本）。untracked
+     * 文件不在 restore 面，失败 run 留下的未提交 tracked 改动被这份代码覆盖
+     * （有意语义：#627 只拦 run 在途，不拦脏树）。
      *
-     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝——用户
+     *                                  可控入参不进 shell）
      */
-    public static String recordFailureSceneCommand(String ref, String scenePath) {
+    public static String restoreCommand(String ref) {
         if (ref == null || !VALID_REF.matcher(ref).matches()) {
-            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
+            throw new IllegalArgumentException("版本引用必须是 commit hash（hex）: " + ref);
         }
         return "cd " + WorkspaceLayout.ROOT
-                + " && git add -A"
-                + " && git diff --cached '" + ref + "'"
-                + " > '" + WorkspaceLayout.absolute(scenePath) + "'";
-    }
-
-    /**
-     * 段起点以来的变更文件名清单（#420 产出证明闸探针）：{@code git diff
-     * --name-only <段起点>}（tracked 面——含段内野 commit 的增量与工作树未提交
-     * 改动）＋ {@code git ls-files --others --exclude-standard}（untracked 面——
-     * 新建文件；排除面经 {@code .git/info/exclude} 天然不进，.platform/ 平台
-     * 产物/数据/依赖不虚构成产出）。两段 {@code &&} 串联，stdout 合计为空＝零
-     * diff——空转判据的唯一确定性信号（#405 裁决）。只读探针：不动索引（区别于
-     * {@link #recordFailureSceneCommand} 的 add -A 暂存——收口尾序不落暂存副作用）。
-     *
-     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
-     */
-    public static String diffSinceStartCommand(String ref) {
-        if (ref == null || !VALID_REF.matcher(ref).matches()) {
-            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
-        }
-        return "cd " + WorkspaceLayout.ROOT
-                + " && git diff --name-only '" + ref + "'"
-                + " && git ls-files --others --exclude-standard";
-    }
-
-    /**
-     * 段失败回滚（#353）：工作树与索引干净回退到段起点（{@code reset --hard}——
-     * 段内执行体野 commit 一并脱落，前段收口 commit 在起点链上不受影响）＋
-     * {@code clean -fd} 清未跟踪新文件（git 排除面不扫——数据/依赖/平台产物/.env
-     * 不在回滚面：数据库与已装依赖保持现状）。与 #93「回滚到此」的追加式（restore
-     * ＋新 commit）分属两面：本命令是段级自愈的机制面（改写未发布的段内现场），
-     * 不追加 commit、不动用户面版本序列。
-     *
-     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
-     */
-    public static String resetToSegmentStartCommand(String ref) {
-        if (ref == null || !VALID_REF.matcher(ref).matches()) {
-            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
-        }
-        return "cd " + WorkspaceLayout.ROOT
-                + " && git reset --hard '" + ref + "'"
-                + " && git clean -fd";
-    }
-
-    /**
-     * 应用 fork patch 到主工作区（#351 按序合并的机器查/执行）：{@code git apply
-     * --3way -}——patch 经 stdin 灌入（{@code execWithStdin}），三方合并（fork 与主
-     * 共享基线 blob，冲突才退）。exitCode 0 = 干净应用（或三方合并成功）；非 0 =
-     * 冲突（转子智能体裁决）。应用后改动在未暂存工作树，由调用方 {@code commitAtClosing}
-     * 提交成版。
-     */
-    public static String applyPatchCommand() {
-        return "cd " + WorkspaceLayout.ROOT + " && git apply --3way -";
-    }
-
-    /**
-     * 是否存未提交的 tracked 改动（#100）：{@code git restore} 只动 tracked 文件，
-     * 故 untracked（{@code ??} 行）不算会被丢弃的改动；其余任何行（modified /
-     * staged / deleted / added 等）都表示 restore 会静默丢弃的未提交 tracked 改动。
-     */
-    public static boolean hasUncommittedTrackedChanges(String stdout) {
-        for (String line : stdout.split("\n")) {
-            String status = line.trim();
-            if (status.isEmpty() || status.startsWith("??")) {
-                continue;
-            }
-            return true;
-        }
-        return false;
+                + " && git restore --source='" + ref + "' --staged --worktree .";
     }
 
     /**
@@ -277,9 +168,11 @@ public final class WorkspaceVersions {
     }
 
     /**
-     * 解析 git log 输出为版本序列（原生序新→旧保持）。只收带 Run-Id 或
-     * Rollback-From trailer 的成版 commit（野 commit 不是版本）；畸形记录跳过
-     * 不炸整列。
+     * 解析 git log 输出为版本序列（原生序新→旧保持）。成员判据两种：带
+     * {@code Platform-Version} trailer 的用户面版本（#626 自动成版，携版本号与
+     * run 标识）、带 {@code Rollback-From} trailer 的回滚版本（#93 历史兼容）。
+     * 跑前快照与智能体 shell 面的野 commit 无 trailer——不入列。畸形记录跳过不炸
+     * 整列。
      */
     public static List<WorkspaceVersion> parseLog(String stdout) {
         List<WorkspaceVersion> versions = new ArrayList<>();
@@ -288,14 +181,20 @@ public final class WorkspaceVersions {
             if (fields.length != 4) {
                 continue;
             }
-            String runId = extractTrailer(fields[3], RUN_ID_TRAILER);
+            String versionRaw = extractTrailer(fields[3], VERSION_TRAILER);
             String rollbackFrom = extractTrailer(fields[3], ROLLBACK_TRAILER);
-            if (runId == null && rollbackFrom == null) {
+            if (versionRaw == null && rollbackFrom == null) {
                 continue;
             }
+            Integer versionNo = parseVersionNo(versionRaw);
+            if (versionRaw != null && versionNo == null) {
+                continue; // 版本标记非数字 = 畸形记录
+            }
+            String runId = extractTrailer(fields[3], RUN_TRAILER);
             try {
                 versions.add(new WorkspaceVersion(fields[0],
-                        Long.parseLong(fields[1]), fields[2], runId, rollbackFrom));
+                        Long.parseLong(fields[1]), fields[2], versionNo,
+                        runId == null || runId.isBlank() ? null : runId, rollbackFrom));
             } catch (NumberFormatException malformed) {
                 // 时刻段不是数字 = 畸形记录，跳过
             }
@@ -303,11 +202,17 @@ public final class WorkspaceVersions {
         return versions;
     }
 
-    /** 提交尾（成版 / 回滚共用）：提交携 trailer（Run-Id 或 Rollback-From）→ 回读 HEAD hash。 */
-    private static String commitTail(String subject, String trailer) {
-        return "git commit -q --allow-empty -m '" + escapeSingleQuote(subject) + "'"
-                + " -m '" + trailer + "'"
-                + " && git rev-parse HEAD";
+    /** 版本标记值解析（"3" → 3；空/非数字 → null）。 */
+    private static Integer parseVersionNo(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        }
+        catch (NumberFormatException malformed) {
+            return null;
+        }
     }
 
     /** 提交正文（%b）取指定 trailer 值；无该 trailer = null（野 commit / 异类版本）。 */

@@ -1,33 +1,28 @@
-import { Check, Circle, ClipboardCheck, TriangleAlert } from "lucide-react";
+import { ClipboardCheck } from "lucide-react";
 
 import type { components } from "@/lib/api/schema";
-import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/time";
 
-type DemoVersion = components["schemas"]["DemoVersionSummaryResponse"];
+type GitVersion = components["schemas"]["VersionResponse"];
 
-/** 右栏第一段：基准清单吃真实生成轨切片，历史流水吃真实 Demo 成版记录。 */
+/**
+ * 右栏第一段：历史流水吃真实用户面版本（#626 单轴时间线；#629 商业面改接后
+ * Demo 页不再读旧 Demo/PRD 版本表）。基准清单（吃生成轨切片）随 #608 呈现面
+ * 清场退役——计划区两级无生产方（#602 起详情不再携带片清单）。
+ */
 export function DeliveryBaselineCard({
-  segments,
   versions,
-  prdVersionNo,
   generating,
   failed,
 }: {
-  segments?: GenerationSegmentFact[] | null;
-  versions: DemoVersion[];
-  prdVersionNo?: number | null;
+  versions: GitVersion[];
   generating: boolean;
   failed: boolean;
 }) {
-  const baseline = segments ?? [];
-  const allGreen =
-    versions.length > 0 &&
-    !generating &&
-    !failed &&
-    baseline.every((segment) => segment.status === "closed");
+  const allGreen = versions.length > 0 && !generating && !failed;
   const flowStatus = allGreen ? "ALL GREEN" : generating ? "GENERATING" : failed ? "ATTENTION" : "WAITING";
+  const latestVersionNo = versions[0]?.versionNo;
 
   return (
     <section
@@ -39,32 +34,14 @@ export function DeliveryBaselineCard({
           <ClipboardCheck className="size-4.5 text-electric-indigo" aria-hidden="true" />
           <h2 className="text-headline-sm font-bold text-ink-primary">版本交付基准</h2>
         </div>
-        {prdVersionNo != null ? (
+        {latestVersionNo != null ? (
           <span className="rounded-full border border-electric-indigo/20 bg-surface-violet-tint px-2 py-0.5 font-mono text-code-sm font-semibold text-electric-indigo">
-            PRD v{prdVersionNo} 对齐
+            版本 v{latestVersionNo}
           </span>
         ) : (
           <span className="rounded-full border border-slate-soft/60 bg-surface-dawn px-2 py-0.5 font-mono text-code-sm text-ink-faint">
-            PRD 对齐
+            版本
           </span>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {baseline.length > 0 ? (
-          baseline.map((segment) => (
-            <div
-              key={segment.ord}
-              className="flex items-center gap-2.5 rounded-xl border border-slate-soft/60 bg-surface-dawn/70 p-2"
-            >
-              <SegmentMark status={segment.status} />
-              <span className="text-body-sm font-medium text-ink-secondary">{segment.description}</span>
-            </div>
-          ))
-        ) : (
-          <p className="rounded-xl border border-slate-soft/60 bg-surface-dawn/70 p-3 text-body-sm text-ink-faint">
-            当前交付基准将在生成计划就绪后显示。
-          </p>
         )}
       </div>
 
@@ -86,11 +63,12 @@ export function DeliveryBaselineCard({
         {versions.length > 0 ? (
           <ol className="flex flex-col gap-1 rounded-xl border border-slate-soft/60 bg-surface-dawn/80 p-2.5 font-mono text-code-sm text-ink-muted">
             {versions.slice(0, 3).map((version, index, visible) => (
-              <li key={version.versionNo} className="flex items-center justify-between gap-3">
-                <span className="min-w-0 truncate" title={version.createdAt}>
-                  [{String(index + 1).padStart(2, "0")}/{String(visible.length).padStart(2, "0")}] Demo v{version.versionNo}
-                  {version.prdVersionNo != null ? ` · PRD v${version.prdVersionNo} 快照` : ""}
-                  {version.createdAt ? ` · ${formatRelativeTime(version.createdAt)}` : ""}
+              <li key={version.commitHash ?? String(version.versionNo)} className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate" title={version.committedAt}>
+                  [{String(index + 1).padStart(2, "0")}/{String(visible.length).padStart(2, "0")}]{" "}
+                  {version.versionNo != null ? `v${version.versionNo}` : "版本"}
+                  {version.subject ? ` · ${version.subject}` : ""}
+                  {version.committedAt ? ` · ${formatRelativeTime(version.committedAt)}` : ""}
                 </span>
                 <span className="shrink-0 font-bold text-emerald-600">✓ 已成版</span>
               </li>
@@ -115,22 +93,4 @@ export function DeliveryBaselineCard({
       </div>
     </section>
   );
-}
-
-function SegmentMark({ status }: { status: GenerationSegmentFact["status"] }) {
-  if (status === "closed") {
-    return (
-      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-xs">
-        <Check className="size-3" strokeWidth={3} aria-hidden="true" />
-      </span>
-    );
-  }
-  if (status === "failed") {
-    return (
-      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-error/15 text-error">
-        <TriangleAlert className="size-3" aria-hidden="true" />
-      </span>
-    );
-  }
-  return <Circle className="size-4 shrink-0 text-ink-faint/50" aria-hidden="true" />;
 }

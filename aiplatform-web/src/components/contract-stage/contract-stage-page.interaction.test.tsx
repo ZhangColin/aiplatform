@@ -327,6 +327,17 @@ describe("签约付款页 P06 · 原型结构（#348）", () => {
     expect(useVersionRecordStore.getState().open).toBe(true);
   });
 
+  it("新单版本引用收敛为已确认用户面版本号（#629）", () => {
+    seed.order = { ...seedQuotedOrder(), prdVersionNo: undefined, demoVersionNo: undefined, confirmedVersionNo: 7 };
+    seed.contract = { ...seedSignedContract(), prdVersionNo: undefined, demoVersionNo: undefined, confirmedVersionNo: 7 };
+    seed.paymentPlan = seedPlan({ kickoffStatus: PAYMENT_NODE_STATUS.received });
+    renderPage();
+
+    expect(screen.getByText("确认版本 v7 不可变交付快照")).toBeTruthy();
+    expect(screen.queryByText(/PRD v\d/)).toBeNull();
+    expect(screen.queryByText(/Demo v\d/)).toBeNull();
+  });
+
   it("合同预览长字段区窄屏独立滚动（#350，交接包 13.2：长文档和合同支持独立滚动）", () => {
     seed.contract = seedSignedContract();
     renderPage();

@@ -69,6 +69,8 @@ export function useUploadVoucher(orderId: string) {
       return api.post<PaymentPlanResponse>(
         `/orders/${orderId}/payment-nodes/${nodeId}/vouchers`,
         form,
+        // 慢上行凭证图不吃默认 30s 超时（#652 覆盖口径），2min 仍有界
+        { timeoutMs: 120_000 },
       );
     },
     onSuccess: () => {

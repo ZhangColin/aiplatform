@@ -11,9 +11,10 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
 /**
  * {@link WorkspaceVersions}（容器内 git 管道，#91）：命令形状（幂等 init /
- * .gitignore 派生自非交付名单 / 收口成版提交携 Run-Id trailer / 三守卫退出码）、
- * git log 输出解析（只收带 Run-Id trailer 的成版 commit——智能体 shell 面的野
- * commit 不进版本序列）、版本引用校验（hex-only，shell 注入防线）。
+ * .gitignore 派生自非交付名单 / 三守卫退出码）、git log 输出解析（只收带
+ * Rollback-From trailer 的版本 commit——智能体 shell 面的野 commit 不进版本
+ * 序列）、版本引用校验（hex-only，shell 注入防线）。收口成版（Run-Id trailer）
+ * 与段失败回滚/fork 补丁等旧生成栈辅助件随审查与收口组退役（#605）。
  */
 class WorkspaceVersionsTest {
 
@@ -31,9 +32,8 @@ class WorkspaceVersionsTest {
         assertThat(command).contains("if ! test -d .git; then");
         assertThat(command).contains("git init");
         // repo-local 身份（git 全局配置不进卷，随卷持久的是 repo-local config）。
-        // #430：身份写入必须在 init-if 之外无条件执行——fork 克隆（#351）与存量
-        // 仓库已有 .git（git clone 不携 repo-local config），身份若藏在 if 内即跳过，
-        // 收口成版必败「Author identity unknown」
+        // #430：身份写入必须在 init-if 之外无条件执行——存量仓库已有 .git，身份若
+        // 藏在 if 内即跳过，提交必败「Author identity unknown」
         assertThat(command).contains("fi && git config user.name 'semgravio-builder'");
         assertThat(command).contains("git config user.email 'builder@semgravio.com'");
         // 工作区根锚定
@@ -74,30 +74,10 @@ class WorkspaceVersionsTest {
     }
 
     @Test
-    void given_closing_facts_when_commit_command_then_allow_empty_with_run_id_trailer() {
-        String command = WorkspaceVersions.commitCommand("更新了系统", "1234567890");
-
-        // --allow-empty：每轮收口必成版（含「无需改动」轮），保版本 ↔ 收尾卡 1:1 锚定
-        assertThat(command).contains("--allow-empty");
-        assertThat(command).contains("-m '更新了系统'");
-        assertThat(command).contains("-m 'Run-Id: 1234567890'");
-        // 全量暂存 + 提交后回读 HEAD hash（成版锚点回传）
-        assertThat(command).contains("git add -A");
-        assertThat(command).contains("git rev-parse HEAD");
-    }
-
-    @Test
-    void given_subject_with_single_quote_when_commit_command_then_escaped() {
-        String command = WorkspaceVersions.commitCommand("改了用户的'订单'页", "1");
-
-        assertThat(command).contains("-m '改了用户的'\\''订单'\\''页'");
-    }
-
-    @Test
     void given_workspace_when_list_command_then_no_commit_guard_exit_3() {
         String command = WorkspaceVersions.listCommand();
 
-        // 零版本守卫（尚无收口的仓库）：exit 3 与真实 git 故障分道
+        // 零版本守卫（尚无版本的仓库）：exit 3 与真实 git 故障分道
         assertThat(command).contains("git rev-parse --verify HEAD");
         assertThat(command).contains("exit 3");
         assertThat(command).contains("git log");
@@ -125,64 +105,60 @@ class WorkspaceVersionsTest {
     }
 
     @Test
-    void given_ref_and_subject_when_rollback_command_then_restore_then_append_commit_with_rollback_trailer() {
-        String command = WorkspaceVersions.rollbackCommand("a1b2c3d", "回滚到「更新了系统」");
+    void given_ref_when_restore_command_then_restores_tracked_files_only_without_committing() {
+        String command = WorkspaceVersions.restoreCommand("a1b2c3d");
 
-        // 复位工作树到目标 commit（restore --source，只动 tracked——数据不在跟踪面保留）→
-        // 追加新 commit（HEAD 不动、无 rebase/force）→ 携 Rollback-From trailer 锚定源版本
+        // 只复位 tracked 文件（restore --source --staged --worktree）：数据/依赖/.env
+        // 不在跟踪面原样保留；不提交——成版由回滚编排在 build＋起服＋探活全过后落定
         assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
         assertThat(command).contains("git restore --source='a1b2c3d' --staged --worktree .");
-        assertThat(command).contains("git commit -q --allow-empty");
-        assertThat(command).contains("-m '回滚到「更新了系统」'");
-        assertThat(command).contains("-m 'Rollback-From: a1b2c3d'");
-        assertThat(command).contains("git rev-parse HEAD");
-        // 历史只追加不改写——绝无 reset --hard / rebase / push --force 类操作
+        assertThat(command).doesNotContain("git commit");
+        assertThat(command).doesNotContain("git clean");
         assertThat(command).doesNotContain("rebase").doesNotContain("--hard").doesNotContain("--force");
     }
 
     @Test
-    void given_non_hex_ref_when_rollback_command_then_rejected_before_shell() {
-        assertThatThrownBy(() -> WorkspaceVersions.rollbackCommand("main; rm -rf /", "x"))
+    void given_non_hex_ref_when_restore_command_then_rejected_before_shell() {
+        assertThatThrownBy(() -> WorkspaceVersions.restoreCommand("main; rm -rf /"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> WorkspaceVersions.rollbackCommand("$(id)", "x"))
+        assertThatThrownBy(() -> WorkspaceVersions.restoreCommand("$(id)"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WorkspaceVersions.restoreCommand(""))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void given_workspace_when_status_command_then_porcelain_full() {
-        String command = WorkspaceVersions.statusCommand();
+    void given_version_when_commit_version_command_then_full_commit_with_platform_and_run_trailers() {
+        // #626 自动成版：全量提交 + 用户那句话主题 + Platform-Version/Run-Id trailer
+        // → 回读 HEAD hash；仓库初始化（身份自愈）随命令前置
+        String command = WorkspaceVersions.commitVersionCommand(3, "run-abc", "把按钮改成蓝色");
 
         assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git status --porcelain");
-    }
-
-    // ---------- 脏树解析（#100 回滚并发守卫） ----------
-
-    @Test
-    void given_clean_porcelain_when_has_uncommitted_tracked_changes_then_false() {
-        // 空输出（无改动）或仅有 untracked（??）行——restore 不触 untracked，不算会被丢弃的改动
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("")).isFalse();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("?? data/new.txt\n?? draft.md")).isFalse();
+        assertThat(command).contains("git init"); // 幂等仓库初始化前置（提交身份在场）
+        assertThat(command).contains("git add -A");
+        assertThat(command).contains("git commit -q --allow-empty");
+        assertThat(command).contains("-m '把按钮改成蓝色'");
+        assertThat(command).contains("-m '" + WorkspaceVersions.VERSION_TRAILER + "3'");
+        assertThat(command).contains("-m '" + WorkspaceVersions.RUN_TRAILER + "run-abc'");
+        assertThat(command).contains("git rev-parse HEAD");
     }
 
     @Test
-    void given_tracked_change_when_has_uncommitted_tracked_changes_then_true() {
-        // modified（工作树）/ staged / deleted 等 tracked 改动——restore 会静默丢弃
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(" M src/app.js")).isTrue();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("M  src/app.js")).isTrue();
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(" D src/old.js")).isTrue();
-        // 混合：untracked 与 tracked 并存，只要有 tracked 即脏
-        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("?? new.txt\n M src/app.js")).isTrue();
+    void given_subject_with_quote_when_commit_version_command_then_escaped_not_injected() {
+        // 用户那句话是用户可控入参：单引号转义进 shell，不破命令
+        String command = WorkspaceVersions.commitVersionCommand(1, "r1", "it's done");
+
+        assertThat(command).contains("-m 'it'\\''s done'");
     }
 
-    // ---------- log 解析 ----------
+    // ---------- log 解析（Rollback-From 成员判据；Run-Id 已随 #605 退役） ----------
 
     @Test
-    void given_log_output_when_parse_then_versions_newest_first_with_run_id() {
+    void given_rollback_commits_when_parse_then_versions_newest_first() {
         String stdout = "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" + FS + "1700000200" + FS
-                + "更新了系统" + FS + "Run-Id: 222\n" + RS
+                + "回滚到「更新了系统」" + FS + "Rollback-From: deadbeef\n" + RS
                 + "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" + FS + "1700000100" + FS
-                + "首次生成了系统" + FS + "Run-Id: 111\n" + RS;
+                + "回滚到「首次生成了系统」" + FS + "Rollback-From: feedface\n" + RS;
 
         List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
 
@@ -190,38 +166,64 @@ class WorkspaceVersionsTest {
         // git log 原生序（新→旧）即版本序列
         assertThat(versions.get(0).commitHash()).isEqualTo("c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2");
         assertThat(versions.get(0).committedAtEpochSeconds()).isEqualTo(1700000200L);
-        assertThat(versions.get(0).subject()).isEqualTo("更新了系统");
-        assertThat(versions.get(0).runId()).isEqualTo("222");
+        assertThat(versions.get(0).subject()).isEqualTo("回滚到「更新了系统」");
+        assertThat(versions.get(0).runId()).isNull();
+        assertThat(versions.get(0).rollbackFrom()).isEqualTo("deadbeef");
         assertThat(versions.get(1).commitHash()).startsWith("a1a1");
-        assertThat(versions.get(1).runId()).isEqualTo("111");
+        assertThat(versions.get(1).rollbackFrom()).isEqualTo("feedface");
     }
 
     @Test
-    void given_wild_commit_without_trailer_when_parse_then_excluded_from_version_sequence() {
-        // 智能体 shell 面技术上可跑 git——无 Run-Id trailer 的野 commit 不是版本
+    void given_wild_or_run_id_commit_when_parse_then_excluded_from_version_sequence() {
+        // 智能体 shell 面技术上可跑 git——无 Rollback-From trailer 的 commit 不是
+        // 版本；存量 Run-Id 成版 commit 随成员判据退役不再入列（#605）
         String stdout = "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3" + FS + "1700000300" + FS
                 + "wip" + FS + RS
+                + "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4" + FS + "1700000250" + FS
+                + "更新了系统" + FS + "Run-Id: 222\n" + RS
                 + "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" + FS + "1700000200" + FS
-                + "更新了系统" + FS + "Run-Id: 222\n" + RS;
+                + "回滚到「更新了系统」" + FS + "Rollback-From: deadbeef\n" + RS;
 
         List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
 
         assertThat(versions).hasSize(1);
-        assertThat(versions.get(0).runId()).isEqualTo("222");
+        assertThat(versions.get(0).rollbackFrom()).isEqualTo("deadbeef");
     }
 
     @Test
-    void given_rollback_commit_when_parse_then_version_with_rollback_from_and_null_run_id() {
-        // 回滚版本是版本序列成员（Rollback-From trailer 第二判据）——runId 空、rollbackFrom 锚源
-        String stdout = "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3" + FS + "1700000300" + FS
-                + "回滚到「首次生成了系统」" + FS + "Rollback-From: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\n" + RS;
+    void given_platform_version_commits_when_parse_then_version_no_run_id_and_label_newest_first() {
+        // #626 自动成版：Platform-Version trailer 即成员判据——版本号/run 标识/主题
+        // （用户那句话）逐条解析，git log 原生序新→旧保持
+        String stdout = "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" + FS + "1700000200" + FS
+                + "把按钮改成蓝色" + FS + "Platform-Version: 2\nRun-Id: run-2\n" + RS
+                + "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" + FS + "1700000100" + FS
+                + "做一个预约系统" + FS + "Platform-Version: 1\nRun-Id: run-1\n" + RS;
+
+        List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
+
+        assertThat(versions).hasSize(2);
+        assertThat(versions.get(0).commitHash()).startsWith("c2c2");
+        assertThat(versions.get(0).versionNo()).isEqualTo(2);
+        assertThat(versions.get(0).runId()).isEqualTo("run-2");
+        assertThat(versions.get(0).subject()).isEqualTo("把按钮改成蓝色");
+        assertThat(versions.get(0).rollbackFrom()).isNull();
+        assertThat(versions.get(1).versionNo()).isEqualTo(1);
+        assertThat(versions.get(1).runId()).isEqualTo("run-1");
+        assertThat(versions.get(1).subject()).isEqualTo("做一个预约系统");
+    }
+
+    @Test
+    void given_snapshot_commit_without_trailer_when_parse_then_excluded_from_timeline() {
+        // 跑前快照（#619）不带任何 trailer——不是用户面版本，不进时间线
+        String stdout = "f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5" + FS + "1700000400" + FS
+                + "snapshot 12345" + FS + RS
+                + "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" + FS + "1700000200" + FS
+                + "把按钮改成蓝色" + FS + "Platform-Version: 2\nRun-Id: run-2\n" + RS;
 
         List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
 
         assertThat(versions).hasSize(1);
-        assertThat(versions.get(0).runId()).isNull();
-        assertThat(versions.get(0).rollbackFrom()).isEqualTo("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1");
-        assertThat(versions.get(0).subject()).isEqualTo("回滚到「首次生成了系统」");
+        assertThat(versions.get(0).versionNo()).isEqualTo(2);
     }
 
     @Test
@@ -233,101 +235,10 @@ class WorkspaceVersionsTest {
     void given_malformed_record_when_parse_then_skipped_without_failing_whole_log() {
         String stdout = "碎行" + RS
                 + "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" + FS + "1700000100" + FS
-                + "首次生成了系统" + FS + "Run-Id: 111\n" + RS;
+                + "回滚到「首次生成了系统」" + FS + "Rollback-From: feedface\n" + RS;
 
         List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
 
         assertThat(versions).hasSize(1);
-    }
-
-    // ---------- 段失败回滚（#353：回滚本段起点——留账 + git 干净回退） ----------
-
-    @Test
-    void given_workspace_when_head_ref_command_then_verify_head() {
-        String command = WorkspaceVersions.headRefCommand();
-
-        // 段起点捕获：--verify 让「无 HEAD」（全新工作区首段）以非 0 退出与脏输出分道
-        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git rev-parse --verify HEAD");
-    }
-
-    @Test
-    void given_no_head_when_anchor_start_command_then_full_commit_without_trailer() {
-        String command = WorkspaceVersions.anchorStartCommand();
-
-        // 无 HEAD 的段起点锚：全量提交把基座钉成起点（无 trailer——版本序列只收
-        // Run-Id / Rollback-From，锚 commit 不进版本流）；--allow-empty 兜空工作区
-        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git add -A");
-        assertThat(command).contains("git commit -q --allow-empty");
-        assertThat(command).doesNotContain("Run-Id").doesNotContain("Rollback-From");
-        assertThat(command).contains("git rev-parse HEAD");
-    }
-
-    @Test
-    void given_ref_and_scene_path_when_record_failure_scene_then_staged_diff_landed() {
-        String command = WorkspaceVersions.recordFailureSceneCommand("a1b2c3d",
-                ".platform/failed-scene-segment-2-1700000000000.patch");
-
-        // 留账（回滚不丢证据）：add -A 让新建文件进索引（--cached diff 才可见）→
-        // 全量 diff 段起点落盘 patch（git 排除面〔数据/依赖/平台产物〕天然不进场）
-        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git add -A");
-        assertThat(command).contains("git diff --cached 'a1b2c3d'");
-        assertThat(command).contains(
-                "> '" + WorkspaceLayout.ROOT + "/.platform/failed-scene-segment-2-1700000000000.patch'");
-    }
-
-    @Test
-    void given_non_hex_ref_when_record_failure_scene_then_rejected_before_shell() {
-        assertThatThrownBy(() -> WorkspaceVersions.recordFailureSceneCommand("main; rm -rf /", ".platform/x.patch"))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> WorkspaceVersions.recordFailureSceneCommand("$(id)", ".platform/x.patch"))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void given_ref_when_diff_since_segment_start_then_name_only_plus_untracked_without_staging() {
-        String command = WorkspaceVersions.diffSinceStartCommand("a1b2c3d");
-
-        // 产出证明闸探针（#420 空转片防呆）：段起点以来的变更文件名清单——tracked
-        //（diff 含段内野 commit 的增量）＋ untracked（ls-files --others；排除面经
-        // .git/info/exclude 天然不进——.platform/ 平台产物/数据/依赖不虚构成产出）；
-        // 不动索引（add -A 留账先例在此不取——收口尾序不落暂存副作用）；stdout 空
-        // ＝零 diff（空转判据的唯一确定性信号）
-        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git diff --name-only 'a1b2c3d'");
-        assertThat(command).contains("git ls-files --others --exclude-standard");
-        assertThat(command).doesNotContain("git add");
-    }
-
-    @Test
-    void given_non_hex_ref_when_diff_since_segment_start_then_rejected_before_shell() {
-        assertThatThrownBy(() -> WorkspaceVersions.diffSinceStartCommand("main; rm -rf /"))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> WorkspaceVersions.diffSinceStartCommand("$(id)"))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void given_ref_when_reset_to_segment_start_then_hard_reset_and_clean_untracked() {
-        String command = WorkspaceVersions.resetToSegmentStartCommand("a1b2c3d");
-
-        // git 干净回退：reset --hard 回段起点（段内野 commit 一并脱落，前段收口
-        // commit 在起点链上不动）＋ clean -fd 清未跟踪新文件（排除面不扫——数据/
-        // 依赖/平台产物/.env 不在回滚面）
-        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
-        assertThat(command).contains("git reset --hard 'a1b2c3d'");
-        assertThat(command).contains("git clean -fd");
-        // 回滚不追加 commit、不改写用户面版本序列（区别于 #93「回滚到此」的追加式）
-        assertThat(command).doesNotContain("git commit");
-    }
-
-    @Test
-    void given_non_hex_ref_when_reset_to_segment_start_then_rejected_before_shell() {
-        assertThatThrownBy(() -> WorkspaceVersions.resetToSegmentStartCommand("main; rm -rf /"))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> WorkspaceVersions.resetToSegmentStartCommand("$(id)"))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 }

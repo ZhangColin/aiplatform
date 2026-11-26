@@ -21,7 +21,7 @@ import com.semgravio.aiplatform.business.project.domain.port.ModelCatalog;
  * OpenAI 兼容模型清单拉取器单测（#368，形制照 {@code BochaWebSearchProviderTest}）：
  * JDK 内置 HttpServer 随机端口假服务，零新增测试依赖。请求契约（GET /models、
  * Bearer key、无请求体）与降级契约（非 200 / 坏响应 / 连接拒绝 → 失败理由不抛错）；
- * 响应形状以方舟端点 2026-10-23 实测为准（data[] 条目：id 必有，name/status/domain
+ * 响应形状以 OpenAI 兼容端点 2026-10-23 实测为准（data[] 条目：id 必有，name/status/domain
  * 可缺——活跃模型无 status 字段）。
  */
 class OpenAiCompatibleModelCatalogFetcherTest {
@@ -55,11 +55,11 @@ class OpenAiCompatibleModelCatalogFetcherTest {
     void given_models_endpoint_when_fetch_then_gets_models_with_bearer_and_maps_entries() {
         respond(200, """
                 {"data":[
-                  {"id":"deepseek-v4-flash-ga-260731","name":"deepseek-v4-flash-ga",
+                  {"id":"demo-llm-260731","name":"demo-llm",
                    "object":"model","domain":"LLM"},
-                  {"id":"doubao-lite-4k-240328","name":"doubao-lite-4k","object":"model",
+                  {"id":"demo-lite-4k-240328","name":"demo-lite-4k","object":"model",
                    "status":"Shutdown","domain":"LLM"},
-                  {"id":"doubao-embedding-text-240515","object":"model",
+                  {"id":"demo-embedding-240515","object":"model",
                    "status":"Retiring","domain":"Embedding"}
                 ]}
                 """);
@@ -72,11 +72,11 @@ class OpenAiCompatibleModelCatalogFetcherTest {
 
         // 解析形状：id 必有；name/status/domain 如实转述（活跃模型无 status → null）
         assertThat(result.models()).containsExactly(
-                new ModelCatalog.RemoteModel("deepseek-v4-flash-ga-260731",
-                        "deepseek-v4-flash-ga", null, "LLM"),
-                new ModelCatalog.RemoteModel("doubao-lite-4k-240328", "doubao-lite-4k",
+                new ModelCatalog.RemoteModel("demo-llm-260731",
+                        "demo-llm", null, "LLM"),
+                new ModelCatalog.RemoteModel("demo-lite-4k-240328", "demo-lite-4k",
                         "Shutdown", "LLM"),
-                new ModelCatalog.RemoteModel("doubao-embedding-text-240515", null,
+                new ModelCatalog.RemoteModel("demo-embedding-240515", null,
                         "Retiring", "Embedding"));
     }
 

@@ -31,11 +31,8 @@ import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
 import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
-import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
-import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
-import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.BuildGateResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ContinueDiscussionResponse;
 import com.semgravio.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
@@ -44,9 +41,7 @@ import com.semgravio.aiplatform.business.project.application.dto.command.Continu
 import com.semgravio.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.semgravio.aiplatform.business.project.application.dto.command.RenameProjectCommand;
-import com.semgravio.aiplatform.business.project.application.dto.command.SwitchEndpointTypeCommand;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.GenerationStopResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BalanceReminderCardResponse;
@@ -54,9 +49,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Interc
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -73,10 +65,12 @@ import com.semgravio.aiplatform.support.BinaryResponses;
 import com.semgravio.aiplatform.support.Tsid;
 
 /**
- * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
- * 派发）/ 问答卡作答 / 继续生成（断点续跑，中断兜底）→ 继续更新（更新
- * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / PRD 确认成版与
- * 版本清单详情（#330 确认即成版）/ 文件树只读浏览 → 源码包下载 → 预览 → 删除真删级联。
+ * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（生成前入口
+ * 三分类派发 / 生成后对话面）/ 问答卡作答 / 生成点火（岔路口「立即生成」与前端
+ * 「继续生成」恢复出口共用——#604 起重发即在既有工作区重跑）→ 归档 / 改名 / 详情
+ * / 列表 / 用量 / PRD 读 / PRD 确认点火（#542） / 文件树只读浏览 → 源码包下载 →
+ * 预览 → 删除真删级联。版本面（用户面 git 单轴）归 {@code ProjectVersionController}
+ * ——旧 PRD/Demo 双轴版本端点随 #630 退场。
  *
  * <p>#325 owner 守卫：{@code /api/projects/{id}/**} 单项目寻址统一过归属判定
  * （{@code ProjectOwnerInterceptor} 先于控制器）——非本人项目与不存在项目同 404
@@ -85,7 +79,7 @@ import com.semgravio.aiplatform.support.Tsid;
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / Demo 版本与确认标记 / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（生成前三分类派发、生成后对话面）/ 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认点火 / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -93,11 +87,8 @@ public class ProjectController {
     private final DispatchAppService dispatchAppService;
     private final MainAgentAppService mainAgentAppService;
     private final GenerationAppService generationAppService;
-    private final IterationAppService iterationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
     private final InterviewQuotaAppService interviewQuotaAppService;
-    private final PrdVersionAppService prdVersionAppService;
-    private final DemoVersionAppService demoVersionAppService;
     private final BuildGateAppService buildGateAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
@@ -105,22 +96,16 @@ public class ProjectController {
                              DispatchAppService dispatchAppService,
                              MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
-                             IterationAppService iterationAppService,
                              ConversationHistoryAppService conversationHistoryAppService,
                              InterviewQuotaAppService interviewQuotaAppService,
-                             PrdVersionAppService prdVersionAppService,
-                             DemoVersionAppService demoVersionAppService,
                              BuildGateAppService buildGateAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
         this.mainAgentAppService = mainAgentAppService;
         this.generationAppService = generationAppService;
-        this.iterationAppService = iterationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
         this.interviewQuotaAppService = interviewQuotaAppService;
-        this.prdVersionAppService = prdVersionAppService;
-        this.demoVersionAppService = demoVersionAppService;
         this.buildGateAppService = buildGateAppService;
     }
 
@@ -128,9 +113,7 @@ public class ProjectController {
     @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理；免注册访客可用）",
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
-                    + "失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，"
-                    + "#299 入口两档 mode 进载荷）：入口选「做设计」携 1、缺省/做系统＝2 系统（主链路零变化）；"
-                    + "不合法 code 400（框架统一信封）。"
+                    + "失败保占位经改名端点可改）；类型单模板服务端缺省；终点收窄为系统单值（#612）。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。"
                     + "SSE：workspace-created → 智能体事件。"
@@ -161,8 +144,14 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/messages")
-    @Operation(summary = "对话区发言（入口三分类派发：意见/咨询/兜底）",
-            description = "content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用"
+    @Operation(summary = "对话区发言（生成前入口三分类派发；生成后/在途走对话面）",
+            description = "content 即用户在对话区输入的这句话。项目已生成或首建/迭代在途时，"
+                    + "发言走<b>对话面</b>（生成后的独立轻会话）：只读查工作区/PRD/项目事实后"
+                    + "答疑；修改说得不清楚时先出带选项的问答卡澄清；说清楚后交出一条自足"
+                    + "修改指令，平台据此恰起一轮内核重跑（生成在途则记入待办并轻提示「已记下，"
+                    + "下一轮生效」，当前 run 成功收口后合并补派；失败/停止不自动补派、待办"
+                    + "保留，用户重说即起新一轮）。对话面零写工作区/编码工具、SSE 复用现有事件。"
+                    + "生成前（首建访谈期）平台先经智能体边界上的轻量分类调用"
                     + "三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一"
                     + "主智能体单会话（main-{projectId}）连续："
                     + "意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台"
@@ -173,13 +162,6 @@ public class ProjectController {
                     + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / "
                     + "咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
                     + "回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。"
-                    + "designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——"
-                    + "画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达"
-                    + "该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代"
-                    + "收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。"
-                    + "divergence（可选，#294 发散度 chip，Integer code）：1=REFINE"
-                    + "（微调）/2=EXPLORE（探索）/3=REIMAGINE（大胆）——只随作用域"
-                    + "发言生效，改稿 prompt 携档位引导；非法值 400。"
                     + "空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；"
                     + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；"
                     + "挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑"
@@ -188,8 +170,7 @@ public class ProjectController {
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(
-                dispatchAppService.dispatch(parseId(id), command.content(), command.attachments(),
-                        command.designItem(), command.divergence())
+                dispatchAppService.dispatch(parseId(id), command.content(), command.attachments())
                         .runId()));
     }
 
@@ -243,8 +224,9 @@ public class ProjectController {
                     + "两呈现互斥（两轨判定归扣费域单读点）；快道（试用态＝用户明确"
                     + "收敛令；付费态＝零必答短路/「直接开始做」视同确认）收口观测直派"
                     + "生成——两读面都缺席（false）；点火后"
-                    + "（generation_requested_at 落位）卡与按钮都不复现（失败重试走"
-                    + "「继续生成」）。轮收口与编码 run 起跑/收口事件失效本读面。"
+                    + "（generation_requested_at 落位）卡与按钮隐藏；#604 起终态失败/"
+                    + "停止收口清点火位——卡与按钮复现，用户在点火入口重跑即恢复。"
+                    + "轮收口与编码 run 起跑/收口事件失效本读面。"
                     + "forkSettleDue＝「继续讨论」引导流到账自动翻转信号（#544：卡在场∧源"
                     + "已选定∧源池余额为正——他处到账〔不限收银台单缝〕后卡回读即显，前端"
                     + "空 source 重判即翻转，POST /{id}/fork/continue-discussion）。"
@@ -304,6 +286,8 @@ public class ProjectController {
                     + "待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本"
                     + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
                     + "上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。"
+                    + "哪座会话发起的问答卡答复就续回哪座——生成后的对话面卡回 dialog-{projectId}"
+                    + " 轻会话，访谈卡回 main-{projectId}。"
                     + "空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<Void> answerQuestion(@PathVariable String id, @PathVariable String qid,
@@ -315,36 +299,27 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/generate")
-    @Operation(summary = "生成点火与继续生成（岔路口「立即生成」/断点续跑共用单出口）",
+    @Operation(summary = "生成点火（岔路口「立即生成」与前端「继续生成」恢复出口共用——重发即在既有工作区重跑）",
             description = "#542 首建派发门（ADR-0048/0049——自动派发两入口退役）：试用态"
                     + "岔路口三选卡的「立即生成」＝本端点点火首个构建（PRD 已照产可看、"
                     + "平台承担本次）；付费轨首建的点火动作是 PRD 确认（POST /{id}/prd/"
-                    + "confirm，失败重试也回本端点——不重复确认）。断点续跑（#221）同口："
-                    + "run-failed 或生成中断后项目仍「未生成」，重发即从断点接续——跳过"
-                    + "已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口"
-                    + "片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、"
-                    + "中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——"
-                    + "PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表"
-                    + "（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；"
-                    + "PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；"
-                    + "计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体"
-                    + "按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮；补产"
-                    + "完成后岔路口卡/确认按钮照旧在场，再点一次本端点即起跑——同一 PRD "
-                    + "版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。"
-                    + "平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发"
-                    + " run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md"
-                    + " 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行"
+                    + "confirm——确认经同一派发编排）。纯动作无门——PRD 已产出即可发起"
+                    + "（待定项未清也可）。#601 起直派新内核（generation-kernel 装配，"
+                    + "权威提示「开始」）；#602 起切片计划/生成轨道表机器整体出局；"
+                    + "#607 起不再向工作区写 AGENTS.md（仍成立的生产约束并入内核提示词）。"
+                    + "平台随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md"
+                    + " 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 本场运行"
                     + "标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start"
-                    + " agent=executor 起工作消息）。失败自动静默重试有限次＝原地修"
-                    + "（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场"
-                    + "继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发"
-                    + " run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为"
-                    + "唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。"
+                    + " agent=executor 起工作消息）。#604 起失败语义＝明确展示＋重跑即恢复"
+                    + "（不自动重试——尝试上界/免预算重试账随旧 run 尝试体退役，重试层只余"
+                    + "供给链 failover 与内核 maxAttempts=1）：失败即发 run-failed 收口事件"
+                    + "（前端恢复出口只认本事件——run 失败为唯一失败终态），由用户重跑兜底"
+                    + "——续跑机器已退役：重发不带断点、不携错误现场，在既有工作区重跑"
+                    + "内核（已落盘成果保留、内核自见工作区现状）；首建失败/停止同时清"
+                    + "点火位（岔路口卡与 PRD 确认按钮复现，重走点火入口即重跑）。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
                     + "PRD 从未产出 409 PRJ_018（点火前置＝PRD 在——本守卫拦未产出直连调用）；"
-                    + "设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、"
-                    + "系统＋设计设计先行——构建从定稿设计稿长出）；"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<GenerationStartResponse> generate(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
@@ -355,12 +330,13 @@ public class ProjectController {
     @Operation(summary = "停止在途生成/更新（#359 生成取消）",
             description = "用户叫停在途编码 run（生成/迭代更新/设计过程任一在途即停——"
                     + "停止请求置停＋中断执行任务，模型流订阅随之中止不再烧 token）。"
-                    + "停止＝中断口径非判死：已收口成果保留、在途段回待跑，不回滚；"
+                    + "停止＝中断口径非判死：已落盘成果保留，不回滚；"
                     + "终态按失败账口径收口——run-failed 载荷带 stopped=true＋一句人话"
                     + "（「已按你的要求停止，已完成的进度都保留」），已耗计量如实落账。"
-                    + "停止后项目态转「生成中断」（不显假生成中），「继续生成」从断点"
-                    + "脏续（续跑起手带现状盘点，中断原因＝用户停止）；更新轨停止记"
-                    + "终态账，「继续更新」照常可达。幂等：无在途返回 stopped=false"
+                    + "停止后未生成项目的生成态投影回「从未生成」（不显假生成中；#604"
+                    + "起无「生成中断」档），重跑入口照常可达——首建停止清点火位"
+                    + "（岔路口卡/PRD 确认按钮复现；前端「继续生成」同口：不带断点、"
+                    + "不携错误现场，在既有工作区重跑）。幂等：无在途返回 stopped=false"
                     + "（连点/与自然收口的竞态如实回，不 409）。停止是异步收场：请求"
                     + "返回 ≠ 执行体已完全落定，以 SSE/REST 重查为准。"
                     + "项目不存在 404 PRJ_001")
@@ -369,29 +345,16 @@ public class ProjectController {
                 generationAppService.stopInFlightRun(parseId(id))));
     }
 
-    @PostMapping("/{id}/fix-runs/restart")
-    @Operation(summary = "继续更新（更新 run 超限终态恢复出口）",
-            description = "更新 run 失败自动重试超限转终态后的人工兜底（与生成的「继续生成」"
-                    + "对齐）：重派终态那场的更新任务——交接物沿用（同任务清单）、续同 "
-                    + "coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识"
-                    + "（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），"
-                    + "重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发："
-                    + "更新在途（进行中/排队中）409 PRJ_025；无终态账（未派过更新/"
-                    + "已成功收工/平台重启丢账）409 PRJ_026（指路对话区重提意见）。"
-                    + "已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001")
-    public ApiResponse<FixRestartResponse> restartFix(@PathVariable String id) {
-        return ApiResponse.ok(new FixRestartResponse(
-                iterationAppService.restartFixRun(parseId(id)).runId()));
-    }
-
     @GetMapping("/{id}")
     @Operation(summary = "项目详情",
             description = "status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）。"
-                    + "generationState = 生成态四态投影（#222，Integer code：1=从未生成 "
-                    + "2=生成中 3=生成中断 4=已生成）——轨道表＋generated_at＋在途标记派生、"
-                    + "与 SSE 会话态无关（刷新/回访后档位仍正确）；生成中断/从未生成即"
-                    + "「继续生成」出口的档位（POST /{id}/generate 断点续跑或计划重派），"
-                    + "已生成 = Demo 首版成版锚（v1 随 generated_at 同刻落）")
+                    + "generationState = 生成态投影（#222；#604 四态归一，三档：1=从未生成 "
+                    + "2=生成中 4=已生成——「生成中断」档随旧失败语义退役：失败不落投影，"
+                    + "只经 run-failed 事件在会话内明确呈现）——generated_at＋在途标记派生、"
+                    + "与 SSE 会话态无关（刷新/回访后档位仍正确）；从未生成即重跑入口在场的"
+                    + "档位（首建未起跑，或失败/停止后——点火入口复现，POST /{id}/generate"
+                    + " 重发即在既有工作区重跑），"
+                    + "已生成 = 首次生成时点（generated_at）已落")
     public ApiResponse<ProjectDetailResponse> get(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.detail(parseId(id)));
     }
@@ -404,10 +367,8 @@ public class ProjectController {
                     + "4=answer 5=closing 6=guide 7=quote）+ kindName 中文名随行（#186：枚举出口配 "
                     + "*Name，消费端零映射）；question = question-raised 事件"
                     + "载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = "
-                    + "run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。sessionSource "
-                    + "会话来源标识（#298，后台对接件随面携带）：2=设计会话（设计收尾卡携 drafts）、"
-                    + "null=主会话缺省——用户面前端可忽略。归档项目照读"
-                    + "（对话区只读终态）；项目不存在 404 PRJ_001")
+                    + "run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。"
+                    + "归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001")
     public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
         return ApiResponse.ok(conversationHistoryAppService.read(parseId(id)));
     }
@@ -429,24 +390,6 @@ public class ProjectController {
     public ApiResponse<ProjectDetailResponse> rename(@PathVariable String id,
                                                      @Valid @RequestBody RenameProjectCommand command) {
         return ApiResponse.ok(appService.rename(parseId(id), command.name()));
-    }
-
-    @PostMapping("/{id}/endpoint-type")
-    @Operation(summary = "切换终点类型（设置 tab 终点控件＝项目内唯一变更位，#285）",
-            description = "终点类型（Integer code：1=设计 2=系统 3=系统＋设计）下单前可变、"
-                    + "下单即冻结（转轨是对话之外类型变更的一等入口，ADR-0024）。切换落库后"
-                    + "平台派主智能体切换重产轮：PRD 已产出即重产清单章（形态随终点类型走——"
-                    + "设计＝设计物清单、系统/系统＋设计＝功能清单〔后者设计硬约束入关键约束〕），"
-                    + "访谈期即转向通告；过程经 SSE agent=main 可见。作用域：系统→设计类切换"
-                    + "（PRD 已产出、功能清单在）必带 scopeType（1=全部页面 2=勾选页面，缺选"
-                    + " 400 PRJ_040），勾选形 scopePages（功能清单条目标签）非空（空集 400 "
-                    + "PRJ_041）；范围仅系统＋设计落库（设计主线由 PRD 设计物清单章承载）。"
-                    + "同目标幂等无操作。已归档 409 PRJ_013；订单处理中 409 ORD_006"
-                    + "（取消订单即解冻）；挂起问答待答 409 PRJ_024（指路作答）；"
-                    + "项目不存在 404 PRJ_001")
-    public ApiResponse<ProjectDetailResponse> switchEndpoint(@PathVariable String id,
-            @Valid @RequestBody SwitchEndpointTypeCommand command) {
-        return ApiResponse.ok(appService.switchEndpoint(parseId(id), command));
     }
 
     @GetMapping("/{id}/usage")
@@ -485,76 +428,21 @@ public class ProjectController {
             description = "ADR-0049 恢复 #462 之前的<b>原确认动作形态</b>（PRD 文档面按钮"
                     + "＋端点、确认即派发），范围收窄＝付费轨首建一次：试用轨不加（岔路口"
                     + "三选卡即点火动作、PRD 已照产可看）；首建后迭代受理即派不逐次确认"
-                    + "（钱面归段边界检查）。确认经生成编排共用派发（余额门/设计定稿门/"
-                    + "断点续跑同构）；<b>版本机制零改动</b>——确认不写版本行（旧「确认"
-                    + "即成版」#330 写表语义不复活），记行归 Demo 类 run 起跑单点、版本号"
-                    + "＝构建基准序全域一致。<b>点击幂等</b>＝已点火重复确认 409 PRJ_017"
-                    + "（不重复派发），失败重试走「继续生成」（POST /{id}/generate）不重复"
-                    + "确认；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经"
+                    + "（钱面归段边界检查）。确认经生成编排共用派发（余额门/"
+                    + "重跑同构）；确认不写任何版本数据——用户面版本由探活通过后自动成版"
+                    + "（#626 git 单轴时间线），旧 PRD/Demo 版本表已随 #630 退场。"
+                    + "<b>点击幂等</b>＝已点火重复确认 409 PRJ_017"
+                    + "（不重复派发）；#604 起首建失败/停止收口清点火位——确认按钮复现，"
+                    + "重确认即重跑；付费轨快道（用户明确说「直接开始做」）视同确认直接派发、不经"
                     + "本端点。按钮呈现条件＝GET /{id}/build-gate 的 prdConfirmable"
                     + "（付费态∧PRD 在∧首建未点火）。错误码：PRJ_084 试用项目（岔路口"
                     + "「立即生成」即点火）；PRJ_018 PRD 尚未产出；PRJ_013 已归档；"
-                    + "PRJ_017 已点火或生成在途；PRJ_042 设计未定稿（设计轨构建从定稿"
-                    + "设计稿长出）；BILL_025 源池余额不足（充值回正自动重派）。"
+                    + "PRJ_017 已点火或生成在途；BILL_025 源池余额不足（充值回正自动重派）。"
                     + "项目不存在 404 PRJ_001")
-    @ErrorCodes({"PRJ_001", "PRJ_013", "PRJ_017", "PRJ_018", "PRJ_042", "PRJ_084", "BILL_025"})
+    @ErrorCodes({"PRJ_001", "PRJ_013", "PRJ_017", "PRJ_018", "PRJ_084", "BILL_025"})
     public ApiResponse<GenerationStartResponse> confirmPrdGeneration(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
                 buildGateAppService.confirmFirstBuild(parseId(id)).runId()));
-    }
-
-    @GetMapping("/{id}/prd/versions")
-    @Operation(summary = "PRD 版本清单（最新在前，轻量形不含全文）",
-            description = "项目内 PRD 版本列表（#330→#462 去门化：Demo 类 run 起跑自动记行，"
-                    + "版本号＝构建基准序）：[{projectId, versionNo, confirmedAt}]，versionNo "
-                    + "倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。"
-                    + "空列表 = 尚无构建基准记行（呈现「草稿」徽章归前端推导）。归档项目照读"
-                    + "（历史可追溯）。项目不存在 404 PRJ_001")
-    public ApiResponse<List<PrdVersionSummaryResponse>> prdVersions(@PathVariable String id) {
-        return ApiResponse.ok(prdVersionAppService.versions(parseId(id)));
-    }
-
-    @GetMapping("/{id}/prd/versions/{versionNo}")
-    @Operation(summary = "PRD 版本详情（含全文快照）",
-            description = "单版详情（#330→#462 去门化）：{projectId, versionNo, content, "
-                    + "confirmedAt, readiness}——content 是成行时工作区 PRD 全文的不可变"
-                    + "快照（Demo 类 run 起跑时点，后续草稿改动不影响）；readiness（#331）"
-                    + "＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手"
-                    + "即解析）。归档项目照读。"
-                    + "版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001")
-    public ApiResponse<PrdVersionResponse> prdVersion(@PathVariable String id,
-            @PathVariable int versionNo) {
-        return ApiResponse.ok(prdVersionAppService.version(parseId(id), versionNo));
-    }
-
-    @GetMapping("/{id}/demo-versions")
-    @Operation(summary = "Demo 版本清单（最新在前）",
-            description = "项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, "
-                    + "prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口"
-                    + "自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口"
-                    + "递增），prdVersionNo＝起跑时最新 PRD 版本锚（「Demo vN（基于 "
-                    + "PRD vM 快照）」式关联；null＝无版本记行起跑——legacy/设计类），runId＝"
-                    + "收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；"
-                    + "confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。"
-                    + "versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = "
-                    + "从未成版（未生成/生成中）。归档项目照读（历史可追溯）。"
-                    + "项目不存在 404 PRJ_001")
-    public ApiResponse<List<DemoVersionSummaryResponse>> demoVersions(@PathVariable String id) {
-        return ApiResponse.ok(demoVersionAppService.versions(parseId(id)));
-    }
-
-    @PostMapping("/{id}/demo-versions/{versionNo}/confirm")
-    @Operation(summary = "确认此版本，准备签约（既有 Demo 版本上打确认标记）",
-            description = "「确认此版本，准备签约」（#333）＝既有版本上打确认标记——选定"
-                    + "动作、<b>不产生新版本号</b>（版本行不可变，标记归项目单指针"
-                    + "confirmed_demo_version_no）；换确认版本＝指针随移（旧标记自然失效，"
-                    + "重复确认同版幂等刷新确认时间）。响应＝所确认版本的清单形（含"
-                    + "confirmedAt）——下单前置「Demo 确认版本在场」的消费面（#335）。"
-                    + "项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；"
-                    + "版本不存在（含非正整数）404 PRJ_054")
-    public ApiResponse<DemoVersionSummaryResponse> confirmDemoVersion(@PathVariable String id,
-            @PathVariable int versionNo) {
-        return ApiResponse.ok(demoVersionAppService.confirm(parseId(id), versionNo));
     }
 
     @GetMapping("/{id}/files")
@@ -581,16 +469,17 @@ public class ProjectController {
     }
 
     @GetMapping("/{id}/files/raw")
-    @Operation(summary = "文件直出（点看图片 inline 大图 #283；设计稿 HTML 伺服 #293）",
+    @Operation(summary = "文件直出（点看图片 inline 大图 #283；曾扩设计稿 HTML 伺服 #293）",
             description = "path = 工作区相对路径。伺服面＝图片（png/jpg/webp/gif/svg，"
-                    + "扩展名判定）＋设计稿 HTML（design/ 锚定——设计稿画布固定画幅帧"
-                    + "取件，iframe 直渲）：真实 content-type + 原始字节流 inline 直出"
+                    + "扩展名判定）＋设计稿 HTML（design/ 锚定，iframe 直渲——消费面"
+                    + "设计稿画布已随 #613 拆除，该分支是挂在保留端点上的死支路，"
+                    + "去留待重建入口时再定）：真实 content-type + 原始字节流 inline 直出"
                     + "（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；src 同源"
                     + "会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本"
                     + "照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。"
-                    + "稿 HTML 伺服的脚本面收口：CSP 禁脚本（default-src 'none'）——"
-                    + "设计稿是帧不是网站，呈现面（样式/内嵌图）可达、行为面结构性"
-                    + "关闭。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/"
+                    + "HTML 伺服的脚本面收口：CSP 禁脚本（default-src 'none'）——"
+                    + "呈现面（样式/内嵌图）可达、行为面结构性关闭（查看面无脚本"
+                    + "诉求）。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/"
                     + "逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非伺服面"
                     + "扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过直出查看上限"
                     + "（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001")

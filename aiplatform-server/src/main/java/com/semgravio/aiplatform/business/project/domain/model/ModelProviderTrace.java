@@ -13,9 +13,12 @@ import java.time.LocalDateTime;
  *
  * @param id           留痕标识（TSID，写痕用例生成）
  * @param providerKey  通道键（无 FK——留痕跨行存活）
+ * @param oldVendor    变更前归一供应商（创建痕＝null；V80 起入快照——#559 写面
+ *                     起可改，快照缺腿则换归一不可回滚）
  * @param oldBaseUrl   变更前 baseUrl（创建痕＝null）
  * @param oldApiKey    变更前 apiKey 明文（库内；读面掩码）
  * @param oldEnabled   变更前启用态（创建痕＝null）
+ * @param newVendor    变更后归一供应商（删除痕＝null）
  * @param newBaseUrl   变更后 baseUrl（删除痕＝null）
  * @param newApiKey    变更后 apiKey 明文（库内；读面掩码）
  * @param newEnabled   变更后启用态（删除痕＝null）
@@ -26,9 +29,11 @@ import java.time.LocalDateTime;
 public record ModelProviderTrace(
         long id,
         String providerKey,
+        String oldVendor,
         String oldBaseUrl,
         String oldApiKey,
         Boolean oldEnabled,
+        String newVendor,
         String newBaseUrl,
         String newApiKey,
         Boolean newEnabled,

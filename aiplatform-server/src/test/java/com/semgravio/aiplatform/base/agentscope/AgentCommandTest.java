@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link AgentCommand} 入参校验：runId/prompt/sessionId/modelString 必填
- * （modelString＝档位解析产物——ADR-0031/#366 起全部调用面经档位解析携串，无配置
+ * （modelString＝配置解析产物——ADR-0031/#366 起全部调用面经配置解析携串，无配置
  * 缺省回落），其余可空各取默认；workspaceId/streamCorrelation 透传 + 信封契约校验。
  */
 class AgentCommandTest {
@@ -105,7 +105,7 @@ class AgentCommandTest {
     @Test
     void given_canonical_form_when_construct_then_workspace_read_only_kept() {
         AgentCommand command = new AgentCommand("run-1", "咨询", null, MODEL, null, "s-1", null,
-                null, "42", Map.of(), null, null, null, "ASSISTANT", true, false, null, null);
+                null, "42", Map.of(), null, null, null, "ASSISTANT", true, null, null);
 
         assertThat(command.workspaceReadOnly()).isTrue(); // 主智能体对话姿态：写面结构性关闭
     }
@@ -113,9 +113,9 @@ class AgentCommandTest {
     /** #118 工作消息头部标题：heading 可空透传（底座不解释）。 */
     @Test
     void given_heading_when_construct_then_kept() {
-        RunHeading heading = RunHeading.slice("商品浏览", 2, 5);
+        RunHeading heading = RunHeading.titled("商品浏览");
         AgentCommand command = new AgentCommand("run-1", "做系统", null, MODEL, null, "s-1", null,
-                null, null, Map.of(), null, null, null, "executor", false, false, heading, null);
+                null, null, Map.of(), null, null, null, "executor", false, heading, null);
 
         assertThat(command.heading()).isEqualTo(heading);
     }

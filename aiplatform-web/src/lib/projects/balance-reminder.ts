@@ -18,7 +18,6 @@ export type BalanceReminderCardResponse = {
   holdId?: string | null;
   lane?: string | null;
   prompt?: string | null;
-  designItem?: number | null;
   sourcePoolBalance?: number | null;
   runId?: string | null;
 };

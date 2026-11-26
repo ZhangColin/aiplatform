@@ -67,7 +67,7 @@ class MeteringScopeTest {
         MeteringScope scope = scope();
         scope.markClosed();
 
-        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), new ChatUsage(100, 40, 0, 0.5));
+        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), "deepseek", new ChatUsage(100, 40, 0, 0.5));
 
         verify(sink).report(any(UsageEvent.class));
         assertThat(appender.list)
@@ -87,8 +87,8 @@ class MeteringScopeTest {
         MeteringScope scope = scope();
         scope.markClosed();
 
-        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), new ChatUsage(1, 1, 0, 0));
-        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), new ChatUsage(2, 2, 0, 0));
+        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), "deepseek", new ChatUsage(1, 1, 0, 0));
+        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), "deepseek", new ChatUsage(2, 2, 0, 0));
 
         assertThat(appender.list).hasSize(2);
         assertThat(appender.list.get(0).getFormattedMessage()).contains("第 1 次");
@@ -99,7 +99,7 @@ class MeteringScopeTest {
     void given_open_when_report_then_no_zombie_warn() {
         // 对照钉子：正常轮收口（未判死）不产 WARN——判死 WARN 是判死路径专属的可
         // 观察面，不进正常生命周期
-        scope().report(ModelRef.parse("deepseek:deepseek-v4-flash"), new ChatUsage(100, 40, 0, 0.5));
+        scope().report(ModelRef.parse("deepseek:deepseek-v4-flash"), "deepseek", new ChatUsage(100, 40, 0, 0.5));
 
         verify(sink).report(any(UsageEvent.class));
         assertThat(appender.list).isEmpty();
@@ -111,7 +111,7 @@ class MeteringScopeTest {
         MeteringScope scope = scope();
         scope.markClosed();
 
-        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), null);
+        scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), "deepseek", null);
 
         verify(sink, never()).report(any());
         assertThat(appender.list).isEmpty();

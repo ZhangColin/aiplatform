@@ -14,8 +14,8 @@ public final class AgentEventTypes {
     /**
      * 运行开始（runId 随 run 响应同值返回）。engine/model 之外携带智能体配置键
      * {@code agent}（业务侧 AgentProfile 的稳定键，如 executor；无配置语境的
-     * 一次性调用不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次：
-     * 编码 run 静默重试（#84）不新发——用户面 run 身份 = 首试 runId 全程不变。
+     * 一次性调用不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次
+     * （#604 起编码 run 单发无重试——用户面 run 身份全程不变）。
      */
     public static final String RUN_START = "run-start";
 
@@ -30,19 +30,21 @@ public final class AgentEventTypes {
 
     /**
      * 运行结束（finish = 引擎结煞语，如 end / error）。编码 run 在收口判据落定后
-     * 扩载 {@link #CLOSING_FIELD}（#88 收尾卡——服务端权威的摘要/判定行/变更清单/
-     * 轮末统计，schema 见 SSE事件清单·收口扩载节）；主智能体对话轮（咨询/纯追问）
-     * 不携带——无收尾卡。
+     * 扩载 {@link #CLOSING_FIELD}（#617 五字段收尾卡——用时/判据结果/变更清单/
+     * 内核自述/预览入口，schema 见 SSE事件清单·收口扩载节）；主智能体对话轮
+     * （咨询/纯追问）不携带——无收尾卡。
      */
     public static final String RUN_FINISH = "run-finish";
 
     /**
-     * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
-     * systemChanged, systemNote?, files[{path,added,removed}], durationMs,
-     * verification?（#352——见 {@link #VERIFICATION_FIELD}）, version?（#91）,
-     * durationBreakdown（#111 阶段耗时分布——平台分析口径，前端不渲染） }——
-     * 对话史落库（#89）与版本锚定（#91）复用同一载荷。判定与清单以平台可观测
-     * 事实为准（工具调用/探活），不由模型自报。
+     * run-finish 的收口扩载键（#617 五字段骨架）：值为对象 { narrative?,
+     * criteria{buildPassed,previewPassed}, files[{path,added,removed}],
+     * directories[{path,fileCount,added,removed}]（#620 首建目录汇总，迭代缺省）,
+     * durationMs, durationBreakdown（#111 阶段耗时分布——平台分析口径，前端不渲染） }
+     * ——对话史落库（#89）复用同一载荷。判据与清单以平台可观测事实为准（工具
+     * 调用/探活），不由模型自报。旧平台句式摘要与「需求文档／系统」判定键已
+     * 退役（读侧回落）；version 锚随审查与收口组退役（#605）；modelTier 随
+     * 模型路由退役（#606）。
      */
     public static final String CLOSING_FIELD = "closing";
 
@@ -58,40 +60,6 @@ public final class AgentEventTypes {
     public static final String FAILURE_FIELD = "failure";
 
     /**
-     * 收口扩载的验证键（#352 独立验证子智能体的收尾统计；#424 片轻验常开后收口
-     * 必在场）：值为对象
-     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[], budgetExhausted? }}
-     * ——事实源＝verify 子智能体（source=verify）经 report_verification 工具登记的
-     * 本轮逐项结果（平台从工具调用事实观测，不解析子智能体自由文本）：total/failed
-     * ＝末轮总项数与未过数、faces＝末轮三面分布（browser＝主径轴、db/log＝按需
-     * 下钻——#424 载荷口径，面键不变）、rounds＝本场验证轮数（修复—复验环的
-     * 如实呈现，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注的落点）、
-     * budgetExhausted＝轮次预算用尽仍未过（#424：达预算停止修复—复验、未过项
-     * 如实呈现的标注）。<b>可缺省</b>——验证子智能体未跑/未登记时本键不携带
-     * （#424 起收口硬门在场，缺省＝零验证收口被拒路径）。逐项 ✅/❌ 明细与证据
-     * 在过程播报（解说段）里，收尾卡只带聚合。
-     */
-    public static final String VERIFICATION_FIELD = "verification";
-
-    /** verification 对象的末轮总项数键。 */
-    public static final String VERIFICATION_TOTAL_FIELD = "total";
-
-    /** verification 对象的末轮未过项数键。 */
-    public static final String VERIFICATION_FAILED_FIELD = "failed";
-
-    /** verification 对象的三面分布键（{@code {browser,db,log}}——三面各验了几项）。 */
-    public static final String VERIFICATION_FACES_FIELD = "faces";
-
-    /** verification 对象的验证轮数键（修复—复验环如实：>1＝修后复验过）。 */
-    public static final String VERIFICATION_ROUNDS_FIELD = "rounds";
-
-    /** verification 对象的末轮未过项名清单键（修不了如实标注；全过时为空数组）。 */
-    public static final String VERIFICATION_FAILED_ITEMS_FIELD = "failedItems";
-
-    /** verification 对象的轮次预算用尽键（#424：达预算仍有未过＝停止修复—复验的如实标注）。 */
-    public static final String VERIFICATION_BUDGET_EXHAUSTED_FIELD = "budgetExhausted";
-
-    /**
      * 智能体挂起提问（ask_user 触发，唯一挂起源）：payload 带
      * runId/sessionId/summary/engineRef/data（引擎载荷原样，含前端问答卡投影与
      * 续跑上下文）。答复续跑归业务编排（问答作答通道，需求环），eventhub 只承载
@@ -100,12 +68,13 @@ public final class AgentEventTypes {
     public static final String QUESTION_RAISED = "question-raised";
 
     /**
-     * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与
-     * 终态账（恢复出口的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；
-     * 生成轨道超限即终态。runId = 该场 run 的<b>用户面标识</b>（首试 runId——#84
-     * 静默重试：重试不换新锚、不新发 {@link #RUN_START}，中间尝试的内部 runId
-     * 不出用户面，事件序上 run-failed 前无任何失败/重试信号）。前端恢复出口
-     * （继续生成 / 重新修改）只认本事件——run 失败为唯一失败终态。
+     * 编码 run 终态失败收口（#56；#604 起生成/更新 run 单发无重试——失败/停止即
+     * 终态）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口的重派依据）
+     * 同事实点，排队合并续派的中途超限不是终态、不发；生成轨道失败/停止即终态
+     * （#604 失败新语义＝明确展示＋重跑即恢复，本事件即「明确展示」的发射点）。
+     * runId = 该场 run 的<b>用户面标识</b>（单发：无静默重试——run-failed 前无任何
+     * 失败/重试信号）。前端恢复出口（继续生成 / 继续更新）只认本事件——run 失败
+     * 为唯一失败终态。
      */
     public static final String RUN_FAILED = "run-failed";
 
@@ -119,6 +88,12 @@ public final class AgentEventTypes {
 
     /** 运行关联字段（事件 id 的 streamId 同值；payload 必带）。 */
     public static final String RUN_FIELD = "runId";
+
+    /** run-start 的本场提示词键（#627 平台侧动作——回滚复用工作消息呈现时给标题占位）。 */
+    public static final String RUN_PROMPT_FIELD = "prompt";
+
+    /** run-start 的模型串键（#627 平台侧动作给「platform」占位；非内核 run 无真实模型）。 */
+    public static final String RUN_MODEL_FIELD = "model";
 
     /** 会话标识（会话建立后各事件携带）。 */
     public static final String SESSION_FIELD = "sessionId";
@@ -173,16 +148,6 @@ public final class AgentEventTypes {
      */
     public static final String GUIDE_REPLY = "guide-reply";
 
-    /**
-     * 受理开始（#87 受理动作卡）：受理轮（迭代期意见轮——项目已生成后的意见链
-     * 轮）开场的受理事实——意见已接住、主智能体正在受理（需求不清则追问；需求
-     * 变更则改 PRD）。对话区受理动作卡的呈现源（意见到更新 run 工作消息之间的
-     * 呈现位，原「更新 PRD 中」阶段的归位）；受理落定不出新事件——由该轮
-     * run-finish / error 收口事件推导（重放面随事件族重建）。场景矩阵收口：咨询
-     * 轮与纯追问轮（访谈期意见轮）不发。
-     */
-    public static final String ACCEPTANCE_START = "acceptance-start";
-
     /** 引导回复正文键（平台侧定型文案）。 */
     public static final String GUIDE_TEXT_FIELD = "text";
 
@@ -235,28 +200,20 @@ public final class AgentEventTypes {
     /** 余额提醒卡的留存 id 键（卡锚；run 场拦截不留存，缺省不携带）。 */
     public static final String BALANCE_HOLD_ID_FIELD = "holdId";
 
-    /** 余额提醒卡的被拦车道键（OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿）。 */
+    /** 余额提醒卡的被拦车道键（OPINION=意见 / INQUIRY=咨询）。 */
     public static final String BALANCE_LANE_FIELD = "lane";
 
     /** 余额提醒卡的被拦输入原文键（卡上引用呈现；run 场拦截不携带）。 */
     public static final String BALANCE_PROMPT_FIELD = "prompt";
 
-    /** 余额提醒卡的作用域改稿目标件序键（仅 DESIGN_REVISION 车道携带）。 */
-    public static final String BALANCE_DESIGN_ITEM_FIELD = "designItem";
-
     /** 余额提醒卡的源池余额快照键（分；显负额素材——负额渲染客户端分转元）。 */
     public static final String BALANCE_POOL_BALANCE_FIELD = "sourcePoolBalance";
 
     // ---------- 消息部件（parts 契约，词根 = agentscope 原生 part 族） ----------
-    // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具
-    // 动作部件），收口定格。由 base.agentscope 的部件映射表产出。步骤分组已退役
-    // （#115：步骤序号对用户零信息，部件按序竖排）。
-
-    /** 解说文本部件：text 为完整段非增量（服务端逐段成型，段切分内核共用）。 */
-    public static final String PART_TEXT = "part-text";
-
-    /** part-text 的段文本键（完整段）。 */
-    public static final String PART_TEXT_FIELD = "text";
+    // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（工具动作部件），收口
+    // 定格。由 base.agentscope 的部件映射表产出。步骤分组已退役（#115：步骤序号对
+    // 用户零信息，部件按序竖排）；解说文本部件随 #608 呈现面清场退役（ADR-0057：
+    // 模型文本不直播——过程流＝工具动作流，叙事段守卫的机器语法吞段仍出脱轨信号）。
 
     /**
      * 脱轨信号部件（#240 机器语法吞段的人话留痕）：叙事段守卫识别到机器语法段
@@ -304,68 +261,21 @@ public final class AgentEventTypes {
     public static final String PART_ACTION_LABEL_FIELD = "label";
 
     /**
+     * part-action 的写文件目标路径键（#618 预览跟随）：仅写文件类工具
+     * （write_file／edit_file）可选携带——path 参数原形（相对/锚定两形自选，
+     * 同 closing.files.path 口径）；命令类与读类不携带。前端纯函数据此映射
+     * 应用路由（组件／样式／库／布局等非页面文件不切页），参数在途（started）
+     * 无路径时不携带。
+     */
+    public static final String PART_ACTION_PATH_FIELD = "path";
+
+    /**
      * part-action 的失败留痕键（#229）：仅 state=failed 携带——错误/stderr 首行
      * 截断（与 {@link #PART_ACTION_LABEL_FIELD} 各管各的截断额度）；结果文本为
      * 空 / 首行空白不携带（可缺省）。失败红行＝label＋error，排障不进容器即可
      * 初判原因。
      */
     public static final String PART_ACTION_ERROR_FIELD = "error";
-
-    /**
-     * 步骤清单部件（#236）：run 级步骤清单的<b>全量快照</b>——agent 调 update_plan
-     * 工具自产计划（步骤：稳定 id、标题、状态 ✓●○），由部件映射表从工具参数增量
-     * 解析产出（不走动作行、不留动作痕——计划变化不进部件流水）。快照式：执行中
-     * 再调即整表替换（已收口步骤不可变＝提示词纪律，平台 v1 不强制校验）；断线
-     * 补发以最后快照为准；不落库（当次会话定格留驻，刷新不回显）；步骤不设 ✗ 态
-     * （失败留痕归动作部件与收尾卡）。契约与来源解耦——本部件不携带计划来源
-     * （v1 run 执行体提示词直产；skill 线接入时再议标注）。
-     */
-    public static final String PART_PLAN = "part-plan";
-
-    /** part-plan 的步骤清单键（值 = 全量快照数组，元素字段见 PART_PLAN_STEP_*）。 */
-    public static final String PART_PLAN_STEPS_FIELD = "steps";
-
-    /** part-plan 步骤的稳定 id 键（跨多次调用不变——就地整表更新的锚）。 */
-    public static final String PART_PLAN_STEP_ID_FIELD = "id";
-
-    /** part-plan 步骤的标题键（用户语言一句话）。 */
-    public static final String PART_PLAN_STEP_TITLE_FIELD = "title";
-
-    /** part-plan 步骤的状态键（值 = PART_PLAN_STATE_* 常量，✓●○ 三态）。 */
-    public static final String PART_PLAN_STEP_STATE_FIELD = "state";
-
-    /** 步骤待做（○）。 */
-    public static final String PART_PLAN_STATE_PENDING = "pending";
-
-    /** 步骤进行中（● 当前步）。 */
-    public static final String PART_PLAN_STATE_IN_PROGRESS = "in_progress";
-
-    /** 步骤已完成（✓——已收口不可变）。 */
-    public static final String PART_PLAN_STATE_COMPLETED = "completed";
-
-    /**
-     * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的
-     * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成 = 8081
-     * 探活、更新 = finish_edit 收口事实），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、
-     * 落定发 {@link #PART_CHECK_STATE_PASSED}/{@link #PART_CHECK_STATE_FAILED}。静默重试
-     * 同构口径（#84）：尝试间核验未过不发 failed——部件停在 checking（重试信号不外泄，
-     * 重复 checking 幂等）；failed 仅在末次尝试未过（超限转终态）时发，与
-     * {@link #RUN_FAILED} 同窗口到达。状态终值 = 探活结果，可被收尾统计消费（#88
-     * 轮末统计行）。
-     */
-    public static final String PART_CHECK = "part-check";
-
-    /** part-check 的核验状态键（值 = PART_CHECK_STATE_* 常量）。 */
-    public static final String PART_CHECK_STATE_FIELD = "state";
-
-    /** 核验进行中（收口判据核验开始——「正在检查系统」）。 */
-    public static final String PART_CHECK_STATE_CHECKING = "checking";
-
-    /** 核验通过（收口判据落定，run-finish 随之放行）。 */
-    public static final String PART_CHECK_STATE_PASSED = "passed";
-
-    /** 核验未过（仅末次尝试——超限转终态，与 run-failed 同窗口）。 */
-    public static final String PART_CHECK_STATE_FAILED = "failed";
 
     /**
      * 消息附件部件（契约预留，#97 圈注）：圈注锚随消息发送的载荷位——结构化定位
@@ -376,7 +286,8 @@ public final class AgentEventTypes {
 
     // part-hint（#437 决策时微指令的用户面部件）2026-11-12 退役：微指令是模型面
     // 指引、给用户看只添噪（生产实案同一提示每迭代重注刷屏），注入观测走
-    // DecisionHintMiddleware 的 INFO 日志。类型与常量整体摘除——SSE 事件面不再
+    // DecisionHintMiddleware 的 INFO 日志（该中间件本体随 #604 run 尝试体旧机制
+    // 一并退役）。类型与常量整体摘除——SSE 事件面不再
     // 有该事件，历史存量事件前端按未知类型忽略。
 
     private AgentEventTypes() {

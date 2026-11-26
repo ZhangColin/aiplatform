@@ -31,8 +31,9 @@ import com.semgravio.aiplatform.business.order.domain.enums.ContractStatus;
  * @param scopeTimeline    范围快照·工期口径（冻结副本）
  * @param amount           冻结金额（分，随冻结价目行定格）
  * @param currency         币种（v1 恒 CNY）
- * @param prdVersionNo     PRD 确认版本号（#335 冻结集冗余）
- * @param demoVersionNo    Demo 确认版本号引用（#15 冻结集）
+ * @param prdVersionNo     PRD 确认版本号（#335 冻结集冗余；#629 起新合同 null——历史合同照读）
+ * @param demoVersionNo    Demo 确认版本号引用（#15 冻结集；#629 起新合同 null——历史合同照读）
+ * @param confirmedVersionNo 已确认用户面版本号（#629：旧两套版本引用收敛为一个——遗留合同 null）
  * @param partyASigned     甲方签署位（未签/已签）
  * @param partyASignedAt   甲方落签时点（未签 null）
  * @param partyBSigned     乙方签署位
@@ -58,6 +59,7 @@ public record ContractResponse(
         String currency,
         Integer prdVersionNo,
         Integer demoVersionNo,
+        Integer confirmedVersionNo,
         boolean partyASigned,
         LocalDateTime partyASignedAt,
         boolean partyBSigned,
@@ -86,6 +88,7 @@ public record ContractResponse(
                 contract.getCurrency(),
                 contract.getPrdVersionNo(),
                 contract.getDemoVersionNo(),
+                contract.getConfirmedVersionNo(),
                 contract.isPartyASigned(),
                 contract.getPartyASignedAt(),
                 contract.isPartyBSigned(),

@@ -344,14 +344,13 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
         projectId: "p1",
         runId: "run-b2",
         holdId: "bh-2",
-        lane: "DESIGN_REVISION",
-        prompt: "把首页改大气些",
-        designItem: 2,
+        lane: "INQUIRY",
+        prompt: "把导出格式说明一下",
         sourcePoolBalance: -1200,
       },
       "b2:1",
     ));
-    // run 场拦截（生成/修正/设计派发）——无留存无原文，取代上一张卡
+    // run 场拦截（生成/修正）——无留存无原文，取代上一张卡
     dispatchAgentEvent(agentQc, agentEvent(
       "balance-reminder",
       { projectId: "p1", runId: "run-b3", sourcePoolBalance: -300 },
@@ -456,57 +455,6 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     expect(chat?.turnActive).toBe(false);
   });
 
-  it("受理动作卡全轮序（#87）：意见 → acceptance-start 落卡（先于 run-start——服务端守卫后、受理动作前发）→ 追问挂起不落定 → 答复续跑收口（run-finish）落定——衔接更新 run 工作消息", () => {
-    // 镜面服务端 MainAgentAppServiceTest 脚本化受理轮（追问分岔）：事件序 =
-    // acceptance-start → run-start(agent=main) → 解说 → question-raised →
-    // （作答）run-finish → run-start(agent=executor，更新 run 工作消息起锚）
-    dispatchAgentEvent(agentQc, agentEvent("acceptance-start", { projectId: "p1", runId: "run1" }, "run1:1"));
-    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "把系统的主色调改成绿色", model: "m1", agent: "main" }, "run1:2"));
-    dispatchAgentEvent(agentQc, agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "main-p1", data: { delta: "我来处理这个需求" } }, "run1:3"));
-    dispatchAgentEvent(agentQc,
-      agentEvent(
-        "question-raised",
-        {
-          projectId: "p1",
-          runId: "run1",
-          sessionId: "main-p1",
-          summary: "想要哪种绿?",
-          engineRef: "reply-7",
-          data: {
-            toolCalls: [{ id: "tc-1", name: "ask_user", input: {} }],
-            questions: [{ header: "主色调", question: "想要哪种绿?", multiple: false, custom: true, options: [{ label: "薄荷绿" }] }],
-          },
-        },
-        "run1:4",
-      ),
-    );
-    let chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages).toEqual([
-      { kind: "user", id: expect.any(String), text: "把系统的主色调改成绿色", runId: "run1" },
-      { kind: "acceptance", id: "run1:1", runId: "run1", settled: false },
-      { kind: "agent", id: expect.any(String), text: "我来处理这个需求", runId: "run1" },
-      expect.objectContaining({ kind: "question", runId: "run1" }),
-    ]);
-
-    // 答复续跑收口：run-finish 落定受理卡（受理完成）；随后更新 run 起跑（executor
-    // 工作消息）——对话区连续衔接
-    dispatchAgentEvent(agentQc, agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "main-p1", finish: "end" }, "run1:5"));
-    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run9", prompt: "系统更新：把主色调改为绿", model: "m1", agent: "executor" }, "run9:1"));
-
-    chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages[1]).toMatchObject({ kind: "acceptance", runId: "run1", settled: true });
-    expect(useWorkMessageStore.getState().works["p1"]).toMatchObject({ runId: "run9" });
-  });
-
-  it("受理轮失败（error）：受理卡落定不死转（#87——炸轮有中断提示兜底，卡不悬转）", () => {
-    dispatchAgentEvent(agentQc, agentEvent("acceptance-start", { projectId: "p1", runId: "run1" }, "run1:1"));
-    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "意见", model: "m1", agent: "main" }, "run1:2"));
-    dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:3"));
-
-    const chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages[1]).toMatchObject({ kind: "acceptance", runId: "run1", settled: true });
-    expect(chat?.messages.filter((m) => m.kind === "error")).toHaveLength(1);
-  });
 });
 
 describe("bridge · 智能体事件 → generation store（生成面，#22）", () => {
@@ -529,7 +477,7 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     // 到达按 miss 忽略，状态不因杂音漂移
     dispatchAgentEvent(agentQc, agentEvent("run-retrying", { projectId: "p1", runId: "run1", attempt: 2, message: "遇到问题，正在重试" }, "run1:9"));
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", text: "从中断处继续" }, "run1:10"));
+    dispatchAgentEvent(agentQc, agentEvent("part-action", { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", toolCallId: "tc-r", toolName: "write_file", state: "running", label: "编写【首页】" }, "run1:10"));
 
     // 同锚收口 → finished + 预览纪元 +1（重挂信号）
     dispatchAgentEvent(agentQc, agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" }, "run1:11"));
@@ -547,14 +495,14 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
   });
 
-  it("run-start(agent=executor) 失效 projects＋documents 双域（#462：记行先于事件落库——阶段门即时解锁，不卡到刷新）；main 轮不失效 documents", () => {
+  it("run-start(agent=executor) 失效 projects 域（#630：首建阶段门读生成态，版本记行退场不再连带 documents）；main 轮不失效 documents", () => {
     const invalidate = vi.spyOn(agentQc, "invalidateQueries");
 
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统", agent: "executor" }, "run1:1",
     ));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.projects.all });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.documents.all });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.documents.all });
 
     invalidate.mockClear();
     dispatchAgentEvent(agentQc, agentEvent(
@@ -572,7 +520,6 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
     const sequence: [string, Record<string, unknown>][] = [
       ["run-start", { ...base, prompt: "做系统", model: "m", agent: "executor" }],
-      ["part-text", { ...base, text: "先搭骨架" }],
       ["part-action", { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【首页】" }],
     ];
     sequence.forEach(([type, payload], index) => {
@@ -593,7 +540,7 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.frozen).toBe(true);
-    expect(work?.parts).toHaveLength(2);
+    expect(work?.parts).toHaveLength(1);
   });
 
   it("run-finish 重放（同事件 id）不重复计预览纪元", () => {
@@ -705,8 +652,9 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
    * 镜面服务端断言（AgentscopeAgentClientTest·given_scripted_coding_run_
    * when_converse_then_part_events_full_lifecycle）：同一剧本的部件序列 →
    * 前端工作消息部件结构——双侧同源于契约正本（SSE事件清单·消息部件事件节）。
+   * #608 起模型文本不直播：解说事件退役，只余动作部件。
    */
-  it("编码 run 全部件序：解说 → 动作 started/running/completed → 解说 → 收口定格", () => {
+  it("编码 run 部件序：动作 started/running/completed → 收口定格", () => {
     const t0 = "2026-09-05T06:00:00.000Z";
     const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
@@ -717,7 +665,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       "run1:1",
       at(0),
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在编写订单管理页面。" }, "run1:3", at(2)));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-action",
       { ...base, toolCallId: "tc-1", toolName: "write_file", state: "started", label: "编写【代码文件】" },
@@ -726,17 +673,18 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-action",
-      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【订单管理】" },
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【订单管理】",
+        path: "src/app/orders/page.tsx" }, // #618：写文件路径（落定起携带）
       "run1:5",
       at(4),
     ));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-action",
-      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "completed", label: "编写【订单管理】" },
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "completed", label: "编写【订单管理】",
+        path: "src/app/orders/page.tsx" },
       "run1:6",
       at(8),
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "订单管理完成" }, "run1:7", at(9)));
     dispatchAgentEvent(agentQc, agentEvent(
       "run-finish",
       { ...base, finish: "end" },
@@ -748,83 +696,35 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     expect(work?.runId).toBe("run1");
     expect(work?.frozen).toBe(true); // 收口定格
     expect(work?.parts).toEqual([
-      { kind: "text", id: "run1:3", text: "正在编写订单管理页面。" },
       {
         kind: "action",
         id: "run1:4",
+        source: undefined,
         toolCallId: "tc-1",
         toolName: "write_file",
         state: "completed",
         label: "编写【订单管理】", // running 起具体对象，终态复述不闪换
+        error: undefined,
+        path: "src/app/orders/page.tsx", // #618 预览跟随的路径来源（跨状态保留）
       },
-      { kind: "text", id: "run1:7", text: "订单管理完成" },
     ]);
   });
 
   /**
-   * 自检播报（#85，镜面服务端 GenerationAppServiceTest·收口核验事件序断言）：
-   * 收口判据核验「检查中 → 通过」位于真收口 run-finish 前——工作消息尾部一个
-   * 自检部件原位换装，run-finish 定格后留驻（终值 = 探活结果，收尾卡统计行
-   * 随 #88 消费）。
+   * 呈现面清场（#608）：part-check（自检播报）随发射源退役——桥对存量事件按
+   * 未知平台类型忽略，不进部件流水、不影响工作消息。
    */
-  it("part-check：checking → passed 原位换装后随 run-finish 定格（无 engine 字段的平台侧部件）", () => {
-    const t0 = "2026-09-05T06:00:00.000Z";
-    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
+  it("part-check（已退役）：桥忽略该类型事件，不进部件流水", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1" };
-
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
       { ...base, prompt: "做系统", model: "m", engine: "agentscope", agent: "executor" },
       "run1:1",
-      at(0),
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, engine: "agentscope", text: "骨架已就位" }, "run1:2", at(1)));
-    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "checking" }, "run1:3", at(8)));
-    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "passed" }, "run1:4", at(9)));
-    dispatchAgentEvent(agentQc, agentEvent("run-finish", { ...base, engine: "agentscope", finish: "end" }, "run1:5", at(10)));
+    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "checking" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "passed" }, "run1:3"));
 
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.frozen).toBe(true);
-    expect(work?.parts).toEqual([
-      { kind: "text", id: "run1:2", text: "骨架已就位" },
-      {
-        kind: "check",
-        id: "run1:3", // 首见 checking 事件 id——原位换装不改键
-        state: "passed",
-      },
-    ]);
-  });
-
-  /**
-   * 自检终态面（镜面服务端「核验全程不过」断言）：末次核验未过 ❌ 先于
-   * run-failed 到达——自检部件定格 failed，工作消息随 run-failed 定格。
-   */
-  it("part-check failed → run-failed：❌ 定格留驻，消息定格", () => {
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { projectId: "p1", runId: "run1", sessionId: "coder-p1", prompt: "做系统", model: "m", agent: "executor" },
-      "run1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "part-check",
-      { projectId: "p1", runId: "run1", sessionId: "coder-p1", state: "checking" },
-      "run1:2",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "part-check",
-      { projectId: "p1", runId: "run1", sessionId: "coder-p1", state: "failed" },
-      "run1:3",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-failed",
-      { projectId: "p1", runId: "run1" },
-      "run1:4",
-    ));
-
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.frozen).toBe(true);
-    expect(work?.parts).toHaveLength(1);
-    expect(work?.parts[0]).toMatchObject({ kind: "check", state: "failed" });
+    expect(useWorkMessageStore.getState().works["p1"]?.parts).toEqual([]);
   });
 
   it("run-start 无 executor 配置键（main/一次性调用）不起工作消息；对话部件不误建", () => {
@@ -834,27 +734,24 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       "rb:1",
     ));
     dispatchAgentEvent(agentQc, agentEvent(
-      "part-text",
-      { projectId: "p1", runId: "rb", sessionId: "main-p1", engine: "agentscope", text: "对话解说段" },
+      "part-action",
+      { projectId: "p1", runId: "rb", sessionId: "main-p1", engine: "agentscope",
+        toolCallId: "tc-m", toolName: "write_file", state: "running", label: "编写【PRD】" },
       "rb:2",
     ));
 
     expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
   });
 
-  it("run-start(executor) 携 slice（#118）：工作消息落切片标题与进度（头部「{title}（{index}/{total}）」呈现源）", () => {
+  it("run-start(executor) 携 slice（#118）：工作消息落用户语言标题（#608 起无切片进度）", () => {
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
       { projectId: "p1", runId: "run1", prompt: "做系统", model: "m", agent: "executor",
-        slice: { title: "商品浏览", index: 2, total: 5 } },
+        slice: { title: "系统初始化" } },
       "run1:1",
     ));
 
-    expect(useWorkMessageStore.getState().works["p1"]?.slice).toEqual({
-      title: "商品浏览",
-      index: 2,
-      total: 5,
-    });
+    expect(useWorkMessageStore.getState().works["p1"]?.slice).toEqual({ title: "系统初始化" });
   });
 
   it("更新 run 的 run-start（#118）：slice 只携用户语言标题（无 index/total，无进度）", () => {
@@ -925,7 +822,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       { ...base, runId: "run1", prompt: "做系统", model: "m", agent: "executor" },
       "run1:1",
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, runId: "run1", text: "第一尝试解说" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("part-action", { ...base, runId: "run1", toolCallId: "tc-a", toolName: "write_file", state: "running", label: "编写【A】" }, "run1:2"));
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
       { ...base, runId: "run2", prompt: "做系统", model: "m", agent: "executor" },
@@ -938,11 +835,10 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
   });
 
   /**
-   * 步骤清单（#236 part-plan）：agent 调 update_plan 的全量快照——整表落 `plan`
-   * （不进 parts 流水：不走动作行、不留动作痕、不单独播报）；执行中再调即新快照
-   * 盖旧表（追加步骤 + 推进状态就地更新，平台不合并）。
+   * 呈现面清场（#608）：part-plan（步骤清单快照）随发射源退役——桥对存量事件按
+   * 未知平台类型忽略，不进部件流水、不落任何计划态。
    */
-  it("part-plan：快照整表落 plan（parts 流水零增量），再调盖旧表", () => {
+  it("part-plan（已退役）：桥忽略该类型事件，不进部件流水", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
@@ -951,104 +847,9 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ));
     dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
       { id: "s1", title: "读取现有配色", state: "completed" },
-      { id: "s2", title: "调整主题色", state: "in_progress" },
     ] }, "run1:2"));
 
-    const first = useWorkMessageStore.getState().works["p1"];
-    expect(first?.plan).toEqual([
-      { id: "s1", title: "读取现有配色", state: "completed" },
-      { id: "s2", title: "调整主题色", state: "in_progress" },
-    ]);
-    expect(first?.parts).toEqual([]); // 计划变化不产生播报部件/动作部件
-
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "读取现有配色", state: "completed" },
-      { id: "s2", title: "调整主题色", state: "completed" },
-      { id: "s3", title: "重启服务验证", state: "pending" },
-    ] }, "run1:3"));
-
-    const second = useWorkMessageStore.getState().works["p1"];
-    expect(second?.plan).toHaveLength(3); // 全量快照：终态 = 最后快照
-    expect(second?.plan?.[1]).toEqual({ id: "s2", title: "调整主题色", state: "completed" });
-    expect(second?.parts).toEqual([]);
-  });
-
-  /** 断线补发口径（#236）：重放按事件序、同一事件 id 去重——重放不回退，最后快照为准。 */
-  it("part-plan 重放：同 id 去重不回退；补发窗口内新事件照收（最后快照即终态）", () => {
-    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...base, prompt: "改配色", model: "m", agent: "executor" },
-      "run1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "调整主题色", state: "completed" },
-      { id: "s2", title: "验证效果", state: "in_progress" },
-    ] }, "run1:2"));
-    // 断线重连补发已见事件（同 id）：去重，旧快照不回退
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "调整主题色", state: "in_progress" },
-    ] }, "run1:2"));
-    expect(useWorkMessageStore.getState().works["p1"]?.plan).toHaveLength(2);
-
-    // 补发窗口内错过的更晚快照（新 id）：照收，终态 = 最后快照
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "调整主题色", state: "completed" },
-      { id: "s2", title: "验证效果", state: "completed" },
-    ] }, "run1:3"));
-    expect(useWorkMessageStore.getState().works["p1"]?.plan?.every(
-      (step) => step.state === "completed",
-    )).toBe(true);
-  });
-
-  /** 定格守卫：run-finish / run-failed 后快照不进（收口定格留驻最后快照，#117 口径同款）。 */
-  it("part-plan：定格后不进——收口即计划终形", () => {
-    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...base, prompt: "改配色", model: "m", agent: "executor" },
-      "run1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "调整主题色", state: "in_progress" },
-    ] }, "run1:2"));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-finish",
-      { ...base, finish: "end" },
-      "run1:3",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "调整主题色", state: "completed" },
-    ] }, "run1:4"));
-
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.frozen).toBe(true);
-    expect(work?.plan).toEqual([{ id: "s1", title: "调整主题色", state: "in_progress" }]);
-  });
-
-  /** 载荷容错（toWorkPlanSteps 兜底）：缺 id/标题剔除、未知状态回落 pending、空表忽略不清好表。 */
-  it("part-plan 畸形载荷：防御归一落态（服务端内核已归一，此处兜底）", () => {
-    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...base, prompt: "改配色", model: "m", agent: "executor" },
-      "run1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
-      { id: "s1", title: "读文件" },            // 缺 state → pending
-      { id: "s2", title: "改色", state: "done" }, // 未知 state → pending
-      { id: "s3", state: "in_progress" },         // 缺 title → 剔除
-      "not an object",                            // 非对象 → 剔除
-    ] }, "run1:2"));
-
-    expect(useWorkMessageStore.getState().works["p1"]?.plan).toEqual([
-      { id: "s1", title: "读文件", state: "pending" },
-      { id: "s2", title: "改色", state: "pending" },
-    ]);
-
-    // 空表（全畸形归一后为空）忽略：不清已有好表
-    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: "garbage" }, "run1:3"));
-    expect(useWorkMessageStore.getState().works["p1"]?.plan).toHaveLength(2);
+    expect(useWorkMessageStore.getState().works["p1"]?.parts).toEqual([]);
   });
 
   /**
@@ -1062,7 +863,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       { ...base, prompt: "改配色", model: "m", agent: "executor" },
       "run1:1",
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "先跑一遍验证。" }, "run1:2"));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-signal",
       { ...base, source: "verify", signal: "derailed" },
@@ -1077,7 +877,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
 
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.parts).toEqual([
-      { kind: "text", id: "run1:2", source: undefined, text: "先跑一遍验证。" },
       { kind: "signal", id: "run1:3", source: "verify", signal: "derailed" },
     ]);
   });
@@ -1093,8 +892,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       { ...base, engine: "agentscope", prompt: "改配色", model: "m", agent: "executor" },
       "run1:1",
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text",
-      { ...base, engine: "agentscope", text: "先跑一遍验证。" }, "run1:2"));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-hint",
       { ...base, kind: "failure_stop_loss", text: "同一错误已连续失败 3 次，请换用别的策略。" },
@@ -1102,9 +899,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ));
 
     const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.parts).toEqual([
-      { kind: "text", id: "run1:2", source: undefined, text: "先跑一遍验证。" },
-    ]);
+    expect(work?.parts).toEqual([]);
   });
 });
 
@@ -1130,7 +925,7 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
     // 未登记的 run（无 CODER run-start 前置）：不失效
     expect(projects.fetchCount()).toBe(1);
 
-    // 起跑即失效（#222 四态投影回「生成中」——补产轮再派无对话面事件可搭）
+    // 起跑即失效（#222 生成态投影回「生成中」——收口观测直派无对话面事件可搭）
     dispatchAgentEvent(
       queryClient,
       {
@@ -1161,7 +956,7 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
     queryClient.clear();
   });
 
-  it("coder run-failed → projects 域 active query 重拉（#222 四态投影回「生成中断」——「继续生成」出口由投影派生）", async () => {
+  it("coder run-failed → projects 域 active query 重拉（#222 终态收口在途标记已清——未生成的项目生成态投影回「从未生成」；#604 起失败不落投影）", async () => {
     useGenerationStore.setState({ generations: {} });
     const queryClient = new QueryClient();
     queryClient.setDefaultOptions({ queries: { retry: false } });
@@ -1216,11 +1011,8 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
   }
 
   const closing = {
-    summary: "修订了需求文档，并更新了系统",
-    prdChanged: true,
-    prdNote: "配送范围改为全国",
-    systemChanged: true,
-    systemNote: "下单页新增配送范围说明",
+    narrative: "下单页已加入配送范围说明。",
+    criteria: { buildPassed: true, previewPassed: true },
     files: [
       { path: "/src/App.jsx", added: 4, removed: 0 },
       { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
@@ -1233,7 +1025,7 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
    * closes_then_run_finish_carries_authoritative_closing）：编码 run 真收口的
    * run-finish 携 closing——收尾卡归对话流（#89：chat store 常驻、live 到达经
    * appendClosing），工作消息原地定格留驻（#117：部件保留、不再清空——「过程上文、
-   * 结果下卡」，判定行不由前端推导）；对话史域失效（水合增量接管）。
+   * 结果下卡」，判据/清单不由前端推导）；对话史域失效（水合增量接管）。
    */
   it("编码 run 收口携 closing：收尾卡落对话流、工作消息定格留驻、对话史域失效（#89/#117）", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
@@ -1242,8 +1034,7 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
       { ...base, prompt: "系统修正：下单页加配送范围说明", model: "m", agent: "executor" },
       "run1:1",
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在更新下单页" }, "run1:2"));
-    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "passed" }, "run1:3"));
+    dispatchAgentEvent(agentQc, agentEvent("part-action", { ...base, toolCallId: "tc-u", toolName: "edit_file", state: "completed", label: "修改【下单页】" }, "run1:2"));
     dispatchAgentEvent(agentQc, agentEvent(
       "run-finish",
       { ...base, finish: "end", closing },
@@ -1252,7 +1043,7 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
 
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.frozen).toBe(true);
-    expect(work?.parts).toHaveLength(2); // 工作消息定格留驻（#117 不再清空）
+    expect(work?.parts).toHaveLength(1); // 工作消息定格留驻（#117 不再清空）
     // 收尾卡归对话流（#89）：chat store 常驻（live 到达，id = 事件 id 去重锚）
     const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
     const card = messages.find((message) => message.kind === "closing");
@@ -1294,7 +1085,7 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
       { ...base, prompt: "做系统", model: "m", agent: "executor" },
       "run1:1",
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在做" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("part-action", { ...base, toolCallId: "tc-x", toolName: "write_file", state: "running", label: "编写【首页】" }, "run1:2"));
     dispatchAgentEvent(agentQc, agentEvent(
       "run-finish",
       { ...base, finish: "end", closing: "坏形状" },
@@ -1305,268 +1096,5 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
     expect(work?.parts).toHaveLength(1);
     const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
     expect(messages.some((message) => message.kind === "closing")).toBe(false);
-  });
-});
-
-describe("bridge · designer 事件 → 直播卡生长＋收尾卡稿清单（#290 事件→状态 seam）", () => {
-  beforeEach(() => {
-    useChatStore.setState({ chats: {} });
-    useGenerationStore.setState({ generations: {} });
-    useWorkMessageStore.setState({ works: {} });
-  });
-
-  function agentEvent(
-    type: string,
-    payload: Record<string, unknown>,
-    id: string,
-    ts = "",
-  ): SseEvent {
-    return { id, data: JSON.stringify({ type, payload, ts }) };
-  }
-
-  /** designer 会话事件公共字段（每设计物一个设计会话：designer-{projectId}-item-{ord}）。 */
-  const designRun = {
-    projectId: "p1",
-    runId: "run-d1",
-    sessionId: "designer-p1-item-1",
-    engine: "agentscope",
-  };
-
-  it("run-start(agent=designer)：直播卡起锚（座席＋设计物标题进度＋时钟锚）、项目域失效（清单落表晚于 document-updated）", () => {
-    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
-    const teardown = projects.unsubscribe;
-    return projects
-      .waitForSettled()
-      .then(async () => {
-        dispatchAgentEvent(agentQc, agentEvent(
-          "run-start",
-          {
-            ...designRun,
-            prompt: "设计稿产出…",
-            model: "m",
-            agent: "designer",
-            slice: { title: "首页主视觉", index: 1, total: 3 },
-          },
-          "run-d1:1",
-          "2026-10-06T08:00:00Z",
-        ));
-
-        const work = useWorkMessageStore.getState().works["p1"];
-        expect(work).toMatchObject({
-          runId: "run-d1",
-          frozen: false,
-          seat: "designer",
-          slice: { title: "首页主视觉", index: 1, total: 3 },
-          startedAt: Date.parse("2026-10-06T08:00:00Z"),
-        });
-        // 生成面不涉（designer 非编码 run——四态投影不漂）
-        expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
-        await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
-      })
-      .finally(() => teardown());
-  });
-
-  it("部件事件 → 直播卡生长：解说/写稿动作/自检核验照常进卡（事件封闭集零新增——同 parts 契约）", () => {
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...designRun, prompt: "…", model: "m", agent: "designer", slice: { title: "首页主视觉", index: 1, total: 3 } },
-      "run-d1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...designRun, text: "先读 PRD 清单章" }, "run-d1:2"));
-    dispatchAgentEvent(agentQc, agentEvent("part-action", {
-      ...designRun,
-      toolCallId: "tc-1",
-      toolName: "write_file",
-      state: "running",
-      label: "编写【home-1】",
-    }, "run-d1:3"));
-    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...designRun, state: "checking" }, "run-d1:4"));
-
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.parts.map((part) => part.kind)).toEqual(["text", "action", "check"]);
-    expect(useChatStore.getState().chats["p1"]).toBeUndefined(); // 解说不进对话面（长在直播卡）
-  });
-
-  it("part-action（designer 写动作 completed）→ 文件树失效（#294 渐进长出——稿落盘即重拉树）；running/读类/他 run 不触发", async () => {
-    const files = observeActiveQuery(agentQc, queryKeys.projects.files("p1"));
-    try {
-      await files.waitForSettled();
-      dispatchAgentEvent(agentQc, agentEvent(
-        "run-start",
-        { ...designRun, prompt: "…", model: "m", agent: "designer", slice: { title: "首页主视觉", index: 1, total: 3 } },
-        "run-d1:1",
-      ));
-      // run-start 失效的是 projects 域（前缀命中 files）——先等这次重拉落定再区分后续
-      await vi.waitFor(() => expect(files.fetchCount()).toBe(2));
-      const base = files.fetchCount();
-
-      // running 不触发（稿未落盘——文件树无新事实）
-      dispatchAgentEvent(agentQc, agentEvent("part-action", {
-        ...designRun, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【home-1】",
-      }, "run-d1:2"));
-      // 读类完成不触发（读不落盘）
-      dispatchAgentEvent(agentQc, agentEvent("part-action", {
-        ...designRun, toolCallId: "tc-2", toolName: "read_file", state: "completed", label: "读取【PRD】",
-      }, "run-d1:3"));
-      // 他 run 的写完成不触发（锚定判定——designer 座席＋runId 双锚）
-      dispatchAgentEvent(agentQc, agentEvent("part-action", {
-        ...designRun, runId: "run-x", toolCallId: "tc-3", toolName: "write_file", state: "completed", label: "编写【他件】",
-      }, "run-x:1"));
-      expect(files.fetchCount()).toBe(base);
-
-      // 写动作完成（write_file/edit_file/generate_image）——稿落盘即失效（逐张不等齐）
-      dispatchAgentEvent(agentQc, agentEvent("part-action", {
-        ...designRun, toolCallId: "tc-4", toolName: "write_file", state: "completed", label: "编写【home-1】",
-      }, "run-d1:4"));
-      await vi.waitFor(() => expect(files.fetchCount()).toBe(base + 1));
-      dispatchAgentEvent(agentQc, agentEvent("part-action", {
-        ...designRun, toolCallId: "tc-5", toolName: "generate_image", state: "completed", label: "出图【海报】",
-      }, "run-d1:5"));
-      await vi.waitFor(() => expect(files.fetchCount()).toBe(base + 2));
-    } finally {
-      files.unsubscribe();
-    }
-  });
-
-  it("run-finish 携 closing.drafts：收尾卡稿清单入对话流、直播卡定格留驻、项目域失效（件状态落表推进计划区）", async () => {
-    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
-    try {
-      await projects.waitForSettled();
-      const baseFetches = projects.fetchCount();
-      dispatchAgentEvent(agentQc, agentEvent(
-        "run-start",
-        { ...designRun, prompt: "…", model: "m", agent: "designer", slice: { title: "首页主视觉", index: 1, total: 3 } },
-        "run-d1:1",
-      ));
-      dispatchAgentEvent(agentQc, agentEvent("part-text", { ...designRun, text: "本件产出三稿" }, "run-d1:2"));
-      dispatchAgentEvent(agentQc, agentEvent(
-        "run-finish",
-        {
-          ...designRun,
-          finish: "end",
-          closing: {
-            summary: "完成设计物：首页主视觉",
-            prdChanged: false,
-            systemChanged: false,
-            systemNote: "完成设计物：首页主视觉",
-            files: [{ path: "/design/home-1.html", added: 120, removed: 0 }],
-            durationMs: 95_000,
-            drafts: [
-              { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
-              { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
-            ],
-          },
-        },
-        "run-d1:3",
-      ));
-
-      const work = useWorkMessageStore.getState().works["p1"];
-      expect(work).toMatchObject({ frozen: true, seat: "designer" }); // 定格留驻（#117 同律）
-      const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
-      expect(card).toMatchObject({ runId: "run-d1" });
-      expect((card as { closing: { drafts?: unknown[] } }).closing.drafts).toHaveLength(2);
-      // 件收口落轨道表 → 失效项目域（计划区 ✓ 推进）
-      await vi.waitFor(() => expect(projects.fetchCount()).toBeGreaterThan(baseFetches + 1));
-    } finally {
-      projects.unsubscribe();
-    }
-  });
-
-  it("定稿收尾卡（#291，平台侧发射、无锚定直播卡）：closing.drafts 在场即入流＋失效项目域（件状态转已定稿进计划区）", async () => {
-    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
-    const baseFetches = projects.fetchCount();
-    try {
-      await projects.waitForSettled();
-      // 平台侧定稿发射：无 run-start、无过程事件——run-finish 直达（version 锚＋
-      // drafts 单条携 triggers）
-      dispatchAgentEvent(agentQc, agentEvent(
-        "run-finish",
-        {
-          ...designRun,
-          finish: "end",
-          closing: {
-            summary: "定稿设计物：首页主视觉",
-            prdChanged: false,
-            systemChanged: false,
-            files: [],
-            durationMs: 300,
-            version: "abc123def456",
-            drafts: [
-              {
-                item: "首页主视觉",
-                media: "html",
-                path: "/design/home-2.html",
-                triggers: ["设计已全部定稿，可以确认下单了"],
-              },
-            ],
-          },
-        },
-        "run-f2:1",
-      ));
-
-      // 无锚定 run：工作消息不建不定格（定稿不是 run）
-      expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
-      // 收尾卡直达对话流：version 锚与 triggers 完整
-      const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
-      expect(card).toMatchObject({ runId: "run-d1" });
-      const closing = (card as { closing: { version?: string; drafts?: Array<{ triggers?: string[] }> } }).closing;
-      expect(closing.version).toBe("abc123def456");
-      expect(closing.drafts?.[0].triggers).toEqual(["设计已全部定稿，可以确认下单了"]);
-      // 件状态落轨道表 → 失效项目域（finalized_path 透出）
-      await vi.waitFor(() => expect(projects.fetchCount()).toBeGreaterThan(baseFetches));
-    } finally {
-      projects.unsubscribe();
-    }
-  });
-
-  it("error（设计会话在途）不进对话面（重试全程静默——run-failed 才是唯一失败终态）", () => {
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...designRun, prompt: "…", model: "m", agent: "designer" },
-      "run-d1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent("error", { ...designRun, message: "模型调用失败" }, "run-d1:2"));
-
-    expect(useChatStore.getState().chats["p1"]).toBeUndefined(); // 无失败气泡、无收轮副作用
-    expect(useWorkMessageStore.getState().works["p1"]?.frozen).toBe(false); // 卡不闪定格
-  });
-
-  it("run-failed（设计轨超限终态）：直播卡定格留驻、项目域失效（件 ✗ 落表）", async () => {
-    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
-    try {
-      await projects.waitForSettled();
-      const baseFetches = projects.fetchCount();
-      dispatchAgentEvent(agentQc, agentEvent(
-        "run-start",
-        { ...designRun, prompt: "…", model: "m", agent: "designer" },
-        "run-d1:1",
-      ));
-      dispatchAgentEvent(agentQc, agentEvent("part-text", { ...designRun, text: "尝试中" }, "run-d1:2"));
-      dispatchAgentEvent(agentQc, agentEvent("run-failed", { ...designRun }, "run-d1:3"));
-
-      expect(useWorkMessageStore.getState().works["p1"]).toMatchObject({ frozen: true, seat: "designer" });
-      // 生成面不写中断（设计轨无「继续生成」出口——重提意见走收口链）
-      expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
-      await vi.waitFor(() => expect(projects.fetchCount()).toBeGreaterThan(baseFetches + 1));
-    } finally {
-      projects.unsubscribe();
-    }
-  });
-
-  it("与构建 run 同构不混淆（agent 标识区分）：executor 锚在途时 designer 会话部件不进卡、不重锚", () => {
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { projectId: "p1", runId: "run-c1", prompt: "做系统", model: "m", agent: "executor" },
-      "run-c1:1",
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "part-text",
-      { projectId: "p1", runId: "run-d1", sessionId: "designer-p1-item-1", engine: "e", text: "迟到的设计部件" },
-      "run-d1:9",
-    ));
-
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work).toMatchObject({ runId: "run-c1", seat: undefined }); // 编码锚不受扰（生长中不重锚）
-    expect(work?.parts).toHaveLength(0);
   });
 });

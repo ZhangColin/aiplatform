@@ -32,14 +32,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
       : { data: undefined, error: undefined, isPending: false, isError: false, refetch: refetchMock },
 }));
 
-vi.mock("@/hooks/use-resume-generation", () => ({
-  useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-
-vi.mock("@/hooks/use-restart-update", () => ({
-  useRestartUpdate: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-
 function renderPanel() {
   useGenerationStore.setState({
     generations: { p1: { coderRunIds: [], coderStatus: "running", previewEpoch: 0, seenFinishEventIds: [] } },
@@ -50,7 +42,6 @@ function renderPanel() {
         projectId="p1"
         generationState="generating"
         coderStatus="running"
-        onGenerated={() => {}}
       />
     </QueryClientProvider>,
   );
@@ -395,7 +386,6 @@ describe("SystemPanel · Demo 手机说明位（#350，交接包 13.2：Demo 不
           projectId="p1"
           generationState="generating"
           coderStatus="running"
-          onGenerated={() => {}}
           variant="demo"
         />
       </QueryClientProvider>,

@@ -1,37 +1,29 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkClosing } from "@/lib/store/chat";
 
 import { ClosingCard } from "./closing-card";
 
-// 版本动作 hook 契约面 mock（起/停快照、回滚——请求面归 use-version 与后端测试，
-// 本测试只验收尾卡形态与版本控件的成版锚点门控）
-vi.mock("@/hooks/use-version", () => ({
-  useStartVersionView: () => ({
-    isPending: false,
-    isError: false,
-    data: undefined,
-    mutate: vi.fn(),
-    reset: vi.fn(),
-  }),
-  useStopVersionView: () => ({ mutate: vi.fn() }),
-  useRollbackVersion: () => ({ mutate: vi.fn() }),
-  useVersionViewSession: () => ({
-    startView: { isPending: false, isError: false, data: undefined, mutate: vi.fn(), reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
+// 预览入口（#617）取既有预览查询：此处替身直给 URL 就绪态（请求面归
+// use-project-preview 测试）
+const previewState = vi.hoisted(() => ({
+  data: undefined as { url?: string } | undefined,
+  refetch: vi.fn(),
 }));
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => previewState,
+}));
+
+afterEach(() => {
+  previewState.data = undefined;
+});
 
 function closing(overrides: Partial<WorkClosing> = {}): WorkClosing {
   return {
-    summary: "修订了需求文档，并更新了系统",
-    prdChanged: true,
-    prdNote: "配送范围改为全国",
-    systemChanged: true,
-    systemNote: "下单页新增配送范围说明",
+    narrative: "本次交付了**下单与配送范围**说明。",
+    criteria: { buildPassed: true, previewPassed: true },
     files: [
       { path: "/src/App.jsx", added: 4, removed: 0 },
       { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
@@ -40,8 +32,6 @@ function closing(overrides: Partial<WorkClosing> = {}): WorkClosing {
     ...overrides,
   };
 }
-
-const VISIBLE_LINT_COUNT = 5;
 
 function renderCard(card: WorkClosing) {
   return renderToStaticMarkup(
@@ -52,68 +42,117 @@ function renderCard(card: WorkClosing) {
 }
 
 /**
- * 收尾卡四要素（#88 AC①）：摘要 / 判定行（服务端权威值直译，非前端推导）/
- * 变更清单（文件级 +N −M）/ 轮末统计（时长 + 文件数 + 变更行数 + 检查通过）
- * + 版本控件（#92/#93：成版锚点 version 在场才出「查看当时 / 回滚到此」）
- * ——SSR 断言（形态轻、事件→状态归桥接测试，Testing Decisions 口径）。
+ * 收尾卡五字段（#617）：用时 / 判据逐件（build＋预览）/ 变更清单合计 / 内核自述
+ * （markdown）/ 预览入口（未就绪禁用、就绪可开）。SSR 断言（形态轻；点击开窗归
+ * 交互测试）。
  */
-describe("ClosingCard · 四要素（#88 定格收口）", () => {
-  it("四要素齐：摘要、判定行（带原因）、变更清单、轮末统计", () => {
+describe("ClosingCard · 五字段（#617）", () => {
+  it("五字段齐：标题「生成完成」、判据逐件、内核自述 markdown、清单合计、用时、预览入口", () => {
     const html = renderCard(closing());
 
-    expect(html).toContain("本轮完成");
-    expect(html).toContain("修订了需求文档，并更新了系统"); // 摘要（合并叙事）
-    expect(html).toContain("需求文档：");
-    expect(html).toContain("已修订");
-    expect(html).toContain("配送范围改为全国"); // 判定行·PRD 原因（权威值）
-    expect(html).toContain("系统：");
-    expect(html).toContain("已更新");
-    expect(html).toContain("下单页新增配送范围说明"); // 判定行·系统原因
-    expect(html).toContain("/src/pages/Orders.jsx"); // 变更清单
+    expect(html).toContain("生成完成");
+    // 判据逐件如实
+    expect(html).toContain("构建");
+    expect(html).toContain("通过");
+    expect(html).toContain("预览");
+    expect(html).toContain("可用");
+    // 内核自述：markdown 渲染（非源码记号）
+    expect(html).toContain("内核自述");
+    expect(html).toContain("<strong>下单与配送范围</strong>");
+    expect(html).not.toContain("**下单与配送范围**");
+    // 变更清单：文件级 ±行数 + 合计（文件数/行数在清单头一次呈现）
+    expect(html).toContain("/src/pages/Orders.jsx");
     expect(html).toContain("+12");
     expect(html).toContain("−3");
-    expect(html).toContain("2"); // 文件数（无独立断言面，随清单断言兜住）
-    expect(html).toContain("3 分 03 秒"); // 轮末统计·时长（183420ms）
-    expect(html).toContain("+16"); // 变更行数（4 + 12）
-    expect(html).toContain("检查通过"); // 自检终值计入统计（closing ⟺ 核验通过）
+    expect(html).toContain("2</b> 个文件"); // 合计·文件数
+    expect(html).toContain("+16"); // 合计·新增行数（4 + 12）
+    expect(html).toContain("−3"); // 合计·删除行数
+    // 用时（183420ms）
+    expect(html).toContain("用时");
+    expect(html).toContain("3 分 03 秒");
+    // 预览入口：未就绪禁用
+    expect(html).toContain('aria-label="在新窗口打开预览"');
+    expect(html).toContain('disabled=""');
   });
 
-  it("系统无需改动轮：判定行如实呈现原因、空清单不出清单区与文件统计", () => {
+  it("内核自述为空：不出该块（其余字段照常）", () => {
+    const html = renderCard(closing({ narrative: undefined }));
+
+    expect(html).not.toContain("内核自述");
+    expect(html).toContain("生成完成");
+    expect(html).toContain("用时");
+  });
+
+  it("判据未过如实呈现（组件不写死「通过」）", () => {
     const html = renderCard(
-      closing({
-        summary: "本轮系统无需改动",
-        prdChanged: false,
-        prdNote: undefined,
-        systemChanged: false,
-        systemNote: "页面上没有写死配送范围，都以文档为准",
-        files: [],
-      }),
+      closing({ criteria: { buildPassed: false, previewPassed: true } }),
     );
 
-    expect(html).toContain("本轮系统无需改动");
-    expect(html).toContain("未修订");
-    expect(html).toContain("无需改动");
-    expect(html).toContain("页面上没有写死配送范围，都以文档为准");
+    expect(html).toContain("未通过");
+    expect(html).toContain("可用");
+  });
+
+  it("空清单不出清单区（如系统无实际文件改动的轮）", () => {
+    const html = renderCard(closing({ files: [] }));
+
+    expect(html).not.toContain("变更清单");
     expect(html).not.toContain("个文件");
-    expect(html).not.toContain("查看全部");
-    expect(html).toContain("用时"); // 时长统计恒在
+    expect(html).toContain("用时");
   });
 
-  it("生成轮：摘要「首次生成了系统」、判定行无原因注脚（说明缺省）", () => {
+  it("patch 超限省略：行数保留、卡上标注「diff 过大」（#619）", () => {
+    const html = renderCard(
+      closing({ files: [{ path: "/src/Huge.jsx", added: 500, removed: 0, patchOmitted: true }] }),
+    );
+
+    expect(html).toContain("/src/Huge.jsx");
+    expect(html).toContain("+500");
+    expect(html).toContain("diff 过大");
+  });
+
+  it("变更清单不可用：标注不可用、不出合计与文件行，其余字段照常（#619 降级）", () => {
+    const html = renderCard(closing({ files: [], filesUnavailable: true }));
+
+    expect(html).toContain("变更清单不可用");
+    expect(html).not.toContain("个文件");
+    expect(html).toContain("生成完成");
+    expect(html).toContain("用时");
+  });
+
+  it("首建目录汇总：默认按目录呈现（目录、文件数、± 行数），不裸列文件（#620）", () => {
     const html = renderCard(
       closing({
-        summary: "首次生成了系统",
-        prdChanged: false,
-        prdNote: undefined,
-        systemChanged: true,
-        systemNote: undefined,
-        files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
+        files: [
+          { path: "/src/App.jsx", added: 4, removed: 0 },
+          { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+          { path: "/public/logo.png", added: 0, removed: 0 },
+        ],
+        directories: [
+          { path: "/public", fileCount: 1, added: 0, removed: 0 },
+          { path: "/src", fileCount: 1, added: 4, removed: 0 },
+          { path: "/src/pages", fileCount: 1, added: 12, removed: 3 },
+        ],
       }),
     );
 
-    expect(html).toContain("首次生成了系统");
-    expect(html).toContain("已更新");
-    expect(html).toContain("+40");
+    // 目录行（目录、文件数、± 行数）
+    expect(html).toContain("/public");
+    expect(html).toContain("/src/pages");
+    expect(html).toContain("1 个文件");
+    expect(html).toContain("+12");
+    // 百文件不裸列：文件级默认收起，不出文件全路径行
+    expect(html).not.toContain("/src/App.jsx");
+    expect(html).not.toContain("/src/pages/Orders.jsx");
+    // 合计仍按真实文件计（3 个文件，+16 −3）
+    expect(html).toContain("3</b> 个文件");
+    expect(html).toContain("+16");
+  });
+
+  it("迭代文件级清单（无 directories）：照旧文件级＋合计，不出目录行", () => {
+    const html = renderCard(closing());
+
+    expect(html).toContain("/src/pages/Orders.jsx");
+    expect(html).not.toContain("展开 /src 目录");
   });
 
   it("长清单默认收五条，「查看全部 N 个文件」收进折叠", () => {
@@ -128,462 +167,12 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
     expect(html).not.toContain("/src/File6.jsx"); // 五条之外收进折叠（SSR 默认收起）
     expect(html).toContain("查看全部 7 个文件");
   });
-});
 
-describe("ClosingCard · 验证统计（#352 独立验证子智能体的收尾统计）", () => {
-  it("验证全过：轮末统计带「验证 N 项通过」", () => {
-    const html = renderCard(
-      closing({
-        verification: {
-          total: 5,
-          failed: 0,
-          faces: { browser: 2, db: 2, log: 1 },
-          rounds: 1,
-          failedItems: [],
-        },
-      }),
-    );
-
-    expect(html).toContain("验证 5 项通过");
-    expect(html).not.toContain("未过");
-  });
-
-  it("验证有未过：如实标「N 项未过」并带未过项名（修不了如实标注）", () => {
-    const html = renderCard(
-      closing({
-        verification: {
-          total: 5,
-          failed: 2,
-          faces: { browser: 3, db: 1, log: 1 },
-          rounds: 1,
-          failedItems: ["留言提交", "登录"],
-        },
-      }),
-    );
-
-    expect(html).toContain("验证 5 项");
-    expect(html).toContain("2 项未过");
-    expect(html).toContain("留言提交、登录");
-  });
-
-  it("修复后复验（rounds>1）：如实带复验轮次", () => {
-    const html = renderCard(
-      closing({
-        verification: {
-          total: 5,
-          failed: 0,
-          faces: { browser: 2, db: 2, log: 1 },
-          rounds: 2,
-          failedItems: [],
-        },
-      }),
-    );
-
-    expect(html).toContain("验证 5 项通过");
-    expect(html).toContain("复验 2 轮");
-  });
-
-  it("轮次预算用尽仍未过（#424）：如实带「轮次预算已尽」标注", () => {
-    const html = renderCard(
-      closing({
-        verification: {
-          total: 3,
-          failed: 1,
-          faces: { browser: 3, db: 0, log: 0 },
-          rounds: 3,
-          failedItems: ["留言提交"],
-          budgetExhausted: true,
-        },
-      }),
-    );
-
-    expect(html).toContain("1 项未过");
-    expect(html).toContain("复验 3 轮");
-    expect(html).toContain("轮次预算已尽"); // 达预算停止修复—复验的如实呈现
-  });
-
-  it("验证缺省（子智能体未跑/未登记）：不出验证统计行", () => {
+  it("预览就绪：入口可点（未就绪的 disabled 退场）", () => {
+    previewState.data = { url: "https://preview.example.com/" };
     const html = renderCard(closing());
 
-    expect(html).not.toContain("验证");
-    expect(html).toContain("检查通过"); // 平台收口判据（8081 探活）恒在
-  });
-});
-
-describe("ClosingCard · 版本控件（#92/#93）", () => {
-  it("成版锚点（version）在场：出「查看当时 / 回滚到此」两动作", () => {
-    const html = renderCard(closing({ version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" }));
-
-    expect(html).toContain("查看当时");
-    expect(html).toContain("回滚到此");
-  });
-
-  it("成版失败（缺 version 键）：不出版本控件", () => {
-    const html = renderCard(closing({ version: undefined }));
-
-    expect(html).not.toContain("查看当时");
-    expect(html).not.toContain("回滚到此");
-  });
-});
-
-describe("ClosingCard · 定稿收尾卡（#291 显式动作收口：成版锚＋后续触发行）", () => {
-  /** 定稿收尾载荷（#291 平台侧发射形）：closing 携 version（成版锚）与 drafts 单条（triggers）。 */
-  function finalizeClosing(triggers?: string[]): WorkClosing {
-    return closing({
-      summary: "定稿设计物：首页主视觉",
-      prdChanged: false,
-      prdNote: undefined,
-      systemChanged: false,
-      systemNote: undefined,
-      files: [],
-      durationMs: 320,
-      version: "abc123def456",
-      drafts: [
-        { item: "首页主视觉", media: "html", path: "/design/home-2.html", triggers },
-      ],
-    });
-  }
-
-  it("定稿稿行＋「已触发」行＋版本控件（成版锚在场——「查看当时」即见定稿稿）", () => {
-    const html = renderCard(finalizeClosing(["设计已全部定稿，可以确认下单了"]));
-
-    expect(html).toContain("定稿设计物：首页主视觉"); // 定稿叙事
-    expect(html).toContain("home-2.html"); // 定稿稿单条
-    expect(html).toContain("已触发：设计已全部定稿，可以确认下单了"); // 后续触发事实
-    // 版本控件：定稿例外携带 version——候选轮不出、定稿轮出（ADR-0025 只有定稿成版）
-    expect(html).toContain("查看当时");
-    expect(html).toContain("回滚到此");
-  });
-
-  it("triggers 空（未触发分岔——如非全部定稿的中间定稿）：不出「已触发」行", () => {
-    const html = renderCard(finalizeClosing(undefined));
-
-    expect(html).toContain("定稿设计物：首页主视觉");
-    expect(html).not.toContain("已触发：");
-    expect(html).toContain("查看当时"); // 成版锚仍在（定稿即成版，与触发无关）
-  });
-
-  it("多触发并置以「；」连缀（全部定稿起构建后仍可按稿对齐的复合场景面）", () => {
-    const html = renderCard(finalizeClosing(["系统已开始按定稿设计对齐", "系统更新已排入下一轮"]));
-
-    expect(html).toContain("已触发：系统已开始按定稿设计对齐；系统更新已排入下一轮");
-  });
-});
-
-describe("ClosingCard · 稿清单与去向（#290 设计会话收尾卡扩载呈现）", () => {
-  /** 设计会话收尾载荷（#289 closing.drafts 扩载形）：判定行恒「未动」、文件清单与稿同集。 */
-  function designClosing(drafts: WorkClosing["drafts"]): WorkClosing {
-    return closing({
-      summary: "完成设计物：首页主视觉",
-      prdChanged: false,
-      prdNote: undefined,
-      systemChanged: false,
-      systemNote: "完成设计物：首页主视觉",
-      files: [{ path: "/design/home-1.html", added: 120, removed: 0 }],
-      durationMs: 95_000,
-      version: undefined,
-      drafts,
-    });
-  }
-
-  it("稿清单在场：每稿一行（文件名＋形态标签）、图像稿 raw 直看链接、稿数统计；判定行/文件清单/版本控件让位", () => {
-    const html = renderCard(
-      designClosing([
-        { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
-        { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
-      ]),
-    );
-
-    expect(html).toContain("完成设计物：首页主视觉"); // 摘要（本场设计物叙事）
-    // 稿清单：文件名＋形态标签（用户语言——界面稿/图像稿，不出 html/png 工程词）
-    expect(html).toContain("home-1.html");
-    expect(html).toContain("界面稿");
-    expect(html).toContain("home-hero-2.png");
-    expect(html).toContain("图像稿");
-    // 去向＝平台文件服务 raw 直看（未付费照看：门只盖下载面，#287）——图像稿可点
-    expect(html).toContain('href="/api/projects/100/files/raw?path=design%2Fhome-hero-2.png"');
-    // 界面稿不出直链（raw 只伺服图片 PRJ_038——渲染式呈现归 #293 稿伺服通道）：
-    // 如实提示文件区可看，不伪造不可用入口
-    expect(html).not.toContain('href="/api/projects/100/files/raw?path=design%2Fhome-1.html"');
-    expect(html).toContain("文件区可看");
-    // 轮末统计：时长＋稿数（设计变体不出「检查通过」与文件行数）
-    expect(html).toContain("本轮");
-    expect(html).toContain("2");
-    expect(html).toContain("稿");
-    expect(html).toContain("1 分 35 秒");
-    // 让位面：判定行（PRD/系统恒未动的结构常量）与文件清单（与稿同集重复）不出
-    expect(html).not.toContain("需求文档：");
-    expect(html).not.toContain("系统：");
-    expect(html).not.toContain("+120");
-    expect(html).not.toContain("个文件");
-    expect(html).not.toContain("检查通过");
-    // 设计候选不自动成版（ADR-0025）：版本控件不出
-    expect(html).not.toContain("查看当时");
-    expect(html).not.toContain("回滚到此");
-  });
-
-  it("多稿长清单默认收五条，「查看全部 N 稿」收进折叠", () => {
-    const drafts = Array.from({ length: 7 }, (_, index) => ({
-      item: "首页主视觉",
-      media: "image" as const,
-      path: `/design/home-${index + 1}.png`,
-    }));
-    const html = renderCard(designClosing(drafts));
-
-    expect(html).toContain("home-5.png");
-    expect(html).not.toContain("home-6.png"); // 五条之外收进折叠（SSR 默认收起）
-    expect(html).toContain("查看全部 7 稿");
-  });
-
-  it("drafts 缺省（编码 run）：四要素照旧——判定行/文件清单在、无稿清单区", () => {
-    const html = renderCard(closing());
-
-    expect(html).toContain("需求文档：");
-    expect(html).toContain("/src/App.jsx");
-    expect(html).not.toContain("界面稿");
-    expect(html).not.toContain("图像稿");
-    expect(html).not.toContain("查看全部 7 稿");
-  });
-
-  it("drafts 空数组（畸形载荷防御面）：仍走设计形态如实「本轮 0 稿」——不闪编码 run 语料", () => {
-    const html = renderCard(designClosing([]));
-
-    expect(html).toContain("完成设计物：首页主视觉");
-    expect(html).toMatch(/本轮 <b[^>]*>0<\/b> 稿/);
-    expect(html).not.toContain("需求文档："); // 判定行不出（设计收口不是编码轮语料）
-    expect(html).not.toContain("检查通过");
-    expect(html).not.toContain("查看全部"); // 零稿行不出清单区
-  });
-});
-
-describe("ClosingCard · 按稿对齐（#296 设计规范扫描）", () => {
-  it("通过：样式合规一行；曾自动修一轮则注明（纠偏过程如实）", () => {
-    const html = renderCard(closing({
-      designLint: { status: "passed" },
-    }));
-    expect(html).toContain("按稿对齐：");
-    expect(html).toContain("样式合规");
-    expect(html).not.toContain("曾自动修正一轮");
-
-    const retried = renderCard(closing({
-      designLint: { status: "passed", retried: true },
-    }));
-    expect(retried).toContain("样式合规（曾自动修正一轮）");
-  });
-
-  it("违规：总数行（曾修一轮注明仍余）＋清单（文件:行＋规则中文名，hover 带诊断原文）", () => {
-    const html = renderCard(closing({
-      designLint: {
-        status: "violations",
-        total: 3,
-        retried: true,
-        violations: [
-          { file: "src/app/page.tsx", line: 3, rule: "no-raw-colors", message: "raw palette" },
-          { file: "src/app/page.tsx", line: 4, rule: "no-arbitrary-values", message: "p-[13px]" },
-        ],
-      },
-    }));
-    expect(html).toContain("3 处样式违规");
-    expect(html).toContain("（已自动修正一轮，仍余）");
-    expect(html).toContain("src/app/page.tsx:3");
-    expect(html).toContain("裸色"); // 规则中文名（不露工程码）
-    expect(html).toContain("任意值");
-    expect(html).toContain('title="raw palette"'); // 诊断原文经 hover 可见
-  });
-
-  it("违规超可见上限：出「查看全部 N 处」收口（卡不无限长）", () => {
-    const many = Array.from({ length: 7 }, (_, i) => ({
-      file: `src/app/p${i}.tsx`, line: i + 1, rule: "no-raw-colors", message: "raw",
-    }));
-    const html = renderCard(closing({
-      designLint: { status: "violations", total: 7, violations: many },
-    }));
-    expect(html).toContain("7 处样式违规");
-    expect(html).toContain("查看全部 7 处");
-    expect(html).not.toContain(`src/app/p${VISIBLE_LINT_COUNT}.tsx`); // 超限条目收起
-  });
-
-  it("扫描未执行：如实呈现，不假装达标", () => {
-    const html = renderCard(closing({
-      designLint: { status: "unavailable" },
-    }));
-    expect(html).toContain("样式合规扫描未执行");
-    expect(html).not.toContain("样式合规（"); // 不与通过叙事混淆
-  });
-
-  it("无规范项目：不携带不出按稿对齐行（基座行为零改变的呈现面）", () => {
-    const html = renderCard(closing());
-    expect(html).not.toContain("按稿对齐");
-  });
-});
-
-describe("ClosingCard · 基座件使用（#425 基座 lint 两档）", () => {
-  it("通过：基座件合规一行；曾自动修一轮则注明（纠偏过程如实）", () => {
-    const html = renderCard(closing({
-      robustKitLint: { status: "passed" },
-    }));
-    expect(html).toContain("基座件使用：");
-    expect(html).toContain("基座件合规");
-    expect(html).not.toContain("曾自动修正一轮");
-
-    const retried = renderCard(closing({
-      robustKitLint: { status: "passed", retried: true },
-    }));
-    expect(retried).toContain("基座件合规（曾自动修正一轮）");
-  });
-
-  it("预置档余项：总数行（曾修一轮注明仍余）＋清单（文件:行＋规则中文名，hover 带件用法指引）——不拦收口如实标注", () => {
-    const html = renderCard(closing({
-      robustKitLint: {
-        status: "violations",
-        retried: true,
-        preset: {
-          total: 2,
-          violations: [
-            { file: "src/app/login/actions.ts", line: 8, rule: "handwritten-session", message: "会话存储自写——走 src/lib/robust/session" },
-          ],
-        },
-      },
-    }));
-    expect(html).toContain("余 2 处基座件违规");
-    expect(html).toContain("（已自动修正一轮，仍余）");
-    expect(html).toContain("src/app/login/actions.ts:8");
-    expect(html).toContain("会话自写"); // 规则中文名（不露工程码）
-    expect(html).toContain('title="会话存储自写——走 src/lib/robust/session"');
-  });
-
-  it("强制档余项（#541 让路缺省）：照常呈现清单——收口照扫只标注的感知面", () => {
-    const html = renderCard(closing({
-      robustKitLint: {
-        status: "violations",
-        mandatory: {
-          total: 2,
-          violations: [
-            { file: "src/lib/orders.ts", line: 12, rule: "bare-db-client", message: "数据访问裸客户端直用——走 src/lib/robust/data-access" },
-            { file: "src/app/orders/page.tsx", line: 40, rule: "bare-fetch", message: "裸 fetch——走 src/lib/robust/http" },
-          ],
-        },
-      },
-    }));
-    expect(html).toContain("余 2 处基座件违规");
-    expect(html).toContain("src/lib/orders.ts:12");
-    expect(html).toContain("裸数据库客户端");
-    expect(html).toContain("src/app/orders/page.tsx:40");
-    expect(html).toContain("裸 fetch");
-  });
-
-  it("两档并存（#541 让路后可同场）：合并计数与清单（各档条目都在场）", () => {
-    const html = renderCard(closing({
-      robustKitLint: {
-        status: "violations",
-        mandatory: {
-          total: 1,
-          violations: [
-            { file: "src/app/orders/page.tsx", line: 40, rule: "bare-fetch", message: "裸 fetch" },
-          ],
-        },
-        preset: {
-          total: 2,
-          violations: [
-            { file: "src/app/login/actions.ts", line: 8, rule: "handwritten-session", message: "会话自写" },
-          ],
-        },
-      },
-    }));
-    expect(html).toContain("余 3 处基座件违规");
-    expect(html).toContain("src/app/orders/page.tsx:40");
-    expect(html).toContain("src/app/login/actions.ts:8");
-  });
-
-  it("预置档超可见上限：出「查看全部 N 处」收口（卡不无限长）", () => {
-    const many = Array.from({ length: 7 }, (_, i) => ({
-      file: `src/app/login${i}.ts`, line: i + 1, rule: "handwritten-session", message: "自写",
-    }));
-    const html = renderCard(closing({
-      robustKitLint: {
-        status: "violations",
-        preset: { total: 7, violations: many },
-      },
-    }));
-    expect(html).toContain("余 7 处基座件违规");
-    expect(html).toContain("查看全部 7 处");
-  });
-
-  it("扫描未执行：如实呈现，不假装达标", () => {
-    const html = renderCard(closing({
-      robustKitLint: { status: "unavailable" },
-    }));
-    expect(html).toContain("基座件扫描未执行");
-    expect(html).not.toContain("基座件合规（");
-  });
-
-  it("存量工作区：不携带不出基座件使用行（基座行为零改变的呈现面）", () => {
-    const html = renderCard(closing());
-    expect(html).not.toContain("基座件使用");
-  });
-});
-
-describe("ClosingCard · 产出证明判别标注（#420 空转片防呆）", () => {
-  it("豁免收口：如实呈现豁免依据（验证确认「能力已存在」）", () => {
-    const html = renderCard(closing({
-      systemChanged: false,
-      systemNote: "该能力系统已具备",
-      files: [],
-      proofOfOutput: {
-        exempted: true,
-        exemptionBasis: "验证确认「能力已存在」：预约列表倒序",
-      },
-    }));
-    expect(html).toContain("能力已存在");
-    expect(html).toContain("预约列表倒序");
-  });
-
-  it("空转拒绝史：曾 N 次被拒、补做后收口——纠偏过程如实", () => {
-    const html = renderCard(closing({
-      proofOfOutput: { idleRejections: 2 },
-    }));
-    expect(html).toContain("2 次空转拒绝");
-  });
-
-  it("拒绝史与豁免依据并存：两行事实都出（先被拒、后补验证确认豁免）", () => {
-    const html = renderCard(closing({
-      proofOfOutput: {
-        idleRejections: 1,
-        exempted: true,
-        exemptionBasis: "验证确认「能力已存在」：预约列表倒序",
-      },
-    }));
-    expect(html).toContain("1 次空转拒绝");
-    expect(html).toContain("预约列表倒序");
-  });
-
-  it("正常干活收口（无标注）：不出产出证明行——真·薄片不误伤的呈现面", () => {
-    const html = renderCard(closing());
-    expect(html).not.toContain("空转拒绝");
-    expect(html).not.toContain("能力已存在");
-  });
-});
-
-describe("ClosingCard · 已知缺陷清单（#427 整轨终验：预算耗尽版本照成、如实呈现）", () => {
-  it("缺陷清单在场：如实出已知缺陷区（总数定性＋逐项名，hover 带证据）", () => {
-    const html = renderCard(closing({
-      summary: "系统整体验证：1 项未过、修复预算已尽——系统按现状交付，已知缺陷如下如实呈现",
-      knownDefects: {
-        defects: [
-          { name: "下单支付", detail: "点击支付无响应" },
-          { name: "留言提交", detail: "提交后刷新数据丢失" },
-        ],
-      },
-    }));
-    expect(html).toContain("已知缺陷");
-    expect(html).toContain("2 项");
-    expect(html).toContain("下单支付");
-    expect(html).toContain("留言提交");
-    expect(html).toContain("点击支付无响应"); // title hover 证据也在静态标记里
-  });
-
-  it("缺省（终验通过/预算内有修复）：不出已知缺陷区——不粉饰也不虚警", () => {
-    const html = renderCard(closing());
-    expect(html).not.toContain("已知缺陷");
+    expect(html).toContain('aria-label="在新窗口打开预览"');
+    expect(html).not.toContain('disabled=""');
   });
 });

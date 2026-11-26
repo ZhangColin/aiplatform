@@ -9,11 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MobileAreaSwitch } from "@/components/shell/mobile-area-switch";
 import { useProject } from "@/hooks/use-project";
-import { usePrd, usePrdVersions } from "@/hooks/use-prd";
+import { usePrd } from "@/hooks/use-prd";
 import { errorText } from "@/lib/api/api-error";
 import { prdBadgeOf } from "@/lib/projects/prd-badge";
-import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
-import { planAreaOfDesignItems } from "@/lib/projects/detail";
 import { lockRowOf } from "@/lib/orders/lock";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
@@ -34,8 +32,8 @@ import { RequirementAnalysisHeader } from "./ra-header";
  * 失效重拉即时切换，滑入动效即状态切换反馈）。
  *
  * <p>本组件是 agent 流通道首个挂载方（ADR 0003「项目页 mount 建连、unmount
- * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定）。首个构建基准记行
- * （版本清单由空转非空，#462 去确认门——首 Demo 触发平移到首次 savePrd）即
+ * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定）。首个构建 run 起跑
+ * （生成态由从未生成转生成中/已生成；#630 起旧版本记行退场后改读生成态）即
  * 自动切 Demo 体验页（可切回，仅转换点跳一次）。「确认下单」顶栏按钮已退役
  * （spec 删除清单：并入 Demo 确认门——Demo 阶段页归 #347）。</p>
  */
@@ -43,7 +41,6 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
   const prd = usePrd(projectId);
-  const { data: prdVersions } = usePrdVersions(projectId);
   const markSeen = usePrdNoticesStore((s) => s.markSeen);
 
   useAgentEventChannel(projectId);
@@ -70,19 +67,20 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
     if (!chatOnly) setMobileArea("doc");
   }
 
-  // 首 Demo 自动切页（#462 去确认门，ADR-0039）：首个构建 run 起跑自动记行→
-  // 版本清单由空转非空即首 Demo 在途——界面自动切 Demo 体验页（可切回：仅
-  // 转换点跳一次，挂载即在场的存量项目不跳）。导航是副作用：只能在 effect 里
-  // 调 router.push——渲染期调用会触发 React「Cannot update a component (Router)
+  // 首 Demo 自动切页（#462 去确认门，ADR-0039；#630 起旧版本记行退场，改读
+  // 生成态）：首个构建 run 起跑（generationState 由 never 转 generating/generated）
+  // 即自动切 Demo 体验页（可切回：仅转换点跳一次）。导航是副作用：只能在 effect
+  // 里调 router.push——渲染期调用会触发 React「Cannot update a component (Router)
   // while rendering a different component」（setState 派生态不能混入路由跳转）
-  const hasPrdVersions = !!prdVersions && prdVersions.length > 0;
-  const prevHasPrdVersions = useRef(hasPrdVersions);
+  const generationStarted =
+    detail?.generationState === "generating" || detail?.generationState === "generated";
+  const prevGenerationStarted = useRef(generationStarted);
   useEffect(() => {
-    if (hasPrdVersions && !prevHasPrdVersions.current) {
+    if (generationStarted && !prevGenerationStarted.current) {
       router.push(`/projects/${projectId}/demo`);
     }
-    prevHasPrdVersions.current = hasPrdVersions;
-  }, [hasPrdVersions, projectId, router]);
+    prevGenerationStarted.current = generationStarted;
+  }, [generationStarted, projectId, router]);
 
   // 「断线」语义 = 连上过再掉线（装配口径沿旧项目页）：通道从未连上不武装计时
   const wasConnected = useRef(false);
@@ -116,12 +114,8 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
     );
   }
 
-  // 徽标推导（#462 去门化：draftPending 判据随 draftChangeSummary 字段退役——
-  // 草稿/新草稿不再单独分形，徽标只看产出在否＋最新构建基准版本号）
-  const badge = prdBadgeOf({
-    hasPrd: !!detail?.prdProducedAt,
-    latestVersionNo: prdVersions?.[0]?.versionNo ?? null,
-  });
+  // 徽标推导（#630：旧 PRD 版本面退场——徽标只看产出在否，恒「PRD 草稿」）
+  const badge = prdBadgeOf({ hasPrd: !!detail?.prdProducedAt });
 
   // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——澄清输入禁用+提示
   const lock = lockRowOf({ archived: detail?.archived, activeOrder: detail?.activeOrder });
@@ -137,10 +131,6 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
       projectId={projectId}
       lock={lock}
       stage={chatOnly ? "interview" : "iterate"}
-      // 常驻文案轨道（#299）：设计主线＝设计形；系统/系统＋设计＝系统形
-      track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
-      plan={detail?.segments}
-      designPlan={planAreaOfDesignItems(detail?.designItems)}
       variant="stage"
       inputRef={chatInputRef}
       // 报价卡「查看订单详情」（#203）：签约域在 Demo/签约阶段页——过渡期归
@@ -158,6 +148,7 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
         projectName={detail?.name ?? ""}
         badge={badge}
         hasPrd={!chatOnly}
+        generationStarted={generationStarted}
         onFocusChat={focusChat}
         getArticleHtml={() => articleRef.current?.innerHTML ?? null}
         loading={isPending}

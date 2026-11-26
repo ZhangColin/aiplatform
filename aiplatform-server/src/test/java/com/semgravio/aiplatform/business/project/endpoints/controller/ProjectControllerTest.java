@@ -36,23 +36,15 @@ import com.semgravio.aiplatform.business.project.application.DispatchAppService;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.application.GenerationAppService;
 import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppService;
-import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.semgravio.aiplatform.business.project.application.PrdReadiness;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
-import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
 import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
-import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.InterviewQuotaResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -65,12 +57,6 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.semgravio.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
-import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
-import com.semgravio.aiplatform.business.project.application.dto.response.DesignScopeResponse;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
-import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -125,19 +111,10 @@ class ProjectControllerTest {
     private GenerationAppService generationAppService;
 
     @MockitoBean
-    private IterationAppService iterationAppService;
-
-    @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
 
     @MockitoBean
     private InterviewQuotaAppService interviewQuotaAppService;
-
-    @MockitoBean
-    private PrdVersionAppService prdVersionAppService;
-
-    @MockitoBean
-    private DemoVersionAppService demoVersionAppService;
 
     @MockitoBean
     private BuildGateAppService buildGateAppService;
@@ -221,31 +198,6 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_design_endpoint_when_create_then_initial_type_bound() throws Exception {
-        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
-                new ProjectCreatedResponse(detailOf("300", ProjectStatus.IN_PROGRESS, false),
-                        "run-9"), null));
-
-        // #299 mode 进载荷（ADR-0029）：入口选「做设计」携终点初值 Integer code
-        performAsUser(post("/api/projects")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"requirement\":\"给我的咖啡店设计一个 logo\",\"endpointType\":1}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.runId").value("run-9"));
-
-        verify(appService).create(argThat(cmd -> cmd.endpointType() == ProjectEndpointType.DESIGN));
-    }
-
-    @Test
-    void given_unknown_endpoint_code_when_create_then_rejected_as_400() throws Exception {
-        // Integer code 表外值：框架统一信封 400（与 status 过滤参数同口径）
-        performAsUser(post("/api/projects")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"requirement\":\"做一个官网\",\"endpointType\":99}"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
     void given_projects_when_list_then_wrapped_array() throws Exception {
         when(queryAppService.list(null)).thenReturn(List.of(new ProjectResponse("100", "官网",
                         ProjectType.WEBSITE, "官网",
@@ -254,7 +206,7 @@ class ProjectControllerTest {
                         false, false, false),
                 new ProjectResponse("101", "已下单官网",
                         ProjectType.WEBSITE, "官网",
-                        ProjectEndpointType.SYSTEM_DESIGN, "系统＋设计", "901",
+                        ProjectEndpointType.SYSTEM, "系统", "901",
                         ProjectStatus.IN_PROGRESS, "进行中", false, null, null,
                         new OrderBriefResponse("900", OrderStatus.PENDING_QUOTE, "待报价"),
                         true, true, false)));
@@ -264,9 +216,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data[0].id").value("100"))
                 .andExpect(jsonPath("$.data[0].status").value(1)) // IN_PROGRESS → code
                 .andExpect(jsonPath("$.data[0].statusName").value("进行中"))
-                .andExpect(jsonPath("$.data[0].endpointType").value(2)) // 终点类型弱标识取数面
+                .andExpect(jsonPath("$.data[0].endpointType").value(2)) // 终点收窄系统单值
                 .andExpect(jsonPath("$.data[0].endpointTypeName").value("系统"))
-                .andExpect(jsonPath("$.data[1].endpointTypeName").value("系统＋设计"))
                 .andExpect(jsonPath("$.data[0].activeOrder").isEmpty()) // 无订单 → null
                 // #28：未终结订单嵌入（四态列表「待报价」的推导输入）
                 .andExpect(jsonPath("$.data[1].activeOrder.id").value("900"))
@@ -314,82 +265,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.name").value("官网 demo"))
                 .andExpect(jsonPath("$.data.endpointType").value(2))
                 .andExpect(jsonPath("$.data.endpointTypeName").value("系统"))
-                .andExpect(jsonPath("$.data.designScope").doesNotExist())
                 .andExpect(jsonPath("$.data.status").value(1))
                 .andExpect(jsonPath("$.data.archived").value(false));
-    }
-
-    @Test
-    void given_detail_with_design_items_when_get_then_item_list_returned() throws Exception {
-        // #290 设计轨道件清单读模型（对偶 segments 契约）：ord/标题/状态 code + *Name，
-        // null（无现行清单/锚漂）不序列化——前端不渲染计划区
-        when(queryAppService.detail(100L)).thenReturn(ProjectDetailResponseFixture
-                .detailOf("100", "官网 demo")
-                .designItems(List.of(new DesignItemResponse(1, "首页主视觉",
-                        DesignItemStatus.CLOSED, DesignItemStatus.CLOSED.getName(), null)))
-                .build());
-
-        performAsUser(get("/api/projects/100"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.designItems[0].ord").value(1))
-                .andExpect(jsonPath("$.data.designItems[0].title").value("首页主视觉"))
-                .andExpect(jsonPath("$.data.designItems[0].status").value(2))
-                .andExpect(jsonPath("$.data.designItems[0].statusName").value("已收口"));
-    }
-
-    @Test
-    void given_switch_command_when_endpoint_type_then_detail_returned_with_enum_binding() throws Exception {
-        // 终点控件动作端点（#285）：Integer code 双向（BaseEnum 契约），响应与详情同构
-        when(appService.switchEndpoint(eq(100L), argThat(command ->
-                command != null && command.endpointType() == ProjectEndpointType.SYSTEM_DESIGN
-                        && command.scopeType() == DesignScopeType.SELECTED_PAGES)))
-                .thenReturn(ProjectDetailResponseFixture.detailOf("100", "官网 demo")
-                        .workspaceId("900")
-                        .endpointType(ProjectEndpointType.SYSTEM_DESIGN)
-                        .designScope(new DesignScopeResponse(DesignScopeType.SELECTED_PAGES,
-                                "勾选页面", List.of("首页：展示产品与入口")))
-                        .build());
-
-        performAsUser(post("/api/projects/100/endpoint-type")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endpointType\":3,\"scopeType\":2,"
-                                + "\"scopePages\":[\"首页：展示产品与入口\"]}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.endpointType").value(3))
-                .andExpect(jsonPath("$.data.endpointTypeName").value("系统＋设计"))
-                .andExpect(jsonPath("$.data.designScope.type").value(2))
-                .andExpect(jsonPath("$.data.designScope.pages[0]").value("首页：展示产品与入口"));
-    }
-
-    @Test
-    void given_switch_without_endpoint_type_then_rejected_as_400() throws Exception {
-        performAsUser(post("/api/projects/100/endpoint-type")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest());
-        verify(appService, never()).switchEndpoint(any(), any());
-    }
-
-    @Test
-    void given_switch_with_unknown_endpoint_code_then_rejected_with_legal_values() throws Exception {
-        performAsUser(post("/api/projects/100/endpoint-type")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endpointType\":9}"))
-                .andExpect(status().isBadRequest());
-        verify(appService, never()).switchEndpoint(any(), any());
-    }
-
-    @Test
-    void given_frozen_project_when_switch_then_ord_006_mapped_to_409() throws Exception {
-        when(appService.switchEndpoint(eq(100L), any()))
-                .thenThrow(new ApplicationException(OrderMessage.ORDER_FROZEN));
-
-        performAsUser(post("/api/projects/100/endpoint-type")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endpointType\":1,\"scopeType\":1}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(5006))
-                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_FROZEN.message()));
     }
 
     @Test
@@ -445,25 +322,31 @@ class ProjectControllerTest {
     void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
         // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一
         // code——1=user 3=question 5=closing 7=quote）、question/closing/quote
-        // 载荷原样、id 升序（写入序 = 对话序）；sessionSource 会话来源标识
-        // （#298，null＝主会话缺省）随面携带
+        // 载荷原样、id 升序（写入序 = 对话序）
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
-                new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
+                new ConversationEntryResponse(1L, 1, "用户发言",
+                        "run-1", "做一个官网",
                         null, null, null, null, null, null, false,
                         LocalDateTime.of(2026, 9, 5, 10, 0)),
-                new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
-                        Map.of("engineRef", "reply-1", "data", Map.of()),
-                        1, null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
-                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null, null,
-                        Map.of("summary", "首次生成了系统", "prdChanged", false,
-                                "systemChanged", true, "files", List.of(), "durationMs", 183420),
-                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
-                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null, null,
-                        null, null,
+                new ConversationEntryResponse(2L, 3, "问答卡",
+                        "run-1", null,
+                        Map.of("engineRef", "reply-1", "data", Map.of()), 1,
+                        null, null, null, null, false,
+                        LocalDateTime.of(2026, 9, 5, 10, 1)),
+                new ConversationEntryResponse(3L, 5, "收尾卡",
+                        "run-2", null, null, null,
+                        Map.of("narrative", "首次生成了系统",
+                                "criteria", Map.of("buildPassed", true, "previewPassed", true),
+                                "files", List.of(), "durationMs", 183420),
+                        null, null, null, false,
+                        LocalDateTime.of(2026, 9, 5, 10, 9)),
+                new ConversationEntryResponse(4L, 7, "报价卡",
+                        null, null, null, null, null, null,
                         Map.of("orderId", "900123", "event", "quoted"),
-                        null, false, LocalDateTime.of(2026, 9, 6, 9, 0)),
-                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null, null,
-                        null, null, null,
+                        null, false,
+                        LocalDateTime.of(2026, 9, 6, 9, 0)),
+                new ConversationEntryResponse(5L, 8, "失败留账",
+                        "run-3", null, null, null, null, null, null,
                         Map.of("error", "模型响应超时", "durationMs", 61200, "attempts",
                                 List.of(Map.of("round", 1, "attempt", 1, "durationMs", 61200,
                                         "modelId", "deepseek-v4-flash", "llmMs", 58000,
@@ -483,7 +366,7 @@ class ProjectControllerTest {
                 // 「第 N 问」序号随问答卡读面（#538/#549，服务端单源）
                 .andExpect(jsonPath("$.data[1].questionOrdinal").value(1))
                 .andExpect(jsonPath("$.data[2].kind").value(5))
-                .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[2].closing.narrative").value("首次生成了系统"))
                 .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420))
                 // #203 报价卡读面：kind=7、quote 载荷原样（事件 + 订单引用，不含金额）
                 .andExpect(jsonPath("$.data[3].kind").value(7))
@@ -570,7 +453,7 @@ class ProjectControllerTest {
 
     @Test
     void given_project_when_generate_then_run_id_returned() throws Exception {
-        // 「继续生成」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
+        // 生成点火纯动作无入参：异步提交即返回本场 runId（过程经 SSE）
         when(generationAppService.startGeneration(100L)).thenReturn(
                 new GenerationAppService.GenerationRun("run-gen-1"));
 
@@ -603,32 +486,6 @@ class ProjectControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(4018))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD——确认此版后平台开始生成 Demo"));
-    }
-
-    @Test
-    void given_fix_terminal_when_restart_fix_then_run_id_returned() throws Exception {
-        // 「继续更新」（#48 超限终态恢复出口）：纯动作无入参，重派即返回新 run 首试
-        // runId（与新 run 的链路锚，同 /generate 口径）
-        when(iterationAppService.restartFixRun(100L)).thenReturn(
-                new IterationAppService.FixDispatch("run-fix-2", false));
-
-        performAsUser(post("/api/projects/100/fix-runs/restart"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.runId").value("run-fix-2"));
-        verify(iterationAppService).restartFixRun(100L);
-    }
-
-    @Test
-    void given_no_terminal_failure_when_restart_fix_then_prj_026_as_409() throws Exception {
-        // 无终态账守卫（未派过/已成功收工/重启丢账）——指路指令区重提意见
-        when(iterationAppService.restartFixRun(100L)).thenThrow(
-                new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE));
-
-        performAsUser(post("/api/projects/100/fix-runs/restart"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(4026))
-                .andExpect(jsonPath("$.message").value("没有可恢复的更新，请在对话区重新提意见"));
     }
 
     @Test
@@ -857,98 +714,6 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.sourcePoolBalance").value(10000));
     }
 
-    @Test
-    void given_confirmed_versions_when_list_then_newest_first_without_content() throws Exception {
-        when(prdVersionAppService.versions(100L)).thenReturn(List.of(
-                new PrdVersionSummaryResponse("100", 2,
-                        LocalDateTime.of(2026, 10, 17, 9, 0)),
-                new PrdVersionSummaryResponse("100", 1,
-                        LocalDateTime.of(2026, 10, 16, 12, 0))));
-
-        // 清单轻量形（不含全文——全文走单版详情）；versionNo 是小整数版本号（非 TSID，数值形）
-        performAsUser(get("/api/projects/100/prd/versions"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].versionNo").value(2))
-                .andExpect(jsonPath("$.data[0].confirmedAt").value("2026-10-17T09:00:00"))
-                .andExpect(jsonPath("$.data[1].versionNo").value(1))
-                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T12:00:00"));
-    }
-
-    @Test
-    void given_version_no_when_detail_then_full_text_returned() throws Exception {
-        when(prdVersionAppService.version(100L, 1)).thenReturn(new PrdVersionResponse("100", 1,
-                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
-                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
-
-        performAsUser(get("/api/projects/100/prd/versions/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.versionNo").value(1))
-                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
-                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
-    }
-
-    @Test
-    void given_no_such_version_when_detail_then_prj_052_as_404() throws Exception {
-        when(prdVersionAppService.version(100L, 7))
-                .thenThrow(new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND));
-
-        performAsUser(get("/api/projects/100/prd/versions/7"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4052))
-                .andExpect(jsonPath("$.message").value("PRD 版本不存在"));
-    }
-
-    // ---------- Demo 版本（#333「版本化与确认标记」：清单＋确认动作） ----------
-
-    @Test
-    void given_demo_versions_when_list_then_newest_first_with_anchor_and_marker() throws Exception {
-        when(demoVersionAppService.versions(100L)).thenReturn(List.of(
-                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
-                        LocalDateTime.of(2026, 10, 17, 9, 0), null),
-                new DemoVersionSummaryResponse("100", 1, 1, "r-1",
-                        LocalDateTime.of(2026, 10, 16, 12, 0),
-                        LocalDateTime.of(2026, 10, 16, 13, 0))));
-
-        // 清单最新在前；prdVersionNo＝「Demo vN（基于 PRD vM 快照）」关联锚；confirmedAt
-        // 仅确认标记所在版非空（标记投影到行）
-        performAsUser(get("/api/projects/100/demo-versions"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].versionNo").value(2))
-                .andExpect(jsonPath("$.data[0].prdVersionNo").value(1))
-                .andExpect(jsonPath("$.data[0].runId").value("r-2"))
-                .andExpect(jsonPath("$.data[0].confirmedAt").doesNotExist())
-                .andExpect(jsonPath("$.data[1].versionNo").value(1))
-                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T13:00:00"));
-    }
-
-    @Test
-    void given_version_when_confirm_demo_then_summary_with_confirmed_at() throws Exception {
-        when(demoVersionAppService.confirm(100L, 2)).thenReturn(
-                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
-                        LocalDateTime.of(2026, 10, 17, 9, 0),
-                        LocalDateTime.of(2026, 10, 17, 10, 0)));
-
-        // 「确认此版本，准备签约」：既有版本上打标记——回执＝所确认版本清单形
-        performAsUser(post("/api/projects/100/demo-versions/2/confirm"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.versionNo").value(2))
-                .andExpect(jsonPath("$.data.prdVersionNo").value(1))
-                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-17T10:00:00"));
-    }
-
-    @Test
-    void given_no_such_demo_version_when_confirm_then_prj_054_as_404() throws Exception {
-        when(demoVersionAppService.confirm(100L, 7))
-                .thenThrow(new ApplicationException(ProjectMessage.DEMO_VERSION_NOT_FOUND));
-
-        performAsUser(post("/api/projects/100/demo-versions/7/confirm"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4054))
-                .andExpect(jsonPath("$.message").value("Demo 版本不存在"));
-    }
-
     // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------
 
     @Test
@@ -1084,7 +849,7 @@ class ProjectControllerTest {
     @Test
     void given_message_when_post_then_run_id_returned() throws Exception {
         // #47 入口三分类：/messages 走派发入口（runId = 所派运行，分支归应用层测试）
-        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户", null, null, null))
+        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户", null))
                 .thenReturn(new DispatchAppService.DispatchRun("run-9"));
 
         performAsUser(post("/api/projects/100/messages")
@@ -1096,29 +861,12 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_scoped_message_with_divergence_when_post_then_enum_code_bound() throws Exception {
-        // #294 作用域发言携发散度：BaseEnum Integer code 双向（endpointType 先例）——
-        // 3=REIMAGINE 绑定到枚举后透传派发
-        when(dispatchAppService.dispatch(eq(100L), eq("换个方向"), any(), eq(1),
-                eq(DesignDivergence.REIMAGINE)))
-                .thenReturn(new DispatchAppService.DispatchRun("run-11"));
-
-        performAsUser(post("/api/projects/100/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"content\":\"换个方向\",\"designItem\":1,\"divergence\":3}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.runId").value("run-11"));
-        verify(dispatchAppService).dispatch(eq(100L), eq("换个方向"), any(), eq(1),
-                eq(DesignDivergence.REIMAGINE));
-    }
-
-    @Test
     void given_message_with_two_form_attachments_when_post_then_both_bound_and_dispatched() throws Exception {
         // #286 附件两形态（圈注 + 图片物料）在 REST 契约层绑定并透传派发——
         // image 形态载荷＝工作区路径引用、不带字节
         AtomicReference<List<MessageAttachment>> dispatched =
                 new AtomicReference<>();
-        when(dispatchAppService.dispatch(any(), any(), any(), any(), any()))
+        when(dispatchAppService.dispatch(any(), any(), any()))
                 .thenAnswer(invocation -> {
                     dispatched.set(invocation.getArgument(2));
                     return new DispatchAppService.DispatchRun("run-10");
@@ -1150,23 +898,18 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\" \"}"))
                 .andExpect(status().isBadRequest());
-        // #294 发散度非法档位码：BaseEnum Integer code 绑定面 400（零派发调用）
-        performAsUser(post("/api/projects/100/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"content\":\"改稿\",\"designItem\":1,\"divergence\":9}"))
-                .andExpect(status().isBadRequest());
-        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any());
         performAsUser(post("/api/projects/100/messages")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))
                 .andExpect(status().isBadRequest());
-        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any());
     }
 
     @Test
     void given_archived_project_when_post_message_then_prj_013_as_409() throws Exception {
         // 归档即指令区关闭（只读终态）
-        when(dispatchAppService.dispatch(100L, "再改改", null, null, null))
+        when(dispatchAppService.dispatch(100L, "再改改", null))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
 
         performAsUser(post("/api/projects/100/messages")
@@ -1182,7 +925,7 @@ class ProjectControllerTest {
         // 挂起问答守卫的 REST 契约（#40 / ADR-0005）：问答待答期间 /messages 同步
         // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
         // 行为由应用层守卫测试驱动）
-        when(dispatchAppService.dispatch(100L, "测试：请继续", null, null, null))
+        when(dispatchAppService.dispatch(100L, "测试：请继续", null))
                 .thenThrow(new ApplicationException(ProjectMessage.QUESTION_PENDING));
 
         performAsUser(post("/api/projects/100/messages")
@@ -1195,7 +938,7 @@ class ProjectControllerTest {
 
     @Test
     void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
-        when(dispatchAppService.dispatch(404L, "你好", null, null, null))
+        when(dispatchAppService.dispatch(404L, "你好", null))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
 
         performAsUser(post("/api/projects/404/messages")
@@ -1234,7 +977,7 @@ class ProjectControllerTest {
         when(dispatchAppService.pendingBalanceReminder(100L)).thenReturn(Optional.of(
                 new BalanceReminderAppService.BalanceReminderCard(
                         "8890123456789", "OPINION", "把报表加个导出",
-                        null, -500L, "run-b")));
+                        -500L, "run-b")));
 
         performAsUser(get("/api/projects/100/balance-reminder"))
                 .andExpect(status().isOk())
@@ -1400,15 +1143,15 @@ class ProjectControllerTest {
 
     @Test
     void given_generation_states_when_detail_then_projection_returned() throws Exception {
-        // 生成态四态投影透出（#222）：Integer code + *Name 随行——与 SSE 会话态无关，
-        // 前端档位与「继续生成」出口的推导输入
+        // 生成态三态投影透出（#222；#604 四态归一——INTERRUPTED 枚举退役）：Integer
+        // code + *Name 随行——与 SSE 会话态无关，前端档位推导的输入
         when(queryAppService.detail(100L)).thenReturn(
                 detailOf("100", ProjectStatus.IN_PROGRESS, false, null,
-                        GenerationState.INTERRUPTED));
+                        GenerationState.GENERATING));
         performAsUser(get("/api/projects/100"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.generationState").value(3))
-                .andExpect(jsonPath("$.data.generationStateName").value("生成中断"));
+                .andExpect(jsonPath("$.data.generationState").value(2))
+                .andExpect(jsonPath("$.data.generationStateName").value("生成中"));
 
         when(queryAppService.detail(101L)).thenReturn(
                 detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
@@ -1418,59 +1161,22 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.generationStateName").value("已生成"));
     }
 
-    @Test
-    void given_segments_when_detail_then_plan_list_returned() throws Exception {
-        // 生成轨道片清单透出（#225 计划区只读读模型）：ord/描述/状态 code + *Name
-        // 按库序透出；缺计划 = 字段缺席（前端不渲染计划区、不伪造计划）
-        when(queryAppService.detail(100L)).thenReturn(detailOf("100", ProjectStatus.IN_PROGRESS,
-                false, LocalDateTime.of(2026, 9, 20, 9, 0), GenerationState.GENERATING,
-                List.of(
-                        new GenerationSegmentResponse(0, "系统初始化", GenerationSegmentStatus.CLOSED,
-                                GenerationSegmentStatus.CLOSED.getName()),
-                        new GenerationSegmentResponse(1, "用户能注册登录", GenerationSegmentStatus.PENDING,
-                                GenerationSegmentStatus.PENDING.getName()))));
-        performAsUser(get("/api/projects/100"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.segments.length()").value(2))
-                .andExpect(jsonPath("$.data.segments[0].ord").value(0))
-                .andExpect(jsonPath("$.data.segments[0].description").value("系统初始化"))
-                .andExpect(jsonPath("$.data.segments[0].status").value(2))
-                .andExpect(jsonPath("$.data.segments[0].statusName").value("已收口"))
-                .andExpect(jsonPath("$.data.segments[1].status").value(1))
-                .andExpect(jsonPath("$.data.segments[1].statusName").value("待跑"));
-
-        when(queryAppService.detail(101L)).thenReturn(
-                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
-                        GenerationState.NEVER_GENERATED));
-        performAsUser(get("/api/projects/101"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.segments").value((Object) null));
-    }
-
     // ---------- 夹具 ----------
 
-    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成、片清单缺省无）。 */
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
         return detailOf(id, status, archived, null, GenerationState.NEVER_GENERATED);
     }
 
-    /** 详情夹具（携片清单——#225 计划区透出面）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
-            LocalDateTime prdProducedAt, GenerationState generationState,
-            List<GenerationSegmentResponse> segments) {
+            LocalDateTime prdProducedAt, GenerationState generationState) {
         return ProjectDetailResponseFixture.detailOf(id, "官网 demo")
                 .workspaceId("900")
                 .status(status)
                 .archived(archived)
                 .prdProducedAt(prdProducedAt)
                 .generationState(generationState)
-                .segments(segments)
                 .build();
-    }
-
-    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
-            LocalDateTime prdProducedAt, GenerationState generationState) {
-        return detailOf(id, status, archived, prdProducedAt, generationState, null);
     }
 
     /**

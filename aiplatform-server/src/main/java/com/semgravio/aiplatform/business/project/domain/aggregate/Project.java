@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Objects;
 
 import jakarta.persistence.Column;
@@ -11,21 +10,16 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Getter;
 
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.core.stereotype.Aggregate;
 import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
-import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 
 /**
  * 项目聚合根（{@code prj_projects}）：用户一次定制需求的全程载体——业务字段 +
@@ -61,15 +55,6 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
 
     @Column(name = "type", nullable = false, updatable = false)
     private ProjectType type;
-
-    /**
-     * 终点类型（#285，ADR-0024「项目不分型、终点是属性」）：下单前可变（切换
-     * 编排归 {@link #switchEndpoint}，项目内唯一变更位＝设置 tab 控件）、下单即
-     * 冻结（守卫归编排）。入口两档显式选择定初值（#299：做设计＝DESIGN，缺省
-     * 系统）。PRD 清单章形态跟本属性走（技能 prd-writing 双形态选择键）。
-     */
-    @Column(name = "endpoint_type", nullable = false)
-    private ProjectEndpointType endpointType;
 
     @Column(name = "workspace_id", nullable = false, updatable = false)
     private Long workspaceId;
@@ -130,23 +115,25 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      * 首个构建派发点火时点（#542，ADR-0049「两轨唯一差异＝触发源」的读点）：
      * 岔路口「立即生成」／付费轨 PRD 确认／快道直生成的共同落位（单向置位，
      * {@link #markFirstBuildRequested}）——岔路口卡与确认按钮「首建未派发」呈现
-     * 条件的事实源（失败重试走「继续生成」不回清：确认不重复、卡不复现）。
+     * 条件的事实源（#604 失败新语义：终态失败/停止收口清位——{@link
+     * #reopenFirstBuildRequest}，卡与确认按钮复现，用户在点火入口重跑即恢复）。
      */
     @Column(name = "generation_requested_at")
     private LocalDateTime generationRequestedAt;
 
     /**
-     * 确认标记所在 Demo 版本（#333 单指针，NULL = 未确认任何版本）：「确认此
-     * 版本，准备签约」＝既有版本上打标记（选定动作、不产生新版本号——版本行
-     * 不可变，标记归本指针；换确认版本＝指针移动，旧标记随移）。下单/合同冻结
-     * 引用（#335）与签约门投影消费本位。
+     * 确认用于签约的用户面版本号（#629 改义，「确认此版本，准备签约」；单指针，
+     * NULL = 未确认任何版本）：标记当前用户面版本（git 版本号，非旧 Demo/PRD
+     * 版本号）——选定动作、不产生新版本号；换选＝指针移动、旧标记随移，重复确认
+     * 同版幂等（时间刷新）。下单前置「存在已确认用户面版本」与订单冻结的版本引用
+     * 消费本位。旧双轴版本表随 #630 退场，本列语义收拢为用户面版本号。
      */
-    @Column(name = "confirmed_demo_version_no")
-    private Integer confirmedDemoVersionNo;
+    @Column(name = "confirmed_version_no")
+    private Integer confirmedVersionNo;
 
-    /** 确认标记落位时点（与 {@link #confirmedDemoVersionNo} 同刻写，随指针移动刷新）。 */
-    @Column(name = "confirmed_demo_at")
-    private LocalDateTime confirmedDemoAt;
+    /** 确认标记落位时点（与 {@link #confirmedVersionNo} 同刻写，随指针移动刷新）。 */
+    @Column(name = "confirmed_version_at")
+    private LocalDateTime confirmedVersionAt;
 
     /**
      * 改需求回路停驻的意见原文（#334；<b>#462 去确认门：停驻读法整段退役</b>——
@@ -168,26 +155,10 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "needs_user_supplement", nullable = false)
     private boolean needsUserSupplement;
 
-    /**
-     * 设计范围作用域（#285）：仅系统＋设计项目落值（设计范围＝功能清单页面集的
-     * 锚定口径——全部/勾选）；设计主线（计划对应物＝PRD 设计物清单章）与系统/
-     * 设计主线出身不由页面锚定时为 NULL。
-     */
-    @Column(name = "design_scope_type")
-    private DesignScopeType designScopeType;
-
-    /**
-     * 设计范围勾选页标签（#285）：功能清单条目原文 jsonb（建议性锚——PRD 是模型
-     * 独笔演进的正本，标签不构成稳定标识）；作用域为全部页面或无范围时 NULL。
-     */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "design_scope_pages", columnDefinition = "jsonb")
-    private List<String> designScopePages;
-
     protected Project() {
     }
 
-    private Project(String name, ProjectType type, ProjectEndpointType endpointType,
+    private Project(String name, ProjectType type,
                     Long workspaceId, Long ownerAccountId, Long ownerGuestId) {
         if (name == null || name.isBlank()) {
             throw new DomainException(ProjectMessage.PROJECT_NAME_BLANK);
@@ -198,58 +169,28 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         }
         this.name = name;
         this.type = ProjectType.orDefault(type);
-        this.endpointType = ProjectEndpointType.orDefault(endpointType);
         this.workspaceId = workspaceId;
         this.ownerAccountId = ownerAccountId;
         this.ownerGuestId = ownerGuestId;
     }
 
     /**
-     * 建项目（#326 收编单一形——owner 双列与终点初值全显形；#299 备案触发器「下一
-     * 职责再入聚合时收编删重载」已燃，四参/五参重载删除、调用方逐自声明）：终点
-     * 初值入口两档显式选择（#299，做设计携 {@link ProjectEndpointType#DESIGN}、
-     * 缺省传 null 走系统）；归属 owner 双列至多一方落值（互斥——聚合守卫与库层
-     * CHECK 双保险，账户随会话、访客随凭证惰性创建后挂列，皆可空＝无主占位形）。
+     * 建项目（#326 收编单一形）：归属 owner 双列至多一方落值（互斥——聚合守卫与
+     * 库层 CHECK 双保险，账户随会话、访客随凭证惰性创建后挂列，皆可空＝无主
+     * 占位形）。#612 终点收窄为系统单值——建项目不再接受终点初值（恒系统）。
      */
-    public static Project create(String name, ProjectType type, ProjectEndpointType endpointType,
+    public static Project create(String name, ProjectType type,
                                  Long workspaceId, Long ownerAccountId, Long ownerGuestId) {
-        return new Project(name, type, endpointType, workspaceId, ownerAccountId, ownerGuestId);
+        return new Project(name, type, workspaceId, ownerAccountId, ownerGuestId);
     }
 
     /**
-     * 切换终点类型（#285，设置 tab 控件＝项目内唯一变更位）：纯属性落位——冻结
-     * （未终结订单）/关闭（归档）守卫与「同目标即无操作」判定归编排；设计范围
-     * 只随系统＋设计落库（其余目标清空——设计主线的范围由 PRD 设计物清单章承载，
-     * 不另存正本防两处漂移）。
+     * 终点类型读面（#612 收窄为系统单值）：终点概念收窄后恒为 {@link
+     * ProjectEndpointType#SYSTEM}——列已拆除，本方法只为读面/契约保持「系统」
+     * 这一唯一事实。
      */
-    public void switchEndpoint(ProjectEndpointType target, DesignScope scope) {
-        if (target == null || (scope != null && target != ProjectEndpointType.SYSTEM_DESIGN)) {
-            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
-        }
-        this.endpointType = target;
-        if (target == ProjectEndpointType.SYSTEM_DESIGN && scope != null) {
-            this.designScopeType = scope.type();
-            this.designScopePages = scope.type() == DesignScopeType.SELECTED_PAGES
-                    ? List.copyOf(scope.pages()) : null;
-        }
-        else {
-            this.designScopeType = null;
-            this.designScopePages = null;
-        }
-    }
-
-    /**
-     * 设计范围读面（{@link DesignScope} 组装）：无锚定（非系统＋设计或不由页面
-     * 锚定）返回 null。
-     */
-    public DesignScope designScope() {
-        if (designScopeType == null) {
-            return null;
-        }
-        if (designScopeType == DesignScopeType.ALL_PAGES) {
-            return DesignScope.allPages();
-        }
-        return DesignScope.selected(designScopePages == null ? List.of() : designScopePages);
+    public ProjectEndpointType getEndpointType() {
+        return ProjectEndpointType.SYSTEM;
     }
 
     /**
@@ -314,9 +255,9 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     /**
-     * 首个构建派发点火置位（#542）：幂等单向——首次落值后不再刷新（失败重试走
-     * 「继续生成」，确认不重复、卡不复现；对偶 {@link #markGenerated} 的单置位
-     * 语义，两者相差整场生成在途窗口）。
+     * 首个构建派发点火置位（#542）：已置不刷新（一场在途/成功的首建只记首次点火
+     * 时点）；对偶 {@link #markGenerated} 的置位语义，两者相差整场生成在途窗口。
+     * #604 起终态失败/停止收口清位（{@link #reopenFirstBuildRequest}），重跑可再置。
      */
     public void markFirstBuildRequested() {
         if (generationRequestedAt == null) {
@@ -325,13 +266,26 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     /**
-     * Demo 版本确认标记移动（#333「确认此版本，准备签约」）：既有版本上打标记
-     * ——不产生新版本号（版本行不可变，标记归本聚合单指针），换确认版本＝指针
-     * 随移（旧标记自然失效）。目标版本存在性守卫归应用层（PRJ_054）。
+     * 首建点火位复位（#604 失败新语义——明确展示＋重跑即恢复）：终态失败/停止
+     * 收口时清 {@code generation_requested_at}——岔路口卡/确认按钮「首建未派发」
+     * 呈现条件复现，用户在点火入口重跑即恢复（「继续生成」断点续跑入口随续跑
+     * 机器退役；不携错误现场、不自动重跑，ADR-0055 #580-13）。成功收口不清
+     * （已生成，入口本就不在场）。优雅关停中断不清位（关停期不落库，ADR-0043
+     * ——重启后由 POST /generate 重跑入口恢复）。
      */
-    public void confirmDemoVersion(int versionNo) {
-        this.confirmedDemoVersionNo = versionNo;
-        this.confirmedDemoAt = LocalDateTime.now();
+    public void reopenFirstBuildRequest() {
+        this.generationRequestedAt = null;
+    }
+
+    /**
+     * 确认用于签约的用户面版本标记移动（#333 起「确认此版本，准备签约」；#629
+     * 改义为用户面版本号）：不产生新版本号，标记归本聚合单指针；换选＝指针随移
+     * （旧标记自然失效），重复确认同版幂等（时间刷新）。目标版本存在性守卫归应用层
+     * （#629 起＝用户面版本序列的 PRJ_028）。
+     */
+    public void confirmVersion(int versionNo) {
+        this.confirmedVersionNo = versionNo;
+        this.confirmedVersionAt = LocalDateTime.now();
     }
 
     /**

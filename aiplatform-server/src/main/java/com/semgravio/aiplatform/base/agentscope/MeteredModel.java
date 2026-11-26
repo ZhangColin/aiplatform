@@ -33,15 +33,31 @@ final class MeteredModel implements Model {
 
     private final Model delegate;
     private final ModelRef modelRef;
+    private final String vendor;
 
-    private MeteredModel(Model delegate, ModelRef modelRef) {
+    private MeteredModel(Model delegate, ModelRef modelRef, String vendor) {
         this.delegate = delegate;
         this.modelRef = modelRef;
+        this.vendor = vendor;
     }
 
-    /** 解析模型串为 provider:modelId 归属（白名单同主模型口径）并包装。 */
+    /**
+     * 解析模型串为 provider:modelId 归属（白名单同主模型口径）并包装；vendor 缺
+     * （无通道语境的测试形）回落前缀＝provider 同值——V79 历史回填同款语义。
+     */
     static Model wrap(Model delegate, String modelString) {
-        return new MeteredModel(delegate, ModelRef.parse(modelString));
+        return wrap(delegate, modelString, null);
+    }
+
+    /**
+     * 同上，携 vendor（ADR-0053 ②：候选通道行的供应商维度——同供应商多账号
+     * 共用供应商级定价与模型视角合并；候选装配面逐候选传入，failover 切候选后
+     * vendor 随实际命中通道行走）。空经 {@link ModelChannel#normalizedVendor}
+     * 回落前缀同值（V79 历史回填同款语义）。
+     */
+    static Model wrap(Model delegate, String modelString, String vendor) {
+        ModelRef ref = ModelRef.parse(modelString);
+        return new MeteredModel(delegate, ref, ModelChannel.normalizedVendor(ref.provider(), vendor));
     }
 
     @Override
@@ -59,7 +75,7 @@ final class MeteredModel implements Model {
                             last.set(resp.getUsage());
                         }
                     })
-                    .doFinally(signal -> scope.report(modelRef, last.get()));
+                    .doFinally(signal -> scope.report(modelRef, vendor, last.get()));
         });
     }
 

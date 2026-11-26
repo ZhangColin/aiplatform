@@ -60,6 +60,8 @@ export function ScopeAndQuoteCard({
   const waitingQuote = order.status === ORDER_STATUS.pendingQuote;
   const frozen = contract != null;
 
+  // #629：新单版本引用收敛为「已确认用户面版本号」；历史单沿用 PRD/Demo 双版本号。
+  const confirmedVersionNo = contract?.confirmedVersionNo ?? order.confirmedVersionNo;
   const prdVersionNo = contract?.prdVersionNo ?? order.prdVersionNo;
   const demoVersionNo = contract?.demoVersionNo ?? order.demoVersionNo;
 
@@ -79,8 +81,13 @@ export function ScopeAndQuoteCard({
         contractNo={contract?.contractNo}
       />
 
-      {/* PRD/Demo 快照版本引用（照原型；点开版本记录抽屉可回看） */}
-      {prdVersionNo != null || demoVersionNo != null ? (
+      {/* 版本引用（#629）：新单＝已确认用户面版本号（单一）；历史单＝PRD/Demo 双版本号。
+          点开版本记录抽屉可回看。 */}
+      {confirmedVersionNo != null ? (
+        <div className="flex flex-wrap items-center gap-2 text-label-md">
+          <VersionRef onClick={openVersionRecord}>确认版本 v{confirmedVersionNo} 不可变交付快照</VersionRef>
+        </div>
+      ) : prdVersionNo != null || demoVersionNo != null ? (
         <div className="flex flex-wrap items-center gap-2 text-label-md">
           {prdVersionNo != null ? (
             <VersionRef onClick={openVersionRecord}>PRD v{prdVersionNo} 不可变需求快照</VersionRef>

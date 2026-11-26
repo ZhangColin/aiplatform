@@ -186,7 +186,7 @@ class OrderKickoffProductionTest {
         // 承接挂真项目行（prj_production_handoffs FK prj_projects——测试单不虚构
         // 项目号，逐单建真项目随 teardown 级联清）
         Long projectId = projectRepository.save(com.semgravio.aiplatform.business.project.domain.aggregate.Project
-                .create("开工判定项目" + PROJECT_SEQ.get(), null, null,
+                .create("开工判定项目" + PROJECT_SEQ.get(), null,
                         PROJECT_SEQ.incrementAndGet(), 1L, null)).getId();
         projectIds.add(projectId);
         return orderRepository.save(Order.place(projectId, 1L, null,

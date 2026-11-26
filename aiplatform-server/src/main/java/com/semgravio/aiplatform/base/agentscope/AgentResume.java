@@ -15,12 +15,15 @@ import io.agentscope.core.event.ConfirmResult;
  * @param sessionId         会话标识（状态槽位寻址）
  * @param userId            会话用户（状态槽位寻址）
  * @param workspaceId       工作区标识（可空 → 本地兜底工作区）
- * @param modelString       模型串（必填——档位解析产物「前缀:实际模型名」，语义同
+ * @param modelString       模型串（必填——配置解析产物「前缀:实际模型名」，语义同
  *                         {@link AgentCommand#modelString()}；业务侧从运营配置重新
  *                         解析重建，不信挂起载荷）
  * @param modelChannel      模型通道注入件（主链非空——续跑与首轮同通道，业务侧
  *                          从运营配置重新解析，不信挂起载荷；null＝测试形，语义同
  *                         {@link AgentCommand#modelChannel()}）
+ * @param modelQueue        候选队列（#557：可空——非空时语义同
+ *                         {@link AgentCommand#modelQueue()}，续跑与首轮同队列，
+ *                         业务侧从运营配置重新解析重建，不信挂起载荷）
  * @param systemPrompt      系统提示词（可空 → 配置默认）
  * @param replyId           挂起的引擎侧请求 id（计量幂等键后缀）
  * @param confirmResults    待确认工具的批复清单（与挂起 toolCalls 一一对应）
@@ -30,8 +33,6 @@ import io.agentscope.core.event.ConfirmResult;
  *                         续跑构建 agent 时按配置发放工具集，与首轮命令同键
  * @param workspaceReadOnly 项目工作区是否解析为只读面（#86 起续跑与首轮同面——
  *                         主智能体挂起续跑不漂移成读写面）
- * @param workspaceNoShell 项目工作区是否解析为设计面（#289——续跑与首轮同面：
- *                         designer 会话若有挂起续跑，不漂移成带 shell 的读写面）
  * @param toolSpec          工具面规格串（#252，可空——语义同 {@link AgentCommand#toolSpec()}）：
  *                         续跑与首轮同规格（业务侧从同一运营配置解析重建，不信挂起载荷）
  * @param silenceTimeout   活超时判死阈值（可空，语义同 {@link AgentCommand#silenceTimeout()}
@@ -50,6 +51,7 @@ public record AgentResume(
         String workspaceId,
         String modelString,
         ModelChannel modelChannel,
+        ModelCandidateQueue modelQueue,
         String systemPrompt,
         String replyId,
         List<ConfirmResult> confirmResults,
@@ -57,7 +59,6 @@ public record AgentResume(
         UsageContext usageContext,
         String agentKey,
         boolean workspaceReadOnly,
-        boolean workspaceNoShell,
         String toolSpec,
         Duration silenceTimeout,
         Duration toolSilenceTimeout) {
@@ -67,7 +68,7 @@ public record AgentResume(
                 || modelString == null || modelString.isBlank()) {
             throw new IllegalArgumentException(
                     "AgentResume 字段不完整：runId/sessionId/modelString 必填"
-                            + "（modelString＝档位解析产物，与 AgentCommand 同契约）");
+                            + "（modelString＝配置解析产物，与 AgentCommand 同契约）");
         }
     }
 }

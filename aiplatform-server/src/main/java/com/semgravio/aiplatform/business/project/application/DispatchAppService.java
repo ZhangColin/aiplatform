@@ -14,6 +14,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
+import com.semgravio.aiplatform.base.agentscope.ModelCandidateQueue;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.UsageContext;
@@ -27,7 +28,6 @@ import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
 import com.semgravio.aiplatform.business.billing.domain.enums.InterceptLane;
 import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 
@@ -40,11 +40,17 @@ import lombok.extern.slf4j.Slf4j;
  * 此分岔内拦）、咨询走主智能体答询轮（{@link MainAgentAppService#answerInquiry}，
  * 零产物短路，随时可答）、兜底走平台定型引导（零产物，不起任何智能体 run）。
  * 意见与咨询同一 {@code main-{projectId}} 会话连续（#86）——分岔只是车道语义
- * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
+ * （守卫有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
+ *
+ * <p><b>生成后对话面（#622，ADR-0056 两平面）</b>：项目已生成或编码 run 在途时，
+ * 发言在分类前直接分岔到对话面（{@link DialogAppService}）——独立轻会话
+ * （{@code dialog-{projectId}}）、只读答疑与澄清、零派发；生成前的首建访谈链
+ * （分类/答询/兜底）原样不动。旧迭代受理链已随 #625 拆除；其上的试用拦截/余额
+ * 留存代码作为商业面保留，不接本面。</p>
  *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
- * 一次性会话（{@code classify-{runId}}，模型档走边缘点档位链——classification
- * 档位库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
+ * 一次性会话（{@code classify-{runId}}，模型档走边缘点配置链——classification
+ * 配置库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
  * 烧重档）、空 sink 无事件、不触项目工作区），
  * 同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，异步化会
  * 拿不到真锚）。</p>
@@ -78,9 +84,8 @@ import lombok.extern.slf4j.Slf4j;
  * 拦下可计费车道（意见/咨询；兜底零调用天然免费不拦），被拦输入留存
  * （{@code bil_balance_holds} 待决行，原文＋附件不丢失），余额提醒卡事件直达
  * 对话面（显当前负额＋充值入口〔先登录＋准入码〕）；充值回正自动放行（恢复受理
- * 不重输——入账事件编排监听触发认领）；作用域改稿（设计会话段）同门同留存
- * （件序＋发散度随留存承载）；悬空接管路径同守本门。试用项目门恒放行（计费
- * 边界＝翻转时点）。段内绝不检查绝不中断（扣成负照跑——结算段收口才结算）。</p>
+ * 不重输——入账事件编排监听触发认领）；悬空接管路径同守本门。试用项目门恒放行
+ * （计费边界＝翻转时点）。段内绝不检查绝不中断（扣成负照跑——结算段收口才结算）。</p>
  *
  * <p><b>判定轮结算（#537 段收口接线）</b>：分类调用的 runId 随可计费车道的轮
  * 结算入账（翻转后判定轮同计费边界）；兜底路径不起轮——判定调用单独结算。</p>
@@ -138,33 +143,36 @@ public class DispatchAppService {
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     private final MainAgentAppService mainAgentAppService;
+    private final DialogAppService dialogAppService;
+    private final CodingRunTrack codingRunTrack;
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
     private final AgentConfigAppService agentConfigs;
-    private final ModelTierAppService modelTiers;
+    private final ModelConfigAppService modelConfigs;
     private final ConversationHistoryAppService conversationHistory;
-    private final DesignProcessAppService designProcessAppService;
     private final BillingAppService billingAppService;
     private final TrialInterceptAppService trialInterceptAppService;
     private final BalanceGateAppService balanceGate;
     private final BalanceReminderAppService balanceReminderService;
 
-    public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
+    public DispatchAppService(MainAgentAppService mainAgentAppService,
+            DialogAppService dialogAppService, CodingRunTrack codingRunTrack,
+            AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
-            ModelTierAppService modelTiers,
+            ModelConfigAppService modelConfigs,
             ConversationHistoryAppService conversationHistory,
-            DesignProcessAppService designProcessAppService,
             BillingAppService billingAppService,
             TrialInterceptAppService trialInterceptAppService,
             BalanceGateAppService balanceGate,
             BalanceReminderAppService balanceReminderService) {
         this.mainAgentAppService = mainAgentAppService;
+        this.dialogAppService = dialogAppService;
+        this.codingRunTrack = codingRunTrack;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.agentConfigs = agentConfigs;
-        this.modelTiers = modelTiers;
+        this.modelConfigs = modelConfigs;
         this.conversationHistory = conversationHistory;
-        this.designProcessAppService = designProcessAppService;
         this.billingAppService = billingAppService;
         this.trialInterceptAppService = trialInterceptAppService;
         this.balanceGate = balanceGate;
@@ -180,24 +188,20 @@ public class DispatchAppService {
      * 调用，秒级轻调用，接受）。响应携带所派 run 的标识（意见 = 意见轮 / 咨询 =
      * 答询轮 / 兜底 = 引导事件锚）。
      *
-     * <p><b>设计物作用域（#291 跨件回溯的会话路由）</b>：{@code designItem} 在场
-     * 即跳过分类与主智能体轮——发言直达该件设计会话改稿（同会话继续；设计轨在途
-     * 即排队、当前稿代收口后受理）。守卫同意见链（归档/订单冻结——设计改稿是
-     * 迭代动作）；挂起问答不拦（主智能体会话的问答与设计会话互不相干）。发言照
-     * 常落对话史（回访可见），排队时响应锚＝发言锚（改稿 run 起跑另带自身锚）。</p>
-     *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区
      *                              关闭，先于分类——拒绝即零调用零事件）；ORD_006
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
-     *                              分类后拦）；PRJ_047 设计物不存在 / PRJ_048 件
-     *                              未产出稿（仅作用域形态）；divergence 非法值
-     *                              400（Jackson 枚举绑定面）
+     *                              分类后拦）
      */
-    public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments,
-            Integer designItem, DesignDivergence divergence) {
+    public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
-        if (designItem != null) {
-            return dispatchDesignRevision(project, prompt, attachments, designItem, divergence);
+        // 对话面（#622，ADR-0056 两平面）：项目已生成或首建/迭代在途——对话区发言
+        // 走生成后的独立轻会话（答疑与澄清两职能），零派发、零写面、零生成触发；
+        // 生成前的首建访谈链、答询与兜底分类原样不动（下方既有派发面）。旧迭代
+        // 受理链与其上的试用拦截/余额留存不接本面（商业面代码保留，归 #625 清场）。
+        if (dialogPlaneApplies(project, codingRunTrack)) {
+            return new DispatchRun(
+                    dialogAppService.turn(project, prompt, attachments));
         }
         // 悬空接管（ADR-0032，#373）：访谈悬空标记在场即绕过入口三分类直达意见轮
         // ——悬空期短确认（「OK」「可以」）不再被无状态分类吃进兜底、回与项目状态
@@ -211,7 +215,7 @@ public class DispatchAppService {
             BalanceGateAppService.Verdict gate = balanceGate.assess(projectId);
             if (gate.blocked()) {
                 return blockBalanceReminder(project, prompt, attachments,
-                        BalanceHoldLane.OPINION, null, null);
+                        BalanceHoldLane.OPINION);
             }
             return new DispatchRun(
                     mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
@@ -234,8 +238,7 @@ public class DispatchAppService {
             mainAgentAppService.settleStandaloneClassify(projectId, classified.runId());
             return blockBalanceReminder(project, prompt, attachments,
                     classified.classification().type() == MessageClass.OPINION
-                            ? BalanceHoldLane.OPINION : BalanceHoldLane.INQUIRY,
-                    null, null);
+                            ? BalanceHoldLane.OPINION : BalanceHoldLane.INQUIRY);
         }
         return switch (classified.classification().type()) {
             case OPINION -> {
@@ -258,6 +261,15 @@ public class DispatchAppService {
     }
 
     /**
+     * 对话面适用范围（#622）：项目已生成，或首建/迭代编码 run 在途——两者都是
+     * 「系统已存在/正在成形」的生成后时段，对话区发言走对话面。未生成且无在途
+     * （首建访谈期）走既有入口分类链（原样不动）。
+     */
+    static boolean dialogPlaneApplies(Project project, CodingRunTrack codingRunTrack) {
+        return project.isGenerated() || codingRunTrack.isInFlight(project.getId());
+    }
+
+    /**
      * 待决拦截卡读面（#533 计费②门②，卡可回）：无待决/已付费返回空（卡随翻转
      * 熄灭）。重载/回访经 GET 重建——前端无需事件在场。
      */
@@ -276,10 +288,9 @@ public class DispatchAppService {
 
     /**
      * 充值回正放行（#537——「充值到账后下一段自动放行〔不手动重试〕」）：认领全部
-     * 过门的待决留存并恢复受理（意见回意见轮／咨询回答询轮／作用域改稿回设计会话，
-     * 恢复受理的天然守卫〔归档/订单冻结/挂起问答/件状态〕照拦不误）；恢复受理失败
-     * 的留存退场（discard——用户重发即新段，段边界门判定自然接管）。入账事件
-     * （AFTER_COMMIT 监听）触发。
+     * 过门的待决留存并恢复受理（意见回意见轮／咨询回答询轮，恢复受理的天然守卫
+     * 〔归档/订单冻结/挂起问答〕照拦不误）；恢复受理失败的留存退场（discard——
+     * 用户重发即新段，段边界门判定自然接管）。入账事件（AFTER_COMMIT 监听）触发。
      */
     public void resumeBalanceHolds() {
         for (BalanceReminderAppService.ResumableHold hold : balanceReminderService.claimPassable()) {
@@ -290,17 +301,6 @@ public class DispatchAppService {
                             hold.prompt(), attachmentsOf(hold.attachments()));
                     case INQUIRY -> mainAgentAppService.answerInquiry(project,
                             hold.prompt(), attachmentsOf(hold.attachments()));
-                    case DESIGN_REVISION -> {
-                        // 对话史补落（对齐派发直路 dispatchDesignRevision——被拦改稿
-                        // 输入恢复受理后用户面照见原文气泡；OPINION/INQUIRY 车道由
-                        // runOpinionTurn/answerInquiry 自带落史）
-                        conversationHistory.recordUserUtterance(hold.projectId(),
-                                hold.runId(), hold.prompt(), attachmentsOf(hold.attachments()));
-                        designProcessAppService.reviseDesignItem(
-                                hold.projectId(), hold.designItem(), hold.prompt(),
-                                hold.divergence() == null ? null
-                                        : DesignDivergence.valueOf(hold.divergence()));
-                    }
                 }
                 log.info("[dispatch] 项目 {} 余额提醒放行：被拦输入已恢复受理（{}，holdId={}）",
                         hold.projectId(), hold.lane(), hold.holdId());
@@ -318,13 +318,11 @@ public class DispatchAppService {
     /** 被拦输入落留存＋余额提醒卡事件（本事件即该次派发的全部：零 run、零对话史——
      *  受理前的拦下不进对话面，原文随卡呈现与恢复；充值回正自动放行〔不手动重试〕）。 */
     private DispatchRun blockBalanceReminder(Project project, String prompt,
-            List<MessageAttachment> attachments, BalanceHoldLane lane,
-            Integer designItem, DesignDivergence divergence) {
+            List<MessageAttachment> attachments, BalanceHoldLane lane) {
         String runId = EventsAppService.newRunId();
         BalanceReminderAppService.BalanceReminderCard card = balanceReminderService.hold(
                 project.getId(), lane, prompt,
-                ConversationHistoryAppService.toJsonMaps(attachments), designItem,
-                divergence == null ? null : divergence.name(), runId);
+                ConversationHistoryAppService.toJsonMaps(attachments), runId);
         eventBridge.emitBalanceReminder(project, card);
         log.info("[dispatch] 项目 {} 余额提醒（{}）：输入已留存待决，充值回正自动放行",
                 project.getId(), lane);
@@ -396,8 +394,7 @@ public class DispatchAppService {
     /**
      * 闸的开启条件：试用项目（两轨判定单读点，行缺席＝试用）且已过获客旅程
      * （已生成＝迭代期——五问/PRD/首个构建整场生成零扣费，意见与兜底从首次生成
-     * 起进入付费续用）。作用域形态（designItem 随话改稿）不经三分类、本票不入
-     * 闸（归岔路口票统筹，票内声明）。
+     * 起进入付费续用）。
      */
     private boolean interceptGateOn(Project project) {
         return project.isGenerated() && billingAppService.trackOf(project.getId()).trial();
@@ -417,32 +414,9 @@ public class DispatchAppService {
         });
     }
 
-    /**
-     * 作用域改稿派发（#291；#294 携发散度）：发言落对话史（用户面照见）＋直达
-     * 目标件设计会话。排队时锚＝发言锚（runId 只作响应与事件挂载的链路锚，改稿
-     * run 各带自身锚——项目过滤订阅照常看见直播卡生长）。
-     */
-    private DispatchRun dispatchDesignRevision(Project project, String prompt,
-            List<MessageAttachment> attachments, int designItem, DesignDivergence divergence) {
-        // 守卫先于落库（对齐意见轮口径）：拒绝即零副作用——不落幽灵发言
-        designProcessAppService.requireRevisionableItem(project.getId(), designItem);
-        // 段边界余额门（#537 计费③）：作用域改稿＝设计会话段的起跑——欠费拦下留存
-        // （件序＋发散度随留存承载，充值回正自动恢复受理）
-        BalanceGateAppService.Verdict gate = balanceGate.assess(project.getId());
-        if (gate.blocked()) {
-            return blockBalanceReminder(project, prompt, attachments,
-                    BalanceHoldLane.DESIGN_REVISION, designItem, divergence);
-        }
-        String runId = EventsAppService.newRunId();
-        conversationHistory.recordUserUtterance(project.getId(), runId, prompt, attachments);
-        DesignProcessAppService.DesignRun run = designProcessAppService.reviseDesignItem(
-                project.getId(), designItem, prompt, divergence);
-        return new DispatchRun(run != null ? run.runId() : runId);
-    }
-
     /** 无附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
     public DispatchRun dispatch(Long projectId, String prompt) {
-        return dispatch(projectId, prompt, MessageAttachment.NONE, null, null);
+        return dispatch(projectId, prompt, MessageAttachment.NONE);
     }
 
     /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
@@ -488,10 +462,10 @@ public class DispatchAppService {
     }
 
     /**
-     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档走边缘点档位链
-     * （#366 收编：classification 档位库值优先缺省 flash——配置读面
-     * {@link AgentConfigAppService#effectiveEdgeModelId} → 解析单点
-     * {@link ModelTierAppService#resolve} 产模型串＋通道注入，后台改档下一轮派发
+     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档走边缘点配置链
+     * （#366 收编：classification 配置库值优先缺省 flash——配置读面
+     * {@link AgentConfigAppService#effectiveEdgeModelConfigKey} → 解析单点
+     * {@link ModelConfigAppService#resolve} 产模型串＋通道注入，后台改配置下一轮派发
      * 即生效）、空 sink（无 SSE 事件）、不触项目工作区、计量 agentKind=classify。
      * 返回分类结果＋本次判定的 runId（#537 段收口接线：判定轮翻转后计费，随可计费
      * 车道的轮结算／兜底路径单独结算）。失败 / 超时 / 输出不可解析一律回落意见链
@@ -500,13 +474,14 @@ public class DispatchAppService {
     private ClassifyOutcome classify(Long projectId, String prompt) {
         String runId = EventsAppService.newRunId();
         String sessionId = CLASSIFY_SESSION_PREFIX + runId;
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(
-                agentConfigs.effectiveEdgeModelId(AgentEdgePoint.CLASSIFICATION));
+        // #557 整候选队列（边缘点同获链式切换——resolve 面之一）
+        ModelCandidateQueue model = modelConfigs.resolveQueue(
+                agentConfigs.effectiveEdgeModelConfigKey(AgentEdgePoint.CLASSIFICATION));
         AgentCommand command = new AgentCommand(
                 runId,
                 prompt,
                 CLASSIFY_SYSTEM_PROMPT,
-                model.modelString(), // 边缘点档位解析产物（缺省 flash 档）
+                model.modelString(), // 边缘点配置解析产物（缺省 flash 档）
                 model.channel(), // 通道注入：key/baseUrl 入 SDK，不吃环境变量
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
@@ -519,9 +494,10 @@ public class DispatchAppService {
                 /* toolSilenceTimeout= */ null,
                 null,
                 /* workspaceReadOnly= */ false,
-                /* workspaceNoShell= */ false,
                 /* heading= */ null,
-                /* toolSpec= */ null); // 一次性判定无配置语境：空工具面、无规格
+                /* toolSpec= */ null, // 一次性判定无配置语境：空工具面、无规格
+                // #557 候选队列（failover 装配面）
+                model);
         try {
             AgentReply reply = agentClient.converse(command, event -> {
             });

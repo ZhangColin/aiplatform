@@ -20,8 +20,6 @@ import com.semgravio.aiplatform.business.order.domain.model.Operator;
 import com.semgravio.aiplatform.business.order.domain.repository.ContractRepository;
 import com.semgravio.aiplatform.business.order.domain.repository.OrderRepository;
 import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
-import com.semgravio.aiplatform.business.project.application.DesignPackageAppService;
-import com.semgravio.aiplatform.business.project.application.ProjectKnowledgeAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -31,16 +29,16 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#297 交付物
- * 类型＋设计资产包下单冻结——交易机制零改版，下单多冻结一维；#335 下单改版与
+ * 类型下单冻结；#611 交付物类型收窄为系统单值〔设计线退役〕；#335 下单改版与
  * 订单语义重对位基座；#338 取消边界收窄＋归档取版对齐）。#337 起 mock 支付闭环
  * 退役（同步支付端点与 {@code #pay} 用例连代码删除——支付语义并入付款节点凭证
  * 核验路径，不留两轨并存；「已支付＝开工条件满足」的判定器＝{@link
- * KickoffAppService}〔#338 接通〕，本服务不再有「支付」入口）：确认下单 = 过双确认门（最新 PRD 版本＋Demo 确认版本）
- * 后冻结 PRD 最新版全文冗余拷贝＋双版本引用＋交付物类型入单，待报价起步
- * （「待确认报价」占位态）。下单快照的上游＝PRD 版本行（#330 确认即成版→
- * <b>#462 去门化读法顺延</b>：版本表＝Demo 类 run 起跑自动记行的构建基准快照，
- * ADR-0039——下单/合同/归档取版统一读「最新版」，冻结字段结构与既有数据不动）。
- * 项目事实（存在性/归档态/双确认引用/终点类型）经 {@code business.project} 应用
+ * KickoffAppService}〔#338 接通〕，本服务不再有「支付」入口）：确认下单 = 过下单
+ * 前置门（PRD 已产出＋存在已确认用户面版本，<b>#629 商业面改接</b>）后冻结当前
+ * 工作区 PRD 全文冗余拷贝＋已确认用户面版本号＋交付物类型入单，待报价起步
+ * （「待确认报价」占位态）。版本引用收敛为一个用户面版本号（不再读旧 PRD/Demo
+ * 版本表）；历史订单自含双版本引用与 PRD 快照，照常可读。
+ * 项目事实（存在性/归档态/双确认引用）经 {@code business.project} 应用
  * 层软引用——跨 BC 无 FK，同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
@@ -51,9 +49,8 @@ import lombok.extern.slf4j.Slf4j;
  * {@link #cancelByBackoffice}（#338 收窄后）用 {@link TransactionTemplate} 收
  * 「订单取消＋活跃合同联动作废」一个事务；{@link #retryArchive}（#158 后台
  * 手动补归档口——已归档＝后台人工终局的唯一触发）同款收「订单＋项目」一个
- * 事务，失败异常上抛（运营须看见拦截原因）；知识沉淀与 SSE 在事务提交后
- * （#5 决议；沉淀降级不炸——embedding 不可用不允许回滚已成功的归档；取版
- * ＝合同冻结 PRD 优先、无合同回退项目最新版）。</p>
+ * 事务，失败异常上抛（运营须看见拦截原因）；SSE 在事务提交后（#5 决议）。
+ * 知识入库 #640 起改挂用户面版本成版——订单归档不再触发沉淀。</p>
  */
 @Service
 @Slf4j
@@ -72,10 +69,7 @@ public class OrderAppService {
     private final ContractRepository contractRepository;
     private final ProjectQueryAppService projectQueryAppService;
     private final ProjectLifecycleAppService projectLifecycleAppService;
-    private final ProjectKnowledgeAppService projectKnowledgeAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
-    private final DesignPackageAppService designPackageAppService;
-    private final OrderQueryAppService orderQueryAppService;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
 
@@ -83,50 +77,37 @@ public class OrderAppService {
                            ContractRepository contractRepository,
                            ProjectQueryAppService projectQueryAppService,
                            ProjectLifecycleAppService projectLifecycleAppService,
-                           ProjectKnowledgeAppService projectKnowledgeAppService,
                            ConversationHistoryAppService conversationHistoryAppService,
-                           DesignPackageAppService designPackageAppService,
-                           OrderQueryAppService orderQueryAppService,
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
         this.orderRepository = orderRepository;
         this.contractRepository = contractRepository;
         this.projectQueryAppService = projectQueryAppService;
         this.projectLifecycleAppService = projectLifecycleAppService;
-        this.projectKnowledgeAppService = projectKnowledgeAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
-        this.designPackageAppService = designPackageAppService;
-        this.orderQueryAppService = orderQueryAppService;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * 确认下单（#335 引用语义落位；<b>#462 去门化读法顺延</b>——ADR-0039）：下单
-     * 前置门＝存在 PRD 版本（最新构建基准）＋Demo 确认版本（「确认此版本，准备
-     * 签约」＝下单入口——现「确认下单」按钮语义改挂；缺失如实拦截 ORD_018/ORD_019，
-     * 前端 toast 提示）；过门即冻结双版本引用＋PRD 最新版全文冗余拷贝（快照源＝
-     * 版本行，非工作区正文——订单自含，冻结字段结构与既有订单数据不动）＋
-     * 交付物类型入单（待报价起步，「待确认报价」占位态——后台落定报价〔＋范围
-     * 文本，#336 起〕后翻已报价）。下单即冻结迭代——对话区停止受理意见（project
-     * 上下文冻结守卫，{@code ORD_006}）。交付物类型自项目终点类型冻结（#297
-     * 一单一程——此后项目终点变更不影响本单，取消再下 = 新单新类型）。设计面单
-     * （设计/系统＋设计）在下单时冻结设计资产包：<b>暂存打包先于落库</b>（打包
-     * 失败＝下单失败零残留，不产生「有单无包」半成态）、<b>落名在落库后</b>（以
-     * 落库分配的订单 id 定格该单冻结件——同目录原子改名，失败仅容器中途消亡可
-     * 达，如实上抛）；系统单零打包（源码包实时取口径不变）。取消不清理冻结件
-     * （后台取件正本，残留备案口径）。
+     * 确认下单（#335 引用语义落位；<b>#629 商业面改接用户面版本</b>——ADR-0056）：
+     * 下单前置门＝PRD 已产出＋存在已确认用户面版本（「确认此版本，准备签约」＝
+     * 下单入口；缺失如实拦截 ORD_018/ORD_019，前端 toast 提示）；过门即冻结当前
+     * 工作区 PRD 全文冗余拷贝＋已确认用户面版本号（旧的两套版本引用收敛为一个；
+     * 不读旧 PRD/Demo 版本表——订单自含）＋交付物类型入单（待报价起步，「待确认
+     * 报价」占位态——后台落定报价〔＋范围文本，#336 起〕后翻已报价）。下单即冻结
+     * 迭代——对话区停止受理意见（project 上下文冻结守卫，{@code ORD_006}）。交付物
+     * 类型一律冻结为系统单值（#611——设计线退役后不再从项目终点类型映射设计交付物；
+     * 只插不改）。取消即解冻回迭代。
      *
-     * @return 订单（待报价起步，双版本引用＋快照与交付物类型已冻结）
+     * @return 订单（待报价起步，已确认用户面版本号＋PRD 快照与交付物类型已冻结）
      * @throws ApplicationException PRJ_001 项目不存在（项目上下文原样透传）；
      *                              ORD_017 签约门——未登录绑定（访客身份）走下单
      *                              入口被拦，前端认 ORD_017 弹 M01；ORD_004 项目已
      *                              归档；ORD_003 该项目已有未终结订单（预检或并发
      *                              撞索引，先于版本门——重复下单的主导事实）；
-     *                              ORD_018 无 PRD 版本（尚无构建基准记行）；
-     *                              ORD_019 未确认 Demo
-     *                              版本；WSP_002 设计资产包打包失败（环境故障，
-     *                              零残留）
+     *                              ORD_018 PRD 未产出（当前工作区无 PRD 全文）；
+     *                              ORD_019 未确认用户面版本
      */
     public OrderResponse place(Long projectId) {
         // 签约门（#328，spec 段②）：进下单/签约流程即要求绑定——访客身份（有效
@@ -142,28 +123,22 @@ public class OrderAppService {
         if (orderRepository.findActiveByProject(projectId).isPresent()) {
             throw new ApplicationException(OrderMessage.ORDER_ALREADY_ACTIVE);
         }
-        // 下单前置门（#335，spec #320 ④「加门」；#462 读法顺延）：双版本确认缺一
-        // 即拦（先于昂贵的打包面——廉价库读守卫前置惯例）。引用集一次取齐：
-        // 版本号＋最新版全文。
-        ProjectQueryAppService.LatestVersionRefs refs =
-                projectQueryAppService.latestVersionRefs(projectId);
-        if (refs.prdVersionNo() == null) {
+        // 下单前置门（#629，ADR-0056 商业面改接）：PRD 已产出（冻结其全文）＋存在
+        // 已确认用户面版本，缺一即拦（先于昂贵的打包面——廉价读守卫前置惯例）。
+        ProjectQueryAppService.OrderFreezeRefs refs =
+                projectQueryAppService.orderFreezeRefs(projectId);
+        if (refs.prdContent() == null) {
             throw new ApplicationException(OrderMessage.ORDER_PRD_VERSION_REQUIRED);
         }
-        if (refs.demoVersionNo() == null) {
+        if (refs.confirmedVersionNo() == null) {
             throw new ApplicationException(OrderMessage.ORDER_DEMO_VERSION_REQUIRED);
         }
-        OrderDeliverableType deliverableType =
-                OrderDeliverableType.ofCode(project.endpointType().getCode());
-        // 快照源＝最新版全文（冗余拷贝，#335）——不读工作区（过门即必有版本行
-        // 全文，PRJ_015 未产出不再可能是下单障碍）
-        String prdSnapshot = refs.prdContent();
-        DesignPackageAppService.StagedPackage staged = deliverableType.designInvolved()
-                ? designPackageAppService.stageForOrder(projectId)
-                : null;
+        // 快照源＝当前工作区 PRD 全文（冗余拷贝）＋已确认用户面版本号（两套旧版本
+        // 引用收敛为一个，不再依赖旧 PRD/Demo 版本表）
+        // #611 交付物类型收窄为系统单值：不再从项目终点类型映射（设计线退役）
         Order order = Order.place(projectId, RequestContext.getUserId(),
-                GuestContext.guestId(), prdSnapshot, deliverableType,
-                refs.prdVersionNo(), refs.demoVersionNo());
+                GuestContext.guestId(), refs.prdContent(), OrderDeliverableType.SYSTEM,
+                refs.confirmedVersionNo());
         try {
             order = orderRepository.save(order);
         } catch (DataIntegrityViolationException e) {
@@ -175,29 +150,8 @@ public class OrderAppService {
             }
             throw e;
         }
-        if (staged != null) {
-            designPackageAppService.sealForOrder(staged, order.getId());
-        }
         publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return OrderResponse.of(order);
-    }
-
-    /**
-     * 用户面设计资产包下载（#297，对偶源码包端点——订单锚取件：交付物包是
-     * 下单冻结件、按单定格）：守卫序＝订单存在 → 交付物类型（系统单无设计资产包
-     * ，ORD_016 如实）→ 支付门（{@link OrderQueryAppService#requireDownloadable}
-     * 单点：曾支付/已归档即开放，ORD_015）→ 冻结件读取（PRJ_051 缺失不顶替）。
-     * 文件名/HTTP 头归 REST 层。
-     *
-     * @throws ApplicationException ORD_001 订单不存在；ORD_016 系统单交付物不含
-     *                              设计资产包；ORD_015 未支付（门语义）；PRJ_051
-     *                              冻结件缺失；WSP_002 读取失败（环境故障）
-     */
-    public byte[] downloadableDesignPackage(Long orderId) {
-        Order order = requireOrder(orderId);
-        order.requireDesignDeliverable();
-        orderQueryAppService.requireDownloadable(order.getProjectId());
-        return designPackageAppService.frozenPackage(order.getProjectId(), orderId);
     }
 
     /**
@@ -340,8 +294,8 @@ public class OrderAppService {
      * 归档失败」的卡单手动补归档。归档事务＝订单＋项目一事务（守卫复用：非已
      * 支付 ORD_012、项目重复归档 PRJ_013），失败异常原样上抛（运营须看见拦截
      * 原因，不留静默半成态）。成功收尾同款 {@link #settleArchive}：重读
-     * 库定真，已归档发「已归档」通知并触发知识沉淀（沉淀跟随归档成功——支付链
-     * 与本口皆触发）。操作者留痕落订单行（缺头落空；支付链自动归档为 NULL）。
+     * 库定真，已归档发「已归档」通知（知识入库改挂成版，#640——本口不再触发）。
+     * 操作者留痕落订单行（缺头落空；支付链自动归档为 NULL）。
      * 不做自动 Scheduled 补偿（隐藏状态机，v1 单量不值当）。
      *
      * @return 订单（已归档终态）
@@ -356,35 +310,21 @@ public class OrderAppService {
             orderRepository.save(order);
             projectLifecycleAppService.archive(projectId);
         });
-        return settleArchive(orderId, projectId);
+        return settleArchive(orderId);
     }
 
     /**
      * 归档收尾（#158 起支付链与重试归档共用）：重读库定真——归档事务回滚不还原
-     * 内存对象，通知与沉淀以库内真值为准（已归档才发「已归档」通知并触发知识
-     * 沉淀；沉淀 best-effort，降级不炸的既有口径不变）。沉淀取版对齐（#338；
-     * #462 读法顺延——ADR-0039）：合同冻结的 PRD 版优先（签约双方约定的正身），
-     * 无合同回退项目最新版。
+     * 内存对象，通知以库内真值为准（已归档才发「已归档」通知）。
+     * #640 起知识入库改挂用户面版本成版，订单归档不再触发沉淀（取版辅助逻辑
+     * 随之退场）。
      */
-    private OrderResponse settleArchive(Long orderId, Long projectId) {
+    private OrderResponse settleArchive(Long orderId) {
         Order persisted = requireOrder(orderId);
         if (persisted.getStatus() == OrderStatus.ARCHIVED) {
             publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, persisted); // 归档落定发「已归档」
-            projectKnowledgeAppService.sinkPrd(projectId, archivePrdContent(orderId, projectId));
         }
         return OrderResponse.of(persisted);
-    }
-
-    /**
-     * 归档沉淀取版（#338；<b>#462 读法顺延</b>——ADR-0039）：订单最近合同已签署
-     * 完成 → 合同冻结的 PRD 版全文（合同自含冗余拷贝，签约即定格）；无已签合同
-     * （mock 时代遗留单/异常路径）→ 回退项目最新版（latestVersionRefs）。两源都
-     * 不在场（legacy）如实 null——sinkPrd 空内容跳过。
-     */
-    private String archivePrdContent(Long orderId, Long projectId) {
-        return contractRepository.findLatestSignedByOrderId(orderId)
-                .map(Contract::getPrdSnapshot)
-                .orElseGet(() -> projectQueryAppService.latestVersionRefs(projectId).prdContent());
     }
 
     /**

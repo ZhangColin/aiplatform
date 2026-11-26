@@ -1,10 +1,8 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useDesignScopeStore } from "@/lib/store/design-scope";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore } from "@/lib/store/work-message";
 import type { ChatState, ChatMessage } from "@/lib/store/chat";
 
 import { CommandArea } from "./command-area";
@@ -60,21 +58,9 @@ vi.mock("@/hooks/use-chat", () => ({
   useAnswerQuestion: () => ({ isPending: false, mutate: answerMutate }),
 }));
 
-// 收尾卡版本动作请求面（仅「查看当时」链路用例消费）：起快照直读就绪态
-// （会话 startView.data 即回 previewUrl），请求面归 use-version 与后端测试
-vi.mock("@/hooks/use-version", () => ({
-  useVersionViewSession: () => ({
-    startView: {
-      isPending: false,
-      isError: false,
-      data: { viewId: "v1", previewUrl: "about:blank" },
-      mutate: vi.fn(),
-      reset: vi.fn(),
-    },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
+// 收尾卡预览入口（#617）：取既有预览查询——顶层用例无 QueryClient 可挂，直给未就绪态
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 
 function pendingQuestion(overrides: Partial<Extract<ChatMessage, { kind: "question" }>> = {}) {
@@ -233,32 +219,6 @@ describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
   });
 });
 
-describe("CommandArea · 查看当时标题轮次语境（#142 整链：对话流 → 收尾卡序数/摘要 → 弹窗标题）", () => {
-  it("收尾卡点「查看当时」：标题带轮次序数与收尾摘要（第 N 个收尾卡 = 第 N 轮）", () => {
-    seedChat([
-      { kind: "user", id: "u1", text: "把主色调改成绿色", runId: "run-1" },
-      {
-        kind: "closing",
-        id: "c1",
-        runId: "run-1",
-        closing: {
-          summary: "主色调已改为绿色",
-          prdChanged: false,
-          systemChanged: true,
-          files: [],
-          durationMs: 5000,
-          version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-        },
-      },
-    ]);
-    render(<CommandArea projectId="p1" />);
-
-    fireEvent.click(screen.getByRole("button", { name: "查看当时" }));
-
-    expect(screen.getByText("第 1 轮结束时的系统——主色调已改为绿色")).toBeTruthy();
-  });
-});
-
 describe("CommandArea · 图片物料真上传（#286 回形针接线）", () => {
   it("选文件即上传：完成态随话发出（载荷＝路径引用），Enter 发言 attachments 携 image 形态", async () => {
     seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
@@ -331,151 +291,5 @@ describe("CommandArea · 图片物料真上传（#286 回形针接线）", () =>
       "/api/projects/p1/files/raw?path=materials%2F3897654321098765432-logo.png",
     );
     expect(chip?.textContent).toContain("logo.png");
-  });
-});
-
-describe("CommandArea · designer 直播卡计划区选送（#290 装配 seam：座席分岔选清单）", () => {
-  beforeEach(() => {
-    seed.state = { chats: {} };
-    useWorkMessageStore.setState({ works: {} });
-  });
-
-  it("designer 座席在途：计划区出设计物清单（不出切片清单）——同构不混淆", () => {
-    useWorkMessageStore.setState({
-      works: {
-        p1: {
-          runId: "run-d1",
-          frozen: false,
-          seat: "designer",
-          slice: { title: "logo 主标识", index: 2, total: 3 },
-          parts: [
-            {
-              kind: "action",
-              id: "run-d1:2",
-              toolCallId: "tc-1",
-              toolName: "write_file",
-              state: "running",
-              label: "编写【logo-1】",
-            },
-          ],
-          seenEventIds: ["run-d1:2"],
-        },
-      },
-    });
-    render(
-      <CommandArea
-        projectId="p1"
-        plan={[{ ord: 1, description: "用户能注册登录", status: "pending" }]}
-        designPlan={[
-          { ord: 1, description: "首页主视觉", status: "closed" },
-          { ord: 2, description: "logo 主标识", status: "pending" },
-        ]}
-      />,
-    );
-
-    expect(screen.getByText("logo 主标识（2/3）")).toBeTruthy(); // 头部＝设计物标题进度
-    expect(screen.getByText("正在出第 1 稿")).toBeTruthy(); // 活性行＝出稿动作
-    expect(screen.getByText("首页主视觉")).toBeTruthy(); // 计划区＝设计物清单
-    expect(screen.queryByText("用户能注册登录")).toBeNull(); // 切片清单不串台
-  });
-
-  it("executor 座席在途：计划区照旧切片清单（designPlan 不串台）", () => {
-    useWorkMessageStore.setState({
-      works: {
-        p1: {
-          runId: "run-c1",
-          frozen: false,
-          slice: { title: "用户能注册登录", index: 1, total: 1 },
-          parts: [
-            {
-              kind: "action",
-              id: "run-c1:2",
-              toolCallId: "tc-1",
-              toolName: "write_file",
-              state: "running",
-              label: "编写【订单管理】",
-            },
-          ],
-          seenEventIds: ["run-c1:2"],
-        },
-      },
-    });
-    render(
-      <CommandArea
-        projectId="p1"
-        plan={[{ ord: 1, description: "用户能注册登录", status: "pending" }]}
-        designPlan={[{ ord: 1, description: "首页主视觉", status: "pending" }]}
-      />,
-    );
-
-    expect(screen.getByText("用户能注册登录")).toBeTruthy();
-    expect(screen.queryByText("首页主视觉")).toBeNull();
-    expect(screen.getByText("编写【订单管理】")).toBeTruthy(); // label 滚动（executor 口径）
-  });
-});
-
-describe("CommandArea · 设计改稿作用域＋发散度 chip（#294 点哪改哪）", () => {
-  beforeEach(() => {
-    useDesignScopeStore.setState({ scopes: {}, divergences: {} });
-  });
-
-  it("作用域在场：chip 行呈现（就「件」改＋三档）；发言携 designItem＋所选档位", () => {
-    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
-    act(() => {
-      useDesignScopeStore.getState().pick("p1", { ord: 2, itemTitle: "品牌 logo" });
-    });
-    render(<CommandArea projectId="p1" />);
-
-    expect(screen.getByText("就「品牌 logo」改")).toBeTruthy();
-    for (const label of ["微调", "探索", "大胆"]) {
-      expect(screen.getByText(label)).toBeTruthy();
-    }
-
-    fireEvent.change(inputOf(), { target: { value: "颜色再亮一点" } });
-    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
-
-    // 缺省档＝探索（EXPLORE）；designItem 路由该件设计会话
-    expect(postMutate).toHaveBeenCalledWith({
-      content: "颜色再亮一点",
-      attachments: [],
-      designItem: 2,
-      divergence: 2,
-    });
-  });
-
-  it("调档即改：点「大胆」后发言携 REIMAGINE；作用域不清（连续改稿）", () => {
-    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
-    act(() => {
-      useDesignScopeStore.getState().pick("p1", { ord: 1, itemTitle: "首页主视觉" });
-    });
-    render(<CommandArea projectId="p1" />);
-
-    fireEvent.click(screen.getByText("大胆"));
-    fireEvent.change(inputOf(), { target: { value: "索性换个方向" } });
-    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
-
-    expect(postMutate).toHaveBeenCalledWith({
-      content: "索性换个方向",
-      attachments: [],
-      designItem: 1,
-      divergence: 3,
-    });
-    // 发送后作用域仍在（stitch 挑选语义——下一句继续改同一件零重复点选）
-    expect(useDesignScopeStore.getState().scopes.p1).toEqual({ ord: 1, itemTitle: "首页主视觉" });
-  });
-
-  it("X 退出作用域：chip 行退场，发言回常规三分类（不携 designItem/divergence）", () => {
-    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
-    act(() => {
-      useDesignScopeStore.getState().pick("p1", { ord: 1, itemTitle: "首页主视觉" });
-    });
-    render(<CommandArea projectId="p1" />);
-
-    fireEvent.click(screen.getByLabelText("取消作用域"));
-    expect(screen.queryByText("就「首页主视觉」改")).toBeNull();
-
-    fireEvent.change(inputOf(), { target: { value: "帮我看下进度" } });
-    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
-    expect(postMutate).toHaveBeenCalledWith({ content: "帮我看下进度", attachments: [] });
   });
 });

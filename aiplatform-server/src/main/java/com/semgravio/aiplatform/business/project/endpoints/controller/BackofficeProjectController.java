@@ -123,7 +123,7 @@ public class BackofficeProjectController {
     }
 
     @GetMapping("/{id}/conversation")
-    @Operation(summary = "对话史（后台面，全量同序，含设计会话）",
+    @Operation(summary = "对话史（后台面，全量同序）",
             description = "口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）："
                     + "用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，"
                     + "按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）"
@@ -131,13 +131,9 @@ public class BackofficeProjectController {
                     + "3=question 4=answer 5=closing 6=guide 7=quote）+ kindName 中文名随行"
                     + "（#186：枚举出口配 *Name，后台直读零映射）；question = question-raised "
                     + "事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口"
-                    + "扩载同载荷（版本详情锚定的权威事实）。sessionSource 会话来源标识"
-                    + "（#298）：2=设计会话（设计会话收尾卡——首产/改稿/定稿，closing 携 "
-                    + "drafts 稿清单）、null=主会话缺省——设计会话按来源分组或标注；"
-                    + "作用域改稿发言无结构标记不标注、设计会话完整稿本在智能体会话存储"
-                    + "（存储不同构降级口径）。归档项目照读（对话区只读终态）——排障时"
-                    + "了解用户与系统的交互过程（含设计过程始末）。需要机机签名；"
-                    + "项目不存在 404 PRJ_001")
+                    + "扩载同载荷（版本详情锚定的权威事实）。归档项目照读"
+                    + "（对话区只读终态）——排障时了解用户与系统的交互过程。"
+                    + "需要机机签名；项目不存在 404 PRJ_001")
     @ErrorCodes({"PRJ_001"})
     public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
         return ApiResponse.ok(conversationHistoryAppService.read(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));
@@ -160,9 +156,10 @@ public class BackofficeProjectController {
     @GetMapping("/{id}/versions")
     @Operation(summary = "版本列表（后台面，新→旧）",
             description = "口径照用户面版本读口：git log 即版本序列（正本＝容器内 git log 直读，"
-                    + "无库表）——每轮编码 run 收口自动成版（commit 主题 = 收口摘要、"
-                    + "Run-Id trailer 锚定收尾卡）；回滚版本 runId 空、rollbackFrom 锚定"
-                    + "源版本。排序新→旧定死；零版本（尚无收口）= 空列表非错误。"
+                    + "无库表）——带 Rollback-From trailer 的版本 commit 列入序列（Run-Id"
+                    + " 成版提交已随审查与收口组退役 #605，本阶段不自动成版，版本语义归阶段四"
+                    + "重建）；回滚版本 runId 空、rollbackFrom 锚定源版本。排序新→旧定死；"
+                    + "零版本 = 空列表非错误。"
                     + "「上周五还好好的」按版本锚点回看的入口。归档项目照读。"
                     + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
     @ErrorCodes({"PRJ_001", "WSP_002"})
@@ -173,9 +170,9 @@ public class BackofficeProjectController {
     @GetMapping("/{id}/versions/{ref}")
     @Operation(summary = "版本详情（后台面，锚定收尾卡）",
             description = "口径照用户面版本详情：版本元数据（hash / 摘要 / 锚定 run / 成版时刻）＋"
-                    + "收尾卡载荷（Run-Id 联接对话史 closing 条目，#88 同载荷复用；收尾卡"
-                    + "缺位时 closing 为 null）＋rollbackFrom（回滚版本锚定源版本、runId 空；"
-                    + "run 版本反之）。ref = commit hash（hex 40 位）——非 hash 形态"
+                    + "收尾卡载荷（Run-Id 联接随成版提交退役 #605，closing 恒空；字段契约"
+                    + "留至阶段四版本重建）＋rollbackFrom（回滚版本锚定源版本、runId 空）。"
+                    + "ref = commit hash（hex 40 位）——非 hash 形态"
                     + "404 PRJ_028 且不触工作区（shell 注入防线）。归档项目照读。"
                     + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
     @ErrorCodes({"PRJ_001", "PRJ_028", "WSP_002"})

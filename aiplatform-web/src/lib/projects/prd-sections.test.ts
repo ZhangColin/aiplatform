@@ -4,12 +4,12 @@ import { splitPrdSections } from "@/lib/projects/prd-sections";
 
 /**
  * PRD 锚点分节提取（#346，spec #320 ⑥ 需求分析页右栏「锚点导航＋结构化
- * 分节」）：PRD 正文＝主智能体按固定七章节模板写出的 markdown（prd-writing
+ * 分节」）：PRD 正文＝主智能体按固定八章节模板写出的 markdown（prd-writing
  * 技能），节界＝`## ` 二级章头（### 子节不独立成锚）。返回值供锚点导航
  * （序号＋章名 pill）与分节渲染（每节自带锚 id）同源消费。
  */
 describe("splitPrdSections（## 章头分节）", () => {
-  it("标准七章节 markdown：逐章成节、序号依序、首章前内容归 preamble", () => {
+  it("标准 PRD markdown：逐章成节、序号依序、首章前内容归 preamble", () => {
     const md = [
       "# 宠物医院预约管理系统 PRD",
       "",

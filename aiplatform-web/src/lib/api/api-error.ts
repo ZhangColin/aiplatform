@@ -21,7 +21,10 @@ export type ApiEnvelopeMeta = {
 };
 
 export type ApiErrorInit = ApiEnvelopeMeta & {
-  /** HTTP 状态码，4xx / 5xx 的分派依据。 */
+  /**
+   * HTTP 状态码，4xx / 5xx 的分派依据。0＝本地超时（#652 默认请求超时触发，
+   * 无 HTTP 状态——不要按 4xx/5xx 语义分派它，只走 message 可见报错）。
+   */
   status: number;
 };
 

@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.base.workspace.application;
 
 import java.net.URI;
-import java.util.Collection;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -29,7 +28,6 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
-import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
@@ -113,9 +111,10 @@ public class WorkspaceLifecycleAppService {
     }
 
     /**
-     * 派生工作区副本（#351 切片并行）：从源工作区当前 HEAD 克隆可写 fork 容器并注册
+     * 派生工作区副本（#351 起立）：从源工作区当前 HEAD 克隆可写 fork 容器并注册
      * 为短命 READY 工作区（正常 workspaceId → 容器寻址——run 执行体经它 exec 读写 fork，
-     * 收口 git commit 落 fork 内）。并行切片各拿一 fork 隔离同跑、按序合并回源工作区；
+     * 收口 git commit 落 fork 内）。原消费方「并行切片各拿一 fork 隔离同跑、按序合并
+     * 回源工作区」的编排已随 #602 切片机器退役拆除，fork 能力面保留（允许保留物）；
      * 用完经 {@link #destroy} 级联清理。
      *
      * @param sourceWorkspaceId 源（主）工作区标识
@@ -281,40 +280,6 @@ public class WorkspaceLifecycleAppService {
                     workspace.workspaceId().value(), archivePath, e);
             throw new ApplicationException(WorkspaceMessage.WORKSPACE_SEAL_PACKAGE_UNAVAILABLE);
         }
-    }
-
-    /**
-     * 起「查看当时」快照容器（#92）：置备中隐式等待就绪（#62）后交给环境后端按
-     * ADR 0007 解路二起快照（同卷 :ro + 入口旁路 + 数据副本 + 检出当时代码起应用）。
-     * 返回快照句柄（容器名 + 预览 URL——#141 网关子域，环境后端拼好），编排层据此
-     * 透传入口与登记在途注册表。
-     */
-    public SnapshotHandle startSnapshot(String workspaceId, String viewId, String ref) {
-        Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
-        return environmentBackend.startSnapshot(workspace.toHandle(), viewId, ref);
-    }
-
-    /**
-     * 销毁快照容器（#92）：{@code docker rm -f}（副本随容器可写层消失），幂等。
-     */
-    public void stopSnapshot(SnapshotHandle snapshot) {
-        environmentBackend.stopSnapshot(snapshot);
-    }
-
-    /**
-     * 清扫孤儿快照容器（#92 启动自愈）：平台重启后注册表丢账，在途查看会话即
-     * 孤儿——启动期扫清全部 {@code ws-*-snap-*} 容器（「不留孤儿容器」兜底面）。
-     */
-    public void sweepSnapshotContainers() {
-        environmentBackend.sweepSnapshotContainers();
-    }
-
-    /**
-     * 清扫保留集之外的快照容器（#171 运行期孤儿兜底，休眠扫描顺带）：保留集 =
-     * 在用查看会话的容器名，集外快照容器扫清——孤儿清扫不再只在启动期跑。
-     */
-    public int sweepOrphanSnapshots(Collection<String> keepContainerNames) {
-        return environmentBackend.sweepSnapshotContainersExcept(keepContainerNames);
     }
 
     /**

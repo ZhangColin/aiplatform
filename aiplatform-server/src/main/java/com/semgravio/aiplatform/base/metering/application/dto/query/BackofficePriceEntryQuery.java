@@ -9,7 +9,7 @@ import com.cartisan.data.jpa.specification.ConditionType;
  * 在数据库侧过滤。provider/model 均为匹配键成分＝精确等值（标识符不做模糊），
  * null 字段自动跳过＝该维不参与过滤（缺省＝全量行，含历史行）。
  *
- * @param provider 模型提供方（精确）
+ * @param provider 供应商（vendor，ADR-0053 ②——匹配挂事件 vendor 腿；存量行通道键同值；精确）
  * @param model    模型（精确）
  */
 public record BackofficePriceEntryQuery(

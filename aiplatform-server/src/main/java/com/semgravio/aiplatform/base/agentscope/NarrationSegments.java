@@ -9,8 +9,9 @@ import java.util.regex.Pattern;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 
 /**
- * 解说文本切段单点（部件 part-text 的生产内核）：文本增量 → 完整段序列（一段一
- * 文本，非增量）。段切分口径（解说部件「完整段非增量」契约）：
+ * 文本切段单点（模型文本不直播——ADR-0057/#608：解说段不再出部件，本类保留段切
+ * 分作为机器语法守卫的状态机内核）：文本增量 → 完整段序列（一段一文本，非增量，
+ * 供内部边界判定；不对外呈现）。段切分口径：
  * <ul>
  *   <li>句读（。！？；…换行及西文对应符号）落定即出段；</li>
  *   <li>文本块变（blockId 变化）先出余段——段与段有序不串；</li>
@@ -24,8 +25,8 @@ import io.agentscope.core.event.TextBlockDeltaEvent;
  *       不入段（防句读缺位时的硬切 / 边界 drain 漏出残头），后续增量落定成真标记
  *       （进吞段）或死文本（照常出段，不丢字）；吞段开始同时产出脱轨信号（#240
  *       人话留痕——只报发生事实不携带原文，形态归活性行变体，静态面无痕）；</li>
- *   <li>run 收尾 / 挂起 / 步骤与动作边界由调用方 {@link #drain()} 出尾段（幂等，
- *       空白不出段；吞段中无尾段）。</li>
+ *   <li>run 收尾 / 挂起不出尾段（模型文本不直播）；步骤与动作边界的余段仍在
+ *       内部成段（空白不出段；吞段中无尾段）。</li>
  * </ul>
  */
 final class NarrationSegments {
@@ -59,9 +60,9 @@ final class NarrationSegments {
     private static final int MARKER_HEAD_WINDOW = 16;
 
     /**
-     * 一次文本映射的产出（0..n，按发生序）：解说段（→ part-text）或脱轨信号
-     * （→ part-signal，#240 机器语法吞段的人话留痕——只报发生事实，不携带原文；
-     * 呈现形态归活性行变体，静态面无痕）。
+     * 一次文本映射的产出（0..n，按发生序）：解说段（当前不出部件——模型文本不
+     * 直播，ADR-0057）或脱轨信号（→ part-signal，#240 机器语法吞段的人话留痕——
+     * 只报发生事实，不携带原文；呈现形态归活性行变体，静态面无痕）。
      */
     sealed interface Outcome {
 
@@ -107,13 +108,6 @@ final class NarrationSegments {
         return outcomes;
     }
 
-    /** 出余段（边界/收尾用，幂等；空白不出段；吞段中缓冲恒空、无尾段）。 */
-    List<Outcome> drain() {
-        List<Outcome> outcomes = new ArrayList<>();
-        drainInto(outcomes);
-        return outcomes;
-    }
-
     // ---------- 内部 ----------
 
     /**
@@ -146,7 +140,7 @@ final class NarrationSegments {
     }
 
     /**
-     * 全量出段（句读硬切 / 边界 / 收尾 drain 用）：缓冲尾巴的活标记头按住不出——
+     * 全量出段（句读硬切 / 边界用）：缓冲尾巴的活标记头按住不出——
      * 残头入段即机器语法漏出，按住等落定（真标记进吞段 / 死文本下拍随人话出）。
      */
     private void drainInto(List<Outcome> outcomes) {
@@ -179,7 +173,7 @@ final class NarrationSegments {
     /**
      * 逐句出段：每个句读符（含）各成一段（一次到达的长增量含多句时不憋整块——
      * 「句读落定即出段」对粗粒度增量同样成立）；无句读的尾部留在缓冲等下一边界
-     * 或收尾 drain。
+     * 的强制出段。
      */
     private void settleSentences(List<Outcome> outcomes) {
         int start = 0;

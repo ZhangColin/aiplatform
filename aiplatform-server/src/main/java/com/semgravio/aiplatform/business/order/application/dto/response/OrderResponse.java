@@ -20,10 +20,11 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
  * @param projectId           所属项目标识
  * @param status              订单状态（code）：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消
  * @param statusName          状态名
- * @param deliverableType     交付物类型（code，#297 下单冻结）：1=设计 2=系统 3=系统＋设计
+ * @param deliverableType     交付物类型（code，#297 下单冻结；#611 收窄为系统单值）：2=系统
  * @param deliverableTypeName 交付物类型名
- * @param prdVersionNo        下单冻结的已确认 PRD 版本号（#335；遗留单 NULL）
- * @param demoVersionNo       下单冻结的已确认 Demo 版本号（#335；遗留单 NULL）
+ * @param prdVersionNo        下单冻结的已确认 PRD 版本号（#335；#629 起新单 NULL——历史单照读）
+ * @param demoVersionNo       下单冻结的已确认 Demo 版本号（#335；#629 起新单 NULL——历史单照读）
+ * @param confirmedVersionNo  下单冻结的已确认用户面版本号（#629；旧两套版本引用收敛为一个——遗留单 NULL）
  * @param amount              当前总价（分；待报价 NULL，改价取最新价目行）
  * @param currency            币种（v1 恒 CNY；待报价 NULL）
  * @param note                当前后台备注（最新价目行 note；待报价 NULL）
@@ -47,6 +48,7 @@ public record OrderResponse(
         String deliverableTypeName,
         Integer prdVersionNo,
         Integer demoVersionNo,
+        Integer confirmedVersionNo,
         Long amount,
         String currency,
         String note,
@@ -72,6 +74,7 @@ public record OrderResponse(
                 order.getDeliverableType().getName(),
                 order.getPrdVersionNo(),
                 order.getDemoVersionNo(),
+                order.getConfirmedVersionNo(),
                 order.getAmount(),
                 order.getCurrency(),
                 order.currentQuoteNote(),

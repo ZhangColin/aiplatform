@@ -13,6 +13,8 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
  * 命令构建即生效（缓存指纹含 baseUrl/key——同模型串换 key 换地址＝新实例）。
  *
  * @param providerKey  键名＝协议路由前缀
+ * @param vendor       归一供应商（#559/T5 写面回显；受控下拉数据源＝全通道行
+ *                     distinct vendor 集，可新建）
  * @param baseUrl      通道 baseUrl
  * @param apiKeyMasked apiKey 掩码形（尾 4 位；null＝未配置）
  * @param enabled      启用态
@@ -21,10 +23,14 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
  * @param updatedAt    最近写入时刻
  */
 public record BackofficeModelProviderResponse(
-        @Schema(description = "通道键名＝协议路由前缀", example = "volcengine")
+        @Schema(description = "通道键名＝协议路由前缀", example = "deepseek")
         String providerKey,
+        @Schema(description = "归一供应商（计量按模型统计与单价/峰谷匹配的维度腿；"
+                + "同供应商多账号行同填，如 deepseek/deepseek-2 同填 deepseek）",
+                example = "deepseek")
+        String vendor,
         @Schema(description = "通道 baseUrl（创建上下文注入 SDK）",
-                example = "https://ark.cn-beijing.volces.com/api/v3")
+                example = "https://api.deepseek.com")
         String baseUrl,
         @Schema(description = "apiKey 掩码形（尾 4 位；null＝未配置——接口回显零明文 key）",
                 example = "****ab12")
@@ -40,8 +46,8 @@ public record BackofficeModelProviderResponse(
 
     /** 行 → 读面（掩码单点经此——全链无第二处掩码逻辑）。 */
     public static BackofficeModelProviderResponse of(ModelProvider provider) {
-        return new BackofficeModelProviderResponse(provider.providerKey(), provider.baseUrl(),
-                provider.maskedApiKey(), provider.enabled(),
+        return new BackofficeModelProviderResponse(provider.providerKey(), provider.vendor(),
+                provider.baseUrl(), provider.maskedApiKey(), provider.enabled(),
                 provider.operatorId(), provider.operatorName(), provider.updatedAt());
     }
 }

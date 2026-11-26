@@ -6,17 +6,19 @@ import java.util.Optional;
 import com.cartisan.core.domain.BaseEnum;
 
 /**
- * 边缘调用点（#366，spec #364-T2，ADR-0031 绑定层）：平台四件一次性轻调用——
+ * 边缘调用点（#366，spec #364-T2，ADR-0031 绑定层）：平台一次性轻调用——
  * {@link #NAMING 项目取名}、{@link #COMPACTION 上下文压缩}、{@link #CLASSIFICATION
- * 入口分类}、{@link #PRECHECK 技能预检}——的身份与模型档位缺省正本。与三座智能体
- * （{@link AgentProfile}）统一在智能体运营配置面（{@code prj_agent_configs} 同表
- * 同机制：库值优先缺省回落、留痕回滚、改完即生效），但值面<b>仅模型档位</b>——
- * 一次性判定的提示词是编排内建，不属运营配置（CONTEXT.md「智能体运营配置」）。
+ * 入口分类}、{@link #REFINEMENT 候选经验提炼}（#641，ADR-0058）——的身份与模型
+ * 配置缺省正本。与智能体（{@link AgentProfile}）统一在智能体运营配置面
+ * （{@code prj_agent_configs} 同表同机制：库值优先缺省回落、留痕回滚、改完即
+ * 生效），但值面<b>仅模型配置</b>——一次性判定的提示词是编排内建，不属运营配置
+ * （CONTEXT.md「智能体运营配置」）。技能预检边缘点随 #638 阶段六技能清场退场
+ * （预检从未运行，配置行由 V91 迁移删除）。
  *
- * <p>缺省档位＝快模型档 flash（各点原 yml/代码缺省串的等位收编——轻调用不烧重档，
+ * <p>缺省配置＝快模型档 flash（各点原 yml/代码缺省串的等位收编——轻调用不烧重档，
  * 与 {@link AgentProfile#MAIN} 同口径）。装配腿：{@code AgentConfigAppService
- * #effectiveEdgeModelId}（库值优先）→ {@code ModelTierAppService#resolve}（档位键→
- * 模型串＋通道注入，ADR-0031 解析单点）——档位键解析产物随命令/装配透传，后台改档
+ * #effectiveEdgeModelConfigKey}（库值优先）→ {@code ModelConfigAppService#resolve}（配置键→
+ * 模型串＋通道注入，ADR-0031 解析单点）——配置键解析产物随命令/装配透传，后台改配置
  * 下一轮命令构建即生效。{@link #key()} 与配置行 {@code agent_key} 同串寻址（后台
  * 边缘点端点 {@code /agent-configs/edge/{edgeKey}}）。</p>
  */
@@ -31,19 +33,19 @@ public enum AgentEdgePoint implements BaseEnum<AgentEdgePoint> {
     /** 入口分类（对话区消息三分类，{@code DispatchAppService}，#51）。 */
     CLASSIFICATION("classification", 13, "入口分类", "flash"),
 
-    /** 技能预检（指派双头重叠判定，{@code BackofficeSkillPrecheckAppService}，#255）。 */
-    PRECHECK("precheck", 14, "技能预检", "flash");
+    /** 候选经验提炼（每出一个用户面版本的异步后台提炼，{@code ExperienceDistillationAppService}，#641）。 */
+    REFINEMENT("refinement", 14, "候选经验提炼", "flash");
 
     private final String key;
     private final Integer code;
     private final String name;
-    private final String modelId;
+    private final String modelConfigKey;
 
-    AgentEdgePoint(String key, Integer code, String name, String modelId) {
+    AgentEdgePoint(String key, Integer code, String name, String modelConfigKey) {
         this.key = key;
         this.code = code;
         this.name = name;
-        this.modelId = modelId;
+        this.modelConfigKey = modelConfigKey;
     }
 
     /** 框架约定码（domain 枚举实现 BaseEnum 的自动转换面；本配置不落库不经 REST）。 */
@@ -62,9 +64,9 @@ public enum AgentEdgePoint implements BaseEnum<AgentEdgePoint> {
         return name;
     }
 
-    /** 缺省模型档位键（ADR-0031 语义键；库值优先的回落腿正本）。 */
-    public String modelId() {
-        return modelId;
+    /** 缺省模型配置键（ADR-0031 语义键；库值优先的回落腿正本）。 */
+    public String modelConfigKey() {
+        return modelConfigKey;
     }
 
     /**

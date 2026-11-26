@@ -13,7 +13,11 @@ import java.time.LocalDateTime;
  * <b>接口回显一律掩码</b>（{@link #maskedApiKey()} 单点，尾 4 位——#367 后台
  * 维护面起读写面都只出掩码形，回显面零明文 key）；明文只在库内与装配链路上。</p>
  *
- * @param providerKey  键名＝协议路由前缀（volcengine/deepseek）
+ * @param providerKey  键名＝协议路由前缀（deepseek/openai 等）
+ * @param vendor       归一供应商（ADR-0053 ②：deepseek/deepseek-2 同填 deepseek
+ *                     ——按模型统计与单价/峰谷匹配键的维度腿，随解析产物透传；
+ *                     null＝未配置〔pre-T5 写面建的行〕，解析层归一 provider_key
+ *                     同值；写面受控值随 #559）
  * @param baseUrl      通道 baseUrl（创建上下文注入 SDK，覆盖依赖库默认地址）
  * @param apiKey       凭证唯一正本；null/空＝未配置
  * @param enabled      启用态；停用＝引用该通道的装配明确报错（不静默换道）
@@ -22,8 +26,8 @@ import java.time.LocalDateTime;
  * @param updatedAt    最近写入时刻（读模型列——回读填充；写路径构造时 null，
  *                     落库时刻由库定，同 {@code AgentOperationalConfig} 房规）
  */
-public record ModelProvider(String providerKey, String baseUrl, String apiKey, boolean enabled,
-        String operatorId, String operatorName, LocalDateTime updatedAt) {
+public record ModelProvider(String providerKey, String vendor, String baseUrl, String apiKey,
+        boolean enabled, String operatorId, String operatorName, LocalDateTime updatedAt) {
 
     /** 掩码保留的尾长（尾 4 位——短于 8 的键全掩，防短键被掩码泄露大半）。 */
     private static final int MASK_TAIL_LENGTH = 4;

@@ -30,24 +30,42 @@ public class ListWorkspaceFilesTool extends ToolBase {
     public static final String NAME = "list_workspace_files";
 
     private final DockerExecFilesystem.ExecCommand exec;
+    /** 对话面只读视图（#622）：清单含 .env 与 seed/脚本、只排 data/pg。 */
+    private final boolean dialogPlane;
 
     public ListWorkspaceFilesTool(String workspaceId, String containerName,
             WorkspaceReadinessWaiter readinessWaiter) {
+        this(workspaceId, containerName, readinessWaiter, false);
+    }
+
+    /** 对话面形态（#622）：生成后问答查证面——清单含 .env 与 seed/脚本。 */
+    public ListWorkspaceFilesTool(String workspaceId, String containerName,
+            WorkspaceReadinessWaiter readinessWaiter, boolean dialogPlane) {
         this(ReadinessAwaitingExecCommand.dockerExec(containerName,
-                WorkspaceId.of(workspaceId), readinessWaiter));
+                WorkspaceId.of(workspaceId), readinessWaiter), dialogPlane);
     }
 
     /** 执行缝注入构造（单测替身 ExecCommand）。 */
     ListWorkspaceFilesTool(DockerExecFilesystem.ExecCommand exec) {
+        this(exec, false);
+    }
+
+    ListWorkspaceFilesTool(DockerExecFilesystem.ExecCommand exec, boolean dialogPlane) {
         super(ToolBase.builder()
                 .name(NAME)
-                .description("列出项目工作区的交付文件清单（路径 + 字节大小，按路径排序）。"
-                        + "查证项目里有什么文件（说明文档、初始数据代码等）时调用；"
-                        + "机密（.env）、数据目录与依赖目录不在清单内。")
+                .description(dialogPlane
+                        ? "列出项目工作区的文件清单（路径 + 字节大小，按路径排序）。"
+                                + "查证项目里有什么文件（说明文档、初始数据种子、配置等）时调用；"
+                                + ".env 与 seed/脚本可见可读；pg 数据目录（data/pg）、"
+                                + "依赖目录（node_modules）、版本库（.git）不在清单内。"
+                        : "列出项目工作区的交付文件清单（路径 + 字节大小，按路径排序）。"
+                                + "查证项目里有什么文件（说明文档、初始数据代码等）时调用；"
+                                + "机密（.env）、数据目录与依赖目录不在清单内。")
                 .inputSchema(Map.of("type", "object", "properties", Map.of()))
                 .readOnly(true)
                 .concurrencySafe(true));
         this.exec = exec;
+        this.dialogPlane = dialogPlane;
     }
 
     @Override
@@ -59,7 +77,8 @@ public class ListWorkspaceFilesTool extends ToolBase {
 
     @Override
     public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
-        DockerExecFilesystem.ExecOutput out = exec.run(ProjectFiles.listCommand(), null);
+        DockerExecFilesystem.ExecOutput out = exec.run(
+                dialogPlane ? ProjectFiles.dialogListCommand() : ProjectFiles.listCommand(), null);
         if (!out.ok()) {
             return Mono.just(ToolResultBlock.error("文件清单读取失败（容器不可达？）: "
                     + out.stderr()));
@@ -70,7 +89,7 @@ public class ListWorkspaceFilesTool extends ToolBase {
             listing.append(entry.path()).append("（").append(entry.size()).append(" 字节）\n");
         }
         return Mono.just(ToolResultBlock.text(listing.isEmpty()
-                ? "工作区暂无交付文件。"
+                ? (dialogPlane ? "工作区暂无文件。" : "工作区暂无交付文件。")
                 : listing.toString()));
     }
 }

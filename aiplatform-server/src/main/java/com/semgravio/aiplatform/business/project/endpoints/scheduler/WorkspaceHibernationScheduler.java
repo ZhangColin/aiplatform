@@ -10,10 +10,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceHibernationAppService;
-import com.semgravio.aiplatform.base.workspace.application.WorkspaceProperties;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceScanFact;
 import com.semgravio.aiplatform.business.project.application.CodingRunTrack;
-import com.semgravio.aiplatform.business.project.application.VersionSnapshotAppService;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -22,11 +20,11 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 闲置休眠扫描组合根（#171，ADR-0016，#197 正名；全库首个 @Scheduled）：业务侧
  * 把「run 在途/已生成」的项目域事实随扫描递入 base.workspace 的休眠扫描（base
- * 不反向依赖 business），并同轮顺带清扫闲置快照查看会话。休眠编排与总开关均归
- * base.workspace 自持（只依赖环境后端端口与 DB 状态）；本层留任业务侧是合法组合
- * 根（run 在途事实与「查看当时」会话注册表都在业务侧，分区规则只禁反向依赖），
- * 不跨域读 base 的休眠开关——开关已内移休眠扫描入口
- * （{@link WorkspaceHibernationAppService#scanOnce} 自持），快照清扫与之无关、随轮照跑。
+ * 不反向依赖 business）。休眠编排与总开关均归 base.workspace 自持（只依赖环境
+ * 后端端口与 DB 状态）；本层留任业务侧是合法组合根（run 在途事实在业务侧，分区
+ * 规则只禁反向依赖），不跨域读 base 的休眠开关——开关已内移休眠扫描入口
+ * （{@link WorkspaceHibernationAppService#scanOnce} 自持）。快照查看会话清扫随
+ * #628「查看当时」快照容器拆除退役。
  *
  * <p>节奏：默认每 5 分钟一轮（{@code app.workspace.hibernation-scan-interval}，
  * Duration 形如 {@code 5m}）；启动期对账一次（{@link ApplicationRunner}，首轮
@@ -38,21 +36,15 @@ import lombok.extern.slf4j.Slf4j;
 public class WorkspaceHibernationScheduler implements ApplicationRunner {
 
     private final WorkspaceHibernationAppService hibernationAppService;
-    private final VersionSnapshotAppService snapshotAppService;
     private final CodingRunTrack codingRunTrack;
     private final ProjectRepository projectRepository;
-    private final WorkspaceProperties workspaceProperties;
 
     public WorkspaceHibernationScheduler(WorkspaceHibernationAppService hibernationAppService,
-            VersionSnapshotAppService snapshotAppService,
             CodingRunTrack codingRunTrack,
-            ProjectRepository projectRepository,
-            WorkspaceProperties workspaceProperties) {
+            ProjectRepository projectRepository) {
         this.hibernationAppService = hibernationAppService;
-        this.snapshotAppService = snapshotAppService;
         this.codingRunTrack = codingRunTrack;
         this.projectRepository = projectRepository;
-        this.workspaceProperties = workspaceProperties;
     }
 
     /** 启动期对账一次（#171 AC）：与定时轮同一扫描——启动即收敛遗留漂移。 */
@@ -61,7 +53,7 @@ public class WorkspaceHibernationScheduler implements ApplicationRunner {
         scanRound();
     }
 
-    /** 定时扫描轮：闲置休眠 + 闲置快照清扫（同一闲置阈值，同一轮顺带）。 */
+    /** 定时扫描轮：闲置休眠（业务事实随扫描递入 base）。 */
     @Scheduled(fixedDelayString = "${app.workspace.hibernation-scan-interval:5m}",
             initialDelayString = "${app.workspace.hibernation-scan-interval:5m}")
     public void scanRound() {
@@ -69,12 +61,8 @@ public class WorkspaceHibernationScheduler implements ApplicationRunner {
         try {
             Map<Long, WorkspaceScanFact> facts = scanFacts();
             int hibernated = hibernationAppService.scanOnce(facts, facts.keySet(), now);
-            // 同一闲置口径（#197 钉住）：快照查看会话与工作区休眠共用同一阈值——
-            // 刻意跨包共享，换阈值两处同动，不为快照另立口径
-            int swept = snapshotAppService.sweepIdleViews(now, workspaceProperties.getIdleThreshold());
-            if (hibernated > 0 || swept > 0) {
-                log.info("[hibernation] 扫描轮收口：休眠 {} 工作区、清扫 {} 快照（会话/孤儿）",
-                        hibernated, swept);
+            if (hibernated > 0) {
+                log.info("[hibernation] 扫描轮收口：休眠 {} 工作区", hibernated);
             }
         } catch (RuntimeException e) {
             // 尽力而为：本轮失败不炸定时器，下轮再收敛

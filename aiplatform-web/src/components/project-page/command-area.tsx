@@ -1,13 +1,11 @@
 "use client";
 
-import { Check, FileText, Inbox, Lock, RefreshCcw, Sparkles, TriangleAlert, User, X } from "lucide-react";
+import { FileText, Lock, RefreshCcw, Sparkles, TriangleAlert, User, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { Composer, type ComposerAttachment } from "@/components/composer/composer";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
 import { useInterviewQuota } from "@/hooks/use-interview-quota";
@@ -25,14 +23,8 @@ import {
 import { renderMaterialsText, toImageAttachmentCommand } from "@/lib/projects/materials";
 import { rawFileUrl } from "@/lib/projects/files";
 import type { LockRow } from "@/lib/orders/lock";
-import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
-import {
-  DIVERGENCE_EXPLORE,
-  DIVERGENCE_LEVELS,
-  useDesignScopeStore,
-} from "@/lib/store/design-scope";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
@@ -49,25 +41,14 @@ import { WorkMessage } from "./work-message";
 const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_ANNOTATIONS: AnnotationItem[] = [];
 
-/** 常驻文案（#79 初版；#299 设计主线变体）：随访谈/迭代阶段化 × 终点轨道变体——
- * 设计主线（做设计出身）梳的是设计物清单、迭代即改稿；系统/系统＋设计访谈用
- * 系统形（系统＋设计的 PRD 是功能清单形，#285 口径）。 */
+/** 常驻文案（#79 初版）：随访谈/迭代阶段化。 */
 const STAGE_HINTS = {
-  system: {
-    interview: "访谈中：说说你的想法，平台会提问、把要点整理成需求文档，聊清楚后动手做系统",
-    iterate: "迭代中：想改什么、想问什么直接说，每轮修改都会更新文档、留下记录",
-  },
-  design: {
-    interview: "访谈中：说说你想要的设计，平台会提问、把要点整理成设计物清单，聊清楚后开始出稿",
-    iterate: "迭代中：想改哪件、想问什么直接说，改稿与定稿都在这里聊、留下记录",
-  },
+  interview: "访谈中：说说你的想法，平台会提问、把要点整理成需求文档，聊清楚后动手做系统",
+  iterate: "迭代中：想改什么、想问什么直接说，每轮修改都会更新文档、留下记录",
 } as const;
 
-/** 轨道两态（缺省系统——终点缺省/未知按系统形，与弱标识缺省不出同口径方向）。 */
-type ChatTrack = keyof typeof STAGE_HINTS;
-
-/** 阶段两态（两轨道同键集）。 */
-type StageKey = keyof typeof STAGE_HINTS["system"];
+/** 阶段两态。 */
+type StageKey = keyof typeof STAGE_HINTS;
 
 /** 数据模板钮插入的模板片段（#346 澄清输入照原型位；最小实现＝向输入框插入
  *  数据描述骨架，用户照着填——数据模板的最小可用形态，实施期定）。 */
@@ -101,9 +82,6 @@ export function CommandArea({
   projectId,
   lock,
   stage = "interview",
-  track = "system",
-  plan,
-  designPlan,
   onSeePrd,
   onSeeOrder,
   variant = "default",
@@ -114,12 +92,6 @@ export function CommandArea({
   lock?: LockRow;
   /** 阶段（常驻文案两态）：缺省访谈期，PRD 产出后装配层切迭代期。 */
   stage?: StageKey;
-  /** 终点轨道（#299 常驻文案变体）：设计主线＝设计形文案；缺省系统。 */
-  track?: ChatTrack;
-  /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
-  plan?: GenerationSegmentFact[] | null;
-  /** 设计轨道件清单（#290 designer 直播卡计划区；工作消息座席＝designer 时选送）。 */
-  designPlan?: GenerationSegmentFact[] | null;
   /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
   /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
@@ -137,12 +109,8 @@ export function CommandArea({
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
   // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
-  // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）；designer 座席（#290
-  // 设计会话）同骨架异语料——计划区换设计物清单
+  // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）
   const work = useWorkMessageStore((s) => s.works[projectId]);
-  // 计划区选送（#290）：座席分岔——designer＝设计物清单、executor＝切片清单
-  //（两清单互斥出场：设计轨与生成轨不并行，同构不混淆）
-  const workPlan = work?.seat === "designer" ? designPlan : plan;
   // 工作消息插入锚（#117「过程上文、结果下卡」）：定格留驻的工作消息插在本 run
   // 收尾卡之前——上承本轮意见、下启收尾卡；-1 = 无本 run 收尾卡（生长中 /
   // run-failed），留对话流末尾。锚位即活性行沉没信号（#235：收尾卡入流 → 末行
@@ -160,12 +128,6 @@ export function CommandArea({
   const uploadMaterial = useUploadMaterial(projectId);
   // 圈注条目（#97）：预览回传的标注，随发送框附件区呈现、发送前可删改，发送即清
   const annotations = useAnnotationStore((s) => s.annotations[projectId] ?? EMPTY_ANNOTATIONS);
-  // 设计改稿作用域（#294 点哪改哪）：画布点选写入，chip 呈现于发送框上方；随话
-  // 直达该件设计会话（designItem）＋发散度档位（divergence）同句发出
-  const scope = useDesignScopeStore((s) => s.scopes[projectId]);
-  const divergence = useDesignScopeStore((s) => s.divergences[projectId] ?? DIVERGENCE_EXPLORE);
-  const clearScope = useDesignScopeStore((s) => s.clear);
-  const setDivergence = useDesignScopeStore((s) => s.setDivergence);
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
   // 重连失效驱动增量水合，live 事件只承载在途增量
   useConversation(projectId);
@@ -201,7 +163,6 @@ export function CommandArea({
         holdId: balanceReminderCard.holdId ?? undefined,
         lane: balanceReminderCard.lane ?? undefined,
         prompt: balanceReminderCard.prompt ?? undefined,
-        designItem: balanceReminderCard.designItem ?? undefined,
         sourcePoolBalance: balanceReminderCard.sourcePoolBalance ?? undefined,
         runId: balanceReminderCard.runId ?? undefined,
       }, `br-${balanceReminderCard.holdId ?? balanceReminderCard.runId ?? "pending"}`);
@@ -260,6 +221,8 @@ export function CommandArea({
         toolCalls: toAnswerToolCalls(pending.toolCalls),
         answer: text,
       },
+      // 提交的勾选随作答记账（已答卡回看显示自己的勾，2026-11-26 用户反馈）
+      selection,
     });
     setSelection([]);
   }
@@ -295,9 +258,6 @@ export function CommandArea({
           ...materials.map(toImageAttachmentCommand),
           ...annotations.map(toAttachmentCommand),
         ],
-        // 作用域在场＝改稿直达（#294 点哪改哪）：designItem 路由＋发散度同句；
-        // 作用域不清（stitch 挑选语义——连续改稿零重复点选，X 才退出）
-        ...(scope ? { designItem: scope.ord, divergence } : {}),
       });
       // 发送即清（圈注随消息发出，不再滞留）
       useAnnotationStore.getState().clear(projectId);
@@ -318,15 +278,15 @@ export function CommandArea({
             : "min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
         }
       >
-        <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[track][stage]}</p>
+        <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[stage]}</p>
         {/* 五问进度（#538 访谈①）：仅访谈期呈现，chip 自决非访谈期不渲染 */}
         {stage === "interview" ? <InterviewQuotaChip quota={interviewQuota.data} /> : null}
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
-              <WorkMessage work={work} plan={workPlan} closingArrived />
+              <WorkMessage work={work} closingArrived />
             ) : null}
-            <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
+            <MessageRow message={message} projectId={projectId} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
@@ -338,7 +298,9 @@ export function CommandArea({
                       : undefined
                   }
                   interactive={message === pending}
-                  selection={selection}
+                  // 勾选按卡分源：待答卡用实时勾选（Enter 作答合并用）；已答回看卡
+                  // 用它自己的作答勾选（finalSelection，水合行无＝无勾）
+                  selection={message === pending ? selection : (message.finalSelection ?? [])}
                   onSelectionChange={setSelection}
                   onAnswer={answer}
                 />
@@ -346,7 +308,7 @@ export function CommandArea({
             </MessageRow>
           </Fragment>
         ))}
-        {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={workPlan} /> : null}
+        {work && workAnchorIndex === -1 ? <WorkMessage work={work} /> : null}
         {/* PRD 更新呈现迁移位（#346 阶段页形态）：时间流内系统横幅照原型
             （「PRD 规范已增量刷新」＝旧「PRD 有更新 · 去看看」胶囊的迁移位——
             文档面常驻右栏，横幅只报事实不带跳转） */}
@@ -400,40 +362,6 @@ export function CommandArea({
             {lock.chatHint}
           </div>
         ) : null}
-        {/* 编辑作用域＋发散档（#294 点哪改哪——stitch：选中＝编辑作用域、chip 调幅） */}
-        {scope && !disabled ? (
-          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs" data-design-scope>
-            <span className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-primary">
-              就「{scope.itemTitle}」改
-              <button
-                type="button"
-                className="rounded-full p-0.5 transition-colors hover:bg-primary/10"
-                aria-label="取消作用域"
-                data-scope-clear
-                onClick={() => clearScope(projectId)}
-              >
-                <X className="size-3" />
-              </button>
-            </span>
-            <span className="text-muted-foreground">发散幅度</span>
-            {DIVERGENCE_LEVELS.map((level) => (
-              <button
-                key={level.value}
-                type="button"
-                onClick={() => setDivergence(projectId, level.value)}
-                data-divergence={level.value}
-                className={cn(
-                  "rounded-full border px-2 py-0.5 transition-colors",
-                  divergence === level.value
-                    ? "border-foreground/40 bg-muted font-medium"
-                    : "text-muted-foreground hover:bg-muted/50",
-                )}
-              >
-                {level.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
         <Composer
           value={input}
           onValueChange={setInput}
@@ -464,32 +392,12 @@ export function CommandArea({
   );
 }
 
-/**
- * 收尾卡的轮次序数（#142 标题语境源一）：对话流（写入序即对话序）中第 N 个
- * 收尾卡 = 第 N 轮，客户端数出、零新数据。序数即用户在对话里感知的「第几轮」，
- * 与成版是否成功无关（成版失败轮无「查看当时」入口，但占序数——对话轮与版本
- * 轮不对齐时以对话为准）。#140 的「同 runId 首条用户消息」尽力而为管线（无锚/
- * 被裁即缺场，走查实测全回落不可分辨）已随 #142 退役。
- */
-function closingRoundOf(messages: ChatMessage[], message: ChatMessage): number | undefined {
-  if (message.kind !== "closing") return undefined;
-  let round = 0;
-  for (const m of messages) {
-    if (m.kind === "closing") round += 1;
-    if (m === message) return round;
-  }
-  return undefined;
-}
-
-/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/报价卡/受理动作卡/错误提示/平台引导左对齐。
+/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/报价卡/错误提示/平台引导左对齐。
  *  气泡形态照原型（#346）：用户气泡削右上角（rounded-tr-sm）＋用户头像视觉锚；智能体气泡削
  *  左上角（rounded-tl-sm）＋渐变头像锚——头像只作视觉锚，不落角色名（ADR 0006 无角色署名口径）。 */
-function MessageRow({ message, children, projectId, round, onSeeOrder }: { message: ChatMessage; children?: ReactNode; projectId: string; round?: number; onSeeOrder?: () => void }) {
+function MessageRow({ message, children, projectId, onSeeOrder }: { message: ChatMessage; children?: ReactNode; projectId: string; onSeeOrder?: () => void }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
-  }
-  if (message.kind === "acceptance") {
-    return <AcceptanceRow message={message} />;
   }
   if (message.kind === "quote") {
     // 报价卡（#203 视镜语义）：金额/备注/状态渲染时取订单当前态，卡不冻结金额
@@ -520,7 +428,7 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
     // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）
     return (
       <div className="flex w-full justify-start">
-        <ClosingCard closing={message.closing} projectId={projectId} round={round} />
+        <ClosingCard closing={message.closing} projectId={projectId} />
       </div>
     );
   }
@@ -647,26 +555,3 @@ function PrdRefreshBanner({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-/**
- * 受理动作卡（#87 受理轮过程呈现）：意见已接住、正在受理的单行状态卡（形态同
- * 工作消息动作行——图标 + 对象 + 状态）。受理中转圈（追问挂起期间保持——同一
- * 受理轮仍在途）；该轮收口（run-finish / error 推导）落定为「意见已受理」，
- * 衔接随后到达的更新 run 工作消息。
- */
-function AcceptanceRow({ message }: { message: Extract<ChatMessage, { kind: "acceptance" }> }) {
-  return (
-    <div className="flex w-full justify-start">
-      <div className="flex w-full items-center gap-2 rounded-xl border border-foreground/10 px-3 py-2 text-sm">
-        <Inbox className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className={cn("min-w-0 flex-1", message.settled && "text-muted-foreground")}>
-          {message.settled ? "意见已受理" : "已收到你的意见，正在处理"}
-        </span>
-        {message.settled ? (
-          <Check className="size-3.5 shrink-0 text-green-600" strokeWidth={3} />
-        ) : (
-          <Spinner className="size-3 shrink-0 text-muted-foreground" />
-        )}
-      </div>
-    </div>
-  );
-}

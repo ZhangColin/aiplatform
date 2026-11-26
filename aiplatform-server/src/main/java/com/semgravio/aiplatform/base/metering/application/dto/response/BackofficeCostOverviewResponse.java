@@ -57,7 +57,8 @@ public record BackofficeCostOverviewResponse(
     }
 
     /**
-     * 分模型聚合项（provider + model 为单价表匹配键）。
+     * 分模型聚合项（模型视角＝vendor+model，ADR-0053 ②——跨账号同名模型合并；
+     * {@code provider} 腿承载 vendor 值＝单价表匹配键）。
      */
     public record ModelUsage(String provider, String model, TokenUsage tokens) {
     }

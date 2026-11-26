@@ -47,6 +47,63 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.isViewable(null)).isFalse();
     }
 
+    // ---------- 对话面只读视图（#622：.env / seed 可读，data/pg 等仍拒） ----------
+
+    @Test
+    void given_secret_and_seed_paths_when_dialog_viewable_then_true() {
+        // 账号密码类问题查证面：根级 .env、seed 脚本、data 下非 pg 文件、scripts 可读
+        assertThat(ProjectFiles.isDialogViewable(".env")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("data/seed.sql")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("scripts/schema.sql")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("docs/PRD.md")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("src/app/page.tsx")).isTrue();
+        assertThat(ProjectFiles.isDialogViewable("README.md")).isTrue();
+    }
+
+    @Test
+    void given_non_readable_paths_when_dialog_viewable_then_false() {
+        // 仍拒绝：pg 活数据目录、依赖/构建产物、版本元数据、平台产物、外部仓库、逃逸
+        assertThat(ProjectFiles.isDialogViewable("data/pg")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("data/pg/base/123")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("node_modules/react/index.js")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".git/config")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".pnpm-store/v10/files/x")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".next/trace")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(".platform/logs/run.log")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("agents/helper/report.md")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("external/some-repo/README.md")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("../etc/passwd")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("docs/../../etc")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("/workspace/.env")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable("   ")).isFalse();
+        assertThat(ProjectFiles.isDialogViewable(null)).isFalse();
+    }
+
+    @Test
+    void when_dialog_list_command_then_prunes_non_deliverables_but_keeps_env_and_data() {
+        // 对话面清单：不排 .env、只排 data/pg（其余 data 保留）；其余非交付根目录照排
+        assertThat(ProjectFiles.dialogListCommand()).isEqualTo(
+                "find /workspace \\( -path /workspace/node_modules -o -path /workspace/.pnpm-store"
+                        + " -o -path /workspace/.next -o -path /workspace/.platform"
+                        + " -o -path /workspace/agents -o -path /workspace/external"
+                        + " -o -path /workspace/.git -o -path /workspace/data/pg \\) -prune -o"
+                        + " -type f -printf '%s\\t%P\\n'");
+    }
+
+    @Test
+    void given_dialog_secret_when_dialog_content_command_then_guarded_cat() {
+        // 判定面换成对话面视图：.env 可构造读取命令（交付视图同路径仍拒绝）
+        assertThat(ProjectFiles.dialogContentCommand(".env")).isEqualTo(
+                "if ! test -f '/workspace/.env'; then exit 1; fi;"
+                        + " s=$(stat -c %s '/workspace/.env');"
+                        + " if [ $s -gt " + ProjectFiles.MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
+                        + " printf '%s\\n' $s; cat '/workspace/.env'");
+        assertThatThrownBy(() -> ProjectFiles.dialogContentCommand("data/pg/base/1"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> ProjectFiles.contentCommand(".env"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     // ---------- 路径形归一（锚定侧——#306 两形归一） ----------
 
     @Test
@@ -60,38 +117,6 @@ class ProjectFilesTest {
                 .isEqualTo("/design/home-1.html");
         assertThat(ProjectFiles.anchoredFormOf("docs/PRD.md")).isEqualTo("/docs/PRD.md");
         assertThat(ProjectFiles.anchoredFormOf(null)).isNull();
-    }
-
-    // ---------- 入口文件完整性（#339 首屏界面先行＋入口一次写全） ----------
-
-    @Test
-    void given_entry_with_truncation_placeholder_when_scan_then_incomplete() {
-        // 灵魂例（#339）：执行体「其余代码略」式残缺产出——逐字命中强信号短语即判残缺
-        assertThat(ProjectFiles.hasTruncationPlaceholder(
-                "export default function Home() {\n  return <main>{/* 其余代码略 */}</main>;\n}"))
-                .isTrue();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("// 以下省略")).isTrue();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("/* 其余部分略 */")).isTrue();
-        // 独占一行的纯省略号注释（截断占位——非 JS/TS 展开运算符）
-        assertThat(ProjectFiles.hasTruncationPlaceholder("const x = 1;\n// ...\n")).isTrue();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("{/* ... */}")).isTrue();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("// rest of code omitted")).isTrue();
-    }
-
-    @Test
-    void given_complete_entry_when_scan_then_not_incomplete() {
-        // 负向（#304 先例：解析防线带负例，防未来收紧误伤）——合法的展开运算符
-        // （... 与表达式同现、非独占注释行）、空/缺内容不误判为残缺
-        assertThat(ProjectFiles.hasTruncationPlaceholder(
-                "export default function Home() {\n  const x = {...props};\n"
-                        + "  return <main>{x.title}</main>;\n}"))
-                .isFalse();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("export const items = [...a, ...b];"))
-                .isFalse();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("// 这里按业务需要处理各分支"))
-                .isFalse();
-        assertThat(ProjectFiles.hasTruncationPlaceholder("")).isFalse();
-        assertThat(ProjectFiles.hasTruncationPlaceholder(null)).isFalse();
     }
 
     // ---------- 树列表命令与输出解析 ----------
@@ -210,7 +235,7 @@ class ProjectFilesTest {
     @Test
     void given_design_anchored_html_when_draft_html_then_true() {
         // 稿伺服面＝设计稿范式画布的固定画幅帧取件：design/ 锚定 + html 扩展名，
-        // 两者大小写不敏感（与 designAnchored 同律——文件系统侧无大小写约定）
+        // 两者大小写不敏感（文件系统侧无大小写约定）
         assertThat(ProjectFiles.isDraftHtml("design/home-1.html")).isTrue();
         assertThat(ProjectFiles.isDraftHtml("design/poster.HTML")).isTrue();
         assertThat(ProjectFiles.isDraftHtml("DESIGN/home.html")).isTrue();

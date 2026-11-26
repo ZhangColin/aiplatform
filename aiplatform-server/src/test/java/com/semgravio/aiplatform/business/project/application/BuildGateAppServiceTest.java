@@ -4,15 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -24,6 +26,8 @@ import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeHarnessAgentFactory;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -34,12 +38,9 @@ import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService
 import com.semgravio.aiplatform.business.billing.domain.enums.DeductionSource;
 import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
 import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
-import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ForkState;
-import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -60,9 +61,6 @@ class BuildGateAppServiceTest {
 
     @Autowired
     private ProjectRepository projectRepository;
-
-    @Autowired
-    private GenerationSegmentRepository generationSegments;
 
     @Autowired
     private BillingAppService billingAppService;
@@ -96,7 +94,7 @@ class BuildGateAppServiceTest {
 
     @BeforeEach
     void seed() {
-        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        ModelConfigSeed.ensureChannelKey(jdbcTemplate);
         // 主智能体轮与编码 run 全链默认成功脚本（确认即派发的全链走真轨道）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -117,16 +115,10 @@ class BuildGateAppServiceTest {
         });
         when(workspaceLifecycleAppService.exposePreview(any()))
                 .thenReturn(java.net.URI.create("http://localhost:30080"));
-        // #543 风格物化写面缺省桩（确认即派发的首个构建＝平台确定性写基座四件）
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
     }
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_generation_segments");
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
-        jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         jdbcTemplate.update("DELETE FROM bil_balance_holds");
@@ -138,7 +130,7 @@ class BuildGateAppServiceTest {
     /** 试用态 PRD 已产出的系统终点项目（岔路口前置形态）。 */
     private Long persistedTrialPrdProject(String workspaceId) {
         Project project = projectRepository.save(Project.create("岔路口项目", null,
-                ProjectEndpointType.SYSTEM, Long.parseLong(workspaceId), OWNER, null));
+                Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
@@ -149,16 +141,6 @@ class BuildGateAppServiceTest {
         topupService.topup(null, projectId, 10_000, null, null);
         billingAppService.flipToPaid(projectId, FlipGate.FORK);
         return projectId;
-    }
-
-    /** 轨道表现行计划种子（确认派发读表内计划——不走补产链）。 */
-    private void seedPlan(Long projectId) {
-        Project project = projectRepository.findById(projectId).orElseThrow();
-        LocalDateTime anchor = project.getPrdProducedAt();
-        generationSegments.save(GenerationSegment.pending(projectId, 0,
-                GenerationAppService.STAGE0_TITLE, anchor));
-        generationSegments.save(GenerationSegment.pending(projectId, 1,
-                "用户能注册登录", anchor));
     }
 
     // ---------- 岔路口状态位（自然收口置位、持久可回） ----------
@@ -202,7 +184,7 @@ class BuildGateAppServiceTest {
     void given_no_prd_when_ensure_fork_pending_then_no_card() {
         // PRD 未产出＝访谈未收口——无卡无门
         Project project = projectRepository.save(Project.create("访谈中项目", null,
-                ProjectEndpointType.SYSTEM, 9903L, OWNER, null));
+                9903L, OWNER, null));
 
         assertThat(gateService.ensureForkPending(project.getId())).isFalse();
         BuildGateAppService.BuildGateView gate = gateService.gateOf(project.getId());
@@ -211,21 +193,9 @@ class BuildGateAppServiceTest {
     }
 
     @Test
-    void given_design_endpoint_when_ensure_fork_pending_then_no_card() {
-        // 设计类终点不走岔路口（设计轨触发律不改：PRD 收口起设计过程、全部定稿起构建）
-        Project project = projectRepository.save(Project.create("设计项目", null,
-                ProjectEndpointType.SYSTEM_DESIGN, 9904L, OWNER, null));
-        project.markPrdProduced();
-        Long projectId = projectRepository.save(project).getId();
-
-        assertThat(gateService.ensureForkPending(projectId)).isFalse();
-        assertThat(gateService.gateOf(projectId).forkCardPending()).isFalse();
-        assertThat(gateService.gateOf(projectId).prdConfirmable()).isFalse(); // 设计轨首建由定稿触发
-    }
-
-    @Test
     void given_first_build_requested_when_gate_then_neither_card_nor_button() {
-        // 首建点火后：卡不复现（失败重试走「继续生成」）、确认门不复现（确认不重复）
+        // 首建点火后（在途/已成功）：卡与确认按钮都不呈现（#604 起终态失败/停止
+        // 收口清点火位后的复现见下一例）
         Long trialId = persistedTrialPrdProject("9905");
         gateService.ensureForkPending(trialId);
         Long paidId = persistedPaidPrdProject("9906");
@@ -243,14 +213,47 @@ class BuildGateAppServiceTest {
         assertThat(gateService.gateOf(paidId).prdConfirmable()).isFalse();
     }
 
+    @Test
+    void given_first_build_request_reopened_when_gate_then_card_and_button_reappear() {
+        // #604 失败新语义——重跑走点火入口（「继续生成」断点续跑入口随续跑机器退役）：
+        // 首建终态失败/停止收口清点火位后，岔路口卡与 PRD 确认按钮（「首建未派发」
+        // 呈现条件）复现——用户重走点火入口即重跑（清位动作归生成编排，
+        // 见 GenerationAppServiceTest 的点火位用例；本例钉读面后果）
+        Long trialId = persistedTrialPrdProject("9931");
+        gateService.ensureForkPending(trialId);
+        Long paidId = persistedPaidPrdProject("9932");
+
+        projectRepository.findById(trialId).ifPresent(p -> {
+            p.markFirstBuildRequested();
+            projectRepository.save(p);
+        });
+        projectRepository.findById(paidId).ifPresent(p -> {
+            p.markFirstBuildRequested();
+            projectRepository.save(p);
+        });
+        assertThat(gateService.gateOf(trialId).forkCardPending()).isFalse();
+        assertThat(gateService.gateOf(paidId).prdConfirmable()).isFalse();
+
+        projectRepository.findById(trialId).ifPresent(p -> {
+            p.reopenFirstBuildRequest();
+            projectRepository.save(p);
+        });
+        projectRepository.findById(paidId).ifPresent(p -> {
+            p.reopenFirstBuildRequest();
+            projectRepository.save(p);
+        });
+
+        assertThat(gateService.gateOf(trialId).forkCardPending()).isTrue(); // 卡复现
+        assertThat(gateService.gateOf(paidId).prdConfirmable()).isTrue(); // 确认按钮复现
+    }
+
     // ---------- 付费轨 PRD 确认（原动作形态恢复：确认即派发首建） ----------
 
     @Test
     void given_paid_prd_unrequested_when_confirm_then_first_build_dispatched_once() {
-        // 灵魂例（AC②）：确认即派发首建（点火时点落位）＋版本机制零改动——确认
-        // 不写版本行，起跑记行单点照旧（v1＝构建基准序首行）
+        // 灵魂例（AC②）：确认即派发首建（点火时点落位）＋不写任何版本数据（旧
+        // PRD/Demo 版本表已随 #630 退场，用户面版本由探活通过后自动成版 #626）
         Long projectId = persistedPaidPrdProject("9907");
-        seedPlan(projectId);
 
         GenerationAppService.GenerationRun run = gateService.confirmFirstBuild(projectId);
 
@@ -259,18 +262,34 @@ class BuildGateAppServiceTest {
                 "SELECT generation_requested_at, fork_state FROM prj_projects WHERE id = ?",
                 projectId);
         assertThat(row.get("generation_requested_at")).isNotNull(); // 点火事实
-        // 版本表零改动回归：仅起跑记行单行（确认动作本身不写版本行——确认即成版不复活）
-        List<Map<String, Object>> versions = jdbcTemplate.queryForList(
-                "SELECT version_no FROM prj_prd_versions WHERE project_id = ?", projectId);
-        assertThat(versions).hasSize(1);
-        assertThat(versions.get(0).get("version_no")).isEqualTo(1);
         // 幂等（AC②重复点不重复派发）：已点火即拒绝 PRJ_017——不重复确认
         assertThatThrownBy(() -> gateService.confirmFirstBuild(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.GENERATION_ALREADY_REQUESTED.message());
-        assertThat(jdbcTemplate.queryForList(
-                "SELECT version_no FROM prj_prd_versions WHERE project_id = ?", projectId))
-                .hasSize(1); // 拒绝路径不落第二行
+    }
+
+    @Test
+    void given_paid_confirm_when_dispatch_then_kernel_command_reaches_client() {
+        // #601 接线验收缝（付费入口）：确认即派发首建——到达客户端的命令为内核形态
+        //（权威系统提示＋内核装配键 generation-kernel＋kernelForm＋无工具规格/
+        // 无 executor 旧中间件挂点），与岔路口「立即生成」共用同一派发编排
+        Long projectId = persistedPaidPrdProject("9912");
+
+        GenerationAppService.GenerationRun run = gateService.confirmFirstBuild(projectId);
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(command.capture(), any());
+        AgentCommand value = command.getAllValues().get(0);
+        assertThat(value.runId()).isEqualTo(run.runId());
+        assertThat(value.prompt()).isEqualTo(GenerationAppService.KERNEL_FIRST_RUN_PROMPT);
+        assertThat(value.sessionId())
+                .isEqualTo(GenerationAppService.kernelSession(projectId, run.runId()));
+        assertThat(value.systemPrompt()).isEqualTo(KernelSystemPrompt.text())
+                .contains("0.0.0.0:8081").contains("docs/PRD.md");
+        assertThat(value.agentKey())
+                .isEqualTo(AgentscopeHarnessAgentFactory.KERNEL_AGENT_NAME);
+        assertThat(value.kernelForm()).isTrue();
+        assertThat(value.toolSpec()).isNull();
     }
 
     @Test
@@ -290,7 +309,7 @@ class BuildGateAppServiceTest {
     @Test
     void given_no_prd_when_confirm_then_prj_018() {
         Project project = projectRepository.save(Project.create("访谈中项目", null,
-                ProjectEndpointType.SYSTEM, 9909L, OWNER, null));
+                9909L, OWNER, null));
         topupService.topup(null, project.getId(), 10_000, null, null);
         billingAppService.flipToPaid(project.getId(), FlipGate.FORK);
 
@@ -316,7 +335,6 @@ class BuildGateAppServiceTest {
     void given_generation_in_flight_when_confirm_then_prj_017() {
         // 点火竞态兜底：轨道在途（点火落位前的并发窗口）——startGeneration 在途守卫
         Long projectId = persistedPaidPrdProject("9911");
-        seedPlan(projectId);
         codingRunTrack.begin(projectId);
         try {
             assertThatThrownBy(() -> gateService.confirmFirstBuild(projectId))

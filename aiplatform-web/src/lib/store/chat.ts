@@ -39,13 +39,11 @@ export type InterceptCardFact = {
 export type BalanceReminderCardFact = {
   /** 留存 id（卡锚；run 场拦截无留存缺省）。 */
   holdId?: string;
-  /** 被拦车道：OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿。 */
+  /** 被拦车道：OPINION=意见 / INQUIRY=咨询。 */
   lane?: string;
   /** 被拦输入原文（卡上引用呈现；用户气泡由恢复受理的 run-start 落——卡不
    *  重建气泡，避免双写）。 */
   prompt?: string;
-  /** 作用域改稿目标件序（仅 DESIGN_REVISION）。 */
-  designItem?: number;
   /** 源池余额快照（分；显负额素材——卡显当前负额）。 */
   sourcePoolBalance?: number;
   /** 余额提醒卡事件锚。 */
@@ -55,7 +53,7 @@ export type BalanceReminderCardFact = {
 /**
  * 对话面 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
  * ADR 0003 状态三分法）：按项目累积对话面（用户发言 / 智能体回复增量 / 问答卡 /
- * 收尾卡 / 平台轻引导 / 受理动作卡），对话史跨 run 常驻。<b>#89 起对话史落库</b>：闭史以 REST 水合为准（hydrate 按库序
+ * 收尾卡 / 平台轻引导），对话史跨 run 常驻。<b>#89 起对话史落库</b>：闭史以 REST 水合为准（hydrate 按库序
  * 应用），live 事件只承载在途增量（重放缓冲降级断线补发——新连接不重放，刷新
  * 重建归水合；作答文本随落库不再「即逝」）。
  *
@@ -80,112 +78,48 @@ export type BalanceReminderCardFact = {
 /** guide-reply 事件缺 label 时的呈现兜底（正本在后端 GUIDE_LABEL）。 */
 export const DEFAULT_GUIDE_LABEL = "平台";
 
+/** 收尾卡判据逐件结果（#617）：build 与预览两项（服务端权威值）。 */
+export type WorkClosingCriteria = {
+  buildPassed: boolean;
+  previewPassed: boolean;
+};
+
 /**
- * 收尾卡稿条目（#289 设计会话收尾卡扩载，#290 呈现）：item＝本场设计物、media＝
- * 稿形态（html＝界面稿 / image＝图像稿）、path＝去向（工作区锚定形——文件区可见
- * 可下载）。编码 run 不携带。
+ * 收尾卡权威事实（#617 五字段骨架；#619 变更清单改真实 diff，#89 起归对话流）：
+ * 用时（durationMs）/判据逐件（criteria）/变更清单（files，跑前快照基线的真实
+ * ± 行数；迭代携单文件只读 patch、首建只出行数）/内核自述（narrative，内核末次
+ * 文本）/预览入口（取既有预览查询，不入载荷）。live 经 run-finish.closing 到达、
+ * 回访经对话史水合——同载荷同形；旧载荷（summary/判定键/活动量行数）由读侧
+ * 回落呈现（见 toWorkClosing）。
  */
-export type ClosingDraft = {
-  item: string;
-  media: "html" | "image";
+export type WorkClosingFile = {
   path: string;
-  /** 定稿后续触发事实（#291 定稿收尾卡；候选产出轮缺省）——呈现「已触发」行。 */
-  triggers?: string[];
+  added: number;
+  removed: number;
+  /** 单文件只读 diff 文本（#619 迭代）；首建与超限省略时缺省。 */
+  patch?: string;
+  /** patch 超限省略（#619）——卡上标注「diff 过大」，行数仍保留。 */
+  patchOmitted?: boolean;
 };
 
-/**
- * 收尾卡权威事实（#88 收口扩载的载荷形状，#89 起归对话流）：四要素 = 摘要
- * （summary）/判定行（prd 与 system 两组布尔+说明——服务端权威值）/变更清单
- * （files，文件级）/轮末统计（durationMs；文件数与变更行数由 files 派生）。
- * live 经 run-finish.closing 到达、回访经对话史水合——同载荷同形。
- */
+/** 首建目录汇总（#620）：目录、文件数、± 行数——卡片先目录级呈现、点开展开。 */
+export type WorkClosingDirectory = {
+  path: string;
+  fileCount: number;
+  added: number;
+  removed: number;
+};
+
 export type WorkClosing = {
-  summary: string;
-  prdChanged: boolean;
-  prdNote?: string;
-  systemChanged: boolean;
-  systemNote?: string;
-  files: { path: string; added: number; removed: number }[];
+  /** 内核自述（markdown 源；空则卡片不出该块）。 */
+  narrative?: string;
+  criteria: WorkClosingCriteria;
+  files: WorkClosingFile[];
+  /** 首建目录汇总（#620；迭代与旧载荷缺省——缺省时按文件级清单呈现）。 */
+  directories?: WorkClosingDirectory[];
+  /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
+  filesUnavailable?: boolean;
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
-  version?: string;
-  /** 验证统计（#352 独立验证子智能体的收尾统计；#424 片轻验常开后收口必在场）：
-   *  total/failed＝末轮总项数与未过数、faces＝末轮三面分布（browser 浏览器主径〔含
-   *  刷新验真落库〕/ db 按需下钻 / log 失败定位）、rounds＝本场验证轮数（修复—复验
-   *  环如实，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注）、
-   *  budgetExhausted＝轮次预算用尽仍未过（达预算停止修复—复验的如实标注）；逐项
-   *  ✅/❌ 明细与证据在过程播报里，收尾卡只带聚合。 */
-  verification?: VerificationClosing;
-  /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
-   *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
-  drafts?: ClosingDraft[];
-  /** 设计规范扫描（#296 遵守三件套③）：可缺省——带规范项目编码 run 携带（收尾卡
-   *  「按稿对齐」行的呈现源）；无规范项目与设计会话不携带。 */
-  designLint?: DesignLintClosing;
-  /** 基座 lint 两档扫描（#425；#541 让路）：可缺省——新基座工作区编码 run 携带
-   *  （收尾卡「基座件使用」行的呈现源：两档违规都如实标注、不拦收口——强制档
-   *  裸客户端直用与预置档会话自写在让路缺省下同场呈现，两档合并计数与清单）；
-   *  存量工作区与设计会话不携带。阻断形态（运营开关回滚）强制档修不完＝收口
-   *  被拒，不会以带强制档违规形态出现在收尾卡。 */
-  robustKitLint?: RobustKitLintClosing;
-  /** 产出证明判别标注（#420 空转片防呆）：可缺省——豁免收口（验证确认「能力已
-   *  存在」）与空转拒绝史（曾拒绝后补做收口）的如实呈现源；正常干活收口不携带。 */
-  proofOfOutput?: ProofOfOutputClosing;
-  /** 已知缺陷清单（#427 整轨终验）：可缺省——修复预算耗尽时末轮终验 run 收尾卡
-   *  携带（版本照成＋缺陷如实呈现，不粉饰「完成」）；通过与预算内有修复路径不携带。 */
-  knownDefects?: KnownDefectsClosing;
-};
-
-/** 收尾卡已知缺陷清单事实（#427）：整轨终验修复预算耗尽时随末轮终验 run 呈现。 */
-export type KnownDefectsClosing = {
-  /** 缺陷清单（项名＋证据/失败现场——verify 登记原样）。 */
-  defects: { name: string; detail?: string }[];
-};
-
-/** 收尾卡产出证明判别标注事实（#420）：豁免依据／空转拒绝史（两者可并存）。 */
-export type ProofOfOutputClosing = {
-  /** 本场空转拒绝次数（曾被拒后补做/补验证收口——纠偏过程如实）。 */
-  idleRejections?: number;
-  /** 豁免收口（活已被前片干完、验证确认「能力已存在」的合法收口）。 */
-  exempted?: boolean;
-  /** 豁免依据（确认项名拼装的「验证确认」叙事）。 */
-  exemptionBasis?: string;
-};
-
-/** 收尾卡验证统计事实（#352；#424 增轮次预算用尽标注）：末轮三面验证聚合＋复验轮次
- *  ＋未过项名＋预算用尽标注。 */
-export type VerificationClosing = {
-  total: number;
-  failed: number;
-  faces: Record<string, number>;
-  rounds: number;
-  failedItems: string[];
-  /** 轮次预算用尽仍未过（#424：达预算停止修复—复验、未过项如实呈现的标注）。 */
-  budgetExhausted?: boolean;
-};
-
-/** 收尾卡设计规范扫描事实（#296）：status 三态＋违规清单（file/line/rule/message）。 */
-export type DesignLintClosing = {
-  status: "passed" | "violations" | "unavailable";
-  retried?: boolean;
-  total?: number;
-  violations?: { file: string; line: number; rule: string; message: string }[];
-};
-
-/** 收尾卡基座 lint 分档事实（#425）：各档 total＋违规清单——收尾卡只会见预置档余项
- *  （强制档修不完＝收口被拒，结构性不达收尾卡）。 */
-export type RobustLintTier = {
-  total: number;
-  violations: { file: string; line: number; rule: string; message: string }[];
-};
-
-/** 收尾卡基座 lint 两档扫描事实（#425）：status 三态＋预置档余项（强制档分节仅防御
- *  性容错——正常流转不携带）。 */
-export type RobustKitLintClosing = {
-  status: "passed" | "violations" | "unavailable";
-  retried?: boolean;
-  preset?: RobustLintTier;
-  mandatory?: RobustLintTier;
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -231,25 +165,13 @@ export type ChatMessage =
       /**
        * 收尾卡（#88 定格收口，#89 起归对话流常驻）：编码 run 真收口的凝聚物——
        * live 经 run-finish.closing 到达（id = 事件 id，重放去重），回访经对话史
-       * 水合（id = 库条目 id，退位合并的锚之一）。「查看当时/回滚到此」版本控件
-       * 归版本层（#91）。
+       * 水合（id = 库条目 id，退位合并的锚之一）。版本回看与回滚归单轴时间线
+       * （#626/#627）。
        */
       kind: "closing";
       id: string;
       runId?: string;
       closing: WorkClosing;
-    }
-  | {
-      /**
-       * 受理动作卡（#87）：受理轮（迭代期意见轮）开场的受理锚——意见已接住、
-       * 正在受理（追问或改 PRD 的过程呈现位，衔接更新 run 工作消息）。id = 受理
-       * 事件 id（重放去重）；落定（settled）由该轮收口事件推导（run-finish /
-       * error），挂起追问不落定（同一受理轮仍在途）。
-       */
-      kind: "acceptance";
-      id: string;
-      runId: string;
-      settled: boolean;
     }
   | { kind: "error"; id: string; text: string; runId?: string }
   | {
@@ -293,7 +215,17 @@ export type ChatMessage =
       id: string;
       card: BalanceReminderCardFact;
     }
-  | (RaisedQuestion & { kind: "question"; answered: boolean });
+  | (RaisedQuestion & {
+      kind: "question";
+      answered: boolean;
+      /**
+       * 作答勾选回看面（2026-11-26 用户反馈）：submitAnswer 随乐观写入记下提交的
+       * 勾选，已答卡回看按它显示勾（区别于待答卡的实时勾选）。水合行无此字段
+       * （服务端不存——作答文本已在对话流可见）＝回看无勾；失败重开即清，未落账
+       * 的勾选不残留（其后被新问题取代也不泄漏）。
+       */
+      finalSelection?: string[];
+    });
 
 export type ProjectChat = {
   messages: ChatMessage[];
@@ -331,10 +263,6 @@ export type ChatState = {
     closing: WorkClosing,
     eventId: string,
   ) => void;
-  /** 受理动作卡落卡（#87；SSE 事件 id 只收一次——先于 run-start 到达，不设 run 登记）。 */
-  noteAcceptance: (projectId: string, runId: string, eventId: string) => void;
-  /** 受理卡落定（#87：该受理轮收口——run-finish / error；幂等，异 runId 无操作）。 */
-  settleAcceptance: (projectId: string, runId: string) => void;
   /** 平台轻引导落对话面（#47 兜底分支；prompt 重建用户气泡，SSE 事件 id 只收一次）。 */
   noteGuideReply: (
     projectId: string,
@@ -374,15 +302,12 @@ export type ChatState = {
     materials?: ChatMaterial[],
   ) => string;
   /** 作答落定：用户气泡 + 问题卡转已答 + 轮进行中。 */
-  submitAnswer: (projectId: string, text: string, runId: string) => string;
+  submitAnswer: (projectId: string, text: string, runId: string, selection?: string[]) => string;
   /** 发言起轮（智能体将回复；run-start 回声会被去重）。 */
   startTurn: (projectId: string) => void;
   /** 发送失败收轮（无会话锚的落轮口，区别于 SSE 侧 finishTurn 的 runId 判定）。 */
   endTurn: (projectId: string) => void;
   removeMessage: (projectId: string, messageId: string) => void;
-  /** 发送失败撤尾卡（#87）：撤回乐观气泡时尾随的未落定受理卡一并撤——受理事件
-   *  先于提交失败发出时（REST 500），该轮无 run-finish/error 可落定，随气泡同撤。 */
-  removeTrailingAcceptance: (projectId: string) => void;
   /** 作答发送失败：撤回用户气泡 + 问题卡重开。 */
   reopenQuestion: (projectId: string) => void;
   markRunIngested: (projectId: string, runId: string) => void;
@@ -428,24 +353,14 @@ function lastPresentsUserText(chat: ProjectChat, text: string): boolean {
   return false;
 }
 
-/** 用户气泡落位（#87）：尾部的同 run 受理卡之前插入——重放重建时受理事件先于
- *  run-start 到达，意见气泡仍落在其受理卡上方（卡承接的是这条意见）。 */
+/** 用户气泡落位：run-start 重建时按到达序追加（重放去重已在上游完成）。 */
 function insertUserMessage(
   chat: ProjectChat,
   runId: string,
   text: string,
 ): ProjectChat {
   const messages = [...chat.messages];
-  let insertAt = messages.length;
-  while (insertAt > 0) {
-    const prev = messages[insertAt - 1];
-    if (prev.kind === "acceptance" && prev.runId === runId) {
-      insertAt--;
-    } else {
-      break;
-    }
-  }
-  messages.splice(insertAt, 0, { kind: "user", id: localId(), text, runId });
+  messages.splice(messages.length, 0, { kind: "user", id: localId(), text, runId });
   return { ...chat, messages };
 }
 
@@ -569,8 +484,7 @@ export const useChatStore = create<ChatState>((set) => ({
         openRunId: runId,
       };
       if (!prompt || lastPresentsUserText(ingested, prompt)) return ingested;
-      // 受理事件先于 run-start 到达（#87：服务端守卫后即发）——重放重建时用户
-      // 气泡插到本 run 受理卡之前（意见在卡上，卡承接的是这条意见）
+      // run-start 携 prompt 的重放重建：用户气泡按到达序补落
       return insertUserMessage(ingested, runId, prompt);
     }),
 
@@ -836,32 +750,6 @@ export const useChatStore = create<ChatState>((set) => ({
       };
     }),
 
-  noteAcceptance: (projectId, runId, eventId) =>
-    updateChat(set, projectId, (chat) => {
-      // 受理事件先于 run-start 到达（动作卡先出、解说随后）——不设 chatRunIds
-      // 登记，SSE 事件 id 即去重锚
-      if (chat.seenEventIds.includes(eventId)) return chat;
-      const seen = { ...chat, seenEventIds: pushCapped(chat.seenEventIds, eventId) };
-      return appendMessage(seen, {
-        kind: "acceptance",
-        id: eventId,
-        runId,
-        settled: false,
-      });
-    }),
-
-  settleAcceptance: (projectId, runId) =>
-    updateChat(set, projectId, (chat) => {
-      const target = chat.messages.find(
-        (message) => message.kind === "acceptance" && message.runId === runId && !message.settled,
-      );
-      if (!target) return chat; // 无该轮受理卡（咨询/纯追问轮）或已落定——幂等
-      const messages = chat.messages.map((message) =>
-        message === target ? { ...target, settled: true } : message,
-      );
-      return { ...chat, messages };
-    }),
-
   appendUserMessage: (projectId, text, annotations = [], materials = []) => {
     const id = localId();
     updateChat(set, projectId, (chat) =>
@@ -870,12 +758,12 @@ export const useChatStore = create<ChatState>((set) => ({
     return id;
   },
 
-  submitAnswer: (projectId, text, runId) => {
+  submitAnswer: (projectId, text, runId, selection = []) => {
     const id = localId();
     updateChat(set, projectId, (chat) => {
       const messages = chat.messages.map((message) =>
         message.kind === "question" && !message.answered
-          ? { ...message, answered: true }
+          ? { ...message, answered: true, finalSelection: [...selection] }
           : message,
       );
       return appendMessage(
@@ -896,23 +784,16 @@ export const useChatStore = create<ChatState>((set) => ({
       messages: chat.messages.filter((message) => message.id !== messageId),
     })),
 
-  removeTrailingAcceptance: (projectId) =>
-    updateChat(set, projectId, (chat) => {
-      const last = chat.messages[chat.messages.length - 1];
-      if (last === undefined || last.kind !== "acceptance" || last.settled) return chat;
-      return {
-        ...chat,
-        messages: chat.messages.slice(0, -1),
-      };
-    }),
-
   reopenQuestion: (projectId) =>
     updateChat(set, projectId, (chat) => {
       for (let i = chat.messages.length - 1; i >= 0; i--) {
         const message = chat.messages[i];
         if (message.kind === "question") {
+          // 失败回滚连带清勾选记账（finalSelection 只随落账的作答存在）
+          const reopened = { ...message, answered: false };
+          delete reopened.finalSelection;
           const messages = chat.messages.slice();
-          messages[i] = { ...message, answered: false };
+          messages[i] = reopened;
           return { ...chat, messages, turnActive: false };
         }
       }
@@ -950,175 +831,66 @@ function appendMessage(chat: ProjectChat, message: ChatMessage): ProjectChat {
 }
 
 /**
- * closing 载荷的容错收窄（#88/#89：live 事件与水合同形）：类型镜像只做信任转型、
- * 缺字段容错归消费端——只兜「载荷非对象」的形状异常（视同无收尾卡，不出坏卡）；
- * files 非数组回落空清单。
+ * closing 载荷的容错收窄（#617 五字段；#619 变更清单真实 diff；live 事件与水合
+ * 同形）：只兜「载荷非对象」的形状异常（视同无收尾卡，不出坏卡）；files 非数组
+ * 回落空清单。filesUnavailable 只在明确 true 时呈现降级；patch/patchOmitted
+ * 按可选字段收窄。
+ *
+ * <p>旧载荷回落可读（旧对话史不出坏卡）：#617 前落库的收尾卡没有 criteria /
+ * narrative，而是平台句式 summary＋「需求文档／系统」判定键；#619 前的 files
+ * 行数是工具参数活动量、无 patch——同样按文件级呈现，只少 diff 展开。旧 summary
+ * 作为内核自述的回退文本呈现；判据按收口不变式（closing 在场 ⟺ build＋预览双件
+ * 全过）回落双 ✓。新载荷的 narrative 为空/缺省时不出该块。</p>
  */
 export function toWorkClosing(raw: unknown): WorkClosing | undefined {
   const record = asRecord(raw);
   if (!record) return undefined;
+  const legacySummary = typeof record.summary === "string" ? record.summary : undefined;
+  const narrative = typeof record.narrative === "string" ? record.narrative : legacySummary;
+  const criteriaRecord = asRecord(record.criteria);
+  const criteria: WorkClosingCriteria = criteriaRecord
+    ? {
+        buildPassed: criteriaRecord.buildPassed === true,
+        previewPassed: criteriaRecord.previewPassed === true,
+      }
+    // 旧载荷：收尾卡在场 ⟺ 收口判据双件全过（#88 口径）
+    : { buildPassed: true, previewPassed: true };
   return {
-    summary: typeof record.summary === "string" ? record.summary : "",
-    prdChanged: record.prdChanged === true,
-    prdNote: typeof record.prdNote === "string" ? record.prdNote : undefined,
-    systemChanged: record.systemChanged === true,
-    systemNote: typeof record.systemNote === "string" ? record.systemNote : undefined,
+    ...(narrative ? { narrative } : {}),
+    criteria,
     files: Array.isArray(record.files)
       ? record.files.flatMap((file) => {
           const entry = asRecord(file);
-          return entry && typeof entry.path === "string"
-            ? [{
-                path: entry.path,
-                added: typeof entry.added === "number" ? entry.added : 0,
-                removed: typeof entry.removed === "number" ? entry.removed : 0,
-              }]
-            : [];
+          if (!entry || typeof entry.path !== "string") return [];
+          return [{
+            path: entry.path,
+            added: typeof entry.added === "number" ? entry.added : 0,
+            removed: typeof entry.removed === "number" ? entry.removed : 0,
+            ...(typeof entry.patch === "string" && entry.patch.length > 0
+              ? { patch: entry.patch }
+              : {}),
+            ...(entry.patchOmitted === true ? { patchOmitted: true } : {}),
+          }];
         })
       : [],
+    // 首建目录汇总（#620）：缺省/空数组＝按文件级清单呈现（迭代与旧载荷）
+    ...(Array.isArray(record.directories) && record.directories.length > 0
+      ? {
+          directories: record.directories.flatMap((dir) => {
+            const entry = asRecord(dir);
+            if (!entry || typeof entry.path !== "string") return [];
+            return [{
+              path: entry.path,
+              fileCount: typeof entry.fileCount === "number" ? entry.fileCount : 0,
+              added: typeof entry.added === "number" ? entry.added : 0,
+              removed: typeof entry.removed === "number" ? entry.removed : 0,
+            }];
+          }),
+        }
+      : {}),
+    ...(record.filesUnavailable === true ? { filesUnavailable: true } : {}),
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
-    version: typeof record.version === "string" ? record.version : undefined,
-    verification: toVerification(record.verification),
-    drafts: toClosingDrafts(record.drafts),
-    designLint: toDesignLint(record.designLint),
-    robustKitLint: toRobustKitLint(record.robustKitLint),
-    proofOfOutput: toProofOfOutput(record.proofOfOutput),
-    knownDefects: toKnownDefects(record.knownDefects),
   };
-}
-
-/**
- * knownDefects 载荷容错收窄（#427）：非对象或缺有效缺陷清单回落 undefined（不出
- * 坏区——已知缺陷随在场呈现）；条目缺 name 剔除、detail 可缺省。
- */
-function toKnownDefects(raw: unknown): KnownDefectsClosing | undefined {
-  const record = asRecord(raw);
-  if (!record || !Array.isArray(record.defects)) {
-    return undefined;
-  }
-  const defects = record.defects.flatMap((defect) => {
-    const entry = asRecord(defect);
-    return entry && typeof entry.name === "string"
-      ? [{
-          name: entry.name,
-          detail: typeof entry.detail === "string" ? entry.detail : undefined,
-        }]
-      : [];
-  });
-  return defects.length > 0 ? { defects } : undefined;
-}
-
-/**
- * proofOfOutput 载荷容错收窄（#420）：非对象或无任何有效事实（豁免/拒绝史俱缺）
- * 回落 undefined（不出坏行——判别标注随在场呈现）；豁免收口带依据缺省回落空串。
- */
-function toProofOfOutput(raw: unknown): ProofOfOutputClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  const idleRejections = typeof record.idleRejections === "number"
-    ? record.idleRejections : undefined;
-  const exempted = record.exempted === true;
-  if (idleRejections === undefined && !exempted) {
-    return undefined;
-  }
-  return {
-    idleRejections,
-    exempted: exempted || undefined,
-    exemptionBasis: typeof record.exemptionBasis === "string"
-      ? record.exemptionBasis : undefined,
-  };
-}
-
-/**
- * designLint 载荷容错收窄（#296）：非对象或缺有效 status 回落 undefined（不出
- * 坏行——收尾卡「按稿对齐」行随在场呈现）；违规清单条目缺 file 剔除（行呈现
- * 依赖文件定位），status＝violations 而清单空照收（total 仍在——如实）。
- */
-function toDesignLint(raw: unknown): DesignLintClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  if (record.status !== "passed" && record.status !== "violations"
-      && record.status !== "unavailable") {
-    return undefined;
-  }
-  return {
-    status: record.status,
-    retried: record.retried === true,
-    total: typeof record.total === "number" ? record.total : undefined,
-    violations: Array.isArray(record.violations)
-      ? record.violations.flatMap((violation) => {
-          const entry = asRecord(violation);
-          return entry && typeof entry.file === "string"
-            ? [{
-                file: entry.file,
-                line: typeof entry.line === "number" ? entry.line : 0,
-                rule: typeof entry.rule === "string" ? entry.rule : "",
-                message: typeof entry.message === "string" ? entry.message : "",
-              }]
-            : [];
-        })
-      : undefined,
-  };
-}
-
-/**
- * robustKitLint 载荷容错收窄（#425）：非对象或缺有效 status 回落 undefined（不出
- * 坏行——收尾卡「基座件使用」行随在场呈现）；分档条目同 designLint 收窄（缺 file
- * 剔除）。status＝violations 而两档皆空照收（如实——防御性，正常流转不会出现）。
- */
-function toRobustKitLint(raw: unknown): RobustKitLintClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  if (record.status !== "passed" && record.status !== "violations"
-      && record.status !== "unavailable") {
-    return undefined;
-  }
-  const toTier = (tier: unknown): RobustLintTier | undefined => {
-    const entry = asRecord(tier);
-    if (!entry) return undefined;
-    const violations = Array.isArray(entry.violations)
-      ? entry.violations.flatMap((violation) => {
-          const item = asRecord(violation);
-          return item && typeof item.file === "string"
-            ? [{
-                file: item.file,
-                line: typeof item.line === "number" ? item.line : 0,
-                rule: typeof item.rule === "string" ? item.rule : "",
-                message: typeof item.message === "string" ? item.message : "",
-              }]
-            : [];
-        })
-      : [];
-    return { total: typeof entry.total === "number" ? entry.total : violations.length, violations };
-  };
-  return {
-    status: record.status,
-    retried: record.retried === true,
-    preset: toTier(record.preset),
-    mandatory: toTier(record.mandatory),
-  };
-}
-
-/**
- * drafts 载荷容错收窄（#289/#290）：非数组回落 undefined（编码 run 不携带）；
- * 条目缺 path / media 非二值剔除（不出坏行——稿条目的呈现依赖 path 与形态），
- * item 缺失回落空串（行仍可按 path 呈现）。全空数组照收（收口判据过而清单
- * 被裁的防御面，卡面零稿行）。
- */
-function toClosingDrafts(raw: unknown): ClosingDraft[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  return raw.flatMap((draft): ClosingDraft[] => {
-    const entry = asRecord(draft);
-    if (!entry || typeof entry.path !== "string" || !entry.path) return [];
-    if (entry.media !== "html" && entry.media !== "image") return [];
-    return [{
-      item: typeof entry.item === "string" ? entry.item : "",
-      media: entry.media,
-      path: entry.path,
-      triggers: Array.isArray(entry.triggers)
-        ? entry.triggers.filter((trigger): trigger is string => typeof trigger === "string")
-        : undefined,
-    }];
-  });
 }
 
 /**
@@ -1131,33 +903,6 @@ export function toQuoteRef(raw: unknown): { orderId: string; event: string } | u
   return {
     orderId: record.orderId,
     event: typeof record.event === "string" && record.event !== "" ? record.event : "quoted",
-  };
-}
-
-/** verification 载荷容错收窄（#352；#424 增 budgetExhausted）：非对象或 total 为 0
- *  （未登记/空轮）回落 undefined；faces 非对象回落空表、failedItems 只收字符串项、
- *  rounds 缺省回落 1、budgetExhausted 只认显式 true。 */
-function toVerification(raw: unknown): VerificationClosing | undefined {
-  const record = asRecord(raw);
-  if (!record) return undefined;
-  const total = typeof record.total === "number" ? record.total : 0;
-  if (total <= 0) return undefined;
-  const rawFaces = asRecord(record.faces);
-  const faces: Record<string, number> = {};
-  if (rawFaces) {
-    for (const [face, count] of Object.entries(rawFaces)) {
-      if (typeof count === "number") faces[face] = count;
-    }
-  }
-  return {
-    total,
-    failed: typeof record.failed === "number" ? record.failed : 0,
-    faces,
-    rounds: typeof record.rounds === "number" && record.rounds > 0 ? record.rounds : 1,
-    failedItems: Array.isArray(record.failedItems)
-      ? record.failedItems.filter((item): item is string => typeof item === "string")
-      : [],
-    ...(record.budgetExhausted === true ? { budgetExhausted: true } : {}),
   };
 }
 

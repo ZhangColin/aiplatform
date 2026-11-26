@@ -17,8 +17,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ol>
  * <li>被拦输入留存的认领恢复（{@link DispatchAppService#resumeBalanceHolds}——
- * 意见回意见轮／咨询回答询轮／作用域改稿回设计会话）；</li>
- * <li>run 场派发 intent 暂存的排空重派（生成／修正／设计三口——
+ * 意见回意见轮／咨询回答询轮）；</li>
+ * <li>run 场派发 intent 暂存的排空重派（生成／修正两口——
  * {@code drainBalanceBlocked} 各自按门重判，未回正项目保持暂存待下一次入账）。</li>
  * </ol>
  *
@@ -34,16 +34,13 @@ public class BalanceGateDrainHandler {
     private final DispatchAppService dispatchAppService;
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
-    private final DesignProcessAppService designProcessAppService;
 
     public BalanceGateDrainHandler(DispatchAppService dispatchAppService,
             GenerationAppService generationAppService,
-            IterationAppService iterationAppService,
-            DesignProcessAppService designProcessAppService) {
+            IterationAppService iterationAppService) {
         this.dispatchAppService = dispatchAppService;
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
-        this.designProcessAppService = designProcessAppService;
     }
 
     /**
@@ -68,7 +65,6 @@ public class BalanceGateDrainHandler {
         }
         drainEach("生成", generationAppService::drainBalanceBlocked);
         drainEach("修正", iterationAppService::drainBalanceBlocked);
-        drainEach("设计", designProcessAppService::drainBalanceBlocked);
     }
 
     /** 单口排空隔离：失败只记日志——不拖垮其余车道的放行。 */

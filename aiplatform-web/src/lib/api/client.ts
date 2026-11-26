@@ -15,8 +15,21 @@ export type PageResponse<T> = {
 
 type QueryValue = string | number | boolean;
 
+/**
+ * 默认请求超时（#652）：30s——排队/挂死中的请求（如事件流异常挤占连接池时被
+ * 卡住的作答 POST）也要有可见报错，不允许静默吞掉。慢调用（上传等）以
+ * {@link RequestOptions.timeoutMs} 显式覆盖。
+ */
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
 type RequestOptions = {
   signal?: AbortSignal;
+  /**
+   * 请求超时毫秒；0 关闭。缺省 {@link DEFAULT_TIMEOUT_MS}——超时按 ApiError
+   *（status 0＝本地超时，无 HTTP 状态）可见报错。调用方 signal 的 abort
+   * （StrictMode cleanup／查询取消）不受影响，原样透传。
+   */
+  timeoutMs?: number;
   /** URL query 参数，undefined / 空数组 的键会被丢弃。 */
   query?: Record<string, QueryValue | QueryValue[] | undefined>;
   /**
@@ -105,42 +118,62 @@ async function request<T>(path: string, options: RequestOptions & { method: stri
 }
 
 async function runRequest<T>(url: URL, options: RequestOptions & { method: string; body?: unknown }): Promise<T> {
-  const { method, body, signal, silentUnauthorized } = options;
+  const { method, body, signal, silentUnauthorized, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
   // FormData（multipart 上传）原样直传——浏览器自带 boundary 的 Content-Type
   // 不能手设；JSON body 照旧显式标 application/json
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
-  const res = await fetch(url, {
-    method,
-    headers: body === undefined ? undefined : isFormData ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : isFormData ? (body as FormData) : JSON.stringify(body),
-    signal,
-  });
-
-  if (!res.ok) {
-    const payload: ApiResponse<unknown> | null = await res.json().catch(() => null);
-    if (res.status === 401 && !silentUnauthorized) {
-      // 一个出口、零分支（#326 起事件化）：不再整页跳登录——访客可用面（匿名逛
-      // 首页、访客凭证过期）不因 401 断体验；M01（#327/#328）订阅本事件弹登录
-      // 弹窗，无订阅者时请求保持 error 态（查询面按未登录呈现）。背景探针显式
-      // 静默（silentUnauthorized）：首页匿名访问不为一次探活弹登录框。
-      emitUnauthorized(url.pathname + url.search);
-    }
-    throw new ApiError({
-      status: res.status,
-      code: payload?.code,
-      message: payload?.message,
-      errors: payload?.errors,
-      requestId: payload?.requestId ?? res.headers.get("x-request-id") ?? undefined,
+  // #652 默认超时：与调用方 signal 组合而非互斥（共享去重路径不挂消费者 signal、
+  // 但超时照挂——任何请求不得无限挂死）
+  const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
+  const effectiveSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout])
+      : timeout
+    : signal;
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: body === undefined ? undefined : isFormData ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : isFormData ? (body as FormData) : JSON.stringify(body),
+      signal: effectiveSignal,
     });
-  }
 
-  if (res.status === 204) return undefined as T;
-  const payload: unknown = await res.json();
-  // 统一解包：信封 ApiResponse → data（分页端点的 data 即 PageResponse，原样返回）；
-  // 无信封的裸 JSON 按原样返回。
-  return payload !== null && typeof payload === "object" && "data" in payload
-    ? (payload as ApiResponse<T>).data
-    : (payload as T);
+    if (!res.ok) {
+      const payload: ApiResponse<unknown> | null = await res.json().catch(() => null);
+      if (res.status === 401 && !silentUnauthorized) {
+        // 一个出口、零分支（#326 起事件化）：不再整页跳登录——访客可用面（匿名逛
+        // 首页、访客凭证过期）不因 401 断体验；M01（#327/#328）订阅本事件弹登录
+        // 弹窗，无订阅者时请求保持 error 态（查询面按未登录呈现）。背景探针显式
+        // 静默（silentUnauthorized）：首页匿名访问不为一次探活弹登录框。
+        emitUnauthorized(url.pathname + url.search);
+      }
+      throw new ApiError({
+        status: res.status,
+        code: payload?.code,
+        message: payload?.message,
+        errors: payload?.errors,
+        requestId: payload?.requestId ?? res.headers.get("x-request-id") ?? undefined,
+      });
+    }
+
+    if (res.status === 204) return undefined as T;
+    const payload: unknown = await res.json();
+    // 统一解包：信封 ApiResponse → data（分页端点的 data 即 PageResponse，原样返回）；
+    // 无信封的裸 JSON 按原样返回。
+    return payload !== null && typeof payload === "object" && "data" in payload
+      ? (payload as ApiResponse<T>).data
+      : (payload as T);
+  } catch (error) {
+    // 调用方 abort（StrictMode cleanup／TanStack 取消）优先原样透传，不吞成超时
+    if (signal?.aborted) throw error;
+    if (timeout?.aborted) {
+      throw new ApiError({
+        status: 0, // 本地超时：无 HTTP 状态
+        message: `请求超时（${Math.round(timeoutMs / 1000)}s）无响应，请检查网络后重试`,
+      });
+    }
+    throw error;
+  }
 }
 
 /** 唯一网络出口：一律相对路径 /api/*（next.config.ts rewrite → 后端，同源 cookie 自动携带）。 */

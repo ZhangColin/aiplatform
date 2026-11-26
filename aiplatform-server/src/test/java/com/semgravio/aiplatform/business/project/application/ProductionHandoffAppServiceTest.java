@@ -242,7 +242,7 @@ class ProductionHandoffAppServiceTest {
 
     private Long newProject() {
         Project project = projectRepository.save(Project.create("生产承接项目" + WORKSPACE_SEQ.get(),
-                null, null, WORKSPACE_SEQ.incrementAndGet(), 1L, null));
+                null, WORKSPACE_SEQ.incrementAndGet(), 1L, null));
         projectIds.add(project.getId());
         return project.getId();
     }

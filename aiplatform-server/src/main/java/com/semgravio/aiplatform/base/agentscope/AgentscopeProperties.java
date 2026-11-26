@@ -7,8 +7,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * AgentScope 内核配置（前缀 app.agentscope）：默认人格 / agent 名 / 工作区根 /
- * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走档位解析：三座与边缘四点的
- * 模型串＋通道注入由业务侧 {@code ModelTierAppService} 解析随命令/装配透传——
+ * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走配置解析：三座与边缘三点的
+ * 模型串＋通道注入由业务侧 {@code ModelConfigAppService} 解析随命令/装配透传——
  * 旧 yml 模型键 default-model/compaction-model 已随边缘点收编退役）。workspace
  * 是本地兜底工作区（命令未带 workspaceId 时用，如取名轻调用），为空时用
  * AgentScope 默认（.agentscope/workspace）；带 workspaceId 的调用解析为项目
@@ -28,8 +28,8 @@ public class AgentscopeProperties {
     private Path workspace;
 
     /**
-     * 单轮对话超时（一次性总墙钟）：未携活超时阈值的调用面的兜底——判定轮/取名/
-     * 预检等无工具轻调用（对话轮与生成轨已接活超时，见 app.main-agent /
+     * 单轮对话超时（一次性总墙钟）：未携活超时阈值的调用面的兜底——判定轮/取名等
+     * 无工具轻调用（对话轮与生成轨已接活超时，见 app.main-agent /
      * app.generation 的 silence-timeout，#371/#322）。
      */
     private Duration timeout = Duration.ofMinutes(2);
@@ -51,7 +51,10 @@ public class AgentscopeProperties {
      * 尤甚。取 400K：按最坏低估比 2.5× 折算 est 400K ≈ 真实 1M，正好在
      * context_length_exceeded 硬上限前触发（streamEvents 路径天然受益，「炸后下轮」
      * 因下一轮先压缩再跑而自愈，#108 / ADR-0012）。null = 回框架动态缺省。
-     * 压缩模型不在此配（#366 起走边缘点档位链：compaction 档位库值优先缺省 flash，
+     * <b>内核形态不用本值</b>（#598）：内核对话以代码为主、框架估算偏高，本值的标定
+     * 前提不成立——内核不按消息条数压缩，token 阈值照 DeepSeek Harness 原式按主模型
+     * 窗口现算（{@code AgentscopeHarnessAgentFactory#kernelCompactionConfig}）。
+     * 压缩模型不在此配（#366 起走边缘点配置链：compaction 配置库值优先缺省 flash，
      * 经 {@code EdgeModelSupplier} 解析注入工厂装配）。
      */
     private Integer compactionTriggerTokens = 400_000;
@@ -59,7 +62,7 @@ public class AgentscopeProperties {
     /**
      * 模型流断流自动重试次数上界（含首试；#321）。单条模型流遇可重试错误（HTTP
      * 429/5xx，框架 {@code ExecutionConfig.RETRYABLE_ERRORS} 分类）在流层有限次
-     * 自动重试接续，耗尽才上抛进外层尝试环（CoderRunAttempts 维持最后防线）；1 =
+     * 自动重试接续，耗尽才上抛进外层尝试环（CodingRunDispatcher 维持最后防线）；1 =
      * 关闭流层重试。缺省 3 = 首试 + 2 次重试。平台层独占流层重试（框架内建缺省
      * 已在 resolve 时关闭，见工厂 innerRetryDisabledOptions——两层叠加会让次数
      * 语义不可控）。已发块后的失败不重试（重订阅重放已消费块会让下游累积重复
@@ -86,32 +89,36 @@ public class AgentscopeProperties {
     private Duration modelStreamMaxDuration = Duration.ofMinutes(15);
 
     /**
-     * 生成车道宽度（worker 数）＝跨项目并发产出轨上界（#475 分池 ADR-0042；#477
-     * 生成道改全局 FIFO＋固定 worker 池，ADR-0043——不按会话落位，有空闲 worker
-     * 即起跑）：生成/迭代复演/设计轨的小时级整场任务独立车道（饿不死交互轮），
-     * 超出即排队（入队/出队滞留日志可见）、起跑按 {@link #generationAdmissionInterval}
-     * 错峰。缺省 8＝共池时代容量平移；按单机容量调低（eu-1 实测 2-3 并发生成轻松、
-     * 6-8 个 ws 容器接近极限）。改动重启生效（执行器是启动期装配的常驻线程组，
-     * 非运营配置热面——单机容量口径定档后随部署改）。
+     * 生成内核运营护栏·轮次上限（#597 配置化，ADR-0054／#593 用户故事 8）：300 轮——
+     * 防挂死与成本失控的兜底数值，非工作语义、不重新标定（定稿配置实测最长 146 轮，
+     * 取值远离实测分布）。到顶不掐断：关工具＋如实汇报提示（循环第 2 条，
+     * {@link KernelLoopSemantics}）。缺省正本 {@link KernelLoopSemantics#GUARD_ROUNDS}；
+     * null/非正＝回落缺省（显式置空不产出「无限轮」形态——SDK maxIters 互锁需具体值）。
+     * 改动重启生效（agent 实例启动期装配）。
      */
-    private Integer generationStripes = 8;
+    private Integer kernelGuardRounds = KernelLoopSemantics.GUARD_ROUNDS;
 
     /**
-     * 生成车道错峰准入间隔（#477「发版即满车道」的治）：相邻生成任务起跑至少间隔
-     * 此值——发版重启的自愈续跑洪水 N 场齐发会瞬时占死车道、打满单机容量（11-12
-     * 实录：发版 15 秒内 7 场中断生成齐跑，此后新建项目全在排队）；车道空闲
-     * （间隔窗已过）时任务即取即跑，稳态单任务零新增延迟。缺省 10s；0/负＝关闭
-     * 错峰。改动重启生效（worker 池是启动期装配的常驻线程组）。
+     * 生成内核运营护栏·总时长上限（#597 配置化，ADR-0054）：45 分钟——同族兜底
+     * （实测最长 16.5 分钟）。从生成首轮起算 wall-clock，越过即按循环第 2 条关工具
+     * 如实汇报；null/零/负＝该项不限。改动重启生效。
      */
-    private Duration generationAdmissionInterval = Duration.ofSeconds(10);
+    private Duration kernelGuardDuration = Duration.ofMinutes(45);
 
     /**
-     * 会话任务队列滞留告警阈值（#475 队列可观测）：交互车道任务出队时滞留超此
-     * 即 WARN（sessionId＋滞留时长＋车道深度）——「任务排在队列里无痕迹」是
-     * 11-12 事故定位全靠 jstack 的根源。生成车道逐任务 INFO 留痕（低频），
-     * 不受此阈值约束。
+     * 生成内核运营护栏·prompt 总量上限（#597 配置化，ADR-0054）：60M token——同族
+     * 兜底（实测最大 18.9M，按用量事件 inputTokens 逐轮累计）。越过即按循环第 2 条
+     * 关工具如实汇报；null/零/负＝该项不限。改动重启生效。
      */
-    private Duration sessionQueueWarnThreshold = Duration.ofSeconds(5);
+    private Long kernelGuardPromptTokens = 60_000_000L;
+
+    /**
+     * 生成内核输出上限（#597，ADR-0054／#593 用户故事 10）：每次模型请求的
+     * max_tokens 开关，默认 32768（#590 定稿配置——用速度换完成度的取舍已授权
+     * 为运营开关：调低回 7–11 分钟档，代价是截断风险回来）。null＝不注入（回落
+     * 模型/provider 缺省）。改动重启生效（agent 实例启动期装配）。
+     */
+    private Integer kernelMaxOutputTokens = 32768;
 
     public String getAgentName() {
         return agentName;
@@ -193,27 +200,35 @@ public class AgentscopeProperties {
         this.modelStreamMaxDuration = modelStreamMaxDuration;
     }
 
-    public Integer getGenerationStripes() {
-        return generationStripes;
+    public Integer getKernelGuardRounds() {
+        return kernelGuardRounds;
     }
 
-    public void setGenerationStripes(Integer generationStripes) {
-        this.generationStripes = generationStripes;
+    public void setKernelGuardRounds(Integer kernelGuardRounds) {
+        this.kernelGuardRounds = kernelGuardRounds;
     }
 
-    public Duration getGenerationAdmissionInterval() {
-        return generationAdmissionInterval;
+    public Duration getKernelGuardDuration() {
+        return kernelGuardDuration;
     }
 
-    public void setGenerationAdmissionInterval(Duration generationAdmissionInterval) {
-        this.generationAdmissionInterval = generationAdmissionInterval;
+    public void setKernelGuardDuration(Duration kernelGuardDuration) {
+        this.kernelGuardDuration = kernelGuardDuration;
     }
 
-    public Duration getSessionQueueWarnThreshold() {
-        return sessionQueueWarnThreshold;
+    public Long getKernelGuardPromptTokens() {
+        return kernelGuardPromptTokens;
     }
 
-    public void setSessionQueueWarnThreshold(Duration sessionQueueWarnThreshold) {
-        this.sessionQueueWarnThreshold = sessionQueueWarnThreshold;
+    public void setKernelGuardPromptTokens(Long kernelGuardPromptTokens) {
+        this.kernelGuardPromptTokens = kernelGuardPromptTokens;
+    }
+
+    public Integer getKernelMaxOutputTokens() {
+        return kernelMaxOutputTokens;
+    }
+
+    public void setKernelMaxOutputTokens(Integer kernelMaxOutputTokens) {
+        this.kernelMaxOutputTokens = kernelMaxOutputTokens;
     }
 }

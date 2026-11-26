@@ -14,13 +14,19 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 安全），携现值掩码形（如 ****abcd）同判保持；换 key 才写全量新值。清除 key
  * 无写面（下线通道走 enabled=false，凭证随行留置不影响装配——停用即明确报错）。</p>
  *
+ * @param vendor  归一供应商（#559/T5 受控值校验同创建；缺省＝保持现值——终态
+ *                字段不因缺省翻转，换 key/换地址不带 vendor 不动归一。归一纠正
+ *                ＝显式写新值，留痕前后快照可回滚）
  * @param baseUrl 通道 baseUrl（必填；终态全量替换）
  * @param apiKey  全量新值＝换 key；null/空白/现值掩码形＝保持现值
  * @param enabled 缺省＝保持现值；显式 true/false 才翻转
  */
 public record ModelProviderUpdateCommand(
+        @Schema(description = "归一供应商（受控值校验同创建；缺省＝保持现值。换归一＝计量/"
+                + "单价匹配维度随之切换——留痕前后快照可回滚）", example = "deepseek")
+        String vendor,
         @Schema(description = "通道 baseUrl（终态全量替换，必填）",
-                example = "https://ark.cn-beijing.volces.com/api/v3")
+                example = "https://api.deepseek.com")
         String baseUrl,
         @Schema(description = "apiKey：写全量新值＝换 key（写面唯一明文入口）；null/空白/"
                 + "等于现值掩码形＝保持现值（读面掩码回显的 round-trip 安全语义）。"

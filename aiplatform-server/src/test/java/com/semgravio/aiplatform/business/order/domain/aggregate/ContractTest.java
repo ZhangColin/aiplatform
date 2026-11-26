@@ -72,6 +72,22 @@ class ContractTest {
     }
 
     @Test
+    void given_confirmed_user_version_order_when_create_then_single_version_ref_frozen() {
+        // #629 新单（单一已确认用户面版本号）：合同冻结集只落该版本，旧 PRD/Demo 双列不写
+        Order order = Order.place(900100L, null, null,
+                "# PRD\n\n当前工作区 PRD 全文", OrderDeliverableType.SYSTEM, 7);
+        order.enterScope("交付清单：管理后台", "验收方式：按 PRD 验收", "工期口径：4 周");
+        order.quote(128000L, "首版报价", null);
+
+        Contract contract = Contract.create(order, order.latestPriceEntry());
+
+        assertThat(contract.getConfirmedVersionNo()).isEqualTo(7);
+        assertThat(contract.getPrdVersionNo()).isNull();
+        assertThat(contract.getDemoVersionNo()).isNull();
+        assertThat(contract.getPrdSnapshot()).isEqualTo("# PRD\n\n当前工作区 PRD 全文");
+    }
+
+    @Test
     void given_scope_not_entered_when_create_then_rejected_ord_026() {
         // 范围快照冻结集的守卫腿：范围文本未录入（确认门未过形态）不建合同
         Order order = Order.place(900100L, null, null,

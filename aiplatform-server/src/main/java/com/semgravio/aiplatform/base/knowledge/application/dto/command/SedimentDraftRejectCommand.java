@@ -5,7 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * 沉淀草稿拒绝命令（#464「数据标注」三键之一）：理由必填（终态留档拒绝须有据，
  * 库级 CHECK 锁死）。字段合法性由拒绝用例裁决（KNW_010 空），不在命令层重复
- * 校验——照 {@code SkillDraftRejectCommand} 形制。
+ * 校验（照旧技能草稿拒绝命令的形制——技能草稿链已随 V91 拆表退役）。
  *
  * @param reason 拒绝理由（随终态草稿留档，审核面可查；trim 后非空）
  */

@@ -1,639 +1,315 @@
 "use client";
 
 import {
-  AlertTriangle,
-  BadgeCheck,
   Check,
   ChevronDown,
   Clock3,
-  Eye,
-  FileCode2,
-  FileText,
-  Image as ImageIcon,
-  ListChecks,
+  ExternalLink,
   Monitor,
-  PackageCheck,
-  Palette,
-  PenLine,
-  RotateCcw,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useRollbackVersion, useVersionViewSession } from "@/hooks/use-version";
-import type {
-  ClosingDraft,
-  DesignLintClosing,
-  KnownDefectsClosing,
-  ProofOfOutputClosing,
-  RobustKitLintClosing,
-  RobustLintTier,
-  WorkClosing,
-} from "@/lib/store/chat";
-import { rawFileUrl } from "@/lib/projects/files";
+import { useProjectPreview } from "@/hooks/use-project-preview";
+import type { WorkClosing } from "@/lib/store/chat";
 import { cn } from "@/lib/utils";
 
+import { ChatMarkdown } from "./chat-markdown";
 import { formatDuration } from "./work-message";
-import { VersionViewDialog } from "./version-view-dialog";
 
 /** 变更清单默认可见条数（其余收进「查看全部」——清单可长，卡不无限长）。 */
 const VISIBLE_FILES = 5;
-/** 稿清单默认可见条数（其余收进「查看全部」——多稿候选可长，卡不无限长）。 */
-const VISIBLE_DRAFTS = 5;
 
-/** 验证三面的用户面标签（#352：browser/db/log → 界面/落库/日志——hover 明细用）。 */
-const VERIFICATION_FACE_LABELS: Record<string, string> = {
-  browser: "界面",
-  db: "落库",
-  log: "日志",
-};
-
-/** 验证三面分布的 hover 明细（「界面 2 · 落库 2 · 日志 1」；未知面按原名如实呈现）。 */
-function verificationFacesTitle(faces: Record<string, number>): string {
-  return Object.entries(faces)
-    .map(([face, count]) => `${VERIFICATION_FACE_LABELS[face] ?? face} ${count}`)
-    .join(" · ");
-}
-
-/** 稿形态 → 图标（html＝界面稿〔可交互轻页面〕/ image＝图像稿〔平面位图〕）。 */
-function DraftIcon({ media }: { media: ClosingDraft["media"] }) {
-  return media === "html" ? (
-    <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
-  ) : (
-    <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
-  );
-}
-
-/** 稿去向文件名（path 末段——完整路径是工程语料，用户面认文件名）。 */
-function draftNameOf(path: string): string {
-  const name = path.substring(path.lastIndexOf("/") + 1);
-  return name || path;
+/** 工作区锚定路径 → 父目录锚定形（与后端 `WorkspaceChanges.directoryOf` 同口径）。 */
+function parentDirectory(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash <= 0 ? "/" : path.slice(0, slash);
 }
 
 /**
- * 稿清单区（#290 设计会话收尾卡扩载呈现）：本轮落进 design/ 的稿——每稿一行
- * （形态图标 + 文件名 + 形态标签），去向＝文件区（path 即去向锚）。图像稿行可
- * 点：平台文件服务 raw 直看 inline 大图（未付费照看：门只盖下载面，#287）；界面
- * 稿（html）不出直链——raw 只伺服图片（PRJ_038）、渲染式呈现归成果区设计稿范式
- * （#293 稿伺服通道），此处如实提示文件区可看。其余收进「查看全部」。
+ * 判据单项呈现（#617）：逐件如实——过＝绿、未过＝红。收尾卡只在收口判据双件
+ * 全过后出现，未过档由失败终态呈现（不出现本卡）；组件仍按真实布尔渲染，
+ * 不写死「通过」。
  */
-function DraftsArea({ projectId, drafts }: { projectId: string; drafts: ClosingDraft[] }) {
-  const [open, setOpen] = useState(false);
-  const shown = open ? drafts : drafts.slice(0, VISIBLE_DRAFTS);
+function CriterionRow({
+  icon,
+  label,
+  passed,
+  passText,
+  failText,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  passed: boolean;
+  passText: string;
+  failText: string;
+}) {
   return (
-    <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
-      {shown.map((draft) =>
-        draft.media === "image" ? (
-          <a
-            key={draft.path}
-            href={rawFileUrl(projectId, draft.path)}
-            target="_blank"
-            rel="noopener"
-            className="flex items-center gap-2 rounded-md py-0.5 text-[13px] transition-colors hover:bg-muted/50"
-            title={`${draft.path}（点开看大图）`}
-          >
-            <DraftIcon media={draft.media} />
-            <span className="min-w-0 flex-1 truncate text-foreground/80">{draftNameOf(draft.path)}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">图像稿</span>
-          </a>
-        ) : (
-          <div
-            key={draft.path}
-            className="flex items-center gap-2 rounded-md py-0.5 text-[13px]"
-            title={`${draft.path}（文件区可查看）`}
-          >
-            <DraftIcon media={draft.media} />
-            <span className="min-w-0 flex-1 truncate text-foreground/80">{draftNameOf(draft.path)}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">界面稿 · 文件区可看</span>
-          </div>
-        ),
+    <span className={cn("flex items-center gap-1", !passed && "text-destructive")}>
+      {icon}
+      {label}
+      <b className={cn("font-medium", passed ? "text-foreground/80" : "text-destructive")}>
+        {passed ? passText : failText}
+      </b>
+      {passed ? (
+        <Check className="size-3.5 text-green-600" strokeWidth={3} />
+      ) : (
+        <X className="size-3.5" strokeWidth={3} />
       )}
-      {drafts.length > VISIBLE_DRAFTS ? (
-        <button
-          type="button"
-          className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setOpen(!open)}
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-          {open ? "收起" : `查看全部 ${drafts.length} 稿`}
-        </button>
-      ) : null}
-      <FinalizeTriggers drafts={drafts} />
-    </div>
-  );
-}
-
-/** 违规清单默认可见条数（其余收进「查看全部」——同文件/稿清单收口）。 */
-const VISIBLE_LINT = 5;
-
-/** lint 规则中文名（用户面不露工程码；诊断原文经行 hover 可见）。 */
-const LINT_RULE_LABELS: Record<string, string> = {
-  "no-raw-colors": "裸色",
-  "no-arbitrary-values": "任意值",
-  "no-inline-styles": "内联样式",
-};
-
-/**
- * 按稿对齐区（#296 遵守三件套③感知面）：带规范项目编码 run 的设计规范扫描
- * 事实——样式合规（曾自动修一轮则注明，纠偏过程如实）/违规清单（文件:行 +
- * 规则中文名，hover 带诊断原文）/扫描未执行（如实，不假装达标）。圈注提意见
- * 走系统预览面既有通道（「像不像」归用户人眼，ADR-0028）。
- */
-function DesignLintArea({ lint }: { lint: DesignLintClosing }) {
-  const [open, setOpen] = useState(false);
-  const violations = lint.violations ?? [];
-  const shown = open ? violations : violations.slice(0, VISIBLE_LINT);
-  const violating = lint.status === "violations";
-  return (
-    <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[13px]">
-        <Palette className={cn("size-3.5 shrink-0", violating ? "text-amber-600" : "text-muted-foreground")} />
-        <span>
-          按稿对齐：
-          {lint.status === "passed" ? (
-            lint.retried ? "样式合规（曾自动修正一轮）" : "样式合规"
-          ) : lint.status === "unavailable" ? (
-            "样式合规扫描未执行"
-          ) : (
-            <>
-              <span className="font-medium text-amber-600">
-                {lint.total ?? violations.length} 处样式违规
-              </span>
-              {lint.retried ? "（已自动修正一轮，仍余）" : null}
-            </>
-          )}
-        </span>
-      </div>
-      {violating && violations.length > 0 ? (
-        <>
-          <div className="mt-1 font-mono text-xs">
-            {shown.map((violation) => (
-              <div
-                key={`${violation.file}:${violation.line}:${violation.rule}`}
-                className="flex items-center justify-between gap-2 py-0.5"
-                title={violation.message}
-              >
-                <span className="min-w-0 truncate text-foreground/80">
-                  {violation.file}:{violation.line || ""}
-                </span>
-                <span className="shrink-0 text-muted-foreground">
-                  {LINT_RULE_LABELS[violation.rule] ?? violation.rule}
-                </span>
-              </div>
-            ))}
-          </div>
-          {violations.length > VISIBLE_LINT ? (
-            <button
-              type="button"
-              className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setOpen(!open)}
-            >
-              <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-              {open ? "收起" : `查看全部 ${violations.length} 处`}
-            </button>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-/** 基座 lint 规则中文名（用户面不露工程码；件用法指引原文经行 hover 可见）。 */
-const ROBUST_LINT_RULE_LABELS: Record<string, string> = {
-  "bare-db-client": "裸数据库客户端",
-  "bare-fetch": "裸 fetch",
-  "handwritten-session": "会话自写",
-};
-
-/**
- * 基座件使用区（#425 基座 lint 两档的感知面；#541 让路缺省两档同为标注）：新基座
- * 工作区编码 run 的基座 lint 事实——基座件合规（曾自动修一轮则注明，纠偏过程
- * 如实）/违规清单（强制档裸客户端直用与预置档会话自写都如实随卡标注、不拦
- * 收口，两档并存合并计数与清单；文件:行＋规则中文名，hover 带件用法指引）/
- * 扫描未执行（如实，不假装达标）。阻断形态（运营开关回滚）下强制档修不完
- * ＝收口被拒，不会以该形态出现在本卡。
- */
-function RobustLintArea({ lint }: { lint: RobustKitLintClosing }) {
-  const [open, setOpen] = useState(false);
-  // 两档合并呈现（#541 让路后两档可同场）：计数取各档 total 之和（清单后端截
-  // 20，total 如实），清单拼接保持后端分档次序（强制档在前）
-  const tiers = [lint.mandatory, lint.preset].filter(
-    (tier): tier is RobustLintTier => tier != null,
-  );
-  const violations = tiers.flatMap((tier) => tier.violations ?? []);
-  const total = tiers.reduce((sum, tier) => sum + (tier.total ?? 0), 0);
-  const shown = open ? violations : violations.slice(0, VISIBLE_LINT);
-  const violating = lint.status === "violations";
-  return (
-    <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[13px]">
-        <PackageCheck className={cn("size-3.5 shrink-0", violating ? "text-amber-600" : "text-muted-foreground")} />
-        <span>
-          基座件使用：
-          {lint.status === "passed" ? (
-            lint.retried ? "基座件合规（曾自动修正一轮）" : "基座件合规"
-          ) : lint.status === "unavailable" ? (
-            "基座件扫描未执行"
-          ) : (
-            <>
-              <span className="font-medium text-amber-600">
-                余 {total || violations.length} 处基座件违规
-              </span>
-              {lint.retried ? "（已自动修正一轮，仍余）" : null}
-            </>
-          )}
-        </span>
-      </div>
-      {violating && violations.length > 0 ? (
-        <>
-          <div className="mt-1 font-mono text-xs">
-            {shown.map((violation) => (
-              <div
-                key={`${violation.file}:${violation.line}:${violation.rule}`}
-                className="flex items-center justify-between gap-2 py-0.5"
-                title={violation.message}
-              >
-                <span className="min-w-0 truncate text-foreground/80">
-                  {violation.file}:{violation.line || ""}
-                </span>
-                <span className="shrink-0 text-muted-foreground">
-                  {ROBUST_LINT_RULE_LABELS[violation.rule] ?? violation.rule}
-                </span>
-              </div>
-            ))}
-          </div>
-          {violations.length > VISIBLE_LINT ? (
-            <button
-              type="button"
-              className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setOpen(!open)}
-            >
-              <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-              {open ? "收起" : `查看全部 ${violations.length} 处`}
-            </button>
-          ) : null}
-        </>
-      ) : null}
-    </div>
+    </span>
   );
 }
 
 /**
- * 已知缺陷区（#427 整轨终验的如实呈现面）：修复预算耗尽时版本照成——不粉饰
- * 「完成」：总数定性一行（已交付＋自动修复预算已用完）＋逐项缺陷名（hover 带
- * 证据/失败现场），超可见上限收折叠（同 lint 清单收口）。终验通过/预算内有修复
- * 的收尾卡不携带不出。
- */
-function KnownDefectsArea({ knownDefects }: { knownDefects: KnownDefectsClosing }) {
-  const [open, setOpen] = useState(false);
-  const defects = knownDefects.defects;
-  const shown = open ? defects : defects.slice(0, VISIBLE_LINT);
-  return (
-    <div className="mt-2.5 rounded-lg border border-amber-600/40 bg-amber-500/[0.06] px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[13px]">
-        <AlertTriangle className="size-3.5 shrink-0 text-amber-600" />
-        <span>
-          系统已交付，但有{" "}
-          <span className="font-medium text-amber-600">{defects.length} 项已知缺陷</span>
-          （自动修复预算已用完，如实告知）
-        </span>
-      </div>
-      <div className="mt-1 text-[13px]">
-        {shown.map((defect) => (
-          <div
-            key={defect.name}
-            className="py-0.5 text-foreground/80"
-            title={defect.detail ?? defect.name}
-          >
-            <span className="mr-1.5 text-amber-600">✗</span>
-            {defect.name}
-          </div>
-        ))}
-      </div>
-      {defects.length > VISIBLE_LINT ? (
-        <button
-          type="button"
-          className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setOpen(!open)}
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-          {open ? "收起" : `查看全部 ${defects.length} 项`}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * 产出证明判别标注（#420 空转片防呆的感知面）：豁免依据（验证确认「能力已存在」
- * 的合法收口——活已被前片干完的薄片）与空转拒绝史（曾 N 次被拒、补做后收口）
- * 如实呈现——事后审计每片「干没干活、依据是什么」；正常干活收口（diff＞0 且无
- * 拒绝史）不携带不出。
- */
-function ProofArea({ proof }: { proof: ProofOfOutputClosing }) {
-  return (
-    <div className="mt-1.5 flex items-start gap-2 text-[13px] text-muted-foreground">
-      <BadgeCheck className="mt-0.5 size-3.5 shrink-0" />
-      <span>
-        {proof.exempted ? <>豁免收口——{proof.exemptionBasis ?? "验证确认「能力已存在」"}</> : null}
-        {proof.exempted && proof.idleRejections ? "；" : null}
-        {proof.idleRejections ? <>曾 {proof.idleRejections} 次空转拒绝，补做后收口</> : null}
-      </span>
-    </div>
-  );
-}
-
-/**
- * 定稿后续触发行（#291 定稿收尾卡）：drafts 携 triggers（仅定稿收尾卡——显式
- * 动作收口后的分岔事实：已按稿对齐/已开始构建/下单开放）即出「已触发」一行；
- * 候选产出轮（首产/改稿）不携带、零呈现。定稿稿行在卡内即「锁定那张」的叙事
- * （摘要＋版本控件），不另加标记。
- */
-function FinalizeTriggers({ drafts }: { drafts: ClosingDraft[] }) {
-  const triggers = drafts.flatMap((draft) => draft.triggers ?? []).filter(Boolean);
-  if (triggers.length === 0) {
-    return null;
-  }
-  return (
-    <p className="mt-1.5 text-xs text-muted-foreground">
-      已触发：{triggers.join("；")}
-    </p>
-  );
-}
-
-/**
- * 收尾卡（#88 定格收口）：run 收口 = 工作消息定格，本卡即其收尾部件（不是另起
- * 的卡）——四要素全出服务端权威事实（run-finish 的 closing 扩载）：摘要（判定
- * 事实的合并叙事）/ 判定行（PRD/系统改没改 + 原因——不由前端推导，旧「编辑无
- * 变化」推导口径已移除）/ 变更清单（文件级，+N −M 行数）/ 轮末统计（时长/文件
- * 数/变更行数 + 自检通过——closing 在场 ⟺ 收口判据核验通过）。工作消息定格留驻
- * （#117：过程明细仍留工作消息、不落库，本卡紧随入流）；「查看当时 / 回滚到此」
- * 版本控件（#92/#93）随 closing.version 成版锚点呈现（成版失败缺 version 键则不
- * 出，版本动作无锚不可用）。
- *
- * <p><b>设计会话变体</b>（#289 扩载、#290 呈现；#291 定稿收尾卡）：closing.drafts
- * 在场即设计收口——稿清单＋去向是本卡主承载（{@link DraftsArea}），判定行/文件
- * 清单让位（设计稿不是系统：PRD 恒未动、系统恒未动，文件清单与稿清单同集重复）
- * ；轮末统计＝时长＋稿数。候选产出轮（首产/改稿）不自动成版（ADR-0025），版本
- * 控件不出；定稿收尾卡（平台侧发射、无直播卡）例外——closing 携 version（成版
- * 锚）与 drafts 单条（triggers 后续触发事实，{@link FinalizeTriggers}）。</p>
+ * 收尾卡（#617 五字段骨架；#619 变更清单改真实 diff）：run 收口 = 工作消息定格，
+ * 本卡即其收尾部件（不是另起的卡）。五字段全出服务端权威事实（run-finish 的
+ * closing 扩载）：用时（durationMs）/判据逐件（build＋预览，criteria）/变更清单
+ * （files，工作区真实 diff：迭代可点单个文件看只读 patch，超限标注「diff 过大」；
+ * 首建按 directories 目录汇总呈现、点开展开到文件——#620）/内核自述（narrative，内核末次文本，markdown
+ * 渲染；空则不出该块）/预览入口（既有预览查询的 URL：未就绪禁用、就绪走新窗口
+ * 打开）。快照或 diff 失败时清单区标注「变更清单不可用」（生成照常成功）。旧
+ * 平台句式摘要与「需求文档／系统」判定行退场；档案内旧载荷由 store 读侧回落
+ * （toWorkClosing），旧对话史不出坏卡。变更清单头部认合计（文件数/±行数，一次
+ * 呈现——旧轮末统计行里的重复计数已并入此处）。版本回看与回滚归单轴时间线
+ * （#626/#627），收尾卡不再携旧版本控件（#628 拆「查看当时」）。
  */
 export function ClosingCard({
   closing,
   projectId,
-  round,
 }: {
   closing: WorkClosing;
   projectId: string;
-  /** 轮次序数（#142「查看当时」标题语境源：对话流收尾卡序数，装配层数出）。 */
-  round?: number;
 }) {
   const [filesOpen, setFilesOpen] = useState(false);
+  // 单文件只读 diff 的展开态（#619：一次只展开一个文件，点同文件收起）
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
+  // 首建目录展开态（#620：一次展开一个目录）
+  const [expandedDirectory, setExpandedDirectory] = useState<string | null>(null);
   const files = closing.files;
+  const directories = closing.directories;
+  // 首建按目录汇总（#620）；迭代/旧载荷无 directories——维持文件级清单
+  const grouped = (directories?.length ?? 0) > 0;
   const shown = filesOpen ? files : files.slice(0, VISIBLE_FILES);
   const added = files.reduce((total, file) => total + file.added, 0);
   const removed = files.reduce((total, file) => total + file.removed, 0);
-  // 验证统计（#352）：可缺省——验证子智能体未跑/未登记时不携带；全过带三面分布
-  // hover 明细，有未过如实标项名（修不了如实标注），修复后复验带轮次
-  const verification = closing.verification;
-  // 设计规范扫描（#296）：可缺省——带规范项目编码 run 携带（「按稿对齐」行）
-  const designLint = closing.designLint;
-  // 基座 lint 两档（#425）：可缺省——新基座工作区编码 run 携带（「基座件使用」行）
-  const robustKitLint = closing.robustKitLint;
-  // 产出证明判别标注（#420）：可缺省——豁免收口/空转拒绝史才携带（正常干活不出）
-  const proof = closing.proofOfOutput;
-  // 已知缺陷清单（#427）：可缺省——整轨终验修复预算耗尽才携带（版本照成＋如实
-  // 呈现，不粉饰「完成」）；终验通过/预算内有修复路径不出
-  const knownDefects = closing.knownDefects;
-  // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
-  // 版本控件让位）——空数组（畸形载荷，后端收口判据＝有新稿、正常路径非空）也走
-  // 设计形态如实出「本轮 0 稿」，不闪编码 run 语料
-  const drafts = closing.drafts;
-  const design = !!drafts;
+  // 预览入口（#617）：URL 取既有预览查询；轮询/事件推送归查询层，本卡只消费
+  const preview = useProjectPreview(projectId, true);
+  const previewUrl = preview.data?.url;
 
-  // 版本动作（#92/#93）：查看当时 = 起快照（关窗即销毁——起服/销毁生命周期归
-  // useVersionViewSession 单点，#344 收敛）；回滚 = 追加新版本
-  const version = closing.version;
-  const [viewOpen, setViewOpen] = useState(false);
-  const [rollbackOpen, setRollbackOpen] = useState(false);
-  const { startView, start, finish } = useVersionViewSession(projectId);
-  const rollback = useRollbackVersion(projectId);
-
-  function openView() {
-    if (!version) return;
-    setViewOpen(true);
-    start(version);
-  }
-
-  function handleViewOpenChange(open: boolean) {
-    if (!open) finish();
-    setViewOpen(open);
+  /** 新窗口打开预览（#126 既有动作；#182 触碰先行——先 refetch 唤醒休眠沙箱）。 */
+  function openPreview() {
+    if (!previewUrl) return;
+    void preview.refetch();
+    window.open(previewUrl, "_blank", "noopener");
   }
 
   return (
     <div className="rounded-xl border border-green-600/25 bg-green-500/[0.06] p-3">
       <div className="mb-1.5 flex items-center gap-2">
         <Check className="size-4 shrink-0 text-green-600" strokeWidth={3} />
-        <span className="text-sm font-semibold">本轮完成</span>
+        <span className="text-sm font-semibold">生成完成</span>
       </div>
 
-      {/* 摘要：本轮做了什么（文档与系统合并叙事，不分侧） */}
-      <p className="text-sm leading-relaxed">{closing.summary}</p>
+      {/* 判据结果：build＋预览逐件如实（收口硬判据的可视化） */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+        <CriterionRow
+          icon={<ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />}
+          label="构建"
+          passed={closing.criteria.buildPassed}
+          passText="通过"
+          failText="未通过"
+        />
+        <CriterionRow
+          icon={<Monitor className="size-3.5 shrink-0 text-muted-foreground" />}
+          label="预览"
+          passed={closing.criteria.previewPassed}
+          passText="可用"
+          failText="未就绪"
+        />
+      </div>
 
-      {design ? (
-        /* 稿清单＋去向（#290 设计会话变体主承载）：判定行/文件清单让位；空数组
-           （畸形载荷）无稿行不出清单区，统计行如实「0 稿」 */
-        drafts && drafts.length > 0 ? <DraftsArea projectId={projectId} drafts={drafts} /> : null
-      ) : (
-        <>
-          {/* 判定行：PRD / 系统改没改 + 原因（服务端权威值） */}
-          <div className="mt-1.5 flex items-start gap-2 text-[13px]">
-            <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-            <span>
-              需求文档：
-              {closing.prdChanged ? (
-                <>
-                  已修订
-                  {closing.prdNote ? <span className="text-muted-foreground">——{closing.prdNote}</span> : null}
-                </>
-              ) : (
-                "未修订"
-              )}
-            </span>
+      {/* 内核自述：内核末次文本，markdown 渲染；空则不出该块 */}
+      {closing.narrative?.trim() ? (
+        <div className="mt-2 rounded-lg border bg-background px-2.5 py-2">
+          <div className="mb-1 text-xs text-muted-foreground">内核自述</div>
+          <div className="text-sm">
+            <ChatMarkdown>{closing.narrative}</ChatMarkdown>
           </div>
-          <div className="mt-1 flex items-start gap-2 text-[13px]">
-            <Monitor className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-            <span>
-              系统：
-              {closing.systemChanged ? (
-                <>
-                  已更新
-                  {closing.systemNote ? <span className="text-muted-foreground">——{closing.systemNote}</span> : null}
-                </>
-              ) : (
-                <>
-                  无需改动
-                  {closing.systemNote ? <span className="text-muted-foreground">——{closing.systemNote}</span> : null}
-                </>
-              )}
-            </span>
-          </div>
+        </div>
+      ) : null}
 
-          {/* 变更清单：文件级，+N −M（空清单不出——如系统无需改动的轮） */}
-          {files.length > 0 ? (
-            <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
-              <div className="font-mono text-xs">
-                {shown.map((file) => (
-                  <div key={file.path} className="flex items-center justify-between gap-2 py-0.5">
-                    <span className="min-w-0 truncate text-foreground/80" title={file.path}>
-                      {file.path}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      <span className="text-green-600">+{file.added}</span>
-                      {file.removed > 0 ? <span className="text-destructive"> −{file.removed}</span> : null}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {files.length > VISIBLE_FILES ? (
-                <button
-                  type="button"
-                  className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setFilesOpen(!filesOpen)}
-                >
-                  <ChevronDown className={cn("size-3.5 transition-transform", filesOpen && "rotate-180")} />
-                  {filesOpen ? "收起" : `查看全部 ${files.length} 个文件`}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {/* 已知缺陷（#427）：整轨终验修复预算耗尽的如实呈现——最重的一行，
-              先于 lint/证明类标注出 */}
-          {knownDefects ? <KnownDefectsArea knownDefects={knownDefects} /> : null}
-
-          {/* 按稿对齐（#296）：带规范项目的样式合规扫描事实——编码 run 面上的
-              叙事行＋违规清单；设计会话不携带不出 */}
-          {designLint ? <DesignLintArea lint={designLint} /> : null}
-
-          {/* 基座件使用（#425）：新基座工作区的基座 lint 两档事实——预置档余项
-              如实标注（不拦收口）；存量工作区不携带不出 */}
-          {robustKitLint ? <RobustLintArea lint={robustKitLint} /> : null}
-
-          {/* 产出证明判别标注（#420）：豁免依据/空转拒绝史的如实呈现；正常干活
-              收口不携带不出 */}
-          {proof ? <ProofArea proof={proof} /> : null}
-        </>
-      )}
-
-      {/* 轮末统计：设计会话＝时长＋稿数（#290）；编码 run＝自检通过（closing 在场 ⟺
-          收口判据核验通过）+ 验证统计（#352，可缺省）+ 时长 + 文件数 + 变更行数 */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        {design && drafts ? (
-          <span className="flex items-center gap-1">
-            <PenLine className="size-3.5" /> 本轮 <b className="font-medium text-foreground/80">{drafts.length}</b> 稿
-          </span>
-        ) : (
-          <span className="flex items-center gap-1">
-            <ShieldCheck className="size-3.5" /> 检查通过
-          </span>
-        )}
-        {verification ? (
-          <span className="flex items-center gap-1" title={verificationFacesTitle(verification.faces)}>
-            <ListChecks className="size-3.5" />
-            {verification.failed > 0 ? (
-              <>
-                验证 {verification.total} 项 ·{" "}
-                <span className="text-amber-600">
-                  {verification.failed} 项未过：{verification.failedItems.join("、")}
-                </span>
-              </>
-            ) : (
-              <>验证 {verification.total} 项通过</>
+      {/* 变更清单：文件级 +N −M（真实 diff）；迭代点文件看只读 patch，超限标
+          「diff 过大」；快照/diff 失败时标注不可用。头部认合计（文件数与 ± 行数
+          一次呈现） */}
+      {files.length > 0 || closing.filesUnavailable ? (
+        <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
+          <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>变更清单</span>
+            {closing.filesUnavailable ? null : (
+              <span className="shrink-0 tabular-nums">
+                <b className="font-medium text-foreground/80">{files.length}</b> 个文件{" "}
+                <span className="font-medium text-green-600">+{added}</span>
+                {removed > 0 ? <span className="font-medium text-destructive"> −{removed}</span> : null} 行
+              </span>
             )}
-            {verification.rounds > 1 ? `（复验 ${verification.rounds} 轮）` : null}
-            {verification.budgetExhausted ? "（轮次预算已尽）" : null}
-          </span>
-        ) : null}
+          </div>
+          {closing.filesUnavailable ? (
+            <div className="py-0.5 text-xs text-muted-foreground">变更清单不可用</div>
+          ) : (
+            <div className="font-mono text-xs">
+              {grouped
+                ? directories!.map((directory) => {
+                    const expanded = expandedDirectory === directory.path;
+                    // 展开到该目录下的文件（首建不携 patch——文件行无 diff 入口）
+                    const directoryFiles = files.filter(
+                      (file) => parentDirectory(file.path) === directory.path,
+                    );
+                    return (
+                      <div key={directory.path}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between gap-2 py-0.5 text-left transition-colors hover:text-foreground"
+                          aria-expanded={expanded}
+                          aria-label={`${expanded ? "收起" : "展开"} ${directory.path} 目录`}
+                          onClick={() => setExpandedDirectory(expanded ? null : directory.path)}
+                        >
+                          <span className="min-w-0 truncate text-foreground/80" title={directory.path}>
+                            {directory.path}
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                            <span className="font-sans text-[11px] text-muted-foreground">
+                              {directory.fileCount} 个文件
+                            </span>
+                            <span className="text-green-600">+{directory.added}</span>
+                            {directory.removed > 0 ? (
+                              <span className="text-destructive"> −{directory.removed}</span>
+                            ) : null}
+                            <ChevronDown
+                              className={cn("size-3.5 text-muted-foreground transition-transform",
+                                expanded && "rotate-180")}
+                            />
+                          </span>
+                        </button>
+                        {expanded ? (
+                          <div className="mb-1 ml-3 border-l border-border/60 pl-2">
+                            {directoryFiles.map((file) => (
+                              <div
+                                key={file.path}
+                                className="flex items-center justify-between gap-2 py-0.5"
+                              >
+                                <span className="min-w-0 truncate text-foreground/80" title={file.path}>
+                                  {file.path}
+                                </span>
+                                <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                                  <span className="text-green-600">+{file.added}</span>
+                                  {file.removed > 0 ? (
+                                    <span className="text-destructive"> −{file.removed}</span>
+                                  ) : null}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                : shown.map((file) => {
+                    const patch = file.patch;
+                    const expandable = typeof patch === "string" && patch.length > 0;
+                    const expanded = expandedPath === file.path;
+                    const row = (
+                      <>
+                        <span className="min-w-0 truncate text-foreground/80" title={file.path}>
+                          {file.path}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                          {file.patchOmitted ? (
+                            <span className="font-sans text-[11px] text-muted-foreground">diff 过大</span>
+                          ) : null}
+                          <span className="text-green-600">+{file.added}</span>
+                          {file.removed > 0 ? <span className="text-destructive"> −{file.removed}</span> : null}
+                          {expandable ? (
+                            <ChevronDown
+                              className={cn("size-3.5 text-muted-foreground transition-transform",
+                                expanded && "rotate-180")}
+                            />
+                          ) : null}
+                        </span>
+                      </>
+                    );
+                    return (
+                      <div key={file.path}>
+                        {expandable ? (
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-2 py-0.5 text-left transition-colors hover:text-foreground"
+                            aria-expanded={expanded}
+                            aria-label={`${expanded ? "收起" : "查看"} ${file.path} 的差异`}
+                            onClick={() => setExpandedPath(expanded ? null : file.path)}
+                          >
+                            {row}
+                          </button>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2 py-0.5">{row}</div>
+                        )}
+                        {expandable && expanded ? (
+                          <div className="mt-1 mb-1.5 max-h-72 overflow-auto rounded bg-muted/40 p-2 text-[11px] leading-relaxed">
+                            {patch.split("\n").map((line, index) => (
+                              <div
+                                key={index}
+                                className={cn(
+                                  "whitespace-pre",
+                                  line.startsWith("+")
+                                    ? "text-green-700"
+                                    : line.startsWith("-")
+                                      ? "text-destructive"
+                                      : "text-muted-foreground",
+                                )}
+                              >
+                                {line || " "}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+            </div>
+          )}
+          {!grouped && files.length > VISIBLE_FILES ? (
+            <button
+              type="button"
+              className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setFilesOpen(!filesOpen)}
+            >
+              <ChevronDown className={cn("size-3.5 transition-transform", filesOpen && "rotate-180")} />
+              {filesOpen ? "收起" : `查看全部 ${files.length} 个文件`}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* 用时＋预览入口：入口未就绪禁用、就绪走既有新窗口打开动作 */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1">
           <Clock3 className="size-3.5" /> 用时{" "}
           <b className="font-medium text-foreground/80">{formatDuration(closing.durationMs)}</b>
         </span>
-        {!design && files.length > 0 ? (
-          <>
-            <span className="flex items-center gap-1">
-              <b className="font-medium text-foreground/80">{files.length}</b> 个文件
-            </span>
-            <span className="tabular-nums">
-              <span className="font-medium text-green-600">+{added}</span>
-              {removed > 0 ? <span className="font-medium text-destructive"> −{removed}</span> : null} 行
-            </span>
-          </>
-        ) : null}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 px-2.5 text-xs"
+          disabled={!previewUrl}
+          onClick={openPreview}
+          title="在新窗口打开预览"
+          aria-label="在新窗口打开预览"
+        >
+          <ExternalLink className="size-3.5" />
+          打开预览
+        </Button>
       </div>
-
-      {/* 版本控件（#92/#93）：成版锚点在场才可用——查看当时（起快照只逛不换）/回滚到此
-          （追加版本、只回代码不回数据）。成版失败（缺 version）轮不出控件；设计
-          会话的候选产出轮（首产/改稿）不携带 version（候选不自动成版，ADR-0025）
-          亦不出；定稿收尾卡（#291）例外——显式动作收口即成版，「查看当时」即见
-          定稿稿。 */}
-      {version ? (
-        <>
-          <div className="mt-2.5 flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={openView}>
-              <Eye className="size-3.5" />
-              查看当时
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1 px-2.5 text-xs"
-              onClick={() => setRollbackOpen(true)}
-            >
-              <RotateCcw className="size-3.5" />
-              回滚到此
-            </Button>
-          </div>
-
-          <VersionViewDialog
-            open={viewOpen}
-            onOpenChange={handleViewOpenChange}
-            pending={startView.isPending}
-            error={startView.isError}
-            previewUrl={startView.data?.previewUrl}
-            round={round}
-            summary={closing.summary}
-          />
-
-          <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>回滚到这个版本？</AlertDialogTitle>
-                <AlertDialogDescription>
-                  系统代码会回到该版本，业务数据保留；回滚会追加一个新版本，历史不丢失。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>再想想</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={() => rollback.mutate(version)}>
-                  回滚
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </>
-      ) : null}
     </div>
   );
 }

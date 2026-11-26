@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Sort;
@@ -24,8 +23,6 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResu
 import com.semgravio.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
-import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -35,25 +32,16 @@ import com.semgravio.aiplatform.business.project.application.dto.response.Projec
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectResponse;
-import com.semgravio.aiplatform.business.project.application.dto.response.DesignScopeResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
-import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
-import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.aggregate.PrdVersion;
-import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
-import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.web.GuestContext;
 
@@ -61,7 +49,7 @@ import com.semgravio.aiplatform.web.GuestContext;
  * 项目读侧用例：详情、列表（状态过滤 ACTIVE/ARCHIVED/缺省 all）+ 用量（总量 +
  * 平台成本 + 分模型 + 分智能体）+ PRD 读（直读工作区文件事实源）。写侧（生命周期/
  * 归档/改名）归 {@link ProjectLifecycleAppService}，读拼装集中一处。详情含生成态
- * 四态投影（#222）——轨道表＋generated_at＋在途标记派生，与 SSE 会话态无关。
+ * 投影（#222；#604 四态归一，三档）——generated_at＋在途标记派生，与 SSE 会话态无关。
  */
 @Service
 public class ProjectQueryAppService {
@@ -84,27 +72,18 @@ public class ProjectQueryAppService {
     private final UsageQueryPort usageQueryPort;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final OrderQueryAppService orderQueryAppService;
-    private final GenerationSegmentRepository generationSegments;
-    private final DesignItemRepository designItems;
     private final CodingRunTrack codingRunTrack;
-    private final PrdVersionRepository prdVersionRepository;
 
     public ProjectQueryAppService(ProjectRepository projectRepository,
                                   UsageQueryPort usageQueryPort,
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                   OrderQueryAppService orderQueryAppService,
-                                  GenerationSegmentRepository generationSegments,
-                                  DesignItemRepository designItems,
-                                  CodingRunTrack codingRunTrack,
-                                  PrdVersionRepository prdVersionRepository) {
+                                  CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.orderQueryAppService = orderQueryAppService;
-        this.generationSegments = generationSegments;
-        this.designItems = designItems;
         this.codingRunTrack = codingRunTrack;
-        this.prdVersionRepository = prdVersionRepository;
     }
 
     /**
@@ -117,37 +96,70 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 下单冻结面（#335，spec #320 实施序④；<b>#462 去门化：读法顺延为「最新版」</b>
-     * ——ADR-0039）：下单前置双确认的引用集——<b>最新 PRD 版本</b>（版本号＋版全文
-     * ＝订单快照的冗余拷贝源，订单自含不依赖版本表存亡；去门化后版本表＝Demo 类 run
-     * 起跑自动记行的构建基准快照，「最新版」即最新构建基准）＋项目确认指针的 Demo
-     * 版本号（「确认此版本，准备签约」的定格值）。缺失事实如实上报 {@code null}
-     * ——门判定（ORD_018/ORD_019 拦截）归订单侧，本口只报事实（判定跟职责走）；
-     * 工作区活草稿不进本面（快照源＝版本行，非工作区正文）。冻结字段结构不动，
-     * 既有订单/合同数据自含兼容。
+     * 下单冻结面（#629，ADR-0056 商业面改接）：下单前置两事实的读面——<b>当前
+     * 工作区 PRD 全文</b>（冗余拷贝源；PRD 未产出/工作区无该文件＝null）＋<b>项目
+     * 确认指针的当前用户面版本号</b>（「确认此版本，准备签约」的定格值）。缺失事实
+     * 如实上报 {@code null}——门判定（ORD_018/ORD_019 拦截）归订单侧，本口只报事实
+     * （判定跟职责走）。<b>不再读旧 PRD/Demo 版本表</b>：版本引用收敛为用户面版本号。
      *
-     * @throws ApplicationException PRJ_001 项目不存在
+     * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
      */
-    public LatestVersionRefs latestVersionRefs(Long projectId) {
+    public OrderFreezeRefs orderFreezeRefs(Long projectId) {
         Project project = loadProject(projectId);
-        PrdVersion latest = prdVersionRepository
-                .findFirstByProjectIdOrderByVersionNoDesc(projectId).orElse(null);
-        boolean neverRecorded = latest == null;
-        return new LatestVersionRefs(
-                neverRecorded ? null : latest.getVersionNo(),
-                neverRecorded ? null : latest.getContent(),
-                project.getConfirmedDemoVersionNo());
+        PrdSnapshot snapshot = project.getPrdProducedAt() == null ? null : readPrdSnapshotOrNull(project);
+        return new OrderFreezeRefs(snapshot == null ? null : snapshot.content(),
+                project.getConfirmedVersionNo());
     }
 
     /**
-     * 下单冻结面的引用集形状（跨 BC 内部端口形——对偶
-     * {@code DesignPackageAppService.StagedPackage} 先例，不进 REST 面）。
+     * 下单冻结面的引用集形状（跨 BC 内部端口形，不进 REST 面）。
      *
-     * @param prdVersionNo  最新 PRD 版本号（null＝尚无构建基准记行——legacy）
-     * @param prdContent    最新版全文（冗余拷贝源；与版本号同空同在）
-     * @param demoVersionNo 项目确认指针的 Demo 版本号（null＝未确认任何 Demo 版本）
+     * @param prdContent        当前工作区 PRD 全文（冗余拷贝源；null＝PRD 未产出/无该文件）
+     * @param confirmedVersionNo 项目确认指针的当前用户面版本号（null＝未确认任何版本）
      */
-    public record LatestVersionRefs(Integer prdVersionNo, String prdContent, Integer demoVersionNo) {
+    public record OrderFreezeRefs(String prdContent, Integer confirmedVersionNo) {
+    }
+
+    /**
+     * 当前工作区 PRD 全文（订单冻结快照源，#629）：PRD 未产出标志未落＝null（不触
+     * 工作区）；标志已落才 exec 直读 {@code docs/PRD.md}。文件缺（退出码 1）＝null
+     * 由调用方按「缺 PRD」拦截；环境故障（125/126 等）照抛 WSP_002。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
+     */
+    public String currentPrdContent(Long projectId) {
+        Project project = loadProject(projectId);
+        PrdSnapshot snapshot = project.getPrdProducedAt() == null ? null : readPrdSnapshotOrNull(project);
+        return snapshot == null ? null : snapshot.content();
+    }
+
+    /** 工作区 PRD 快照（stat 首行 mtime＋正文，同一 exec 取齐；#629 起下单/归档共用）。 */
+    private record PrdSnapshot(long mtimeSeconds, String content) {
+    }
+
+    /**
+     * 读工作区 PRD 快照：文件缺（exec 退出码 1）＝null；其它非零＝WSP_002；首行
+     * epoch 秒缺失/畸形＝WSP_002。正本＝{@code docs/PRD.md}（一次 exec 取齐 mtime 与正文）。
+     */
+    private PrdSnapshot readPrdSnapshotOrNull(Project project) {
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(READ_PRD_COMMAND));
+        if (result.exitCode() == 1) {
+            return null;
+        }
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "PRD 读取失败: " + result.stderr());
+        }
+        int newline = result.stdout().indexOf('\n');
+        try {
+            long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
+            return new PrdSnapshot(mtimeSeconds, result.stdout().substring(newline + 1));
+        } catch (RuntimeException e) {
+            // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "PRD 读取结果畸形: " + result.stdout());
+        }
     }
 
     /**
@@ -191,13 +203,9 @@ public class ProjectQueryAppService {
                 RequestContext.getUserId(), GuestContext.guestId());
         List<Long> projectIds = projects.stream().map(Project::getId).toList();
         Map<Long, OrderBriefResponse> activeOrders = orderQueryAppService.activeOrdersOf(projectIds);
-        Set<Long> prdConfirmedProjectIds = projectIds.isEmpty() ? Set.of()
-                : prdVersionRepository.findProjectIdsByProjectIdIn(projectIds).stream()
-                        .collect(Collectors.toSet());
         return projects.stream()
                 .filter(project -> matches(project, status))
-                .map(project -> toResponse(project, activeOrders.get(project.getId()),
-                        prdConfirmedProjectIds.contains(project.getId())))
+                .map(project -> toResponse(project, activeOrders.get(project.getId())))
                 .toList();
     }
 
@@ -252,31 +260,16 @@ public class ProjectQueryAppService {
     public PrdResponse prd(Long projectId) {
         Project project = loadProject(projectId);
         // 未产出期短路（#478）：标志未落＝savePrd 未收口——PRJ_015 直回不 exec
-        if (project.getPrdProducedAt() == null) {
+        PrdSnapshot snapshot = project.getPrdProducedAt() == null
+                ? null : readPrdSnapshotOrNull(project);
+        if (snapshot == null) {
             throw new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED);
         }
-        ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(READ_PRD_COMMAND));
-        if (result.exitCode() == 1) {
-            throw new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED);
-        }
-        if (result.exitCode() != 0) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "PRD 读取失败: " + result.stderr());
-        }
-        int newline = result.stdout().indexOf('\n');
-        try {
-            long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
-            String content = result.stdout().substring(newline + 1);
-            // 收敛度投影（#331）：对正文即时解析——收敛卡（#346 呈现面）同源判定，
-            // 草稿演进投影随之（#462 去确认门：原确认门/停驻差异摘要读面随门退役）
-            return new PrdResponse(projectId.toString(), content,
-                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)));
-        } catch (RuntimeException e) {
-            // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "PRD 读取结果畸形: " + result.stdout());
-        }
+        // 收敛度投影（#331）：对正文即时解析——收敛卡（#346 呈现面）同源判定，
+        // 草稿演进投影随之（#462 去确认门：原确认门/停驻差异摘要读面随门退役）
+        return new PrdResponse(projectId.toString(), snapshot.content(),
+                Instant.ofEpochSecond(snapshot.mtimeSeconds()),
+                PrdReadinessResponse.from(PrdReadiness.parse(snapshot.content())));
     }
 
     /**
@@ -350,10 +343,11 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * raw 直出文件字节（#283 点看图片，ADR-0027 点看判定对图片放行；#293 起扩
-     * 设计稿 HTML 伺服——稿伺服通道）：{@code path} 为工作区相对路径，先过可浏览
+     * raw 直出文件字节（#283 点看图片，ADR-0027 点看判定对图片放行；#293 起曾扩
+     * 设计稿 HTML 伺服）：{@code path} 为工作区相对路径，先过可浏览
      * 判定（非交付物/逃逸一律 400、工作区不被触达）、再过伺服判定（图片扩展名，
-     * 或 design/ 锚定的设计稿 HTML——设计稿画布固定画幅帧取件；其余照旧走
+     * 或 design/ 锚定的设计稿 HTML——消费面设计稿画布已随 #613 拆除，该分支是
+     * 挂在保留端点上的死支路（去留待重建入口时再定）；其余照旧走
      * {@link #fileContent}，含 NUL 的真二进制非图片件在那里仍如实拒收 PRJ_023），
      * 再一次 execBinary 读取（25 MiB 上限在容器侧 cat 前拦截，退出码语义与文本读
      * 同构：1 = 不存在、2 = 超限）。字节不经字符集解释，content-type 按扩展名。
@@ -407,7 +401,8 @@ public class ProjectQueryAppService {
 
     /**
      * 文件读命令的退出码阶梯（#287 收口——#284 备案触发器「第四处同形」已燃：
-     * content/raw/download 三面同码同形抽共享，渲染面 PRJ_039 语义不同不并）：
+     * content/raw/download 三面同码同形抽共享；旧渲染面 PRJ_039 语义不同不并——
+     * 该面已随 #610 设计线退役后的死代码清场移除）：
      * 1 = 不存在（PRJ_021）、2 = 超限（PRJ_022——无上限面〔下载〕不产生此码，
      * 阶梯保留以共形）、其余非 0 = 环境故障（WSP_002，动作语随调用面）。
      */
@@ -455,82 +450,31 @@ public class ProjectQueryAppService {
     // ---------- 响应拼装 ----------
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
-     * + 生成态四态投影（#222）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
-     * 摘要（归档终态「完整记录」取单面，#30）+ 生成轨道片清单（#225 计划区）
-     * + 设计轨道件清单（#290 计划区，对偶片清单）。 */
+     * + 生成态投影（#222；#604 三档）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
+     * 摘要（归档终态「完整记录」取单面，#30）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
-                orderQueryAppService.activeOrderOf(project.getId()).orElse(null),
-                prdVersionRepository.existsByProjectId(project.getId()));
+                orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
         GenerationState generationState = generationStateOf(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 project.getEndpointType(), project.getEndpointType().getName(),
-                designScopeOf(project),
                 base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
                 project.getGeneratedAt(), generationState, generationState.getName(),
                 base.activeOrder(),
-                orderQueryAppService.latestOrderOf(project.getId()).orElse(null),
-                segmentsOf(project),
-                designItemsOf(project));
-    }
-
-    /** 设计范围响应拼装（#285）：无页面锚定（null 聚合读面）即 null。 */
-    private DesignScopeResponse designScopeOf(Project project) {
-        DesignScope scope = project.designScope();
-        if (scope == null) {
-            return null;
-        }
-        return new DesignScopeResponse(scope.type(), scope.type().getName(),
-                scope.type() == DesignScopeType.SELECTED_PAGES ? scope.pages() : List.of());
+                orderQueryAppService.latestOrderOf(project.getId()).orElse(null));
     }
 
     /**
-     * 生成轨道片清单读模型（#225 计划区只读透出）：轨道表当前片集按 ord 升序映射
-     * ——现行计划（PRD 版本锚门 {@link GenerationSegment#planMatchesPrd} 单点）才
-     * 透出；锚不一致（PRD 已演进、旧计划是过期结构）或无片行返回 null（过期计划
-     * 的进度不是现行事实，不拿旧计划对进度）。
-     */
-    private List<GenerationSegmentResponse> segmentsOf(Project project) {
-        List<GenerationSegment> segments =
-                generationSegments.findByProjectIdOrderByOrdAsc(project.getId());
-        if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
-            return null;
-        }
-        return segments.stream()
-                .map(segment -> new GenerationSegmentResponse(segment.getOrd(),
-                        segment.getDescription(), segment.getStatus(), segment.getStatus().getName()))
-                .toList();
-    }
-
-    /**
-     * 设计轨道件清单读模型（#290 计划区只读透出，对偶 {@link #segmentsOf}）：轨道表
-     * 当前件集按 ord 升序映射——现行清单（PRD 版本锚门 {@link DesignItem#
-     * checklistMatchesPrd} 单点）才透出；锚不一致（PRD 已演进、旧清单是过期结构）
-     * 或无件行返回 null（过期清单的进度不是现行事实，不拿旧清单对进度）。
-     */
-    private List<DesignItemResponse> designItemsOf(Project project) {
-        List<DesignItem> items = designItems.findByProjectIdOrderByOrdAsc(project.getId());
-        if (!DesignItem.checklistMatchesPrd(items, project.getPrdProducedAt())) {
-            return null;
-        }
-        return items.stream()
-                .map(item -> new DesignItemResponse(item.getOrd(), item.getTitle(),
-                        item.getStatus(), item.getStatus().getName(), item.getFinalizedPath()))
-                .toList();
-    }
-
-    /**
-     * 生成态四态投影（#222，ADR-0020 裁决四——派生序即优先序）：
+     * 生成态投影（#222；#604 四态归一——原「生成中断」档的判据〔轨道片表〕随 #602
+     * 拆除，该档随旧失败语义一并退役，只余三档）：
      * <ol>
      * <li>已生成：{@code generated_at} 落位恒赢——迭代/修正 run 在途不改变生成态
-     * （四态是生成面的呈现态，生成完成即定格）；</li>
-     * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已提交未起跑
-     * 的排队段）——重启丢标记即落到中断档，正是「中断不判死」的投影面；</li>
-     * <li>生成中断：轨道表有片行而未生成不在途——失败终态、进程重启、PRD 演进致
-     * 旧计划过期同档，「继续生成」出口挂本档；</li>
-     * <li>从未生成：无片行不在途（含存量中断项目——轨道表之前的在途项目，恢复走
-     * 计划重派，「继续生成」同一出口）。</li>
+     * （生成面的呈现态，生成完成即定格）；</li>
+     * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已登记未起跑
+     * 段——begin 先于提交）；</li>
+     * <li>从未生成：其余全部——含首建失败/停止收口后待重跑的项目（#604 起失败
+     * 不落投影：失败只经 run-failed 事件在会话内明确呈现，恢复入口＝点火入口）。</li>
      * </ol>
      */
     private GenerationState generationStateOf(Project project) {
@@ -540,15 +484,12 @@ public class ProjectQueryAppService {
         if (codingRunTrack.isInFlight(project.getId())) {
             return GenerationState.GENERATING;
         }
-        return generationSegments.existsByProjectId(project.getId())
-                ? GenerationState.INTERRUPTED
-                : GenerationState.NEVER_GENERATED;
+        return GenerationState.NEVER_GENERATED;
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）+ 终点类型（列表卡弱标识）+ 未终结订单摘要
-     * + P08 生命周期阶段与待补事实（PRD 确认集合由列表批量读、详情单点存在性读）。 */
-    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder,
-            boolean prdConfirmed) {
+     * + P08 生命周期阶段与待补事实。 */
+    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder) {
         boolean archived = project.getArchivedAt() != null;
         ProjectStatus status = archived ? ProjectStatus.ARCHIVED : ProjectStatus.IN_PROGRESS;
         return new ProjectResponse(
@@ -565,9 +506,19 @@ public class ProjectQueryAppService {
                 project.getCreatedAt(),
                 project.getUpdatedAt(),
                 activeOrder,
-                prdConfirmed,
-                project.getConfirmedDemoVersionNo() != null,
+                firstBuildStarted(project),
+                project.getConfirmedVersionNo() != null,
                 project.isNeedsUserSupplement());
+    }
+
+    /**
+     * PRD 阶段门事实（#349 P08 生命周期阶段推导）：首个构建 run 已起跑（生成在途或
+     * 已生成）。旧版以「PRD 构建基准记行在场」为据，旧版本表随 #630 退场后改读
+     * 生成态投影（{@link #generationStateOf}——generated_at＋在途标记同源）：
+     * 未生成/失败重待＝PRD 阶段未完成，Demo 阶段保持灰置。
+     */
+    private boolean firstBuildStarted(Project project) {
+        return generationStateOf(project) != GenerationState.NEVER_GENERATED;
     }
 
     private Project loadProject(Long projectId) {

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useContinueDiscussion } from "@/hooks/use-continue-discussion";
 import { useMe } from "@/hooks/use-me";
-import { useResumeGeneration } from "@/hooks/use-resume-generation";
+import { useStartGeneration } from "@/hooks/use-start-generation";
 import { useCheckoutStore } from "@/lib/store/checkout";
 import { useM01Store } from "@/lib/store/m01";
 
@@ -47,7 +47,7 @@ export function ForkCard({
    *  余额为正；装配层读面单源传入，本件只在场时发一次空 source 重判）。 */
   autoSettle?: boolean;
 }) {
-  const generate = useResumeGeneration(projectId);
+  const generate = useStartGeneration(projectId);
   const guide = useContinueDiscussion(projectId);
   const me = useMe();
   const loggedIn = me.data != null;

@@ -354,6 +354,6 @@ class BackofficeWorkspaceSeamTest {
     /** 工作区名下建项目（软引用无 FK）。 */
     private Project linkProject(long workspaceId, String name) {
         return projectRepository.save(
-                Project.create(name, ProjectType.WEBSITE, null, workspaceId, null, null));
+                Project.create(name, ProjectType.WEBSITE, workspaceId, null, null));
     }
 }

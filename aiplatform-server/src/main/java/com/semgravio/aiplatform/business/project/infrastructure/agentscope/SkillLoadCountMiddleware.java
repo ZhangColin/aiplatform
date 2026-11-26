@@ -32,7 +32,7 @@ import reactor.core.publisher.Flux;
  *
  * <p>best-effort 语义（知识沉淀容忍口径）：计数失败降级记日志、绝不阻断加载
  * ——异常只包住计数写，工具执行流 {@code next} 照常。挂全形态（主智能体/run
- * 执行体/子智能体——三槽位技能同出库，计数不分槽位），与框架 curator 的
+ * 执行体——两槽位（main/executor）技能同出库，计数不分槽位），与框架 curator 的
  * {@code SkillUsageMiddleware} 同位同型但口径不同（那个只计 agent 自产、
  * 调用即计不管命中——ADR-0022 已拒接入，此为平台自建腿）。</p>
  */

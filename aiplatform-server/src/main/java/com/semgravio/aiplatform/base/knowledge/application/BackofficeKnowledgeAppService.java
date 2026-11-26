@@ -9,36 +9,43 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
+import com.semgravio.aiplatform.base.knowledge.application.dto.response.BackofficeKnowledgeRetrievalResponse;
 import com.semgravio.aiplatform.base.knowledge.application.dto.response.BackofficeMaterialDetailResponse;
 import com.semgravio.aiplatform.base.knowledge.application.dto.response.BackofficeMaterialSummaryResponse;
+import com.semgravio.aiplatform.base.knowledge.application.dto.response.BackofficeVectorHealthResponse;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalSearchResult;
+import com.semgravio.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
 
 /**
- * 后台知识素材管理用例（#166 知识库管理）：清单（状态单选＋沉淀时间闭区间＋
- * 来源项目 id 精确，沉淀时间倒序 SQL 侧分页）/ 详情（元数据＋块按 seq 拼全文）/
- * 停用⇄启用（以 id 解析身份后走域面 {@link KnowledgeAppService}——#153 对接口径，
- * 操作者必落、缺即 KNW_006）/ 删除（治理移除登记行与全部块，不动来源项目；与
- * 项目删除级联正交，无行可留不留痕）。
+ * 后台知识管理用例（#166 知识库管理；#639 增命中留痕与向量服务健康只读读面）：
+ * 素材清单（状态单选＋沉淀时间闭区间＋来源项目 id 精确，沉淀时间倒序 SQL 侧
+ * 分页）/ 详情（元数据＋块按 seq 拼全文）/ 停用⇄启用（以 id 解析身份后走域面
+ * {@link KnowledgeAppService}——#153 对接口径，操作者必落、缺即 KNW_006）/ 删除
+ * （治理移除登记行与全部块，不动来源项目；与项目删除级联正交，无行可留不留痕）/
+ * 命中留痕清单（项目＋检索时间过滤）/ 向量服务健康探活。
  *
  * <p>管理单元＝素材＝{@code knw_materials} 一行（#153 落点）：清单/详情/分页在
  * 登记表上是单表查询；内容面零写（不编辑、不手动新增——沉淀唯一触发点不动），
- * 治理手段＝停用/删除。</p>
+ * 治理手段＝停用/删除。命中留痕与健康读面只读（#639）。</p>
  */
 @Service
 public class BackofficeKnowledgeAppService {
 
     private final KnowledgeAppService knowledgeAppService;
     private final KnowledgeStore knowledgeStore;
+    private final EmbeddingClient embeddingClient;
 
     public BackofficeKnowledgeAppService(KnowledgeAppService knowledgeAppService,
-            KnowledgeStore knowledgeStore) {
+            KnowledgeStore knowledgeStore, EmbeddingClient embeddingClient) {
         this.knowledgeAppService = knowledgeAppService;
         this.knowledgeStore = knowledgeStore;
+        this.embeddingClient = embeddingClient;
     }
 
     /**
@@ -107,6 +114,30 @@ public class BackofficeKnowledgeAppService {
             throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND);
         }
         return BackofficeMaterialSummaryResponse.of(record);
+    }
+
+    /**
+     * 命中留痕清单（#639 只读读面）：项目 id 精确（null/空白＝不过滤）＋检索
+     * 时间闭区间（null 侧不限），检索时间倒序、SQL 侧分页。行字段＝项目、时间、
+     * 命中条目、是否降级——「检索成功但 0 条」与「降级」由此可区分。
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<BackofficeKnowledgeRetrievalResponse> retrievals(String projectId,
+            Instant from, Instant to, Pagination pagination) {
+        RetrievalSearchResult result = knowledgeStore.searchRetrievals(blankToNull(projectId),
+                from, to, (int) pagination.offset(), pagination.limit());
+        return new PageResponse<>(
+                result.items().stream().map(BackofficeKnowledgeRetrievalResponse::of).toList(),
+                result.total(), pagination.page(), pagination.size());
+    }
+
+    /**
+     * 向量服务健康探活（#639 只读读面）：走服务已有健康路径、短超时；探活失败
+     * 只报不可用，不影响检索或入库。
+     */
+    @Transactional(readOnly = true)
+    public BackofficeVectorHealthResponse vectorHealth() {
+        return BackofficeVectorHealthResponse.of(embeddingClient.health());
     }
 
     private MaterialRecord requireMaterial(long materialId) {

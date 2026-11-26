@@ -1,5 +1,10 @@
 FROM node:22-bookworm
 
+# 东八区（#633 阶段五-1）：页面时间不再比北京时间慢 8 小时。0.18 的 zoneinfo
+# 已含 Asia/Shanghai，不额外装 tzdata；容器内 PG 会话时区由 init-workspace.sh
+# 在就绪后幂等对齐（存量卷同受益）。
+ENV TZ=Asia/Shanghai
+
 # 单容器 all-in-one（ADR 0001）：编码智能体与应用运行时（node）与中间件（pg/redis）
 # 同容器不拆分；/workspace 为唯一持久卷、容器无状态——pg 数据落 PGDATA=/workspace/data/pg，
 # 销毁重建由入口脚本自愈。pg 取 bookworm 发行版的 postgresql-15（旧独立容器为
@@ -7,6 +12,8 @@ FROM node:22-bookworm
 # 版本差异对生成应用透明）。编码智能体 = AgentScope 进程内单栈（平台侧运行），
 # 容器只承载应用运行时与中间件，不装智能体 CLI。git 显式安装（版本层 #91：
 # 收口自动成版走容器内 git；基座 buildpack-deps 隐式自带，显式声明防漂移）。
+# #633 补端口/进程工具——0.18 实测 fuser（psmisc）、lsof、ss（iproute2）三者皆无，
+# 模型查端口/找进程只能改读 /proc/net/tcp。
 # 第一层 apt 也走 tuna（对齐 deploy 变体「换源前置到第一层」：本机直连
 # deb.debian.org 实测每包分钟级、大件小时级；sed 换源、层末还原——不留镜像
 # 配置残留，同下方渲染层口径）
@@ -15,6 +22,7 @@ RUN cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         postgresql-15 postgresql-client-15 redis-server git \
+        psmisc lsof iproute2 \
     && mv /tmp/debian.sources.orig /etc/apt/sources.list.d/debian.sources \
     && rm -rf /var/lib/apt/lists/*
 
@@ -79,21 +87,24 @@ ENV RENDER_CHROMIUM=/opt/chrome/chrome-linux/chrome
 # #421 厚模板补三层：基座健壮件首批四件套（src/lib/robust 数据访问层＋fetch 封装＋
 # 会话存储件、src/components/robust 三态 UX 件＋页面级错误边界——机制/呈现分离：
 # 行为契约在件、长相吃项目设计 token、文案可覆盖）＋测试跑道（vitest 配置＋自测
-# 骨架，模板内零 setup 可跑）＋栈规则集（工作区 AGENTS.md 由平台在派发时按健壮件
-# 在场拼入，见 GenerationAppService）。构建期 pnpm test 跑四件套行为契约测试——
-# 模板自己吃狗粮，红＝镜像构建失败（随镜像构建验证，spec #416 测试决议）；故
-# 基座模板内容变更一律随 DEV_IMAGE tag 换版（单源），存量项目不回补。
+# 骨架，模板内零 setup 可跑）＋栈规则集（#607 起平台不再向工作区写 AGENTS.md 规则节，
+# 生产约束并入内核提示词）。构建期 pnpm test 跑四件套行为契约测试——模板自己吃
+# 狗粮，红＝镜像构建失败（随镜像构建验证，spec #416 测试决议）；故基座模板内容
+# 变更一律随 DEV_IMAGE tag 换版（单源），存量项目不回补。
 # #540 首批模式件两件（src/components/patterns：ValidatedForm 表单＋校验＋提交态、
 # FilterableList 列表＋筛选＋分页——ADR-0051 行为骨架预置、呈现全参数化只吃语义
 # token、零配置可用、定制三通道封顶）：行为契约测试＋静态纪律测试（禁裸色/任意
-# 值/inline style＋tree-shake 纯度）同吃狗粮门；用法与纪律进栈规则集常量节。
+# 值/inline style＋tree-shake 纯度）同吃狗粮门；#607 起用法告知面（栈规则集常量节）
+# 随风格与设计资产组退场。
 # store-dir 钉在 /workspace/.pnpm-store：/workspace 是独立卷（独立文件系统），
 # pnpm 在卷上会自动改用项目内 store；若构建期走默认全局 store（/root/.local），
 # 复制就位后 node_modules 的 storeDir 记录与运行时不一致，执行体 pnpm add（长尾
 # 依赖 / shadcn add）会报 UNEXPECTED_STORE。预先对齐 storeDir，就位后 pnpm add
 # 只增量下载新依赖、不复装全部。
 COPY baseline/ /opt/baseline/
-RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store && pnpm test
+# #633 起 pnpm test 之后追加 pnpm lint：模板 ESLint 9 flat config 进场，配置缺失
+# 或腐烂在构建期就红（模板 pnpm lint 退出 0 是硬门）。
+RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store && pnpm test && pnpm lint
 
 # 演示种子数据（#340）：通用示例集引擎 seed.sql（只补空表、按列形合成）＋幂等
 # 施用入口 apply.sh。三处调用——init-workspace.sh（容器自愈，初始化脚本扩位）、
@@ -109,7 +120,7 @@ RUN chmod +x /opt/init-workspace.sh
 ENTRYPOINT ["/opt/init-workspace.sh"]
 CMD ["sleep", "infinity"]
 
-# 极简静态文件服务器：demo 预览示意（环境抽象 exposePort 能力；快照「查看当时」
-# 静态兜底 + 集成测试探针）。纯静态职责——预览注入由网关 sub_filter 单源承担
-# （ADR-0014，#138 删旧内联注入路径），标注脚本资产不进镜像。
+# 极简静态文件服务器：demo 预览示意（环境抽象 exposePort 能力；集成测试探针）。
+# 纯静态职责——预览注入由网关 sub_filter 单源承担（ADR-0014，#138 删旧内联注入
+# 路径），标注脚本资产不进镜像。
 COPY serve.js /opt/serve.js

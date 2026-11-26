@@ -197,7 +197,7 @@ class BackofficeReclaimSeamTest {
     /** 落一行带账户属主的项目（SSE 归属路由键要求至少其一）。 */
     private Long seedProject() {
         Project project = projectRepository.save(Project.create(
-                "回收对象", ProjectType.WEBSITE, null, WS_ID, 730301L, null));
+                "回收对象", ProjectType.WEBSITE, WS_ID, 730301L, null));
         return project.getId();
     }
 }

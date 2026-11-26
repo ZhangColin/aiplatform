@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 回执全文（findings 逐条：patternId/severity/category/file/line/matchText/
  * description）＋终态留痕字段（激活/拒绝后回填；在途恒 null）。审核口径：激活
  * 原样升格不改稿（升格 knw_materials 随激活链，#465）、拒绝理由必填、改标签只调类别。
+ * #642 起不再有在途序号；来源回溯四件（项目名快照/版本号/提交哈希/原句）随行返回。
  *
  * @param content      正文全文 markdown（激活升格时原样入库——审核者不改稿）
  * @param payload      扩展载荷（一期恒空面；kind 开放生长面）
@@ -30,8 +31,15 @@ public record BackofficeSedimentDraftDetailResponse(
         String slot,
         String projectId,
         String runId,
+        @Schema(description = "来源项目名快照（项目改名/删除后仍可读）")
+        String sourceProjectName,
+        @Schema(description = "来源用户面版本号")
+        Integer sourceVersionNo,
+        @Schema(description = "来源提交哈希")
+        String sourceCommitHash,
+        @Schema(description = "来源用户原句（从该版本修改意见中提炼）")
+        String sourceSentence,
         String scanVerdict,
-        Integer inflightSlot,
         Integer status,
         String statusName,
         LocalDateTime createdAt,
@@ -60,8 +68,11 @@ public record BackofficeSedimentDraftDetailResponse(
                 record.slot(),
                 Long.toString(record.projectId()),
                 record.runId(),
+                record.sourceProjectName(),
+                record.sourceVersionNo(),
+                record.sourceCommitHash(),
+                record.sourceSentence(),
                 record.scanVerdict(),
-                record.inflightSlot(),
                 record.status().getCode(),
                 record.status().getName(),
                 record.createdAt(),

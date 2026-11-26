@@ -66,6 +66,10 @@ class ConversationHistoryTest {
     @Autowired
     private MainAgentAppService mainAgentAppService;
 
+    /** 迭代修改链（#623/#625）：交指令触发内核重跑并收口出收尾卡。 */
+    @Autowired
+    private IterationAppService iterationAppService;
+
     @Autowired
     private ConversationHistoryAppService conversationHistory;
 
@@ -77,24 +81,6 @@ class ConversationHistoryTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    private FinishEditFacts finishFixFacts;
-
-    /** 验证事实登记口（#424 片轻验常开硬门脚本位：模拟 verify 子智能体轮内登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
-
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 常开硬门缺省脚本位）：收口自动派的修正
-     * run 收口须验证在场——coder 会话登记一次。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
-        }
-    }
 
     @MockitoBean
     private AgentscopeAgentClient agentClient;
@@ -128,12 +114,10 @@ class ConversationHistoryTest {
         when(agentClient.resume(any(), any())).thenAnswer(invocation ->
                 new AgentReply("r", "好的"));
         when(agentClient.hasAskingToolCall(anyString(), anyString())).thenReturn(false);
-        // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
-        // 命令（含 AGENTS.md）与健壮件在场探针（#421 test -f——默认在场＝新基座
-        // 工作区语义，栈规则集节拼入），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        // #601 内核收尾判据双件（pnpm build＋8081 探活）默认成功——失败态用例后注册覆盖
         when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
-                        || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
                 .thenReturn(new ExecResultResponse("", "", 0));
     }
 
@@ -149,7 +133,7 @@ class ConversationHistoryTest {
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("对话史项目", null, null, Long.parseLong(workspaceId), OWNER, null));
+        Project project = projectRepository.save(Project.create("对话史项目", null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
@@ -162,6 +146,17 @@ class ConversationHistoryTest {
         // 真收口（收尾卡 #88 同载荷）→ 对话史读口按写入序完整回放、顺序正确
         Long projectId = persistedGeneratedProject("9800");
         givenSessionExecutorRunsInline();
+        // #619 收口变更清单改工作区真实 diff：跑前快照基线 + 收口 numstat/patch 的
+        // 脚本化缝（收尾卡载荷取 diff 行数，不再取 AgentReply.changes）
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse("40\t0\tsrc/App.jsx\n", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("diff --cached --no-renames '"))))
+                .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) { // 意见轮：以追问挂起
@@ -183,14 +178,12 @@ class ConversationHistoryTest {
                         new AgentSuspension("reply-1", List.of(Map.of(
                                 "id", "tc-1", "name", "ask_user"))));
             }
-            // 收口自动派的修正 run：run-finish 事件 + finish_edit 事实 + 文件变更
-            // 观察 → 真收口出收尾卡（被押后的 run-finish 携 closing 释放）
+            // 收口自动派的修正 run：run-finish 事件 + 文件变更观察 → 真收口出收尾卡
+            // （被押后的 run-finish 携 closing 释放）
             Consumer<AgentEvent> coderSink = invocation.getArgument(1);
             coderSink.accept(new AgentEvent(AgentEventTypes.RUN_FINISH, Map.of(
                     AgentEventTypes.RUN_FIELD, command.runId(),
                     AgentEventTypes.FINISH_FIELD, "end")));
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成", null, List.of(
                     new FileChange("/src/App.jsx", 40, 0)));
         });
@@ -202,12 +195,21 @@ class ConversationHistoryTest {
                 .thenReturn(false)
                 .thenReturn(true)
                 .thenReturn(false);
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
 
         MainAgentAppService.MainAgentRun turn =
                 mainAgentAppService.runOpinionTurn(projectId, "给宠物医院做预约系统");
         mainAgentAppService.answerQuestion(projectId, turn.runId(), "reply-1",
                 List.of(Map.of("id", "tc-1", "name", "ask_user",
                         "input", Map.of("question", "目标用户是谁？"))), "企业客户");
+        // 修改可落地（#623/#625）：对话面交指令 → 内核重跑收口 → 收尾卡落库
+        iterationAppService.handOffModification(
+                projectRepository.findById(projectId).orElseThrow(),
+                List.of(new ModificationHandoffFacts.Instruction(
+                        "给列表加导出按钮", "加个导出按钮", null)), "dialog-run");
 
         List<ConversationEntryResponse> history = conversationHistory.read(projectId);
         assertThat(history).extracting(ConversationEntryResponse::kind)
@@ -231,14 +233,17 @@ class ConversationHistoryTest {
         assertThat(history.get(3).text()).isEqualTo("企业客户");
         assertThat(history.get(3).kind()).isEqualTo(4); // answer
         assertThat(history.get(4).text()).isEqualTo("好的，按企业客户梳理");
-        // 收尾卡：#88 收口扩载同载荷（判定行 + 变更清单 + 轮末统计），runId = 用户面 run
+        // 收尾卡：#617 五字段收口扩载同载荷（内核自述 + 判据 + 变更清单 + 用时），
+        // runId = 用户面 run
         assertThat(history.get(5).question()).isNull();
         assertThat(history.get(5).closing())
-                .containsEntry("summary", "更新了系统")
-                .containsEntry("systemChanged", true)
-                .containsEntry("prdChanged", false)
+                .containsEntry("narrative", "修正完成")
+                .containsKey("criteria")
                 .containsKey("files")
                 .containsKey("durationMs");
+        assertThat((Map<String, Object>) history.get(5).closing().get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
         assertThat(history.get(5).closing().get("files")).asInstanceOf(
                         InstanceOfAssertFactories.LIST)
                 .containsExactly(Map.of("path", "/src/App.jsx", "added", 40, "removed", 0));
@@ -400,24 +405,33 @@ class ConversationHistoryTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) {
-                // 脚本化过程部件（解说段/动作卡）随事件桥流出——但不应进对话史
+                // 脚本化过程部件（动作卡/脱轨信号）随事件桥流出——但不应进对话史
                 Consumer<AgentEvent> sink = invocation.getArgument(1);
-                sink.accept(new AgentEvent(AgentEventTypes.PART_TEXT, Map.of(
-                        AgentEventTypes.RUN_FIELD, command.runId(), "text", "解说段")));
+                sink.accept(new AgentEvent(AgentEventTypes.PART_SIGNAL, Map.of(
+                        AgentEventTypes.RUN_FIELD, command.runId(),
+                        AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
+                        AgentEventTypes.PART_SIGNAL_DERAILED)));
                 sink.accept(new AgentEvent(AgentEventTypes.PART_ACTION, Map.of(
                         AgentEventTypes.RUN_FIELD, command.runId(), "state", "running")));
                 return new AgentReply(command.runId(), "好的");
             }
-            finishFixFacts.record(command.workspaceId(), true, "已修正");
-            verifyRan(command);
             Consumer<AgentEvent> coderSink = invocation.getArgument(1);
             coderSink.accept(new AgentEvent(AgentEventTypes.RUN_FINISH, Map.of(
                     AgentEventTypes.RUN_FIELD, command.runId(),
                     AgentEventTypes.FINISH_FIELD, "end")));
             return new AgentReply(command.runId(), "修正完成");
         });
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
+                .thenReturn(new ExecResultResponse("", "", 0));
 
         mainAgentAppService.runOpinionTurn(projectId, "加个导出按钮");
+        // 修改经对话面交指令落内核重跑（#623/#625）——收尾卡入对话史
+        iterationAppService.handOffModification(
+                projectRepository.findById(projectId).orElseThrow(),
+                List.of(new ModificationHandoffFacts.Instruction(
+                        "给列表加导出按钮", "加个导出按钮", null)), "dialog-run");
 
         assertThat(conversationHistory.read(projectId))
                 .extracting(ConversationEntryResponse::kind)

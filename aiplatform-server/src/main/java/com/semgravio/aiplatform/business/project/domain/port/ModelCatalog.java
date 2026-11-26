@@ -9,7 +9,7 @@ import java.util.List;
  * （后台清单拉取用例）转成明确错误信封，不静默。
  *
  * <p>条目 modelId 必有（缺 id 条目＝坏响应——入库对照的唯一键）；name/status/
- * domain 可空缺失（OpenAI 纯形状只有 id，方舟多 name/status/domain——status
+ * domain 可空缺失（OpenAI 纯形状只有 id，兼容端点多 name/status/domain——status
  * 无＝活跃，Shutdown/Retiring＝下架/退场中；对照入库建议由调用方结合 status
  * 判断，端口只如实转述）。</p>
  */

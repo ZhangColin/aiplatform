@@ -112,6 +112,8 @@ export function asNotificationEvent(envelope: SseEnvelope): NotificationEvent | 
 // 平台事件 = 封闭集合（字段扁平，下表为准）；引擎透传 = 开放集合，`data` 为
 // 引擎 part 原样。退役五族（role-assigned / run-created / run-retrying /
 // fix-unchanged / dispatch-stage / live-*）不进名册——旧事件到达按 miss 忽略。
+// 呈现面清场（#608，ADR-0057）：part-text / part-check / part-plan 随发射源退役，
+// 不进名册（存量事件按 miss 忽略）；部件只余 part-signal 与 part-action。
 
 /** 智能体事件 payload 的公共关联字段：必带 projectId + runId，sessionId 建立后携带。 */
 type AgentPayload = {
@@ -120,80 +122,47 @@ type AgentPayload = {
   sessionId?: string;
 };
 
-/** 收口扩载的文件条目（正本 closing.files 元素）：path = write_file/edit_file
- *  参数原形（提示词示例为相对形、模型可携锚定形——两形自选，呈现面纯文本零语义
- *  消费；稿清单 drafts.path 才是归一锚定形，#306），行数为活动量口径。 */
+/** 收口扩载的文件条目（正本 closing.files 元素，#619 起为工作区真实 diff）：
+ *  path = 工作区锚定形（{@code /src/App.jsx}），行数为跑前快照基线的真实 ± 行数；
+ *  patch = 单文件只读 diff（迭代模式；首建不携）；patchOmitted = patch 超限省略
+ *  （卡上标注「diff 过大」，行数仍保留）。 */
 export type SseClosingFile = {
   path: string;
+  added: number;
+  removed: number;
+  patch?: string;
+  patchOmitted?: boolean;
+};
+
+/** 首建目录汇总条目（#620）：目录、文件数、± 行数。 */
+export type SseClosingDirectory = {
+  path: string;
+  fileCount: number;
   added: number;
   removed: number;
 };
 
 /**
- * 收口扩载（#88 正本 closing schema）：收尾卡的服务端权威事实——摘要/判定行
- * （PRD/系统改没改 + 各自说明）/变更清单（文件级）/轮末统计（时长；文件数与
- * 变更行数由 files 派生）。判定与清单以平台可观测事实为准，不由模型自报。
+ * 收口扩载（#617 正本 closing schema，五字段骨架；#619 变更清单改真实 diff；
+ * #620 首建目录汇总）：收尾卡的服务端权威事实——内核自述（末次文本，空则缺省）/
+ * 判据逐件（build 与预览）/变更清单（工作区真实 diff：跑前快照基线 + 收口
+ * numstat；首建另携 directories 目录汇总、迭代携单文件 patch）/用时。预览入口
+ * 取既有预览查询，不入载荷；旧平台句式摘要与「需求文档／系统」判定键已退役
+ * （旧对话史由读侧 toWorkClosing 回落呈现）。判据与清单以平台可观测事实为准，
+ * 不由模型自报。
  */
 export type SseClosing = {
-  summary: string;
-  prdChanged: boolean;
-  prdNote?: string;
-  systemChanged: boolean;
-  systemNote?: string;
+  /** 内核自述（markdown 源；内核末次文本为空时缺省）。 */
+  narrative?: string;
+  criteria: { buildPassed: boolean; previewPassed: boolean };
   files: SseClosingFile[];
+  /** 首建目录汇总（#620；迭代缺省——缺省时前端按文件级清单呈现）。 */
+  directories?: SseClosingDirectory[];
+  /** 变更清单不可用（#619：快照或 diff 执行失败——生成照常成功，卡上标注）。 */
+  filesUnavailable?: boolean;
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。
-   * 设计会话（#289）的候选产出轮（首产/改稿，#291）不携带——设计候选不自动成版
-   * （ADR-0025，只有定稿成版）；定稿收尾卡（#291）例外：显式动作收口即成版，
-   * 携带本键（「查看当时」即见定稿稿）。 */
+  /** 成版 commit hash（#91；#605 后新载荷不再携带，存量旧卡沿用）——版本控件锚。 */
   version?: string;
-  /** 稿清单（#289 设计会话收尾卡扩载，closing 复用先例对偶 version）：本轮落进
-   * design/ 的稿——item＝设计物、media＝形态（html 界面类 / image 平面类）、
-   * path＝去向（工作区锚定形）。编码 run 不携带。 */
-  drafts?: SseClosingDraft[];
-  /** 设计规范扫描（#296 遵守三件套③）：带规范项目编码 run 的「按稿对齐」叙事与
-   *  lint 结果——status＝passed（样式合规）/ violations（违规清单随附，曾自动修
-   *  一轮则 retried）/ unavailable（扫描未执行，如实呈现）。无规范项目与设计
-   *  会话不携带。 */
-  designLint?: SseDesignLint;
-};
-
-/** 收尾卡设计规范扫描载荷（#296）：违规条目＝文件+行号+规则+诊断原文。 */
-export type SseDesignLint = {
-  status: "passed" | "violations" | "unavailable";
-  /** 曾发现违规并自动修一轮（修净后仍携 passed+retried——纠偏过程如实）。 */
-  retried?: boolean;
-  /** 违规总数（violations 时在场；清单截 20、total 如实）。 */
-  total?: number;
-  violations?: SseDesignLintViolation[];
-};
-
-export type SseDesignLintViolation = {
-  file: string;
-  line: number;
-  rule: string;
-  message: string;
-};
-
-/** 收尾卡稿条目（#289 设计会话；#291 定稿收尾卡扩 triggers）：item＝本场设计物、
- * media＝稿形态、path＝去向；triggers＝定稿后续触发事实（仅定稿收尾卡携带——
- * 已按稿对齐/已开始生成/下单开放，用户语言；候选产出轮缺省）。 */
-export type SseClosingDraft = {
-  item: string;
-  media: "html" | "image";
-  path: string;
-  triggers?: string[];
-};
-
-/**
- * 步骤清单条目（#236 正本 part-plan.steps 元素）：agent 自产计划的步骤——稳定 id
- * （就地整表更新的锚）+ 用户语言标题 + 状态三值（✓●○，不设 ✗——失败留痕归
- * part-action 与收尾卡）。
- */
-export type SsePlanStep = {
-  id: string;
-  title: string;
-  state: "pending" | "in_progress" | "completed";
 };
 
 export type PlatformAgentEvent =
@@ -207,32 +176,24 @@ export type PlatformAgentEvent =
         engine?: string;
         /**
          * 智能体配置键（引擎信息归一：业务侧 AgentProfile 稳定键——main 主智能体
-         * 对话轮 / executor 编码 run / designer 设计会话（#289——事件封闭集零新增、
-         * agent 扩值即达）；无配置语境的一次性调用不携带）——呈现形态的登记锚：
-         * executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有主智能体
-         * 一座）、designer 同构直播卡（agent 标识区分，呈现归 #290）。字面量联合
-         * 即后端正本键值的镜像（AgentProfile.key()）。
+         * 对话轮 / executor 编码 run；无配置语境的一次性调用不携带）——呈现形态的
+         * 登记锚：executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有主
+         * 智能体一座）。字面量联合即后端正本键值的镜像（AgentProfile.key()）。
          */
-        agent?: "main" | "executor" | "designer";
+        agent?: "main" | "executor";
         /**
-         * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成轨道 = 切片
-         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、设计轨道 = 设计物
-         * 标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based——头部
-         * 「{title}（{index}/{total}）」）；阶段 0 与更新 run 只携 title（无进度）；
+         * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成 = 「系统初始化」、
+         * 更新 run = 「系统更新」）；切片序号/进度随切片机器退役（#602/#608）；
          * 主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。
          */
-        slice?: {
-          title: string;
-          index?: number;
-          total?: number;
-        };
+        slice?: { title: string };
       };
     }
   | { type: "error"; payload: AgentPayload & { message: string } }
   | {
       /** 运行结束：到达即真收口（#84——编码 run 在收口判据落定后才发，一场至多
        * 一次、中场无假收口）；挂起轮不发（软终点）。编码 run 真收口携带 `closing`
-       * （#88 收口扩载——收尾卡的服务端权威事实，四要素 schema 见正本）；主智能体
+       * （#617 收口扩载——收尾卡五字段的服务端权威事实，schema 见正本）；主智能体
        * 对话轮（咨询/纯追问）不携带——无收尾卡。 */
       type: "run-finish";
       payload: AgentPayload & { sessionId: string; finish: string; closing?: SseClosing };
@@ -274,24 +235,14 @@ export type PlatformAgentEvent =
       /**
        * 平台侧定型文案直达对话面（带「平台」标签气泡）。两类使用：兜底轻引导
        * （#47 入口三分类——非意见非咨询输入的零产物路径，本事件即该次派发的
-       * 全部）；在途意见回执（#360——首个构建 run 在途时意见轮收口的排队事实
-       * 告知，runId 锚该意见轮）。`prompt` 为锚定的用户输入（事件到达重建对话
-       * 面；回访经对话史水合——#89）——可缺省（在途回执不携带：用户气泡已由
-       * 意见轮自落，不重复重建）；`label` 为呈现标签（「平台」）；`text` 为
-       * 定型文案。
+       * 全部）；悬空补救（ADR-0032，#373——需求梳理期轮悬空收口）。对话面交指令
+       * 在途入待办时也复用本型发轻提示（#623）。`prompt` 为锚定的用户输入（事件
+       * 到达重建对话面；回访经对话史水合——#89）——可缺省（在途轻提示与悬空补救
+       * 不携带：用户气泡已由所属轮自落，不重复重建）；`label` 为呈现标签
+       * （「平台」）；`text` 为定型文案。
        */
       type: "guide-reply";
       payload: AgentPayload & { prompt?: string; label: string; text: string };
-    }
-  | {
-      /**
-       * 受理开始（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理事实——意见
-       * 已接住、主智能体正在受理（追问或改 PRD）。对话区受理动作卡的呈现源；受理
-       * 落定不出新事件（该轮 run-finish / error 推导）。场景矩阵：咨询轮与纯追问轮
-       * （访谈期意见轮）服务端不发。
-       */
-      type: "acceptance-start";
-      payload: AgentPayload;
     }
   | {
       /**
@@ -322,7 +273,7 @@ export type PlatformAgentEvent =
        * 余额提醒卡（#537 计费③段间硬门，ADR-0047「段间硬门段中自由」）：付费
        * 项目段边界源池≤0 被拦的平台侧卡——显当前负额＋充值入口（到账自动放行
        * 不手动重试）；被拦输入留存 bil_balance_holds（`holdId` 可空＝run 场拦截
-       * 〔生成/修正/设计派发〕——intent 进程内暂存＋充值回正排空重派，无留存）。
+       * 〔生成/修正〕——intent 进程内暂存＋充值回正排空重派，无留存）。
        * 段内绝不检查绝不中断——本卡只在段边界出现。卡可回读面＝GET
        * /projects/{id}/balance-reminder（同形）。
        */
@@ -330,20 +281,13 @@ export type PlatformAgentEvent =
       payload: AgentPayload & {
         /** 留存 id（卡锚；run 场拦截无留存缺省不携带）。 */
         holdId?: string;
-        /** 被拦车道：OPINION=意见 / INQUIRY=咨询 / DESIGN_REVISION=作用域改稿。 */
+        /** 被拦车道：OPINION=意见 / INQUIRY=咨询。 */
         lane?: string;
         /** 被拦输入原文（卡上引用呈现；run 场拦截缺省不携带）。 */
         prompt?: string;
-        /** 作用域改稿目标件序（仅 DESIGN_REVISION）。 */
-        designItem?: number;
         /** 源池余额快照（分；显负额素材）。 */
         sourcePoolBalance?: number;
       };
-    }
-  | {
-      /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口事件前出尾段）。 */
-      type: "part-text";
-      payload: AgentPayload & { engine: string; source?: string; text: string };
     }
   | {
       /**
@@ -380,30 +324,13 @@ export type PlatformAgentEvent =
          * 各的截断额度）；失败红行渲染 label＋error，排障不进容器即可初判原因。
          */
         error?: string;
+        /**
+         * 写文件目标路径（#618 预览跟随）：仅 write_file／edit_file 落定/终态携带
+         * ——path 参数原形（相对/锚定两形自选）；命令类与读类不携带，参数在途
+         * （started）无路径则缺省。前端纯函数（lib/preview/follow）映射应用路由。
+         */
+        path?: string;
       };
-    }
-  | {
-      /**
-       * 自检播报部件（#85「正在检查系统 → ✅/❌」）：run 收口判据核验的呈现——
-       * 平台侧产出（不经引擎映射表，无 engine 字段；判据是平台事实）。`state` ∈
-       * checking（核验中）/ passed / failed；静默重试同构：尝试间核验未过不发
-       * failed（部件停在 checking，重复 checking 幂等），failed 仅末次未过（超限
-       * 转终态）与 run-failed 同窗口。终值 = 探活结果，收尾卡统计行随 #88 消费。
-       */
-      type: "part-check";
-      payload: AgentPayload & { sessionId: string; state: "checking" | "passed" | "failed" };
-    }
-  | {
-      /**
-       * 步骤清单部件（#236）：run 级步骤清单的**全量快照**——agent 调 update_plan
-       * 工具自产计划（步骤：稳定 id、标题、状态），不走动作行、不留动作痕（计划
-       * 变化不进部件流水）。快照式：执行中再调即整表替换（已收口步骤不可变＝
-       * 提示词纪律，平台 v1 不强制校验）；断线补发以最后快照为准；不落库（当次
-       * 会话定格留驻，刷新不回显）；步骤不设 ✗ 态。契约与来源解耦——不携带计划
-       * 来源（v1 run 执行体提示词直产）。
-       */
-      type: "part-plan";
-      payload: AgentPayload & { engine: string; source?: string; steps: SsePlanStep[] };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -413,14 +340,10 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "question-raised",
   "run-failed",
   "guide-reply",
-  "acceptance-start",
   "intercept-card",
   "balance-reminder",
-  "part-text",
   "part-signal",
   "part-action",
-  "part-check",
-  "part-plan",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

@@ -128,7 +128,6 @@ public class AgentscopeAgentClient {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final AgentStateStore stateStore;
     private final UsageEventSink usageEventSink;
-    private final LandedFileFacts landedFiles;
     private final Clock clock;
 
     @Autowired
@@ -136,22 +135,21 @@ public class AgentscopeAgentClient {
             AgentscopeProperties properties,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentStateStore stateStore,
-            UsageEventSink usageEventSink, LandedFileFacts landedFiles) {
+            UsageEventSink usageEventSink) {
         this(factory, properties, workspaceLifecycleAppService, stateStore, usageEventSink,
-                landedFiles, Clock.systemUTC());
+                Clock.systemUTC());
     }
 
     AgentscopeAgentClient(AgentscopeHarnessAgentFactory factory,
             AgentscopeProperties properties,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentStateStore stateStore,
-            UsageEventSink usageEventSink, LandedFileFacts landedFiles, Clock clock) {
+            UsageEventSink usageEventSink, Clock clock) {
         this.factory = factory;
         this.properties = properties;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.stateStore = stateStore;
         this.usageEventSink = usageEventSink;
-        this.landedFiles = landedFiles;
         this.clock = clock;
     }
 
@@ -174,11 +172,9 @@ public class AgentscopeAgentClient {
         result = reaskBlankQuestion(prepared, result, command.runId(),
                 USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
                 command.timeout(), command.silenceTimeout(), command.toolSilenceTimeout(), sink);
-        // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
-        // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
-        // 是真实工作区事实，外层尝试环据此留账）
+        // 流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写是真实
+        // 工作区事实，外层据此留账）
         List<FileChange> changes = new ArrayList<>(result.changes());
-        changes.addAll(landedFiles.drain(command.runId()));
         if (result.error() != null) {
             throw new AgentTurnFailure("智能体调用失败（runId=" + command.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
@@ -225,10 +221,8 @@ public class AgentscopeAgentClient {
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
                 resume.usageContext(), /* timeout= */ null, resume.silenceTimeout(),
                 resume.toolSilenceTimeout(), sink);
-        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
-        // 同携部分观察上浮（#323 失败留账，converse 同口径）
+        // 失败分支同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
-        changes.addAll(landedFiles.drain(resume.runId()));
         if (result.error() != null) {
             throw new AgentTurnFailure("智能体续跑失败（runId=" + resume.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
@@ -296,24 +290,29 @@ public class AgentscopeAgentClient {
      * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
      * 同型位置参数的错位面；工作区形态随命令/续跑请求原样携带——主智能体的问答
      * 挂起续跑同只读面，不漂移成读写面；toolSpec 工具面规格串同携——续跑与首轮
-     * 同规格，#252；modelChannel 通道注入件同携——续跑与首轮同通道，ADR-0031）。
+     * 同规格，#252；modelChannel 通道注入件同携——续跑与首轮同通道，ADR-0031；
+     * modelQueue 候选队列同携——续跑与首轮同队列，#557）。
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
-            ModelChannel modelChannel, String systemPrompt, String workspaceId, String agentKey,
-            boolean workspaceReadOnly, boolean workspaceNoShell, String toolSpec) {
+            ModelChannel modelChannel, ModelCandidateQueue modelQueue, String systemPrompt,
+            String workspaceId, String agentKey,
+            boolean workspaceReadOnly, String toolSpec,
+            boolean kernelForm) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
-                    command.modelString(), command.modelChannel(), command.systemPrompt(),
+                    command.modelString(), command.modelChannel(), command.modelQueue(),
+                    command.systemPrompt(),
                     command.workspaceId(), command.agentKey(), command.workspaceReadOnly(),
-                    command.workspaceNoShell(), command.toolSpec());
+                    command.toolSpec(), command.kernelForm());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
-                    resume.modelString(), resume.modelChannel(), resume.systemPrompt(),
+                    resume.modelString(), resume.modelChannel(), resume.modelQueue(),
+                    resume.systemPrompt(),
                     resume.workspaceId(), resume.agentKey(), resume.workspaceReadOnly(),
-                    /* noShell= */ false, resume.toolSpec());
+                    resume.toolSpec(), /* kernelForm= */ false);
         }
     }
 
@@ -335,18 +334,30 @@ public class AgentscopeAgentClient {
      * 通道注入件同透传——创建上下文注入 SDK＋进实例缓存键指纹，ADR-0031）
      * → 会话上下文与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现
      * 地基）。
+     *
+     * <p><b>内核形态（#601 接线）</b>：{@code kernelForm} 命令经内核装配唯一合法
+     * 入口 {@link AgentscopeHarnessAgentFactory#obtainKernel}——工作区解析为
+     * {@link AgentWorkspace.ProjectKernel}、系统提示＝{@link KernelSystemPrompt}
+     * 权威版本、工具面＝恰四件、循环语义中间件结构性挂载（装配内兑现，底座不重
+     * 复判）；装配键（agentKey）由调用方按内核键携带（不携带 executor 键——平台
+     * 中间件按配置键挂、不看工作区形态，#598 警示第一条）。其余形态照旧经
+     * {@link AgentscopeHarnessAgentFactory#obtain} 通用装配。</p>
      */
     private PreparedTurn prepareFor(TurnSpec spec, Consumer<AgentEvent> sink) {
-        // 模型串必填（ADR-0031/#366：全部调用面经档位解析携串——配置缺省回落已随
+        // 模型串必填（ADR-0031/#366：全部调用面经配置解析携串——配置缺省回落已随
         // 边缘点收编退役，null 即编程错误、形状校验单点报错）
         ModelRef modelRef = ModelRef.parse(spec.modelString());
         String sysPrompt = spec.systemPrompt() != null
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly(),
-                spec.workspaceNoShell());
-        HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
-                modelRef.toModelString(), spec.modelChannel(), workspace, spec.agentKey(),
-                spec.toolSpec());
+                spec.kernelForm());
+        HarnessAgent agent = spec.kernelForm()
+                ? factory.obtainKernel(modelRef.toModelString(), spec.modelChannel(),
+                        spec.modelQueue(), (AgentWorkspace.ProjectKernel) workspace,
+                        spec.agentKey())
+                : factory.obtain(properties.getAgentName(), sysPrompt,
+                        modelRef.toModelString(), spec.modelChannel(), spec.modelQueue(), workspace,
+                        spec.agentKey(), spec.toolSpec());
         // 每迭代平台开销观察面（#453）下发属性袋——执行体中间件每迭代取来掐表回写
         IterationOverheadFacts overhead = new IterationOverheadFacts();
         RuntimeContext ctx = runtimeContext(spec.sessionId(), spec.userId(), spec.runId(), sink);
@@ -368,7 +379,7 @@ public class AgentscopeAgentClient {
      * {@code Flux.timeout} 的信号间隔语义按事件逐个重置，纯静默（无事件/工具动作）
      * 超阈值才判死（还在干活就不掐，活跃 run 无总时长死限——生成轨长任务口径，
      * 替换原一次性总墙钟）；为空＝{@code timeout} 一次性总墙钟（blockLast——判定轮/
-     * 取名/预检等无工具轻调用现状）。判死失败走既有 error 事件表达（SSE 封闭集
+     * 取名等无工具轻调用现状）。判死失败走既有 error 事件表达（SSE 封闭集
      * 零新增），错误现场带中文口径（外层尝试环 #221 原地修据此续作）。判死同时
      * 显式中断内核执行＋计量面关账（#374 判死止损：取消对内核阻塞段无立即效力，
      * 僵尸调用只烧 token——见 catch 块注）。</p>
@@ -433,8 +444,6 @@ public class AgentscopeAgentClient {
             else {
                 events.blockLast(timeout != null ? timeout : properties.getTimeout());
             }
-            // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
-            drainParts(prepared.parts(), sink);
             RequireUserConfirmEvent suspension = suspended.get();
             if (suspension == null) {
                 sink.accept(AgentscopeEventMapper.runFinish(
@@ -460,7 +469,6 @@ public class AgentscopeAgentClient {
                 scope.markClosed();
             }
             interruptKernel(prepared, runId);
-            drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
             // 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更与
             // 已闭合区间的阶段耗时随失败携出（观察器全程在流上累积，此处取快照；
@@ -596,21 +604,24 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * 工作区解析：带 workspaceId → 项目工作区（只读标记则解析为只读面——#86 起
-     * 主智能体的对话姿态：写面结构性关闭；noShell 标记则解析为设计面——#289 设计
-     * 执行体姿态：文件工具保留、shell/委派关闭，只读标记优先）；缺省 → 本地工作区。
+     * 工作区解析：带 workspaceId → 项目工作区（kernelForm 命令解析为生成内核形态
+     * #601——装配面差异（提示词权威版本/工具四件/循环语义）由工厂内核分支结构性
+     * 兑现；只读标记则解析为只读面——#86 起主智能体的对话姿态：写面结构性关闭；
+     * 内核形态优先）；缺省 → 本地工作区。
      */
-    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly, boolean noShell) {
+    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly,
+            boolean kernelForm) {
         if (workspaceId == null || workspaceId.isBlank()) {
             return new AgentWorkspace.Local(properties.getWorkspace());
         }
         var handle = workspaceLifecycleAppService.handleOf(workspaceId);
+        if (kernelForm) {
+            return new AgentWorkspace.ProjectKernel(workspaceId, handle.containerName());
+        }
         if (readOnly) {
             return new AgentWorkspace.ProjectReadOnly(workspaceId, handle.containerName());
         }
-        return noShell
-                ? new AgentWorkspace.ProjectDesign(workspaceId, handle.containerName())
-                : new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
+        return new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
     }
 
     private RuntimeContext runtimeContext(String sessionId, String userId, String runId,
@@ -638,10 +649,8 @@ public class AgentscopeAgentClient {
             text.append(delta.getDelta());
         }
         else if (event instanceof RequireUserConfirmEvent confirm) {
-            // 挂起：先出部件解说尾段（问答卡前不留解说尾巴）再发挂起事件
-            // （question-raised 问答卡），不产透传事件
+            // 挂起：发挂起事件（question-raised 问答卡），不产透传事件
             suspended.set(confirm);
-            drainParts(parts, sink);
             sink.accept(mapper.suspension(confirm));
             return;
         }
@@ -668,11 +677,6 @@ public class AgentscopeAgentClient {
     /** 挂起事件的待确认工具最小面（AgentSuspension.toolCalls 的形状，同事件 data.toolCalls）。 */
     private static List<Map<String, Object>> toolCallFace(RequireUserConfirmEvent event) {
         return AgentscopeEventMapper.toolCallPayloads(event.getToolCalls());
-    }
-
-    /** 部件收尾：解说余段出部件（幂等）。 */
-    private static void drainParts(AgentscopePartsMapper parts, Consumer<AgentEvent> sink) {
-        parts.drain().forEach(sink);
     }
 
     /**

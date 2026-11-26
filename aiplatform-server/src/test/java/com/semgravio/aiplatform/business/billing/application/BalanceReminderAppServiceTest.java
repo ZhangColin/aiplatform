@@ -56,14 +56,13 @@ class BalanceReminderAppServiceTest {
     void given_hold_when_pending_card_then_card_with_balance_snapshot() {
         BalanceReminderCard card = reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION,
                 "把报表加个导出", List.of(Map.of("attachmentType", "image",
-                        "name", "ref.png", "path", "materials/ref.png")), null, null, "run-b1");
+                        "name", "ref.png", "path", "materials/ref.png")), "run-b1");
 
         BalanceReminderCard pending = reminderService.pendingCard(PROJECT_ID).orElseThrow();
 
         assertThat(pending.holdId()).isEqualTo(card.holdId());
         assertThat(pending.lane()).isEqualTo("OPINION");
         assertThat(pending.prompt()).isEqualTo("把报表加个导出");
-        assertThat(pending.designItem()).isNull();
         assertThat(pending.runId()).isEqualTo("run-b1");
         assertThat(pending.sourcePoolBalance()).isNull(); // 试用无池——读面如实
         Map<String, Object> row = jdbcTemplate.queryForMap(
@@ -76,26 +75,10 @@ class BalanceReminderAppServiceTest {
     }
 
     @Test
-    void given_design_revision_hold_when_pending_card_then_item_and_divergence_carried() {
-        reminderService.hold(PROJECT_ID, BalanceHoldLane.DESIGN_REVISION,
-                "海报字大一点", null, 3, "explore", "run-b2");
-
-        BalanceReminderCard pending = reminderService.pendingCard(PROJECT_ID).orElseThrow();
-
-        assertThat(pending.lane()).isEqualTo("DESIGN_REVISION");
-        assertThat(pending.designItem()).isEqualTo(3);
-        Map<String, Object> row = jdbcTemplate.queryForMap(
-                "SELECT design_item, divergence FROM bil_balance_holds WHERE project_id = ?",
-                PROJECT_ID);
-        assertThat(row.get("design_item")).isEqualTo(3);
-        assertThat(row.get("divergence")).isEqualTo("explore");
-    }
-
-    @Test
     void given_second_hold_when_pending_then_first_superseded() {
-        reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION, "旧输入", null, null, null, "run-old");
+        reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION, "旧输入", null, "run-old");
         BalanceReminderCard latest = reminderService.hold(PROJECT_ID, BalanceHoldLane.INQUIRY,
-                "新输入", null, null, null, "run-new");
+                "新输入", null, "run-new");
 
         BalanceReminderCard pending = reminderService.pendingCard(PROJECT_ID).orElseThrow();
         assertThat(pending.holdId()).isEqualTo(latest.holdId());
@@ -109,7 +92,7 @@ class BalanceReminderAppServiceTest {
     @Test
     void given_hold_and_balance_still_negative_when_claim_passable_then_empty_and_pending_kept() {
         toPaidWithBalance(-500);
-        reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION, "输入", null, null, null, "run-x");
+        reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION, "输入", null, "run-x");
 
         assertThat(reminderService.claimPassable()).isEmpty();
 
@@ -120,7 +103,7 @@ class BalanceReminderAppServiceTest {
     void given_hold_and_balance_back_positive_when_claim_passable_then_claimed_with_payload() {
         toPaidWithBalance(-500);
         reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION,
-                "把报表加个导出", null, null, null, "run-y");
+                "把报表加个导出", null, "run-y");
         // 直改池值回正（不经 topup——topup 会发入账事件触发自动认领排空，
         // 本测只验 claimPassable 认领面语义）
         toBalance(10_000);
@@ -144,8 +127,8 @@ class BalanceReminderAppServiceTest {
     void given_other_project_hold_when_claim_passable_then_other_kept_pending() {
         toPaidWithBalance(-500);
         toPaidWithBalance(PROJECT_ID + 1, -500);
-        reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION, "输入A", null, null, null, "run-a");
-        reminderService.hold(PROJECT_ID + 1, BalanceHoldLane.OPINION, "输入B", null, null, null, "run-b");
+        reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION, "输入A", null, "run-a");
+        reminderService.hold(PROJECT_ID + 1, BalanceHoldLane.OPINION, "输入B", null, "run-b");
 
         // 只给本项目回正（直改池值——不经 topup，同认领面语义）：他项目待决保持
         toBalance(10_000);
@@ -159,7 +142,7 @@ class BalanceReminderAppServiceTest {
     @Test
     void given_pending_when_discard_then_superseded() {
         BalanceReminderCard card = reminderService.hold(PROJECT_ID, BalanceHoldLane.OPINION,
-                "输入", null, null, null, "run-z");
+                "输入", null, "run-z");
 
         reminderService.discard(card.holdId());
 

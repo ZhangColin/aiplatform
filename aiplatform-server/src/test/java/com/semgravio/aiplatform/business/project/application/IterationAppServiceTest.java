@@ -1,30 +1,22 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -32,53 +24,31 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.cartisan.core.exception.ApplicationException;
-
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
-import com.semgravio.aiplatform.base.agentscope.AgentTurnFailure;
-import com.semgravio.aiplatform.base.agentscope.StageDurations;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.FileChange;
-import com.semgravio.aiplatform.base.agentscope.RunHeading;
+import com.semgravio.aiplatform.base.agentscope.KernelSystemPrompt;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
-import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
-import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
-import com.semgravio.aiplatform.business.billing.application.BillingAppService;
-import com.semgravio.aiplatform.business.billing.application.PoolTopupAppService;
-import com.semgravio.aiplatform.business.billing.domain.enums.FlipGate;
-import com.semgravio.aiplatform.business.billing.domain.error.BillingMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
-import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
-import com.semgravio.aiplatform.business.project.domain.model.ProjectArtifacts;
-import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
-import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 迭代编排（#26 验收 + #46 结束工具收口）：修正 run 与生成同机制（每场新会话
- * coder-{projectId}-fix-{runId}（#114）+ 同工作区 + EXECUTOR 配置 + live + 计量 dims
- * + 知识命中前置注入 +
- * 失败自动静默重试——run 失败为唯一失败终态）；run 在途时新任务排队（不即派）、当前 run 收口后
- * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以 finish_edit 工具事实
- * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」事件，
- * changed=true 现有收口行为不回归）；超限终态恢复出口（#48：重派终态那场的交接
- * 物，正常态 / 在途 / 排队均不可达）；交接物三要素（#52：判定结果 + PRD 路径
- * 引用入修正 run prompt；排队合并 #55 逐轮配对：各轮「意见 → 修订说明」一一
- * 对应、未修订轮显式占位不串位——#53 判定全保留的口径不变，载体从两清单
- * 位置对齐收严为结构化成对）；守卫组（不存在 / 已归档 / 未生成）。
+ * 迭代编排（#623 对话面交指令 → 内核重跑；#625 旧迭代受理链拆除后只剩这一条从
+ * 对话面到内核的路径）：空闲即起恰好一场内核 run；在途入待办、成功收口后合并为
+ * 恰好一场补派；失败/停止不自动补派、待办保留（用户重说即新一轮）。收口判据双件
+ * （build＋8081 探活）与收尾卡扩载、Demo 迭代成版、PRD 变化通知同生成轨口径。
  */
 @IntegrationTest
 class IterationAppServiceTest {
@@ -88,32 +58,15 @@ class IterationAppServiceTest {
     @Autowired
     private IterationAppService appService;
 
-    /** 尝试环配置（#477 免预算重试上限的测试开关位）。 */
-    @Autowired
-    private GenerationProperties properties;
-
     @Autowired
     private ProjectRepository projectRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private FinishEditFacts finishFixFacts;
-
-    /** 验证事实登记口（#420 豁免路径脚本：模拟 verify 子智能体轮内 existing 确认登记）。 */
-    @Autowired
-    private VerificationFacts verificationFacts;
-
     /** 停止面（#359 生成取消）——停止请求的注入口（测试经公开 requestStop 触发）。 */
     @Autowired
     private CodingRunTrack codingRunTrack;
-
-    @Autowired
-    private BillingAppService billingAppService;
-
-    @Autowired
-    private PoolTopupAppService poolTopupAppService;
 
     @MockitoBean
     private AgentscopeAgentClient agentClient;
@@ -124,34 +77,24 @@ class IterationAppServiceTest {
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
 
-    @MockitoBean
-    private KnowledgePort knowledgePort;
-
-    /** 工作区 exec（#91 版本锚定成版探针的脚本化缝——commit hash 回填 closing）。 */
+    /** 工作区 exec（#619 快照/diff 与 #624 PRD 读的脚本化缝）。 */
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     @BeforeEach
     void stubWorkspace() {
-        // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
-        // 命令（含 AGENTS.md）与健壮件在场探针（#421 test -f——默认在场＝新基座
-        // 工作区语义，栈规则集节拼入），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        // #601 内核收尾判据双件（#597：pnpm build 过＋8081 探活）默认成功——失败态
+        // 用例在测试体内后注册桩覆盖（Mockito 后桩优先）
         when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
-                        || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
+                argThat(cmd -> cmd != null && (cmd.command().contains("pnpm build")
+                        || cmd.command().contains("curl")))))
                 .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     @AfterEach
     void tearDown() {
-        jdbcTemplate.update("DELETE FROM prj_agent_configs");
-        jdbcTemplate.update("DELETE FROM prj_design_specs");
-        jdbcTemplate.update("DELETE FROM prj_prd_versions");
-        jdbcTemplate.update("DELETE FROM prj_demo_versions");
-        jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
-        // 计费闸用例行清理（bil_ 弱引用直落，随测试项目一并清）
         jdbcTemplate.update("DELETE FROM bil_balance_holds");
         jdbcTemplate.update("DELETE FROM bil_entries");
         jdbcTemplate.update("DELETE FROM bil_project_billing");
@@ -172,1414 +115,407 @@ class IterationAppServiceTest {
         return tracks;
     }
 
-    /** 脚本化智能体边界：run 正常返回即调 finish_edit（coder 会话才记——忠实于
-     * 工具面按角色发放的事实），收口判定随脚本给定。 */
-    private void givenConverseFinishing(Boolean changed, String text) {
+    /** 脚本化智能体边界：run 正常返回即收口（内核座单发——收口判定归平台机器判据双件）。 */
+    private void givenConverseFinishing() {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                finishFixFacts.record(command.workspaceId(), changed, text);
-                verifyRan(command);
-            }
-            return new AgentReply(command.runId(), "修正完成");
+            return new AgentReply(command.runId(), "修改完成");
         });
     }
 
-    /**
-     * 模拟 verify 子智能体轮内登记（#424 片轻验；#435 起验证非收口要件、观测面
-     * 不动）：更新轨
-     * 收口须验证在场——coder 会话登记一次（run 起跑清残留后逐 run 重登）。零验证
-     * 场景的测试不调用本位。
-     */
-    private void verifyRan(AgentCommand command) {
-        if (!verificationFacts.hasRegistration(command.workspaceId())) {
-            verificationFacts.record(command.workspaceId(), List.of(
-                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
-        }
-    }
-
-    /**
-     * 脚本化智能体事件缝（#84 验收）的本地别名：剧本体在
-     * {@link AgentEventScripts}（生成/迭代共用，契约变化单点同步）。
-     */
     private static AgentEvent scripted(String type, String runId, Map<String, Object> extra) {
         return AgentEventScripts.scripted(type, runId, extra);
     }
 
-    private void givenConverseSucceeds() {
-        givenConverseFinishing(true, "已按意见修正");
+    // ---------- 对话面交指令（#623，ADR-0056 修改交接） ----------
+
+    private static ModificationHandoffFacts.Instruction instruction(String userWords,
+            String instruction) {
+        return new ModificationHandoffFacts.Instruction(instruction, userWords, null);
+    }
+
+    /** 一条对话面交指令（自足指令＝用户原话的整理形）。 */
+    private void handOff(Long projectId, String text) {
+        appService.handOffModification(projectRepository.findById(projectId).orElseThrow(),
+                List.of(instruction(text, text)), "dialog-run");
     }
 
     @Test
-    void given_generated_project_when_fix_then_command_uses_new_fix_session_and_workspace() {
-        Long projectId = persistedGeneratedProject("9900");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
-                "把预约列表按时间倒序排列", null);
-        tracks.remove(0).run();
-
-        assertThat(dispatch.queued()).isFalse();
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
-        AgentCommand value = command.getValue();
-        // 修正 run 全要素：每场新会话（#114 fix-{runId}）与同工作区 + EXECUTOR 配置 +
-        // owner + 计量 dims + 流关联（与生成同机制）
-        assertThat(value.runId()).isEqualTo(dispatch.runId());
-        assertThat(value.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
-                singleHandoff("把预约列表按时间倒序排列", null)));
-        assertThat(value.sessionId()).isEqualTo(
-                IterationAppService.fixSession(projectId, dispatch.runId()));
-        assertThat(value.workspaceId()).isEqualTo("9900");
-        assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
-        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
-                UsageDims.kindOf(AgentProfile.EXECUTOR),
-                IterationAppService.fixSession(projectId, dispatch.runId())));
-        assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
-        assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（前端编码 run 判定锚）
-        // #118 工作消息头部标题：更新 run 携平台生成的用户语言标题（无切片进度）
-        assertThat(value.heading()).isEqualTo(RunHeading.titled(IterationAppService.FIX_TITLE));
-        verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), any());
-    }
-
-    @Test
-    void given_fix_run_when_start_then_agents_md_written_before_first_converse() {
-        // #214 幂等覆写刷新既有工作区：修正 run 起手同样重写 AGENTS.md 平台约定
-        // （external/ 物理规则进既有工作区，无需重建）——先于首试 converse
+    void given_idle_generated_when_handoff_then_one_kernel_run_carries_instruction_and_words() {
+        // 说清一句修改 → 空闲即起恰好一场内核重跑；任务提示携自足指令与用户原话；
+        // 空闲直派无在途轻提示、零派发第二场
         Long projectId = persistedGeneratedProject("9930");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
+        givenConverseFinishing();
+        Project project = projectRepository.findById(projectId).orElseThrow();
 
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        appService.handOffModification(project,
+                List.of(instruction("列表加分页", "给预约列表加分页")), "dialog-run");
+
+        assertThat(tracks).hasSize(1); // 异步轨道已提交未跑
+        verify(agentClient, never()).converse(any(), any());
         tracks.remove(0).run();
 
-        InOrder order = inOrder(workspaceLifecycleAppService, agentClient);
-        order.verify(workspaceLifecycleAppService).exec(eq("9930"),
-                argThat((WorkspaceExecCommand cmd) ->
-                        cmd.command().contains("/workspace/AGENTS.md")
-                                && cmd.command().contains("external/")));
-        order.verify(agentClient).converse(any(), any());
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .contains("用户原话：列表加分页")
+                .contains("修改指令：给预约列表加分页");
+        assertThat(command.getValue().systemPrompt()).isEqualTo(KernelSystemPrompt.text());
+        assertThat(command.getValue().kernelForm()).isTrue();
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
     }
 
     @Test
-    void given_fix_in_flight_when_more_fixes_then_queued_then_merged_into_one_run()
+    void given_handoffs_while_in_flight_when_run_succeeds_then_merged_into_one_follow_up()
             throws InterruptedException {
-        Long projectId = persistedGeneratedProject("9901");
+        // 当前 run 在途再交两条修改 → 各自入待办并轻提示；当前 run 成功收口后合并且仅
+        // 合并为一场后续 run 补派（不逐条烧 run、不漏派）
+        Long projectId = persistedGeneratedProject("9931");
         List<Runnable> tracks = givenTrackQueued();
-        // 第一场修正 run 起跑后挂住（模拟真实长任务在途），主线程在在途窗口内派新任务
         CountDownLatch runInFlight = new CountDownLatch(1);
         CountDownLatch releaseRun = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
             runInFlight.countDown();
             releaseRun.await();
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            return new AgentReply(command.runId(), "修正完成");
+            return new AgentReply(command.runId(), "完成");
         });
+        Project project = projectRepository.findById(projectId).orElseThrow();
 
-        IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表加筛选", null);
-        Thread trackWorker = new Thread(tracks.remove(0));
-        trackWorker.start();
+        appService.handOffModification(project,
+                List.of(instruction("列表加筛选", "给列表加筛选功能")), "dialog-1");
+        Thread worker = new Thread(tracks.remove(0));
+        worker.start();
         assertThat(runInFlight.await(5, TimeUnit.SECONDS)).isTrue();
 
-        // run 在途：后续任务排队、不即派
-        IterationAppService.FixDispatch second = appService.startFixRun(projectId, "按钮改蓝色", null);
-        IterationAppService.FixDispatch third = appService.startFixRun(projectId, "加导出", null);
-        assertThat(second.queued()).isTrue();
-        assertThat(third.queued()).isTrue();
-        verify(agentClient, times(1)).converse(any(), any());
+        appService.handOffModification(project,
+                List.of(instruction("按钮改蓝色", "把主按钮改成蓝色")), "dialog-2");
+        appService.handOffModification(project,
+                List.of(instruction("加导出", "增加导出功能")), "dialog-3");
+        verify(eventsAppService, times(2)).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), argThat(payload -> IterationAppService
+                        .MODIFICATION_QUEUED_NOTICE.equals(payload.get("text"))));
 
-        // 当前 run 收口（轨道循环排空队列）：两条排队任务合并为一场续派，不逐条烧 run
         releaseRun.countDown();
-        trackWorker.join(5000);
+        worker.join(5000);
+
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        List<AgentCommand> runs = command.getAllValues();
-        assertThat(runs.get(1).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(
-                        List.of(new IterationAppService.FixHandoff.Round("按钮改蓝色", null),
-                                new IterationAppService.FixHandoff.Round("加导出", null)))))
-                .contains("1. 意见原文：按钮改蓝色").contains("2. 意见原文：加导出");
-        // 排队合并续派是另一场 run：新会话（#114）与新 runId（不续首场会话）
-        assertThat(runs.get(1).sessionId()).isEqualTo(
-                IterationAppService.fixSession(projectId, runs.get(1).runId()));
-        assertThat(runs.get(1).runId()).isNotEqualTo(first.runId());
-        // 轨道收工（队列空）：在途释放——下一场意见可再起跑
-        assertThat(appService.startFixRun(projectId, "再来一轮", null).queued()).isFalse();
+        verify(agentClient, times(2)).converse(command.capture(), any()); // 当前一场 + 合并一场
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("用户原话：按钮改蓝色")
+                .contains("修改指令：把主按钮改成蓝色")
+                .contains("用户原话：加导出")
+                .contains("修改指令：增加导出功能");
     }
 
     @Test
-    void given_queued_tasks_when_track_not_run_yet_then_in_flight_covers_queued_start() {
-        // 已提交未起跑（排队中）也算在途：重复派发仍排队，不并发起第二条轨道
-        Long projectId = persistedGeneratedProject("9902");
+    void given_run_fails_when_handoff_queued_then_no_auto_follow_up_and_user_resay_dispatches() {
+        // 当前 run 失败 → 不自动补派、待办保留；用户重说即起新一轮（待办并入本轮，
+        // 失败那场不重放——失败语义不造第三层重试）
+        Long projectId = persistedGeneratedProject("9932");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
+        AtomicInteger calls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (calls.getAndIncrement() == 0) {
+                throw new IllegalStateException("第一场失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+        Project project = projectRepository.findById(projectId).orElseThrow();
 
-        appService.startFixRun(projectId, "第一条（轨道已提交未起跑）", null);
-        assertThat(appService.startFixRun(projectId, "第二条", null).queued()).isTrue();
-        verify(agentClient, never()).converse(any(), any());
+        appService.handOffModification(project,
+                List.of(instruction("第一件事", "做第一件事")), "dialog-1");
+        // 当前 run 在途（已占轨未跑）：第二条入待办
+        appService.handOffModification(project,
+                List.of(instruction("第二件事", "做第二件事")), "dialog-2");
+        tracks.remove(0).run(); // 第一场失败收口
 
-        // 轨道起跑：第一条跑完即合并第二条（同一场合并语义）
-        tracks.remove(0).run();
-        verify(agentClient, times(2)).converse(any(), any());
-    }
+        verify(agentClient, times(1)).converse(any(), any()); // 失败不自动补派
 
-    @Test
-    void given_knowledge_hits_when_fix_then_prefix_injected_before_task_prompt() {
-        Long projectId = persistedGeneratedProject("9903");
-        List<Runnable> tracks = givenTrackQueued();
-        // #466 多类同池：PRD 历史需求＋激活升格的沉淀物同块前置注入，条带 kind 区分
-        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。"),
-                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
-                        "开场前 2 小时内不可取消。")));
-        givenConverseSucceeds();
-
-        String task = "给库存页加分页";
-        appService.startFixRun(projectId, task, null);
-        tracks.remove(0).run();
-
-        // 知识命中前置注入（#24 生成/修正同机制）：query = 修正任务 prompt，命中拼前
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
-        assertThat(command.getValue().prompt())
-                .startsWith("【平台知识库·相似知识】")
-                .contains("〔连锁诊所系统｜历史需求〕PRD·连锁诊所管理")
-                .contains("〔平台沉淀｜业务规则〕预约类业务的取消规则")
-                .endsWith("————\n\n" + IterationAppService.fixRunPrompt(singleHandoff(task, null)));
-    }
-
-    @Test
-    void given_first_attempt_fails_when_fix_then_silent_retry_with_retry_prompt() {
-        Long projectId = persistedGeneratedProject("9904");
-        List<Runnable> tracks = givenTrackQueued();
-        // 知识命中在场（#466）：首试带前置注入块、重试不重注入的对照事实
-        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
-                        "开场前 2 小时内不可取消。")));
-        // 剧本（#84 事件序列断言）：首试中途错误（error 事件 + 异常上浮）；重试尝试
-        //（内部新 runId）真实客户端会再发 run-start 与部件，收口 run-finish
-        when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
-                            "prompt", command.prompt(), "role", "CODER")));
-                    sink.accept(scripted(AgentEventTypes.ERROR, command.runId(), Map.of(
-                            AgentEventTypes.ERROR_MESSAGE_FIELD, "修正尝试中断")));
-                    throw new IllegalStateException("修正尝试中断");
-                })
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    Consumer<AgentEvent> sink = invocation.getArgument(1);
-                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
-                            "prompt", command.prompt(), "role", "CODER")));
-                    sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(), Map.of(
-                            AgentEventTypes.PART_TEXT_FIELD, "从中断处继续修正")));
-                    finishFixFacts.record(command.workspaceId(), true, "重试轮完成修正并收口");
-                    return new AgentReply(command.runId(), "修正完成");
-                });
-
-        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "修正首页布局", null);
+        // 用户重说第三条 → 空闲直派，待办（第二条）并入本轮
+        appService.handOffModification(project,
+                List.of(instruction("第三件事", "做第三件事")), "dialog-3");
+        assertThat(tracks).hasSize(1);
         tracks.remove(0).run();
 
-        // 失败自动静默重试（#82/#84 口径）：重试续作轨照走，用户面零中间信号——
-        // 无重试信号、无逐次 error（run 失败为唯一失败终态）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .contains("错误现场：修正尝试中断")
-                .contains("进展现场（平台可观测事实）")
-                .contains("已累计用时")
-                .contains("已落盘文件变更 尚无")
-                // #466 一次切入一次注入既有语义：知识前置注入只进首试 prompt，重试不重注入
-                .doesNotContain("【平台知识库");
-        verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
-
-        // 用户面 run 身份 = 首试 runId 全程不变（#84）：重试不新发 run-start、
-        // 重试尝试的部件归一首试锚——工作消息只见正常生长；自检播报（#85）：收口
-        // 判据核验（finish_edit 事实）「检查中 → 通过」随正常收口出现
-        ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(4)).publishAgentEvent(types.capture(), payloads.capture());
-        assertThat(types.getAllValues())
-                .containsExactly(AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
-                        AgentEventTypes.PART_CHECK, AgentEventTypes.PART_CHECK);
-        assertThat(payloads.getAllValues()).allSatisfy(payload ->
-                assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(dispatch.runId()));
-        // 自检状态序：检查中 → 通过（首试死于 converse 中途、未进核验，恰一对）
-        assertThat(payloads.getAllValues().get(2))
-                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
-                        AgentEventTypes.PART_CHECK_STATE_CHECKING);
-        assertThat(payloads.getAllValues().get(3))
-                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
-                        AgentEventTypes.PART_CHECK_STATE_PASSED);
-
-        // 重试成功后轨道正常收工：下一场可再起跑
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
+                .contains("用户原话：第二件事")
+                .contains("修改指令：做第二件事")
+                .contains("用户原话：第三件事")
+                .contains("修改指令：做第三件事")
+                .doesNotContain("第一件事"); // 失败那场不自动重放
     }
 
     @Test
-    void given_all_attempts_fail_when_fix_then_terminal_and_track_released() {
-        Long projectId = persistedGeneratedProject("9905");
+    void given_first_build_in_flight_when_handoff_then_after_success_dispatched_as_first_iteration() {
+        // 首建在途提的意见 → 待办保留；首建成功收口后作为第一轮迭代补派（恰好一场）
+        Long projectId = projectRepository.save(Project.create("首建在途项目", null,
+                9933L, OWNER, null)).getId();
+        assertThat(codingRunTrack.begin(projectId)).isTrue();
         List<Runnable> tracks = givenTrackQueued();
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("持续失败"));
+        givenConverseFinishing();
 
-        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "修不动", null);
+        appService.handOffModification(projectRepository.findById(projectId).orElseThrow(),
+                List.of(instruction("首建时提的", "首建完成后做这件事")), "dialog-1");
+        assertThat(tracks).isEmpty(); // 在途不打断：待办不派
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> IterationAppService.MODIFICATION_QUEUED_NOTICE
+                        .equals(payload.get("text"))));
+
+        // 首建成功收口（generated_at 落位）→ 待办作为第一轮迭代补派
+        jdbcTemplate.update("UPDATE prj_projects SET generated_at = CURRENT_TIMESTAMP"
+                + " WHERE id = ?", projectId);
+        codingRunTrack.end(projectId);
+        appService.drainPendingModificationsAfterSuccess(projectId);
+
+        assertThat(tracks).hasSize(1);
         tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> attempts = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(attempts.capture(), any());
-        // 终态收口事件（#56）：run-failed 恰一次、锚该场 run 的用户面标识（首试
-        // runId——重试不换新锚，#84）——前端「重新修改」出口只认本事件（点击即恢复
-        // 出口重派链路，不被 PRJ_025 挡回）
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
-                projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
-                        && dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
-        // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
-        assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .contains("用户原话：首建时提的")
+                .contains("修改指令：首建完成后做这件事");
     }
 
-    /** 付费项目＋指定余额（负余额软模型——测试直接置池值，不经结算）。 */
-    private void toPaidWithBalance(Long projectId, long balanceFen) {
-        poolTopupAppService.topup(null, projectId, 1, null, null);
-        billingAppService.flipToPaid(projectId, FlipGate.INTERCEPT);
-        jdbcTemplate.update("UPDATE bil_pools SET balance = ? WHERE project_id = ?",
-                balanceFen, projectId);
-    }
-
-    @Test
-    void given_paid_exhausted_when_start_fix_run_then_stashed_with_card_and_zero_run() {
-        // 段边界门拦下修正派发（#537 计费③）：intent 暂存＋余额提醒卡（run 场无留存
-        // ——holdId 不携带）＋零 run 起跑；充值回正 drain 自动重派（不手动重试）
-        Long projectId = persistedGeneratedProject("9950");
-        toPaidWithBalance(projectId, -500);
-        List<Runnable> tracks = givenTrackQueued();
-
-        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
-                "把列表加导出", null);
-
-        assertThat(dispatch.queued()).isFalse();
-        assertThat(dispatch.runId()).isNotBlank(); // 卡事件锚（无 run 起跑）
-        verify(agentClient, never()).converse(any(), any()); // 零 run
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.BALANCE_REMINDER), argThat(
-                payload -> payload.get(AgentEventTypes.BALANCE_HOLD_ID_FIELD) == null
-                        && Long.valueOf(-500)
-                                .equals(payload.get(AgentEventTypes.BALANCE_POOL_BALANCE_FIELD))));
-        assertThat(tracks).isEmpty(); // 暂存未起跑
-
-        // 充值回正自动重派（drain 直调断言恢复事实；事件→AFTER_COMMIT 监听同链）
-        poolTopupAppService.topup(null, projectId, 10_000, null, null);
-        appService.drainBalanceBlocked();
-
-        assertThat(tracks).hasSize(1); // 暂存 intent 已重派（轨道任务已提交）
-    }
-
-    @Test
-    void given_terminal_handoff_when_paid_exhausted_restart_then_bill_025_and_auto_redispatch_on_topup() {
-        // 恢复出口同守段间硬门：欠费不空翻终态账——BILL_025 指路充值，交接物转
-        // 余额闸暂存；充值回正自动重派（不手动重试）
-        Long projectId = persistedGeneratedProject("9951");
-        List<Runnable> tracks = givenTrackQueued();
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("持续失败"));
-        appService.startFixRun(projectId, "修不动", null);
-        tracks.remove(0).run(); // 超限终态（终态账在案）
-        toPaidWithBalance(projectId, -500);
-
-        assertThatThrownBy(() -> appService.restartFixRun(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(BillingMessage.BALANCE_BLOCKED.message());
-
-        poolTopupAppService.topup(null, projectId, 10_000, null, null);
-        appService.drainBalanceBlocked();
-
-        assertThat(tracks).hasSize(1); // 终态账已转暂存并自动重派
-    }
-
-    @Test
-    void given_instant_terminal_failure_when_queued_opinions_then_no_redispatch_merged_into_recovery() {
-        // #477 重派上限（修正轨「转终态→重派→秒败」循环的治）：整场 run 全尝试
-        // llmMs=0（通道全死、未发生真实模型调用）的终态失败后不再续派排队意见——
-        // 排队残局并入终态账（恢复出口「继续更新」一次带走，意见零丢失），不形成
-        // 秒败循环；有真实模型工作的失败不受影响（排队合并续派口径不变）
-        Long projectId = persistedGeneratedProject("9907");
-        List<Runnable> tracks = givenTrackQueued();
-        properties.setChannelInstantRetryMax(0); // 关免预算——直击预算烧尽口径
-        try {
-            AgentTurnFailure channelFail = new AgentTurnFailure(
-                    "智能体调用失败：Connection refused",
-                    new IllegalStateException("Connection refused"),
-                    List.of(), StageDurations.zero());
-            when(agentClient.converse(any(), any())).thenThrow(channelFail);
-
-            appService.startFixRun(projectId, "列表加筛选", null);
-            appService.startFixRun(projectId, "按钮改蓝色", null); // 在途排队
-            tracks.remove(0).run(); // 轨道执行：首场秒败×3 转终态
-
-            // 首场即停：排队意见不再作为续派 run 入场（旧口径：合并续派再烧 3 次秒败）
-            verify(agentClient, times(3)).converse(any(), any());
-            verify(eventsAppService, times(1))
-                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
-
-            // 恢复出口可达且一次带走全部意见（首场＋排队）：通道恢复后「继续更新」
-            // 重派的交接物含两条意见原文（意见零丢失）
-            assertThat(appService.restartFixRun(projectId).runId()).isNotBlank();
-            AtomicBoolean channelRecovered = new AtomicBoolean(true);
-            doAnswer(invocation -> {
-                AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-                if (channelRecovered.get() && command.sessionId().startsWith("coder-")) {
-                    verifyRan(command);
-                    finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-                }
-                return new AgentReply(command.runId(), "已按意见修正");
-            }).when(agentClient).converse(any(), any());
-            tracks.remove(0).run();
-            ArgumentCaptor<AgentCommand> restarted = ArgumentCaptor.forClass(AgentCommand.class);
-            verify(agentClient, times(4)).converse(restarted.capture(), any());
-            assertThat(restarted.getAllValues().get(3).prompt())
-                    .contains("列表加筛选")
-                    .contains("按钮改蓝色");
-        }
-        finally {
-            properties.setChannelInstantRetryMax(3);
-        }
-    }
-
-    // ---------- 更新停止（#359 生成取消：失败账口径——终态账可达「继续更新」） ----------
-
-    @Test
-    void given_stop_requested_mid_fix_when_run_then_stopped_terminal_account_and_restartable() {
-        // 灵魂用例（#359 AC②③·修正轨）：更新在途被叫停——不重试（一次尝试即收场）、
-        // run-failed(stopped=true) 收口、失败账口径记终态账——「继续更新」出口照常
-        // 可达（restart 不被 PRJ_026 挡回，交接物沿用同任务重派）
-        Long projectId = persistedGeneratedProject("9930");
-        List<Runnable> tracks = givenTrackQueued();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            codingRunTrack.requestStop(projectId);
-            throw new IllegalStateException("java.lang.InterruptedException");
-        });
-
-        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
-                "把按钮改成蓝色", null);
-        tracks.remove(0).run();
-
-        // 停止不重试：恰一次 converse
-        verify(agentClient, times(1)).converse(any(), any());
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
-                dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))
-                        && Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
-        // 终态账在场：「继续更新」恢复出口不被 PRJ_026 挡回（失败账口径）
-        assertThat(appService.restartFixRun(projectId).runId()).isNotBlank();
-        // 重派同任务：交接物沿用（「把按钮改成蓝色」），续跑可完成——重打桩走
-        // doAnswer 形（when() 形会先调一次在桩的停止脚本，误触发停止）
-        doAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
-            if (command.sessionId().startsWith("coder-")) {
-                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            }
-            return new AgentReply(command.runId(), "已按意见修正");
-        }).when(agentClient).converse(any(), any());
-        tracks.remove(0).run();
-        ArgumentCaptor<AgentCommand> restarted = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(restarted.capture(), any());
-        assertThat(restarted.getAllValues().get(1).prompt()).contains("把按钮改成蓝色");
-        // 停止面已清：新一场照常可起
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    // ---------- 结束工具收口（#46：finish_edit 事实观测；判定呈现归 #88 收口扩载） ----------
+    // ---------- 收口判据（平台机器双件）与收尾卡扩载（#617/#619） ----------
 
     @Test
     void given_fix_run_when_closes_then_demo_seed_applied_and_failure_not_blocking() {
-        // #340 演示种子预置：迭代收口（系统实动后可能有新空表）施用种子——changed
-        // 真假两态都收口不炸；施用失败也不阻断收工（轨道释放、下一场可派）
+        // #340 演示种子预置：迭代收口（系统实动后可能有新空表）施用种子——施用失败
+        // 也不阻断收工（轨道释放、下一场可派）
         Long projectId = persistedGeneratedProject("9916");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(true, "已按意见修正");
+        givenConverseFinishing();
         when(workspaceLifecycleAppService.exec(any(),
                 argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh"))))
                 .thenThrow(new IllegalStateException("容器 exec 失败"));
 
-        appService.startFixRun(projectId, "列表页加一列状态", null);
+        handOff(projectId, "列表页加一列状态");
         tracks.remove(0).run();
 
-        // 施用确已发起（exec 命中种子入口）且失败被吞——轨道正常收工
         verify(workspaceLifecycleAppService, times(1)).exec(eq("9916"),
                 argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh")));
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
+        handOff(projectId, "下一场");
+        assertThat(tracks).hasSize(1); // 轨道已释放，下一场可起跑
     }
-
-    @Test
-    void given_finish_edit_changed_false_when_fix_closes_then_normal_close_no_unchanged_frame() {
-        // 灵魂用例（#46 → #82 收缩）：脚本化结束工具 changed=false = 正常收口——
-        // 判定结果的呈现归收口扩载权威化（#88 收尾卡判定行），本层零事件
-        Long projectId = persistedGeneratedProject("9908");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(false, "纯文档性修订，系统现状已满足");
-
-        appService.startFixRun(projectId, "把首页标题改成「关于我们」", null);
-        tracks.remove(0).run();
-
-        // fix-unchanged 已退役（#82）：两态收口都不发
-        verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_finish_edit_changed_true_when_fix_closes_then_no_unchanged_frame() {
-        Long projectId = persistedGeneratedProject("9909");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(true, "已把主色调改为绿色");
-
-        appService.startFixRun(projectId, "把主色调改成绿色", null);
-        tracks.remove(0).run();
-
-        // changed=true：现有收口行为不回归——轨道正常收工
-        verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_no_finish_edit_when_converse_returns_then_treated_as_failed_attempt() {
-        Long projectId = persistedGeneratedProject("9910");
-        List<Runnable> tracks = givenTrackQueued();
-        // 首试正常返回但不调 finish_edit（脚本化「模型忘了收口」）→ 判未正常收口、
-        // 按既有重试口径续试；重试轮调了 → 正常收口（首试隔离 finish_edit 缺失：验证
-        // 已在场——#424 在场闸不先于 finish_edit 事实拒）
-        when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> {
-                    AgentCommand first = invocation.getArgument(0);
-                    if (first.sessionId().startsWith("coder-")) {
-                        verifyRan(first);
-                    }
-                    return new AgentReply(first.runId(), "做完了");
-                })
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    finishFixFacts.record(command.workspaceId(), true, "重试轮补上收口");
-                    return new AgentReply(command.runId(), "修正完成");
-                });
-
-        appService.startFixRun(projectId, "修一下分页", null);
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).prompt())
-                .contains("错误现场：修正 run 未以 finish_edit 结束工具收口")
-                .contains("进展现场（平台可观测事实）")
-                .contains("已累计用时");
-        // 未正常收口按重试口径静默（#82/#84）：无 error、无重试信号（与 converse
-        // 异常的重试同一口径——run 失败为唯一失败终态）
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_zero_verification_fix_run_when_close_then_rejected_refed_back_then_verified_closes() {
-        // #424 更新轨同盖（闸开用例经 givenClosingGatesOpen 显式切回）：修正 run 零验证收口被结构性拒绝——拒绝回执
-        // 喂回同 run（先于 finish_edit 事实消费，事实连续不丢），补验后正常收口
-        Long projectId = persistedGeneratedProject("9931");
-        givenClosingGatesOpen();
-        List<Runnable> tracks = givenTrackQueued();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            // 首试零验证（finish_edit 已调但不验）、拒绝回执喂回后补验登记
-            if (command.prompt().contains("错误现场")
-                    && !verificationFacts.hasRegistration(command.workspaceId())) {
-                verificationFacts.record(command.workspaceId(), List.of(
-                        new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
-            }
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            return new AgentReply(command.runId(), "修正完成");
-        });
-
-        appService.startFixRun(projectId, "修一下分页", null);
-        tracks.remove(0).run();
-
-        // 两试（零验证被拒 → 补验收口）：拒绝回执进同 run 现场
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(1).prompt())
-                .contains("错误现场")
-                .contains("验证在场未过")
-                .contains("验收要点");
-        // 补验后正常收口：无失败终态、轨道收工（下一场可再起跑）
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_no_finish_edit_all_attempts_when_fix_then_terminal_and_track_released() {
-        Long projectId = persistedGeneratedProject("9911");
-        List<Runnable> tracks = givenTrackQueued();
-        // 全部尝试都不调 finish_edit：每次收口判定不过 → 静默重试超限转终态（唯一
-        // 失败终态 run-failed 收口，中间 error 不出用户面），轨道收工释放
-        when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> new AgentReply(
-                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
-
-        appService.startFixRun(projectId, "修不动", null);
-        tracks.remove(0).run();
-
-        verify(agentClient, times(3)).converse(any(), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
-        // 自检播报（#85）终态面：逐次「检查中」（尝试间未过不出 ❌），末次未过出 ❌
-        // ——❌ 先于 run-failed 到达（同终态窗口）
-        ArgumentCaptor<Map<String, Object>> checks = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(4)).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
-                checks.capture());
-        assertThat(checks.getAllValues())
-                .extracting(payload -> payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))
-                .containsExactly(
-                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
-                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
-                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
-                        AgentEventTypes.PART_CHECK_STATE_FAILED);
-        InOrder closeOrder = inOrder(eventsAppService);
-        closeOrder.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
-                argThat(payload -> AgentEventTypes.PART_CHECK_STATE_FAILED.equals(
-                        payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))));
-        closeOrder.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
-        // 未正常收口的超限同样由 run-failed 收口终态（#56）
-        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
-        assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_stale_fact_from_earlier_track_when_new_track_then_not_consumed_as_verdict() {
-        // 轨道起跑清残留：上一轨遗留（或生成 run 误调）的事实不顶本轨的收口判定
-        Long projectId = persistedGeneratedProject("9912");
-        List<Runnable> tracks = givenTrackQueued();
-        finishFixFacts.record("9912", false, "上一轨的旧事实");
-        // 本轨全程不调 finish_edit → 旧事实被清、收口判定不过 → 重试超限转终态
-        when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> new AgentReply(
-                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
-
-        appService.startFixRun(projectId, "新一轮意见", null);
-        tracks.remove(0).run();
-
-        verify(agentClient, times(3)).converse(any(), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
-    }
-
-    // ---------- 收口扩载（#88：判定行 + 变更清单 + 轮末统计，服务端权威） ----------
 
     /**
-     * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 解说部件 → run-finish）
-     * + finish_edit 事实 + 回复携带文件变更观察（真实客户端的 AgentReply.changes 面）。
+     * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 过程部件 → run-finish）
+     * + 回复携带文件变更观察（真实客户端的 AgentReply.changes 面）。
      */
-    private void givenConverseClosing(Boolean changed, String finishEditText,
-            List<FileChange> changes) {
+    private void givenConverseClosing(List<FileChange> changes) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(),
-                    Map.of(AgentEventTypes.PART_TEXT_FIELD, "正在按意见更新系统")));
+            sink.accept(scripted(AgentEventTypes.PART_SIGNAL, command.runId(),
+                    Map.of(AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
+                            AgentEventTypes.PART_SIGNAL_DERAILED)));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            finishFixFacts.record(command.workspaceId(), changed, finishEditText);
             return new AgentReply(command.runId(), "修正完成", null, changes);
         });
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_spec_project_when_fix_then_materialized_section_and_lint_in_closing() {
-        // #296 更新 run 同律（定稿触发的按稿对齐走本轨）：派发物化（AGENTS.md 设计
-        // 规范节＋DESIGN.md／lint 配置落位）＋收口扫描事实随收尾卡；无规范项目
-        // 零物化（既有测试即证——本类其余用例从不桩 execWithStdin 而全绿）
-        Long projectId = persistedGeneratedProject("9960");
-        jdbcTemplate.update(
-                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
-                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
-                4821000000000000002L, projectId, "/design/home-1.html", "run-final-1",
-                "{\"--primary\": \"#166534\"}");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(true, "按定稿设计统一配色", List.of(
-                new FileChange("/src/app/globals.css", 6, 2)));
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("oxlint"))))
-                .thenReturn(new ExecResultResponse("{ \"diagnostics\": [] }", "", 0));
-
-        appService.startFixRun(projectId, "按定稿设计改配色", null);
-        tracks.remove(0).run();
-
-        // AGENTS.md 命令体含设计规范节；物化写 DESIGN.md＋lint 配置
-        ArgumentCaptor<WorkspaceExecCommand> execs =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(1)).exec(any(), execs.capture());
-        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command)
-                        .contains("AGENTS.md").contains("## 设计规范"));
-        ArgumentCaptor<WorkspaceExecCommand> writes =
-                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
-        verify(workspaceLifecycleAppService, atLeast(2)).execWithStdin(any(), writes.capture(),
-                any());
-        assertThat(writes.getAllValues()).extracting(WorkspaceExecCommand::command)
-                .anySatisfy(command -> assertThat(command).contains("DESIGN.md"))
-                .anySatisfy(command -> assertThat(command).contains(".oxlintrc.json"));
-        // 收尾卡携按稿对齐扫描事实（status=passed）
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> lint = (Map<String, Object>) closing.get("designLint");
-        assertThat(lint).containsEntry("status", "passed");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
-        // #425 更新轨同盖（#471 gap 收口改口径；#541 让路后两档同为标注缺省）：
-        // 基座 lint 预置档（会话件自写）不触发修轮——软档违规不烧 attempt+1 失败
-        // 升档，直接随收尾卡标注、不拦收口（强制档缺省同形＝只标注；阻断形态＝
-        // #541 运营开关回滚，生成轨用例承载）
-        Long projectId = persistedGeneratedProject("9961");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(true, "加了登录会话", List.of(
-                new FileChange("/src/app/login/actions.ts", 8, 1)));
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        // 强制档净、预置档恒余（手写 cookie 会话）——grep 前置判据防误截 AGENTS.md
-        // 写入命令（其正文含件路径字样）
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
-                        && cmd.command().contains("createClient"))))
-                .thenReturn(new ExecResultResponse("", "", 1));
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
-                        && cmd.command().contains("pbkdf2"))))
-                .thenReturn(new ExecResultResponse(
-                        "./src/app/login/actions.ts:8:const jar = await cookies();\n", "", 0));
-
-        appService.startFixRun(projectId, "加登录", null);
-        tracks.remove(0).run();
-
-        // 预置档不触发修轮：一试即收口（无修轮重试）、无失败终态；收尾卡
-        // robustKitLint 如实标注（violations＋预置档余项、无强制档、无 retried
-        // ——修轮没发生，叙事不伪造纠偏过程）
-        verify(agentClient, times(1)).converse(any(), any());
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> robustLint = (Map<String, Object>) closing.get("robustKitLint");
-        assertThat(robustLint)
-                .containsEntry("status", "violations")
-                .doesNotContainKey("retried")
-                .doesNotContainKey("mandatory");
-        assertThat((Map<String, Object>) robustLint.get("preset"))
-                .containsEntry("total", 1);
-    }
-
-    @Test
-    void given_style_lint_violations_when_fix_then_narrow_repair_prompt() {
-        // #472 更新轨同盖（#425 收口携 lint 面——修轮在本轨真实触发，评审收口）：
-        // 修轮派发走窄修轨（本轮修正已完成、仅消除清单内违规、finish_edit 收口
-        // 尾句），不再整任务重述——「完成本轮修正」宽形只属能力面重试（Q1a 兜底
-        // 语义不变）
-        Long projectId = persistedGeneratedProject("9962");
-        jdbcTemplate.update(
-                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
-                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
-                4821000000000000003L, projectId, "/design/home-1.html", "run-final-1",
-                "{\"--primary\": \"#166534\"}");
-        List<Runnable> tracks = givenTrackQueued();
-        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
-                .thenReturn(new ExecResultResponse("123", "", 0));
-        AtomicInteger scans = new AtomicInteger();
-        when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("oxlint"))))
-                .thenAnswer(invocation -> scans.incrementAndGet() == 1
-                        ? new ExecResultResponse("""
-                                { "diagnostics": [{"message": "\\"bg-red-500\\" uses the raw Tailwind palette. Use a theme token.",
-                                "code": "shadcn(no-raw-colors)","severity": "error","filename": "src/app/page.tsx",
-                                "labels": [{"span": {"line": 3}}]}]}
-                                """, "", 1)
-                        : new ExecResultResponse("{ \"diagnostics\": [] }", "", 0));
-        List<String> prompts = new ArrayList<>();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
-            prompts.add(command.prompt());
-            Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
-                    Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            finishFixFacts.record(command.workspaceId(), true, "按定稿设计统一配色");
-            return new AgentReply(command.runId(), "修正完成", null, List.of(
-                    new FileChange("/src/app/page.tsx", 6, 2)));
-        });
-
-        appService.startFixRun(projectId, "按定稿设计改配色", null);
-        tracks.remove(0).run();
-
-        // 首试违规 → 修轮清零（2 次 converse）；修轮 prompt 窄修形：携违规清单＋
-        // 窄修指令＋finish_edit 收口尾句，不携「完成本轮修正」整任务重述
-        verify(agentClient, times(2)).converse(any(), any());
-        assertThat(prompts.get(1))
-                .contains("样式合规扫描未过")
-                .contains("src/app/page.tsx:3 no-raw-colors")
-                .contains("只逐条消除")
-                .contains("finish_edit")
-                .doesNotContain("完成本轮修正");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
-        // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/
-        // 变更清单/统计）且判定行为服务端权威值（PRD 改没改 = 交接物修订说明、
-        // 系统改没改 = finish_edit 工具事实，不由模型自报）；清单与统计源 = 工具
-        // 调用观察（文件级）+ run 时长
+    void given_scripted_update_round_when_fix_closes_then_run_finish_carries_five_field_closing() {
+        // 灵魂用例（#617/#619）：脚本化更新轮收口——五字段骨架齐（用时/判据逐件/
+        // 内核自述/变更清单/预览入口由前端查询提供）；判定键与平台句式摘要退役；
+        // 变更清单来源 = 工作区真实 diff（跑前快照基线 + 收口 numstat），迭代另携
+        // 单文件只读 patch
         Long projectId = persistedGeneratedProject("9915");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(true, "下单页新增配送范围说明", List.of(
-                new FileChange("/src/pages/Orders.jsx", 12, 3),
-                new FileChange("/src/App.jsx", 4, 0)));
+        givenSnapshotAndDiff(
+                "12\t3\tsrc/pages/Orders.jsx\n4\t0\tsrc/App.jsx\n",
+                "diff --git a/src/App.jsx b/src/App.jsx\n"
+                        + "--- a/src/App.jsx\n+++ b/src/App.jsx\n@@ -1 +1,4 @@\n+新增\n"
+                        + "diff --git a/src/pages/Orders.jsx b/src/pages/Orders.jsx\n"
+                        + "--- a/src/pages/Orders.jsx\n+++ b/src/pages/Orders.jsx\n"
+                        + "@@ -1,3 +1,12 @@\n-旧\n+新\n");
+        // 工具参数观察与真实 diff 刻意不同——收尾卡必须取 diff
+        givenConverseClosing(List.of(new FileChange("/src/pages/Orders.jsx", 99, 99)));
 
-        appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
+        handOff(projectId, "下单页加配送范围说明");
         tracks.remove(0).run();
 
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payload.capture());
-        // 扩载随被押后的 run-finish 一体到达（收口判据落定后——真收口才扩载）
         Map<String, Object> closing =
                 (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(closing)
-                .containsEntry("summary", "修订了需求文档，并更新了系统")
-                .containsEntry("prdChanged", true)
-                .containsEntry("prdNote", "配送范围改为全国")
-                .containsEntry("systemChanged", true)
-                .containsEntry("systemNote", "下单页新增配送范围说明");
-        // 变更清单：文件级、路径排序稳定
-        assertThat((List<Map<String, Object>>) closing.get("files")).containsExactly(
-                Map.of("path", "/src/App.jsx", "added", 4, "removed", 0),
-                Map.of("path", "/src/pages/Orders.jsx", "added", 12, "removed", 3));
-        // 轮末统计：时长在场（≥0——起跑到收口的活动量，非墙钟断言）
+        assertThat(closing).containsEntry("narrative", "修正完成");
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
+        assertThat(closing).doesNotContainKeys(
+                "summary", "prdChanged", "prdNote", "systemChanged", "systemNote");
+        List<Map<String, Object>> files = (List<Map<String, Object>>) closing.get("files");
+        assertThat(files).extracting(file -> file.get("path"))
+                .containsExactly("/src/App.jsx", "/src/pages/Orders.jsx");
+        assertThat(files.get(0)).containsEntry("added", 4).containsEntry("removed", 0);
+        assertThat(files.get(1)).containsEntry("added", 12).containsEntry("removed", 3);
+        assertThat((String) files.get(0).get("patch")).contains("+新增");
+        assertThat((String) files.get(1).get("patch")).contains("-旧").contains("+新");
+        assertThat(files).allSatisfy(file -> assertThat(file).doesNotContainKey("patchOmitted"));
+        assertThat(closing).doesNotContainKey("filesUnavailable");
+        assertThat(closing).doesNotContainKey("directories"); // 迭代维持文件级清单
         assertThat(closing.get("durationMs")).isInstanceOf(Long.class);
         assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_scripted_update_round_when_fix_closes_then_version_committed_and_hash_in_closing() {
-        // 版本锚定（#91）：收口自动成版——commit hash 回填 closing 的 version 键
-        // （SSE 扩载与对话史落库同载荷，版本详情复用）
-        Long projectId = persistedGeneratedProject("9917");
-        List<Runnable> tracks = givenTrackQueued();
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\n", "", 0));
-        givenConverseClosing(true, "下单页新增配送范围说明", List.of(
-                new FileChange("/src/pages/Orders.jsx", 12, 3)));
-
-        appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
-        tracks.remove(0).run();
-
-        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payload.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(closing).containsEntry("version", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void given_finish_edit_unchanged_when_fix_closes_then_closing_judgment_reflects_reason() {
-        // 判定行的另一半（#88）：系统无需改动——原因随判定行权威承载（旧「编辑无
-        // 变化」前端推导退役，权威值到位）；无修订说明的轮 prdChanged=false
-        Long projectId = persistedGeneratedProject("9916");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseClosing(false, "页面上没有写死配送范围，都以文档为准", List.of());
-
-        appService.startFixRun(projectId, "把配送范围改成全国", null);
-        tracks.remove(0).run();
-
-        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payload.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        assertThat(closing)
-                .containsEntry("summary", "本轮系统无需改动")
-                .containsEntry("prdChanged", false)
-                .containsEntry("systemChanged", false)
-                .containsEntry("systemNote", "页面上没有写死配送范围，都以文档为准");
-        assertThat(closing).doesNotContainKey("prdNote");
-        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
-    }
-
-    // ---------- 产出证明闸（#420 空转片防呆：更新轨同盖——迭代/fix run 不重新引入空转收口） ----------
-
-    /**
-     * 三闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行三开关
-     * true＝#424/#420/#427 现行为（更新轨拒绝—补做链路与复走终验的既有用例承载面）。
-     */
-    private void givenClosingGatesOpen() {
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     verification_presence_gate_enabled, proof_of_output_gate_enabled,
-                     final_verification_gate_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    verification_presence_gate_enabled
-                        = EXCLUDED.verification_presence_gate_enabled,
-                    proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled,
-                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
-                """);
-    }
-
-    /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
-    private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
-
-    /** 产出证明探针脚本位（true＝零 diff 空转；缺省 false＝有产出）。 */
-    private final AtomicBoolean idleProof = new AtomicBoolean(false);
-
-    /** 产出证明闸桩（#420）：git 就绪＋diff 探针读脚本位（--name-only 与留账 diff 区分）。 */
-    private void givenWorkspaceGitReadyWithProofScript() {
-        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
-            WorkspaceExecCommand cmd = invocation.getArgument(1);
-            if (cmd == null) {
-                return new ExecResultResponse("", "", 0);
-            }
-            if (cmd.command().contains("git rev-parse")) {
-                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
-            }
-            if (cmd.command().contains("git diff --name-only")) {
-                return new ExecResultResponse(
-                        idleProof.get() ? "" : "src/app/page.tsx\n", "", 0);
-            }
-            return new ExecResultResponse("", "", 0);
-        });
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void given_idle_fix_run_when_close_then_rejected_then_confirmed_exempt_closes() {
-        // #420 AC⑤＋AC①（更新轨同盖）：changed=false＋零 diff＋无确认的收口被结构性
-        // 拒绝——拒绝回执进同 run 现场；补验证（确认「能力已存在」）后走豁免路径
-        // 正常收口，拒绝史＋豁免依据均随收尾卡判别标注
-        Long projectId = persistedGeneratedProject("9940");
-        givenClosingGatesOpen();
-        List<Runnable> tracks = givenTrackQueued();
-        givenWorkspaceGitReadyWithProofScript();
-        AtomicInteger converseCalls = new AtomicInteger();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("coder-")) {
-                verifyRan(command);
-            }
-            Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
-                    Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
-                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            // 执行体宣告无需改动（changed=false）；首试零 diff 未验证被拒，重试轮
-            // verify 确认该能力已存在（用户要的活系统里已有）
-            finishFixFacts.record(command.workspaceId(), false, "该能力系统已具备");
-            if (converseCalls.incrementAndGet() == 1) {
-                idleProof.set(true);
-            } else {
-                verificationFacts.record("9940", List.of(
-                        new VerificationFacts.Check("预约列表倒序", "browser", true, null, true)));
-            }
-            return new AgentReply(command.runId(), "修正完成", null, List.of());
-        });
-
-        appService.startFixRun(projectId, "预约列表按时间倒序排", null);
-        tracks.remove(0).run();
-
-        // 两试：空转被拒（回执进重试现场）→ 补验证确认后豁免收口
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(1).prompt())
-                .contains("产出证明未过")
-                .contains("能力已存在");
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
-                payloads.capture());
-        Map<String, Object> closing =
-                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
-        Map<String, Object> proof =
-                (Map<String, Object>) closing.get(CoderRunAttempts.CLOSING_PROOF_FIELD);
-        assertThat(proof)
-                .containsEntry(ProofOfOutputGate.IDLE_REJECTIONS_FIELD, 1)
-                .containsEntry(ProofOfOutputGate.EXEMPTED_FIELD, true)
-                .containsEntry(ProofOfOutputGate.EXEMPTION_BASIS_FIELD,
-                        "验证确认「能力已存在」：预约列表倒序");
-        assertThat(closing).containsEntry("systemChanged", false);
-    }
-
-    @Test
-    void given_idle_fix_run_never_proving_when_fix_then_terminal_run_failed() {
-        // #420 空转拒绝耗尽（更新轨既有失败处置——无段级回滚钩，终态 run-failed 走
-        // 恢复出口，不建新通道）：失败面错误现场携拒绝回执（可归因「为何没修成」）
-        Long projectId = persistedGeneratedProject("9941");
-        givenClosingGatesOpen();
-        List<Runnable> tracks = givenTrackQueued();
-        givenWorkspaceGitReadyWithProofScript();
-        idleProof.set(true);
-        givenConverseFinishing(false, "该能力系统已具备");
-
-        appService.startFixRun(projectId, "预约列表按时间倒序排", null);
-        tracks.remove(0).run();
-
-        verify(agentClient, times(3)).converse(any(), any());
-        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
-                payloads.capture());
-        Map<String, Object> failure =
-                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.FAILURE_FIELD);
-        assertThat(String.valueOf(failure.get("error"))).contains("产出证明未过");
-    }
-
-    // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------
-
-    @Test
-    void given_prd_revised_when_fix_then_prompt_carries_summary_and_prd_reference() {
-        // 灵魂用例（#41 Testing Decisions）：summary 终值 + PRD 路径引用都进修正
-        // run prompt（不注全文——执行体重读约定见配置）
-        Long projectId = persistedGeneratedProject("9919");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        appService.startFixRun(projectId, "把系统的主色调改成绿色",
-                "按意见把主色调相关约定从蓝改为绿（覆盖本条意见）");
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
-        assertThat(command.getValue().prompt())
-                .contains("PRD 已修订")
-                .contains("按意见把主色调相关约定从蓝改为绿（覆盖本条意见）")
-                .contains(ProjectArtifacts.PRD);
-    }
-
-    @Test
-    void given_prd_not_revised_when_fix_then_prompt_states_not_revised_and_dispatch_proceeds() {
-        // 主智能体流不调 savePrd：交接物如实含「本轮无修订」占位口径，修正 run 照派
-        Long projectId = persistedGeneratedProject("9920");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        appService.startFixRun(projectId, "把系统的主色调改成绿色", null);
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
-        assertThat(command.getValue().prompt())
-                .contains("本轮无修订")
-                .doesNotContain("PRD 已修订")
-                .contains(ProjectArtifacts.PRD);
-    }
-
-    @Test
-    void given_queued_rounds_with_and_without_revision_when_merged_then_prompt_pairs_per_round() {
-        // 灵魂用例（#55 story 14 收严）：多轮排队合并且部分轮未改 PRD——每条
-        // 意见与其修订说明仍一一对应（意见二 ↔ 其修订说明、意见三 ↔ 显式占位），
-        // 无修订轮不引起后续轮错位；配对由平台拼装锚定，不靠两清单位置对齐
+    void given_patch_over_limit_when_fix_closes_then_patch_omitted_but_lines_kept() {
         Long projectId = persistedGeneratedProject("9921");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
+        StringBuilder huge = new StringBuilder("diff --git a/src/Big.jsx b/src/Big.jsx");
+        for (int index = 0; index < 301; index++) {
+            huge.append("\n+line ").append(index);
+        }
+        givenSnapshotAndDiff("500\t0\tsrc/Big.jsx\n", huge.toString());
+        givenConverseClosing(List.of());
 
-        appService.startFixRun(projectId, "首条意见（在途）", null);
-        appService.startFixRun(projectId, "意见二：加导出", "为意见二补充了导出功能章节");
-        appService.startFixRun(projectId, "意见三：改蓝色", null);
+        handOff(projectId, "大改一页");
         tracks.remove(0).run();
 
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).prompt())
-                .contains("1. 意见原文：意见二：加导出"
-                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——为意见二补充了导出功能章节")
-                .contains("2. 意见原文：意见三：改蓝色"
-                        + "\n   需求侧判定（主智能体已收口）：本轮无修订（未触发 PRD 变更）");
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat((List<Map<String, Object>>) closing.get("files")).singleElement()
+                .satisfies(file -> assertThat(file).containsEntry("path", "/src/Big.jsx")
+                        .containsEntry("added", 500)
+                        .containsEntry("removed", 0)
+                        .containsEntry("patchOmitted", true)
+                        .doesNotContainKey("patch"));
     }
 
     @Test
-    void given_queued_opinions_each_with_revision_when_track_merges_then_prompt_carries_both_rounds() {
-        // 灵魂用例（#53）：意见 A 的轮已把改 X 落盘（summary=改X）在途排队 +
-        // 意见 B（summary=改Y）排队 → 当前 run 收口续派时，续派 run 的 prompt 同时
-        // 含 X 与 Y 两段判定（各自配对、按派发序）——只带最新一段会让 run 执行体
-        // 不知道 X 也是需求侧新变更、需要同步到系统
-        Long projectId = persistedGeneratedProject("9932");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        appService.startFixRun(projectId, "早前意见（在途）", null);
-        appService.startFixRun(projectId, "意见A：加导出", "A轮修订：PRD 新增导出功能章节");
-        appService.startFixRun(projectId, "意见B：改蓝色", "B轮修订：主色调约定改为蓝");
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        String continuation = command.getAllValues().get(1).prompt();
-        assertThat(continuation)
-                .contains("1. 意见原文：意见A：加导出"
-                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——A轮修订：PRD 新增导出功能章节")
-                .contains("2. 意见原文：意见B：改蓝色"
-                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——B轮修订：主色调约定改为蓝");
-    }
-
-    // ---------- 逐轮配对（#55：merge 纯函数——各轮「意见 → 修订说明」成对串联） ----------
-
-    @Test
-    void given_handoffs_each_with_revision_when_merged_then_rounds_pair_opinion_with_own_revision() {
-        // 跨轮排队合并：各轮判定描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、
-        // B 轮在其上再改 Y）——各轮成对、按派发序
-        IterationAppService.FixHandoff merged = IterationAppService.FixHandoff.merge(List.of(
-                singleHandoff("意见A", "A轮修订：改X"),
-                singleHandoff("意见B", "B轮修订：改Y")));
-        assertThat(merged.rounds()).containsExactly(
-                new IterationAppService.FixHandoff.Round("意见A", "A轮修订：改X"),
-                new IterationAppService.FixHandoff.Round("意见B", "B轮修订：改Y"));
-    }
-
-    @Test
-    void given_handoffs_mixed_revision_when_merged_then_unrevised_round_kept_in_place() {
-        // 有改有不改：未修订轮不丢不串位——轮次保留、summary 槽 null（占位呈现归
-        // fixRunPrompt，数据层不造「假说明」）；派发序两侧各验一次
-        IterationAppService.FixHandoff unrevisedFirst = IterationAppService.FixHandoff.merge(List.of(
-                singleHandoff("意见A", null),
-                singleHandoff("意见B", "B轮修订：改Y")));
-        assertThat(unrevisedFirst.rounds()).containsExactly(
-                new IterationAppService.FixHandoff.Round("意见A", null),
-                new IterationAppService.FixHandoff.Round("意见B", "B轮修订：改Y"));
-        IterationAppService.FixHandoff unrevisedSecond = IterationAppService.FixHandoff.merge(List.of(
-                singleHandoff("意见A", "A轮修订：改X"),
-                singleHandoff("意见B", null)));
-        assertThat(unrevisedSecond.rounds()).containsExactly(
-                new IterationAppService.FixHandoff.Round("意见A", "A轮修订：改X"),
-                new IterationAppService.FixHandoff.Round("意见B", null));
-    }
-
-    @Test
-    void given_handoffs_all_without_revision_when_merged_then_all_rounds_unrevised() {
-        // 全未修订：各轮槽均 null（每轮各自的「本轮无修订」，非全局一杆子）
-        IterationAppService.FixHandoff merged = IterationAppService.FixHandoff.merge(List.of(
-                singleHandoff("意见A", null),
-                singleHandoff("意见B", null)));
-        assertThat(merged.rounds()).hasSize(2)
-                .extracting(IterationAppService.FixHandoff.Round::prdRevisionSummary)
-                .containsOnlyNulls();
-    }
-
-    @Test
-    void given_never_generated_or_archived_or_missing_when_fix_then_rejected() {
-        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null, null, 9906L, OWNER, null)).getId();
-        Long archivedId = persistedArchivedGeneratedProject("9907");
-
-        assertThatThrownBy(() -> appService.startFixRun(notGeneratedId, "改一下", null))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RUN_NOT_GENERATED.message());
-        assertThatThrownBy(() -> appService.startFixRun(archivedId, "改一下", null))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
-        assertThatThrownBy(() -> appService.startFixRun(-1L, "改一下", null))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
-        // 恢复出口守卫同口径（#48）：归档 / 未生成 / 不存在
-        assertThatThrownBy(() -> appService.restartFixRun(archivedId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
-        assertThatThrownBy(() -> appService.restartFixRun(notGeneratedId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RUN_NOT_GENERATED.message());
-        assertThatThrownBy(() -> appService.restartFixRun(-1L))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
-        verify(agentClient, never()).converse(any(), any());
-    }
-
-    // ---------- 超限终态恢复出口（#48：重派终态那场的交接物） ----------
-
-    @Test
-    void given_fix_terminal_failure_when_restart_fix_then_same_handoff_redispatched() {
-        Long projectId = persistedGeneratedProject("9913");
-        List<Runnable> tracks = givenTrackQueued();
-        // 首场 3 次尝试全失败（超限转终态）；恢复轮收口成功
-        IllegalStateException persistentFailure = new IllegalStateException("持续失败");
-        when(agentClient.converse(any(), any()))
-                .thenThrow(persistentFailure, persistentFailure, persistentFailure)
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    finishFixFacts.record(command.workspaceId(), true, "恢复轮完成修正");
-                    return new AgentReply(command.runId(), "修正完成");
-                });
-
-        appService.startFixRun(projectId, "把主色调改成绿色", "按意见把主色调改为绿");
-        tracks.remove(0).run();
-        verify(agentClient, times(3)).converse(any(), any());
-
-        // 恢复出口：重派修正 run——交接物沿用（意见清单 + 判定结果、同 coder 会话），
-        // 响应 runId 即新 run 首试标识（与新 run 的链路锚，同 /generate 口径）
-        IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
-        assertThat(restart.queued()).isFalse();
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(4)).converse(command.capture(), any());
-        AgentCommand redispatch = command.getAllValues().get(3);
-        assertThat(redispatch.prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(
-                        singleHandoff("把主色调改成绿色", "按意见把主色调改为绿")));
-        assertThat(redispatch.runId()).isEqualTo(restart.runId());
-        assertThat(redispatch.sessionId()).isEqualTo(
-                IterationAppService.fixSession(projectId, restart.runId()));
-        // 恢复轮成功收工：终态账清（成功后无恢复面，再恢复即 409）+ 轨道释放（下一场可起跑）
-        assertThatThrownBy(() -> appService.restartFixRun(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
-    }
-
-    @Test
-    void given_fix_succeeded_or_never_dispatched_when_restart_fix_then_rejected() {
-        Long succeededId = persistedGeneratedProject("9914");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-        appService.startFixRun(succeededId, "列表加筛选", null);
-        tracks.remove(0).run();
-
-        Long neverDispatchedId = persistedGeneratedProject("9915");
-
-        // 正常态无恢复面：成功收工 / 从未派过修正（终态账为空）→ 409 指路重提意见
-        assertThatThrownBy(() -> appService.restartFixRun(succeededId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
-        assertThatThrownBy(() -> appService.restartFixRun(neverDispatchedId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
-        // 拒绝即零动作：成功那场之外不起任何 run
-        verify(agentClient, times(1)).converse(any(), any());
-    }
-
-    @Test
-    void given_fix_in_flight_when_restart_fix_then_rejected() {
-        Long projectId = persistedGeneratedProject("9916");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-        // 轨道已提交未起跑（排队中同在途口径）：恢复出口不可达
-        appService.startFixRun(projectId, "第一条", null);
-
-        assertThatThrownBy(() -> appService.restartFixRun(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RESTART_IN_FLIGHT.message());
-        verify(agentClient, never()).converse(any(), any());
-    }
-
-    @Test
-    void given_terminal_then_new_opinion_track_when_restart_fix_then_latest_failure_handoff() {
-        // 终态后再提意见起的新轨若又超限：恢复账换新轨的交接物（最近一次终态）
+    @SuppressWarnings("unchecked")
+    void given_scripted_update_round_when_fix_closes_then_closing_has_no_version_anchor() {
+        // 收尾卡不携 version 键；跑前快照会提交 git（平台标识、无 trailer）——快照不是
+        // 用户面版本，版本序列成员判据（Rollback-From）天然过滤
         Long projectId = persistedGeneratedProject("9917");
         List<Runnable> tracks = givenTrackQueued();
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("持续失败"));
+        givenSnapshotAndDiff("12\t3\tsrc/pages/Orders.jsx\n", "");
+        givenConverseClosing(List.of());
 
-        appService.startFixRun(projectId, "第一次意见", null);
-        tracks.remove(0).run();
-        appService.startFixRun(projectId, "第二次意见", null);
+        handOff(projectId, "下单页加配送范围说明");
         tracks.remove(0).run();
 
-        IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
-        tracks.remove(0).run();
-        // 重派轨同样烧满 3 次尝试（全败）：第 7 次调用即重派首试
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(9)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(6).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(singleHandoff("第二次意见", null)));
-        assertThat(command.getAllValues().get(6).runId()).isEqualTo(restart.runId());
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).doesNotContainKey("version");
+        ArgumentCaptor<WorkspaceExecCommand> execs =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(0)).exec(any(), execs.capture());
+        assertThat(execs.getAllValues().stream().map(WorkspaceExecCommand::command))
+                .noneSatisfy(command -> assertThat(command).contains("Rollback-From"));
+        assertThat(execs.getAllValues().stream().map(WorkspaceExecCommand::command))
+                .anySatisfy(command -> assertThat(command).contains("-m 'snapshot "));
     }
 
     @Test
-    void given_terminal_failure_with_queued_continuation_when_track_settles_then_no_stale_recovery() {
-        // 首场超限但队列有排队意见：轨道合并续派而非收工——续派场成功即整轨收工，
-        // 终态账不落（首场的失败不是可恢复面，排队合并那场才是末场事实）
-        Long projectId = persistedGeneratedProject("9918");
+    @SuppressWarnings("unchecked")
+    void given_no_file_changes_when_fix_closes_then_closing_has_empty_change_list() {
+        Long projectId = persistedGeneratedProject("9916");
         List<Runnable> tracks = givenTrackQueued();
-        IllegalStateException persistentFailure = new IllegalStateException("持续失败");
-        when(agentClient.converse(any(), any()))
-                .thenThrow(persistentFailure, persistentFailure, persistentFailure)
-                .thenAnswer(invocation -> {
-                    AgentCommand command = invocation.getArgument(0);
-                    if (command.sessionId().startsWith("coder-")) {
-                        verifyRan(command);
-                    }
-                    finishFixFacts.record(command.workspaceId(), true, "合并续派场完成修正");
-                    return new AgentReply(command.runId(), "修正完成");
-                });
+        givenSnapshotAndDiff("", "");
+        givenConverseClosing(List.of());
 
-        appService.startFixRun(projectId, "首场意见（将超限）", null);
-        assertThat(appService.startFixRun(projectId, "排队意见", null).queued()).isTrue();
+        handOff(projectId, "把配送范围改成全国");
         tracks.remove(0).run();
 
-        // 首场 3 败 + 合并续派 1 成；成功收工 → 无恢复面（首场超限不留陈账）
-        verify(agentClient, times(4)).converse(any(), any());
-        // 中途超限不是终态（#56）：首场烧满即续派合并场，全程不发 run-failed——
-        // 「重新修改」出口零闪现（轨道仍在途，出口本就会被 PRJ_025 挡回）
-        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
-        assertThatThrownBy(() -> appService.restartFixRun(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
-    }
-
-    // ---------- 测试数据 ----------
-
-    /** 单轮交接物（一次派发 = 一轮：一条意见 + 该轮判定）。 */
-    private static IterationAppService.FixHandoff singleHandoff(String opinion, String summary) {
-        return new IterationAppService.FixHandoff(
-                List.of(new IterationAppService.FixHandoff.Round(opinion, summary)));
-    }
-
-    /** 已生成形态的项目（迭代的前提事实）。 */
-    private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
-        project.markPrdProduced();
-        project.markGenerated();
-        return projectRepository.save(project).getId();
-    }
-
-    /** PRD 版本行在场（#333 Demo 版本锚——迭代起跑时最新构建基准的取数事实）。 */
-    private void seedPrdVersionRow(Long projectId, int versionNo) {
-        seedPrdVersionRowContent(projectId, versionNo, "# PRD");
-    }
-
-    /** PRD 版本行在场（自定义全文——记行形态的版本行夹具：锚捕获读「最新版」）。 */
-    private void seedPrdVersionRowContent(Long projectId, int versionNo, String content) {
-        jdbcTemplate.update("""
-                INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
-                    prd_produced_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, System.nanoTime(), projectId, versionNo, content);
-    }
-
-    private Long persistedArchivedGeneratedProject(String workspaceId) {
-        Project project = Project.create("归档迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
-        project.markPrdProduced();
-        project.markGenerated();
-        project.archive();
-        return projectRepository.save(project).getId();
-    }
-
-    // ---------- Demo 版本化（#333）：迭代轮收口自动成版 ----------
-
-    @Test
-    void given_changed_fix_runs_when_close_then_demo_versions_increment_with_prd_anchor() {
-        // 灵魂例（#333 迭代每轮自动成版）：changed=true 收口即递增成版、锚本场起跑时
-        // 最新 PRD 版本（#462 去门化＝最新构建基准记行）——v1（PRD v1 基准）→ 新基准
-        // v2 记行后下一轮锚 v2（迭代成版链）
-        Long projectId = persistedGeneratedProject("9950");
-        seedPrdVersionRow(projectId, 1);
-        // 工作区 PRD==最新记行全文（同文——起跑记行幂等跳过，不产生新基准）
-        givenWorkspacePrd("# PRD");
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表按时间倒序", null);
-        tracks.remove(0).run();
-        // 需求侧修订后的新基准记行（模拟 PRD 已修订、随起跑自动记 v2）——下一场锚 v2
-        seedPrdVersionRow(projectId, 2);
-        IterationAppService.FixDispatch second = appService.startFixRun(projectId, "加筛选", null);
-        tracks.remove(0).run();
-
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT version_no, prd_version_no, run_id FROM prj_demo_versions"
-                        + " WHERE project_id = ? ORDER BY version_no",
-                projectId);
-        assertThat(rows).extracting(row -> row.get("version_no")).containsExactly(1, 2);
-        // 各版 PRD 关联正确：v1 锚 v1、v2 锚 v2；run 锚＝各场修正 run
-        assertThat(rows.get(0)).containsEntry("prd_version_no", 1)
-                .containsEntry("run_id", first.runId());
-        assertThat(rows.get(1)).containsEntry("prd_version_no", 2)
-                .containsEntry("run_id", second.runId());
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).containsEntry("narrative", "修正完成");
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true)
+                .containsEntry("previewPassed", true);
+        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+        assertThat(closing).doesNotContainKey("filesUnavailable"); // 空清单不是降级
     }
 
     @Test
-    void given_unchanged_fix_run_when_close_then_no_demo_version() {
-        // changed=false＝无新系统状态即无新版本（判定无需改动不成版——不造空版本）
-        Long projectId = persistedGeneratedProject("9951");
+    @SuppressWarnings("unchecked")
+    void given_diff_fails_when_fix_closes_then_run_succeeds_and_changes_unavailable() {
+        Long projectId = persistedGeneratedProject("9922");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseFinishing(false, "现状已满足意见");
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse("", "fatal: bad revision", 128));
+        givenConverseClosing(List.of());
 
-        appService.startFixRun(projectId, "列表按时间倒序", null);
+        handOff(projectId, "列表页加一列状态");
         tracks.remove(0).run();
 
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_demo_versions WHERE project_id = ?", Integer.class,
-                projectId);
-        assertThat(count).isZero();
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).containsEntry("filesUnavailable", true)
+                .containsEntry("narrative", "修正完成");
+        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+        assertThat((Map<String, Object>) closing.get("criteria"))
+                .containsEntry("buildPassed", true);
+    }
+
+    /** 跑前快照成功（回读 hash）＋收口 numstat 与完整 patch 脚本（#619 diff 缝）。 */
+    private void givenSnapshotAndDiff(String numstat, String patch) {
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("-m 'snapshot "))))
+                .thenReturn(new ExecResultResponse("a1b2c3d", "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("--numstat"))))
+                .thenReturn(new ExecResultResponse(numstat, "", 0));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("diff --cached --no-renames '"))))
+                .thenReturn(new ExecResultResponse(patch, "", 0));
     }
 
     // ---------- 迭代需求基准（#462 去门化）：恒工作区 PRD 正本（单形） ----------
 
-    /** 最新版本行全文 v1（基准断言用的独特正文——区别于新草稿与占位）。 */
     private static final String PRD_V1_ROW = "# PRD v1 基准\n\n## 功能清单\n\n1. 首页\n";
 
-    /** 范围级新草稿（≠v1 全文——工作区已修订、未随起跑记行的形态）。 */
     private static final String SCOPE_DRAFT =
             "# PRD v1 基准\n\n## 功能清单\n\n1. 首页\n2. 管理后台\n";
 
-    /** 工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文——覆盖 AGENTS.md 桩，写路径只看退出码）。 */
+    /** 工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文）。 */
     private void givenWorkspacePrd(String prdMarkdown) {
         when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("1756100000\n" + prdMarkdown, "", 0));
     }
 
+    private void givenConverseSucceeds() {
+        givenConverseFinishing();
+    }
+
     @Test
     void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_workspace_draft() {
-        // 去门化（#462，ADR-0039——#334 停派分流退役）：范围级新草稿在场不再停派
-        // 待确认——受理即迭代，需求基准恒为工作区 PRD 正本（新草稿＝新构建基准，
-        // 下一起跑自动记行；不再内联旧确认版快照）
         Long projectId = persistedGeneratedProject("9960");
-        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
         givenWorkspacePrd(SCOPE_DRAFT);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
-        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        handOff(projectId, "按钮改成蓝色");
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -1591,15 +527,12 @@ class IterationAppServiceTest {
 
     @Test
     void given_draft_equals_latest_row_when_iteration_runs_then_prompt_reads_workspace() {
-        // 工作区正本==最新版本行全文（同文形态，无新草稿在场）：照旧以工作区正本
-        // 为需求正本（单形——不内联快照、不区分草稿/成版两形）
         Long projectId = persistedGeneratedProject("9961");
-        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
         givenWorkspacePrd(PRD_V1_ROW);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
-        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        handOff(projectId, "按钮改成蓝色");
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -1611,14 +544,12 @@ class IterationAppServiceTest {
 
     @Test
     void given_no_version_rows_when_iteration_runs_then_prompt_reads_workspace() {
-        // legacy（无版本记行起跑，如记行失败/极老项目）：不虚构记行——照旧以
-        // 工作区正本为需求正本（Demo 版本锚 null 同口径）
         Long projectId = persistedGeneratedProject("9962");
         givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
-        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        handOff(projectId, "按钮改成蓝色");
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -1628,119 +559,101 @@ class IterationAppServiceTest {
                 .doesNotContain("本轮需求基准");
     }
 
-    // ---------- 更新轨收口后复走整轨终验（#427：防修 A 坏 B） ----------
+    // ---------- 迭代后 PRD 仍是完整文档（#624） ----------
 
-    /** 现行旅程清单就位（PRD 锚对齐——复走终验的载荷轴；journey 表 + 项目锚）。 */
-    private void givenCurrentJourneys(Long projectId, String role, String entry, String keyActions) {
-        jdbcTemplate.update("UPDATE prj_projects SET prd_produced_at = NOW() WHERE id = ?",
-                projectId);
-        java.sql.Timestamp anchor = jdbcTemplate.queryForObject(
-                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
-                java.sql.Timestamp.class, projectId);
-        jdbcTemplate.update("""
-                INSERT INTO prj_generation_plan_journeys
-                    (id, project_id, ord, role, entry, key_actions, prd_produced_at)
-                VALUES (?, ?, 1, ?, ?, ?, ?)
-                """, System.nanoTime(), projectId, role, entry, keyActions, anchor);
+    /** 工作区 PRD 读取桩（按调用序返回——起跑快照在前、收口比对在后）。 */
+    private void givenWorkspacePrdReads(String... prdMarkdowns) {
+        ExecResultResponse[] responses = new ExecResultResponse[prdMarkdowns.length];
+        for (int index = 0; index < prdMarkdowns.length; index++) {
+            responses[index] = new ExecResultResponse("1756100000\n" + prdMarkdowns[index], "", 0);
+        }
+        org.mockito.stubbing.OngoingStubbing<ExecResultResponse> stub =
+                when(workspaceLifecycleAppService.exec(any(),
+                        argThat(cmd -> cmd != null && cmd.command().contains("stat -c %Y"))));
+        if (responses.length == 1) {
+            stub.thenReturn(responses[0]);
+        }
+        else {
+            stub.thenReturn(responses[0],
+                    java.util.Arrays.copyOfRange(responses, 1, responses.length));
+        }
     }
 
     @Test
-    void given_update_breaks_journey_when_track_closes_then_reverified_fixed_and_reverified() {
-        // #427 AC④（更新轨腿）：更新 run 收口后复走整轨终验——修 A 坏 B 被拦：更新
-        // run 修好了意见项但走坏了核心旅程 → 复走终验抓到（fail）→ 自动起终验修复
-        // run（载荷＝失败项清单）→ 复走过验，轨道才收工
-        Long projectId = persistedGeneratedProject("9970");
-        givenClosingGatesOpen();
-        givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
-        List<Runnable> tracks = givenTrackQueued();
-        // 终验/修复 run 的收口探针（8081 探活＋入口完整）——探针命令全通
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("", "", 0));
-        AtomicBoolean fixDone = new AtomicBoolean();
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
-                // 更新后首走终验：旅程被更新修坏（修 A 坏 B）；修复后复走：全过
-                if (!fixDone.get()) {
-                    verificationFacts.record(command.workspaceId(), List.of(
-                            new VerificationFacts.Check("下单支付", "browser", false, "更新后支付按钮失灵")));
-                }
-                else {
-                    verificationFacts.record(command.workspaceId(), List.of(
-                            new VerificationFacts.Check("下单支付", "browser", true, null)));
-                }
-            }
-            else if (command.sessionId().contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX)) {
-                finishFixFacts.record(command.workspaceId(), true, "修复了更新修坏的支付");
-                verifyRan(command);
-                fixDone.set(true);
-            }
-            else {
-                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-                verifyRan(command);
-            }
-            return new AgentReply(command.runId(), "完成");
-        });
+    void given_modification_instructions_when_prompt_then_requires_merge_requirement_into_prd_sections() {
+        // 对话面交指令的迭代 run 同口径：内核把需求整合进 PRD 对应章节
+        String prompt = IterationAppService.modificationRunPrompt(
+                List.of(instruction("列表加导出", "把订单列表增加导出按钮")));
 
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
-        tracks.remove(0).run();
-
-        // 更新 run + 终验(fail) + 终验修复 + 复走终验(pass) = 4 场
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(4)).converse(commands.capture(), any());
-        List<AgentCommand> all = commands.getAllValues();
-        assertThat(all.get(0).sessionId()).contains("-fix-");            // 更新 run
-        assertThat(all.get(1).sessionId())
-                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
-        assertThat(all.get(2).sessionId())
-                .contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX);
-        assertThat(all.get(2).prompt())
-                .contains("「下单支付」").contains("更新后支付按钮失灵");
-        assertThat(all.get(3).sessionId())
-                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+        assertThat(prompt)
+                .contains("docs/PRD.md")
+                .contains("对应章节")
+                .contains("完整文档")
+                .contains("留痕")
+                .doesNotContain("迭代节");
     }
 
     @Test
-    void given_no_journeys_when_update_run_closes_then_no_reverification() {
-        // #427 存量口径（更新轨腿）：无核心旅程轴（旧计划不回补）——更新 run 收口后
-        // 不复走终验，既有更新轨行为不变
-        Long projectId = persistedGeneratedProject("9971");
+    void given_prd_changed_after_fix_when_closes_then_document_updated_emitted() {
+        // 迭代收口对比工作区 PRD 与起跑快照：变了才发既有 document-updated
+        Long projectId = persistedGeneratedProject("9975");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
+        givenWorkspacePrdReads("# PRD\n\n## 功能清单\n\n1. 首页\n",
+                "# PRD\n\n## 功能清单\n\n1. 首页\n2. 导出\n");
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
 
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        handOff(projectId, "列表加导出");
         tracks.remove(0).run();
 
-        verify(agentClient, times(1)).converse(any(), any()); // 只更新 run，无终验 run
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), payload.capture());
+        assertThat(payload.getValue())
+                .containsEntry(ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString())
+                .containsEntry(ProjectEventTypes.DOCUMENT_TYPE_FIELD,
+                        ProjectEventTypes.DOCUMENT_TYPE_PRD);
     }
 
     @Test
-    void given_final_verification_gate_closed_when_update_run_closes_then_no_reverification() {
-        // #433 开关化行为矩阵（更新轨腿·闸关态）： journeys 在场也不复走终验——
-        // 更新 run 收工即轨道收工（闸开＝现行为面由
-        // given_update_breaks_journey_when_track_closes_then_reverified_fixed_and_reverified
-        // 锚定）
-        Long projectId = persistedGeneratedProject("9972");
-        givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
-        jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs
-                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     final_verification_gate_enabled)
-                VALUES ('executor', TRUE, TRUE, TRUE, FALSE)
-                ON CONFLICT (agent_key) DO UPDATE SET
-                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
-                """);
+    void given_prd_unchanged_after_fix_when_closes_then_no_document_updated() {
+        // 无变化不发（避免右栏无意义重拉）
+        Long projectId = persistedGeneratedProject("9976");
         List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
+        String same = "# PRD\n\n## 功能清单\n\n1. 首页\n";
+        givenWorkspacePrdReads(same, same);
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
 
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        handOff(projectId, "列表加导出");
         tracks.remove(0).run();
 
-        // 只更新 run——无终验 run、无终验修复 run（闸关）
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(0).sessionId())
-                .contains("-fix-")
-                .doesNotContain(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+        verify(eventsAppService, never()).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
+    }
+
+    @Test
+    void given_prd_changed_after_modification_when_closes_then_document_updated_emitted() {
+        // 对话面交指令触发的迭代 run 同口径
+        Long projectId = persistedGeneratedProject("9977");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspacePrdReads("# PRD\n\n## 功能清单\n\n1. 首页\n",
+                "# PRD\n\n## 功能清单\n\n1. 首页\n2. 导出\n");
+        givenConverseClosing(List.of(new FileChange("/src/App.jsx", 1, 0)));
+
+        appService.handOffModification(projectRepository.findById(projectId).orElseThrow(),
+                List.of(instruction("列表加导出", "把订单列表增加导出按钮")), "dialog-run-1");
+        tracks.remove(0).run();
+
+        verify(eventsAppService).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
+    }
+
+    // ---------- 测试数据 ----------
+
+    /** 已生成形态的项目（迭代的前提事实）。 */
+    private Long persistedGeneratedProject(String workspaceId) {
+        Project project = Project.create("迭代项目", null, Long.parseLong(workspaceId), OWNER, null);
+        project.markPrdProduced();
+        project.markGenerated();
+        return projectRepository.save(project).getId();
     }
 }

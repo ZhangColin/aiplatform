@@ -5,6 +5,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cartisan.core.stereotype.Adapter;
 import com.cartisan.core.stereotype.PortType;
 
+import com.semgravio.aiplatform.base.knowledge.domain.model.EmbeddingHealth;
 import com.semgravio.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +39,9 @@ import lombok.extern.slf4j.Slf4j;
 @Adapter(PortType.CLIENT)
 @Slf4j
 public class FastembedEmbeddingClient implements EmbeddingClient {
+
+    /** 健康探活短超时（#639）：后台读面要快答，探活失败只报不可用、不重试。 */
+    private static final Duration HEALTH_TIMEOUT = Duration.ofSeconds(2);
 
     private final String baseUrl;
     private final HttpClient http = HttpClient.newBuilder()
@@ -69,6 +74,27 @@ public class FastembedEmbeddingClient implements EmbeddingClient {
                     e.getMessage());
             return List.of();
         }
+    }
+
+    @Override
+    public EmbeddingHealth health() {
+        Instant checkedAt = Instant.now();
+        long started = System.nanoTime();
+        boolean available;
+        try {
+            HttpResponse<String> response = http.send(
+                    HttpRequest.newBuilder(URI.create(baseUrl + "/health"))
+                            .timeout(HEALTH_TIMEOUT)
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            available = response.statusCode() == 200;
+        }
+        catch (Exception e) {
+            available = false;
+        }
+        long elapsedMs = Duration.ofNanos(System.nanoTime() - started).toMillis();
+        return new EmbeddingHealth(available, checkedAt, elapsedMs);
     }
 
     private List<float[]> readVectors(String body) throws Exception {

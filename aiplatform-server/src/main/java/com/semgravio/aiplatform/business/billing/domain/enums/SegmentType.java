@@ -9,6 +9,10 @@ import jakarta.persistence.Converter;
  * run、一场设计会话轮各为一段——段收口即结算一次；固定单价项（联网搜索等）
  * 不等段收口、按次直记（第 4 值专用于此）。段内绝不检查余额绝不中断，检查只
  * 在段边界（#537 消费面）。
+ *
+ * <p><b>#610 设计线整条退役</b>：{@link #DESIGN_TURN} 的生产者（设计会话段结算）
+ * 随设计过程编排拆除；本枚举值<b>保留</b>——{@code bil_entries} 的历史扣减流水
+ * 以该值落库，删除或改写会破坏账目可读性与审计（见迁移 V85 的裁决记录）。</p>
  */
 public enum SegmentType implements BaseEnum<SegmentType> {
 

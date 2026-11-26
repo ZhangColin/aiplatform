@@ -9,7 +9,7 @@ import com.cartisan.data.jpa.specification.ConditionType;
  * JPA Specification 在数据库侧过滤。provider 为匹配键＝精确等值（标识符不做
  * 模糊），null 自动跳过＝全量行（含历史版本）。
  *
- * @param provider 模型提供方（精确）
+ * @param provider 供应商（vendor，ADR-0053 ②——匹配挂事件 vendor 腿；存量行通道键同值；精确）
  */
 public record BackofficeTimeBandRuleQuery(
         @Condition(type = ConditionType.EQUAL) String provider

@@ -3,7 +3,7 @@ package com.semgravio.aiplatform.business.project.domain.port;
 /**
  * 远端模型清单拉取端口（#368，spec #364-T4，ADR-0031「模型清单手动同步」）：
  * 按通道行参数（baseUrl＋apiKey）拉取该供应商的远端模型清单——OpenAI 兼容
- * {@code GET {baseUrl}/models}（方舟端点实测同形状）。凭证与地址来自通道行
+ * {@code GET {baseUrl}/models}（OpenAI 兼容端点实测同形状）。凭证与地址来自通道行
  * （库内唯一正本），端口不持有供应商状态——换通道换 key 不动此处。
  *
  * <p>实现面唯一（OpenAI 兼容适配器）；非 OpenAI 协议通道出现时再立适配器

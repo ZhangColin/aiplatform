@@ -3,9 +3,9 @@ import { create } from "zustand";
 /**
  * 工作消息 store（#81 事件模型迁移，SSE 相关 store——桥为唯一事件写入方，ADR 0003
  * 状态三分法）：按项目记当前编码 run 的**生长中的工作消息**（parts 契约的部件投影
- * ：解说文本部件 + 工具动作部件 + 脱轨信号部件〔#240 part-signal——活性行脱轨变体
- * 的推导源，静态面滤除在呈现层〕 + 步骤清单快照〔#236 part-plan——整表落 `plan`，
- * 不进 parts 流水〕），run 收口定格。
+ * ：工具动作部件 + 脱轨信号部件〔#240 part-signal——活性行脱轨变体的推导源，静态
+ * 面滤除在呈现层〕）。呈现面清场（#608，ADR-0057 模型文本不直播）：解说文本部件、
+ * 自检播报部件、步骤清单快照随发射源退役，store 不再收这三类。run 收口定格。
  *
  * <p>run 开始即出现（run-start 携 executor 配置键）、随部件事件逐段生长；run-finish /
  * run-failed 定格（不再生长）。成功收口（run-finish 携 closing，#88/#89
@@ -34,17 +34,6 @@ import { create } from "zustand";
 export type WorkActionState = "started" | "running" | "completed" | "failed";
 
 /**
- * 工作消息座席（#290，run-start 配置键的镜像）：executor＝编码 run（计划区＝
- * 切片清单、活性行＝命令/编写 label 滚动）、designer＝设计会话（计划区＝设计物
- * 清单、活性行＝「正在出第 N 稿」）——同骨架异语料的呈现分岔锚。缺省＝executor
- * （旧调用面与 coder- 前缀补建路径的兼容口径）。
- */
-export type WorkSeat = "executor" | "designer";
-
-/** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
-export type WorkCheckState = "checking" | "passed" | "failed";
-
-/**
  * 脱轨信号值（正本 part-signal 词表，封闭集 v1 唯一值 #240）：derailed = 模型以
  * 机器语法直接发射、引擎未识别为工具调用（什么都没跑）——吞段的人话留痕，呈现
  * 归活性行脱轨变体（定型文案在组件），静态面无痕。
@@ -52,30 +41,16 @@ export type WorkCheckState = "checking" | "passed" | "failed";
 export type WorkSignalKind = "derailed";
 
 /**
- * 步骤清单条目（#236 part-plan 快照的投影）：agent 自产计划的步骤——稳定 id
- * （跨快照不变）、用户语言标题、状态 ✓●○ 三态（不设 ✗——失败留痕归动作部件
- * 与收尾卡）。快照整表替换（不进 parts 流水——计划变化不单独播报、不留动作痕）。
- */
-export type WorkPlanStep = {
-  id: string;
-  title: string;
-  state: "pending" | "in_progress" | "completed";
-};
-
-/**
- * 工作消息头部切片进度（run-start 扩载 #118）：`title` 为用户语言标题（生成轨道
- * = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」）；`index`/`total`
- * 仅生成轨道切片携带（1-based——头部「{title}（{index}/{total}）」），缺省即无进度。
+ * 工作消息头部（run-start 扩载 #118）：`title` 为用户语言标题（生成轨道
+ * =「系统初始化」、更新 run =「系统更新」）；切片序号/总数已随切片机器退役
+ * （#602/#608），不再携带进度。
  */
 export type WorkSlice = {
   title: string;
-  index?: number;
-  total?: number;
 };
 
-/** 工作消息部件（part-* 事件的投影）。 */
+/** 工作消息部件（part-* 事件的投影；#608 起只有工具动作与脱轨信号两件）。 */
 export type WorkPart =
-  | { kind: "text"; id: string; source?: string; text: string }
   | {
       kind: "action";
       /** React key（动作行首见事件 id——状态更新不改键，原位换装）。 */
@@ -94,18 +69,12 @@ export type WorkPart =
        * 初判原因。其余态缺省。
        */
       error?: string;
-    }
-  | {
       /**
-       * 自检部件（#85「正在检查系统 → ✅/❌」）：一场 run 至多一个——收口判据
-       * 核验的呈现，跨状态原位换装（checking → passed/failed）。静默重试口径：
-       * 尝试间核验未过不出 failed（重复 checking 幂等——用户面一次检查），
-       * failed 仅末次未过（与 run-failed 同窗口）。终值即探活结果。
+       * 写文件目标路径（#618 预览跟随）：仅 write_file／edit_file 落定/终态携带
+       * （path 参数原形；参数在途缺省）——纯函数据此映射应用路由，写到哪页切
+       * 哪页；非页面文件由映射函数过滤。组件／呈现不走该字段。
        */
-      kind: "check";
-      /** React key（首见 checking 事件 id——原位更新不改键）。 */
-      id: string;
-      state: WorkCheckState;
+      path?: string;
     }
   | {
       /**
@@ -122,20 +91,8 @@ export type WorkPart =
       signal: WorkSignalKind;
     };
 // part-hint（#437 决策时微指令部件）2026-11-12 退役：微指令是模型面指引、用户面
-// 只添噪（后端已停发、桥不再投递）——kind 联合项与 WorkHintKind 词表整体删除，
-// 历史存量事件按未知类型忽略。
-
-/**
- * 稿落盘动作工具集（#294 渐进长出的文件变更口径）：写/改文件＋出图——completed
- * 即 design/ 有新内容（桥的文件树失效与画布在途稿 rev 戳共用；{@link WorkPart}
- * 的工具名面）。与 work-message 组件 DRAFT_TOOLS 的分野：彼计「出第几稿」
- * （edit 改旧稿不涨稿序）、此计「文件面变了没有」（edit 改旧稿也要刷新帧）。
- */
-export const DRAFT_WRITING_TOOLS: ReadonlySet<string> = new Set([
-  "write_file",
-  "edit_file",
-  "generate_image",
-]);
+// 只添噪（后端已停发、桥不再投递）。part-text / part-check / part-plan 随 #608
+// 呈现面清场退役（ADR-0057 模型文本不直播）——历史存量事件按未知类型忽略。
 
 /** 部件事件的最小关联（信封公共字段 + 事件 id）。 */
 export type PartEventRef = {
@@ -150,9 +107,7 @@ export type PartEventRef = {
 
 /** 桥侧部件输入（store 负责落 id / 原位更新）。 */
 export type WorkPartInput =
-  | { kind: "text"; text: string }
   | { kind: "signal"; signal: WorkSignalKind }
-  | { kind: "check"; state: WorkCheckState }
   | {
       kind: "action";
       toolCallId: string;
@@ -161,6 +116,8 @@ export type WorkPartInput =
       label: string;
       /** 失败留痕（#229）：仅 failed 事件的 payload 携带（错误/stderr 首行截断）。 */
       error?: string;
+      /** 写文件目标路径（#618）：仅写文件类落定/终态事件携带（参数原形）。 */
+      path?: string;
     };
 
 type ProjectWork = {
@@ -171,21 +128,8 @@ type ProjectWork = {
   parts: WorkPart[];
   /** 已收部件事件的 SSE id（重放去重锚，有界）。 */
   seenEventIds: string[];
-  /** 工作消息头部切片进度（#118 run-start 扩载；run-start 被淘汰的补建路径缺省）。 */
+  /** 工作消息头部标题（#118 run-start 扩载；run-start 被淘汰的补建路径缺省）。 */
   slice?: WorkSlice;
-  /**
-   * 座席（#290）：呈现分岔锚（executor＝切片清单计划区＋label 滚动活性行、
-   * designer＝设计物清单计划区＋出稿活性行）；run-start 配置键写入、前缀补建
-   * 路径按会话前缀派生；缺省＝executor。
-   */
-  seat?: WorkSeat;
-  /**
-   * run 级步骤清单（#236 part-plan 全量快照的落态）：整表替换（执行中 agent
-   * 再调 update_plan 即新快照盖旧表——已收口步骤不可变＝提示词纪律，平台不校验
-   * 不合并）；不进 parts 流水（不走动作行、不留动作痕、不单独播报）。不落库
-   * （当次会话定格留驻，刷新不回显）；无快照（agent 不调）= 缺省不显示。
-   */
-  plan?: WorkPlanStep[];
   /**
    * run 级时钟起锚（#225，ADR-0010 窄修订）：run-start 事件信封 ts 的 epoch ms
    * ——前端「已运行 mm:ss」的唯一锚（活性锚定真实事件，缺锚不渲染时钟）。run-start
@@ -201,25 +145,17 @@ export type WorkSnapshot = Omit<ProjectWork, "seenEventIds">;
 
 export type WorkMessageState = {
   works: Record<string, ProjectWork>;
-  /** 编码/设计 run 起跑（run-start agent=executor|designer）：新 runId 重开，同
-   * runId 幂等；携工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）、
-   * run 级时钟起锚（#225 run-start 信封 ts 的 epoch ms，缺省 = 无锚不渲染时钟）
-   * 与座席（#290——呈现分岔锚，缺省 = executor）。 */
+  /** 编码 run 起跑（run-start agent=executor）：新 runId 重开，同 runId 幂等；
+   * 携工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）与 run 级时钟
+   * 起锚（#225 run-start 信封 ts 的 epoch ms，缺省 = 无锚不渲染时钟）。 */
   startWork: (
     projectId: string,
     runId: string,
     slice?: WorkSlice,
     startedAt?: number,
-    seat?: WorkSeat,
   ) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
-  /**
-   * 步骤清单快照入消息（#236 part-plan）：整表替换 `plan`（快照语义——不进
-   * parts 流水、不产生播报部件）；锚定/定格/重放去重守卫与 notePart 同款。
-   * 空表 = 无效载荷忽略（服务端不出空快照，畸形载荷不清好表）。
-   */
-  notePlan: (projectId: string, ref: PartEventRef, steps: WorkPlanStep[]) => void;
   /**
    * run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。工作消息
    * 原地定格留驻（#117）：部件保留、只读、不再生长，成功收口（收尾卡归 chat
@@ -237,8 +173,6 @@ const MAX_IDS = 1000;
 
 /** 编码会话前缀（后端角色 × 项目命名约定：coder-{projectId}）。 */
 const CODER_SESSION_PREFIX = "coder-";
-/** 设计会话前缀（#289 命名约定：designer-{projectId}-item-{ord}）。 */
-const DESIGNER_SESSION_PREFIX = "designer-";
 
 function appendCapped(list: string[], id: string): string[] {
   const next = [...list, id];
@@ -246,55 +180,30 @@ function appendCapped(list: string[], id: string): string[] {
 }
 
 /**
- * 锚定与定格守卫（部件/计划快照共用，notePart / notePlan 的同款前段）：
- * 锚不在或异 runId 时仅编码/设计会话补建/重锚（主智能体的部件不建工作消息——对话
+ * 锚定与定格守卫（部件事件前段）：
+ * 锚不在或异 runId 时仅编码会话补建/重锚（主智能体的部件不建工作消息——对话
  * 面走 text 增量气泡，部件与其并行双发射；生长中的锚 + 异 runId = 事件序异常，静默
  * 重试不换新锚〔#84〕，防御位忽略——清锚会闪空消息）；定格不进（收口后无增量）；
- * 重放按 SSE 事件 id 去重。守卫未过 / 去重命中返回 undefined（无变更）。补建路径的
- * 座席按会话前缀派生（coder-＝executor、designer-＝designer，#290）。
+ * 重放按 SSE 事件 id 去重。守卫未过 / 去重命中返回 undefined（无变更）。补建路径按
+ * 会话前缀判定（coder- 编码 run）。
  */
 function openedWork(work: ProjectWork | undefined, ref: PartEventRef): ProjectWork | undefined {
   let current = work;
   if (current === undefined || current.runId !== ref.runId) {
     if (current !== undefined && !current.frozen) return undefined;
     const sessionId = ref.sessionId ?? "";
-    const seat: WorkSeat = sessionId.startsWith(DESIGNER_SESSION_PREFIX)
-      ? "designer"
-      : "executor";
-    if (!sessionId.startsWith(CODER_SESSION_PREFIX) && !sessionId.startsWith(DESIGNER_SESSION_PREFIX)) {
+    if (!sessionId.startsWith(CODER_SESSION_PREFIX)) {
       return undefined;
     }
-    current = { runId: ref.runId, frozen: false, parts: [], seenEventIds: [], seat };
+    current = { runId: ref.runId, frozen: false, parts: [], seenEventIds: [] };
   }
   if (current.frozen) return undefined; // 定格不进部件（收口后无增量）
   if (current.seenEventIds.includes(ref.eventId)) return undefined; // 重放去重
   return { ...current, seenEventIds: appendCapped(current.seenEventIds, ref.eventId) };
 }
 
-/** 部件应用（动作/自检原位更新；解说/信号逐件追加；返回原数组引用即无变更）。 */
+/** 部件应用（动作原位更新；脱轨信号逐件追加；返回原数组引用即无变更）。 */
 function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): ProjectWork {
-  if (input.kind === "check") {
-    // 一场 run 至多一个自检部件：跨状态原位换装。静默重试的重复 checking 幂等
-    // （同态不改引用——不闪换）
-    const existing = work.parts.find(
-      (part): part is Extract<WorkPart, { kind: "check" }> => part.kind === "check",
-    );
-    if (existing) {
-      if (existing.state === input.state) return work;
-      const updated: Extract<WorkPart, { kind: "check" }> = {
-        ...existing,
-        state: input.state,
-      };
-      return { ...work, parts: work.parts.map((part) => (part === existing ? updated : part)) };
-    }
-    return {
-      ...work,
-      parts: capParts([
-        ...work.parts,
-        { kind: "check", id: ref.eventId, state: input.state },
-      ]),
-    };
-  }
   if (input.kind === "action") {
     const existing = work.parts.find(
       (part): part is Extract<WorkPart, { kind: "action" }> =>
@@ -307,6 +216,8 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
         state: input.state,
         label: input.label,
         error: input.error,
+        // 路径只在落定/终态事件携带（started 缺省）——跨状态原位更新时保留已见值
+        path: input.path ?? existing.path,
       };
       parts = work.parts.map((part) => (part === existing ? updated : part));
     } else {
@@ -321,22 +232,19 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
           state: input.state,
           label: input.label,
           error: input.error,
+          path: input.path,
         },
       ];
     }
     return { ...work, parts: capParts(parts) };
   }
-  if (input.kind === "signal") {
-    // 脱轨信号（#240）：每次吞段一件、不原位更新（天然低频——刷屏节流是触发器）
-    const part: WorkPart = {
-      kind: "signal",
-      id: ref.eventId,
-      source: ref.source,
-      signal: input.signal,
-    };
-    return { ...work, parts: capParts([...work.parts, part]) };
-  }
-  const part: WorkPart = { kind: "text", id: ref.eventId, source: ref.source, text: input.text };
+  // 脱轨信号（#240）：每次吞段一件、不原位更新（天然低频——刷屏节流是触发器）
+  const part: WorkPart = {
+    kind: "signal",
+    id: ref.eventId,
+    source: ref.source,
+    signal: input.signal,
+  };
   return { ...work, parts: capParts([...work.parts, part]) };
 }
 
@@ -362,24 +270,17 @@ function updateWork(
 export const useWorkMessageStore = create<WorkMessageState>((set) => ({
   works: {},
 
-  startWork: (projectId, runId, slice, startedAt, seat) =>
+  startWork: (projectId, runId, slice, startedAt) =>
     updateWork(set, projectId, (work) => {
       // 同 runId 幂等（重放）：已长部件保留，不重开
       if (work?.runId === runId) return work;
-      return { runId, frozen: false, parts: [], seenEventIds: [], slice, seat, startedAt };
+      return { runId, frozen: false, parts: [], seenEventIds: [], slice, startedAt };
     }),
 
   notePart: (projectId, ref, input) =>
     updateWork(set, projectId, (work) => {
       const opened = openedWork(work, ref);
       return opened ? applyPart(opened, ref, input) : work;
-    }),
-
-  notePlan: (projectId, ref, steps) =>
-    updateWork(set, projectId, (work) => {
-      const opened = openedWork(work, ref);
-      // 空表 = 无效载荷忽略（服务端不出空快照）
-      return opened && steps.length > 0 ? { ...opened, plan: steps } : work;
     }),
 
   freezeWork: (projectId, runId, endedAt) =>
@@ -401,29 +302,4 @@ export function workPartsOf(
   projectId: string,
 ): WorkPart[] {
   return state.works[projectId]?.parts ?? NO_PARTS;
-}
-
-const PLAN_STEP_STATES: ReadonlySet<string> = new Set(["pending", "in_progress", "completed"]);
-
-/**
- * part-plan 载荷 steps → 消费口径（#236，toWorkClosing 先例——线上数据容错归一）：
- * 缺 id/标题的条目剔除、未知状态回落 pending（多跑向安全）；全空 = 空表（桥侧
- * 忽略，不清好表）。服务端内核已归一，此处兜底不改语义。
- */
-export function toWorkPlanSteps(raw: unknown): WorkPlanStep[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((entry): WorkPlanStep[] => {
-    if (typeof entry !== "object" || entry === null) return [];
-    const { id, title, state } = entry as Record<string, unknown>;
-    if (typeof id !== "string" || !id.trim() || typeof title !== "string" || !title.trim()) {
-      return [];
-    }
-    return [{
-      id,
-      title,
-      state: typeof state === "string" && PLAN_STEP_STATES.has(state)
-        ? (state as WorkPlanStep["state"])
-        : "pending",
-    }];
-  });
 }

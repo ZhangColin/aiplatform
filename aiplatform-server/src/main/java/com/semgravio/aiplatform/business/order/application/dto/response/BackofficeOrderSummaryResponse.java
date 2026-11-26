@@ -12,8 +12,8 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
 /**
  * 后台订单清单条目（#29 交易环②，/api/backoffice/orders）：四维检索的运营工作
  * 清单行（#156 扩）——足够挑选要处理的单（详情/源码包另取），带下单账号摘要
- * 免二次查档（#243 起 externalId 与显示名同批）。交付物类型随行（#298 列加——
- * 区分两类单报价的呈现维度；筛选不加，设计单量小已备案）。
+ * 免二次查档（#243 起 externalId 与显示名同批）。交付物类型随行（#298 列加；
+ * #611 收窄为系统单值；筛选维度不加）。
  *
  * @param id                  订单标识（TSID 十进制字符串）
  * @param projectId           所属项目标识
@@ -23,7 +23,7 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
  * @param ownerDisplayName    下单用户显示名（下单账号可空或缺档为 null）
  * @param status              订单状态（code）
  * @param statusName          状态名
- * @param deliverableType     交付物类型（code，#297 下单冻结）：1=设计 2=系统 3=系统＋设计
+ * @param deliverableType     交付物类型（code，#297 下单冻结；#611 收窄为系统单值）：2=系统
  * @param deliverableTypeName 交付物类型名
  * @param amount              当前总价（分；待报价 NULL）
  * @param currency            币种（v1 恒 CNY；待报价 NULL）
@@ -38,9 +38,9 @@ public record BackofficeOrderSummaryResponse(
         String ownerDisplayName,
         OrderStatus status,
         String statusName,
-        @Schema(description = "交付物类型（#297 下单冻结自项目终点类型，此后不随项目变更；"
-                + "设计面单取件走 /{id}/design-package、系统单走 /{id}/source-package）",
-                example = "1")
+        @Schema(description = "交付物类型（#297 下单冻结；#611 收窄为系统单值——交付物取件走"
+                + " /{id}/source-package）",
+                example = "2")
         OrderDeliverableType deliverableType,
         String deliverableTypeName,
         Long amount,

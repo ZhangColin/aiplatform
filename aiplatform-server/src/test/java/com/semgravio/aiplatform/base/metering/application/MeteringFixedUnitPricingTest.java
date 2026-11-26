@@ -112,9 +112,10 @@ class MeteringFixedUnitPricingTest {
         assertThat(summary.total()).isEqualTo(new TokenUsage(0, 500_000, 0, 0, 0));
     }
 
-    /** 固定件事件上报（token 五档为零、件数进 units；dims 带主智能体口径——联网搜索是主智能体工具）。 */
+    /** 固定件事件上报（token 五档为零、件数进 units；dims 带主智能体口径——联网搜索是主智能体工具；vendor＝provider 同值——供数方即供应商本体）。 */
     private void reportFixed(String eventId, Instant ts, long units) {
         usageEventSink.report(new UsageEvent(eventId, ts, SUBJ, "run-1", "session-1",
-                PROVIDER, SEARCH_MODEL, Map.of("agentKind", "main"), TokenUsage.ZERO, 0, units));
+                PROVIDER, PROVIDER, SEARCH_MODEL, Map.of("agentKind", "main"),
+                TokenUsage.ZERO, 0, units));
     }
 }

@@ -7,7 +7,6 @@ import java.util.Map;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
-import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessionSource;
 
 /**
  * 对话史条目读面（#89 水合载荷）：kind 为 Integer code + kindName 中文名随行
@@ -16,22 +15,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessio
  * 6=guide 7=quote 8=run_failure），question / closing 为事件载荷 JSON 原样；attachments（#97
  * 圈注 B 档、#286 扩图片物料）= 用户发言随带的消息附件 JSON 数组（回显重建附件 chip 用）；
  * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）；
- * failure（#418 失败留账）= run 失败终态失败面（与 run-failed SSE 扩载同载荷）；
- * sessionSource（#298 会话来源标识）= 2=设计会话（设计收尾卡携 drafts 判据），
- * null＝主会话缺省（含无结构标记的改稿发言——存储不同构降级口径，见
- * {@link ConversationSessionSource}）。
+ * failure（#418 失败留账）= run 失败终态失败面（与 run-failed SSE 扩载同载荷）。
+ * #610 设计线整条退役：会话来源标识（sessionSource/sessionSourceName）拆除。
  */
 public record ConversationEntryResponse(
         Long id,
         Integer kind,
         String kindName,
-        @Schema(description = "会话来源标识（#298）：2=设计会话（每设计物一个——判据＝收尾卡携 "
-                + "drafts 稿清单：首产/改稿/定稿收尾卡）、null=主会话缺省（作用域改稿发言无"
-                + "结构标记不标注、设计会话完整稿本在智能体会话存储——存储不同构降级口径）。"
-                + "后台对话史按来源分组或标注；用户面前端可忽略",
-                example = "2")
-        Integer sessionSource,
-        String sessionSourceName,
         String runId,
         String text,
         @Schema(description = "问答卡载荷（kind=3 question 携带，其余 kind 为 null）："
@@ -57,21 +47,21 @@ public record ConversationEntryResponse(
                 + "为 null。前端仅试用访谈期（额度读面在场）渲染问答卡序号徽标")
         Integer questionOrdinal,
         @Schema(description = "收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish "
-                + "收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝"
-                + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
-                + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
-                + "verification?{total,failed,faces,rounds,failedItems}, version?, "
-                + "durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,overhead{"
+                + "收口扩载原样（#617 五字段收尾卡服务端权威事实；schema 正本＝"
+                + "docs/spec/SSE事件清单·收口扩载节）——{ narrative?, "
+                + "criteria{buildPassed,previewPassed}, files=[{path,added,removed}], "
+                + "directories=[{path,fileCount,added,removed}]（#620 首建目录汇总，迭代缺省）, "
+                + "durationMs, durationBreakdown{llmMs,toolsMs,closingMs,overhead{"
                 + "configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},"
                 + "attempts[]} }（可缺省键＝"
-                + "该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）",
-                example = "{\"summary\":\"完成切片：用户能登录\",\"prdChanged\":false,"
-                        + "\"systemChanged\":true,\"systemNote\":\"起服了登录页\","
+                + "该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略；"
+                + "旧平台句式摘要 summary 与「需求文档／系统」判定键自 #617 退役、"
+                + "存量旧行由前端读侧回落；version 锚随审查与收口组退役 #605；"
+                + "modelTier 随模型路由退役 #606）",
+                example = "{\"narrative\":\"完成首次生成：构建通过、预览可访问\","
+                        + "\"criteria\":{\"buildPassed\":true,\"previewPassed\":true},"
                         + "\"files\":[{\"path\":\"/src/App.jsx\",\"added\":40,\"removed\":0}],"
-                        + "\"durationMs\":183420,\"verification\":{\"total\":5,\"failed\":1,"
-                        + "\"faces\":{\"browser\":2,\"db\":2,\"log\":1},\"rounds\":2,"
-                        + "\"failedItems\":[\"留言提交\"]},"
-                        + "\"version\":\"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2\"}")
+                        + "\"durationMs\":183420}")
         Map<String, Object> closing,
         @Schema(description = "消息附件数组（kind=1 user 可携带，其余 kind 为 null；#97 圈注起立、"
                 + "#286 扩图片物料）：两形态——{attachmentType:\"annotation\", annotation:{kind, "
@@ -92,28 +82,25 @@ public record ConversationEntryResponse(
         Map<String, Object> quote,
         @Schema(description = "失败面载荷（kind=8 run_failure 失败留账携带，其余 kind 为 null，"
                 + "#418 失败片落库面）：与 run-failed SSE 扩载同载荷——{ stopped?, error?, "
-                + "durationMs, attempts[{round,attempt,durationMs,modelId,llmMs,toolsMs,"
-                + "verifyMs}] }（可缺省键＝该场无该事实；attempts 跨轮累计——回滚重跑轮"
-                + "不清账）。平台分析口径，前端不渲染（同 durationBreakdown）",
+                + "durationMs, attempts[{attempt,durationMs,modelId,llmMs,toolsMs}] }"
+                + "（可缺省键＝该场无该事实；attempts 跨轮累计——回滚重跑轮"
+                + "不清账。平台分析口径，前端不渲染（同 durationBreakdown）；"
+                + "verifyMs 随验证机器退役 #605）",
                 example = "{\"error\":\"模型响应超时\",\"durationMs\":183420,"
-                        + "\"attempts\":[{\"round\":1,\"attempt\":1,\"durationMs\":61200,"
-                        + "\"modelId\":\"deepseek-v4-flash\",\"llmMs\":58000,\"toolsMs\":2000,"
-                        + "\"verifyMs\":0}]}")
+                        + "\"attempts\":[{\"attempt\":1,\"durationMs\":61200,"
+                        + "\"modelId\":\"deepseek-v4-flash\",\"llmMs\":58000,\"toolsMs\":2000}]}")
         Map<String, Object> failure,
         boolean answered,
         LocalDateTime at) {
 
-    /** 实体 → 读面（kind 出 Integer code + kindName 中文名；sessionSource 可空
-     *  ——设计会话收尾卡才携带，null＝主会话缺省，判定归读口单点；questionOrdinal
-     *  仅问答卡携带——「第 N 问」序号，读口重算）。 */
+    /** 实体 → 读面（kind 出 Integer code + kindName 中文名；questionOrdinal 仅问答卡
+     *  携带——「第 N 问」序号，读口重算）。 */
     public static ConversationEntryResponse of(ConversationEntry entry,
-            ConversationSessionSource sessionSource, Integer questionOrdinal) {
+            Integer questionOrdinal) {
         return new ConversationEntryResponse(
                 entry.getId(),
                 entry.getKind().getCode(),
                 entry.getKind().getName(),
-                sessionSource == null ? null : sessionSource.getCode(),
-                sessionSource == null ? null : sessionSource.getName(),
                 entry.getRunId(),
                 entry.getText(),
                 entry.getQuestion(),

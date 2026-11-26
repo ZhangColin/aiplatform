@@ -27,9 +27,9 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * 自然收口（非快道——2026-11-17 起未答满五问且无收敛令的 savePrd 在工具闸即被
  * 拒，走不到本缝）由收口观测点调用置 {@link ForkState#PENDING}
  * ——持久可回（未选择前关页回来卡仍在）；快道直生成不置位（不出卡）、点火后
- * 不回清（卡隐藏由首建点火时点派生承担——失败重试走「继续生成」、卡与确认门
- * 都不复现）。设计类终点不出卡不设门（设计轨触发律不改：PRD 收口起设计过程、
- * 全部定稿起构建）。</p>
+ * 不回清（卡隐藏由首建点火时点派生承担——#604 起终态失败/停止收口清点火位，
+ * 卡与确认门复现：用户在点火入口重跑即恢复）。旧「设计类终点不出卡不设门」
+ * 分支已随 #610 设计线退役消失。</p>
  *
  * <p><b>派发门读面</b>（{@link #gateOf}，{@code GET /build-gate} 单读点）：
  * 岔路口卡＝试用态∧PENDING∧PRD 在∧首建未点火；PRD 确认按钮＝付费态∧PRD
@@ -37,10 +37,11 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
  * （{@link BillingAppService#trackOf}，ADR-0049——不立第二份标志）。</p>
  *
  * <p><b>确认即派发、版本机制零改动</b>：确认经 {@link GenerationAppService
- * #startGeneration} 共用编排（守卫/余额门/设计定稿门/起跑记行全同构）——确认
+ * #startGeneration} 共用编排（守卫/余额门/起跑记行全同构）——确认
  * 不写版本行（「确认即成版」#330 写表语义不复活），记行归起跑单点、版本号＝
- * 构建基准序全域一致；点击幂等＝已点火拒绝 PRJ_017（不重复派发），失败重试走
- * 「继续生成」不重复确认。</p>
+ * 构建基准序全域一致；点击幂等＝已点火拒绝 PRJ_017（不重复派发）。#604 起首建
+ * 终态失败/停止收口清点火位（{@link Project#reopenFirstBuildRequest}）——确认
+ * 门复现，用户重走点火入口重跑即恢复。</p>
  */
 @Service
 public class BuildGateAppService {
@@ -77,10 +78,9 @@ public class BuildGateAppService {
         return true;
     }
 
-    /** 岔路口出卡前置（置位与读面同判据）：试用态 ∧ 系统终点 ∧ PRD 在 ∧ 首建未点火 ∧ 未生成未归档。 */
+    /** 岔路口出卡前置（置位与读面同判据）：试用态 ∧ PRD 在 ∧ 首建未点火 ∧ 未生成未归档。 */
     private boolean forkEligible(Project project) {
         return billingAppService.trackOf(project.getId()).trial()
-                && !project.getEndpointType().designInvolved()
                 && project.getPrdProducedAt() != null
                 && project.getGenerationRequestedAt() == null
                 && project.getGeneratedAt() == null
@@ -103,15 +103,14 @@ public class BuildGateAppService {
         boolean trial = track.trial();
         boolean firstBuildOpen = firstBuildOpen(project);
         boolean forkCardPending = trial && firstBuildOpen
-                && project.getForkState() == ForkState.PENDING
-                && !project.getEndpointType().designInvolved();
+                && project.getForkState() == ForkState.PENDING;
         // 到账自动翻转的读面信号（#544——「自动」不止收银台 onDone 单缝：他处
         // 到账〔账户页/项目账单节/他端〕后卡回读即显 settleDue，前端空 source
         // 重判即翻转、无需重走选择）：卡在场 ∧ 源已选定 ∧ 源池余额为正
         boolean forkSettleDue = forkCardPending
                 && track.deductionSource() != null && track.sourcePoolPositive();
         return new BuildGateView(forkCardPending,
-                !trial && firstBuildOpen && !project.getEndpointType().designInvolved(),
+                !trial && firstBuildOpen,
                 forkSettleDue);
     }
 
@@ -127,7 +126,8 @@ public class BuildGateAppService {
      * 付费轨 PRD 确认（POST /prd/confirm——原动作形态恢复，#542/ADR-0049）：确认
      * 即派发首个构建（点火时点随派发落位）。守卫序＝付费态（PRJ_084——试用轨
      * 点火动作是岔路口「立即生成」）→ PRD 在（PRJ_018）→ 未归档（PRJ_013）→
-     * 首建未点火（PRJ_017——点击幂等，失败重试走「继续生成」不重复确认）；在途/
+     * 首建未点火（PRJ_017——点击幂等；#604 起失败/停止收口已清点火位，重确认
+     * 即重跑）；在途/
      * 设计终点等其余守卫由 {@link GenerationAppService#startGeneration} 单点兜
      * （确认与「立即生成」共用同一派发编排——两轨唯一差异＝触发源）。
      *
@@ -208,11 +208,10 @@ public class BuildGateAppService {
         return ForkGuideView.flippedOf(billingAppService.trackOf(projectId));
     }
 
-    /** 岔路口卡在场判定（读面同判据的命令侧镜像）：PENDING ∧ 首建未点火 ∧ 非设计终点。 */
+    /** 岔路口卡在场判定（读面同判据的命令侧镜像）：PENDING ∧ 首建未点火。 */
     private boolean forkCardOnScreen(Project project) {
         return project.getForkState() == ForkState.PENDING
-                && firstBuildOpen(project)
-                && !project.getEndpointType().designInvolved();
+                && firstBuildOpen(project);
     }
 
     /**

@@ -192,7 +192,7 @@ class MeteringReconciliationIntegrationTest {
     }
 
     private void mountAgent(HarnessAgent agent) {
-        when(factory.obtain(any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
     }
 
     /** 真实 HarnessAgent（装配对齐平台工厂：MeteredModel 包装 + 平台压缩配置 + 记忆关闭）。 */
@@ -211,7 +211,7 @@ class MeteringReconciliationIntegrationTest {
                 .disableDefaultWorkspaceSkills()
                 // 压缩保持框架默认开（压缩模型未配＝回落主模型，平台工厂同语义；
                 // 不走 compactionConfig(properties)——那会 resolve 配置档真模型、
-                // 需通道 key（volcengine 通道行，测试库种子注入），脚本腿起不来）
+                // 需通道 key（测试库种子注入），脚本腿起不来）
                 .compaction(io.agentscope.harness.agent.memory.compaction.CompactionConfig
                         .builder().build())
                 .build();

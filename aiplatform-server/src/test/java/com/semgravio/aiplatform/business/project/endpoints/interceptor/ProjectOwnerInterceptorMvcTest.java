@@ -25,7 +25,6 @@ import com.semgravio.aiplatform.business.project.application.InterviewQuotaAppSe
 import com.semgravio.aiplatform.business.project.application.IterationAppService;
 import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
 import com.semgravio.aiplatform.business.project.application.BuildGateAppService;
-import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
 import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -97,14 +96,6 @@ class ProjectOwnerInterceptorMvcTest {
     @MockitoBean
     private BuildGateAppService buildGateAppService;
 
-    /** #330 起进 ProjectController 构造的 PRD 版本服务（切片装配补齐）。 */
-    @MockitoBean
-    private PrdVersionAppService prdVersionAppService;
-
-    /** #333 起进 ProjectController 构造的 Demo 版本服务（切片装配补齐）。 */
-    @MockitoBean
-    private com.semgravio.aiplatform.business.project.application.DemoVersionAppService demoVersionAppService;
-
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
         return RequestContext.runFor(
@@ -114,7 +105,7 @@ class ProjectOwnerInterceptorMvcTest {
 
     private void givenProjectOwnedBy(Long ownerAccountId) {
         when(projectRepository.findById(PROJECT_ID))
-                .thenReturn(Optional.of(Project.create("官网 demo", null, null, 900L, ownerAccountId, null)));
+                .thenReturn(Optional.of(Project.create("官网 demo", null, 900L, ownerAccountId, null)));
     }
 
     // ---------- 单项目寻址：归属守卫（404 不泄露存在性） ----------
@@ -193,7 +184,7 @@ class ProjectOwnerInterceptorMvcTest {
 
     private void givenProjectOwnedByGuest(Long guestId) {
         when(projectRepository.findById(PROJECT_ID))
-                .thenReturn(Optional.of(Project.create("访客项目", null, null, 900L, null, guestId)));
+                .thenReturn(Optional.of(Project.create("访客项目", null, 900L, null, guestId)));
     }
 
     /** 访客上下文直注（同 performAsUser 的 RequestContext 姿势，叠加 GuestContext 维度）。 */

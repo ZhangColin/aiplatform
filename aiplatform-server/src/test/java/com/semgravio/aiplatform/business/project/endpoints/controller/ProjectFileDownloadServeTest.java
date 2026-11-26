@@ -109,7 +109,7 @@ class ProjectFileDownloadServeTest {
                 "ws-" + workspaceSeq, "previewnet")));
         workspaceRepository.save(ready);
         projectId = projectRepository.save(
-                Project.create("下载门测试", null, null, workspaceSeq, 1L, null)).getId();
+                Project.create("下载门测试", null, workspaceSeq, 1L, null)).getId();
     }
 
     @AfterEach

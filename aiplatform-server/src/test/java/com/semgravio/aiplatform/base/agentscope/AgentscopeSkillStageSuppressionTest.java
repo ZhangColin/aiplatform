@@ -34,8 +34,8 @@ import io.agentscope.harness.agent.middleware.HarnessSkillMiddleware;
  *
  * <p>两断言互补：装配面（stager 字段卸除——全宿主确定性）＋症状面（真驱框架
  * 每轮钩子 {@code onSystemPrompt}，宿主可写环境下物化尝试必留痕）。模型经自注册
- * {@code probe363:} 桩工厂解析（SDK 公开 {@code ModelRegistry.registerFactory}，
- * 仿 VolcengineModelRegistrar——测试不依赖任何模型环境 key，桩不被调用）。</p>
+ * {@code probe363:} 桩工厂解析（SDK 公开 API {@code ModelRegistry.registerFactory}
+ * 同款接线——测试不依赖任何模型环境 key，桩不被调用）。</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AgentscopeSkillStageSuppressionTest {
@@ -53,15 +53,13 @@ class AgentscopeSkillStageSuppressionTest {
 
     @BeforeAll
     static void registerProbeModelFactory() {
-        // 构建期模型解析不触网不依赖环境 key（同 VolcengineModelRegistrar 公开注册面）
+        // 构建期模型解析不触网不依赖环境 key（SDK 公开 API ModelRegistry.registerFactory 同款接线）
         io.agentscope.core.model.ModelRegistry.registerFactory(
                 "probe363:.+", (modelId, context) -> org.mockito.Mockito.mock(
                         io.agentscope.core.model.Model.class));
     }
 
     private static final AgentToolkitSupplier TOOLKITS = (agentKey, workspace, toolSpec) -> new Toolkit();
-
-    private static final AgentSubagentSupplier SUBAGENTS = (agentKey, workspace) -> List.of();
 
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES = (agentKey, workspace) -> List.of();
 
@@ -72,15 +70,6 @@ class AgentscopeSkillStageSuppressionTest {
             return new EdgeModel(PROBE_MODEL, null);
         }
 
-        @Override
-        public EdgeModel precheckModel() {
-            return new EdgeModel(PROBE_MODEL, null);
-        }
-
-            @Override
-            public EdgeModel subagentModel() {
-                return null; // 随父级（#424 缺省同执行体档）
-            }
     };
 
     /** 单技能桩仓库（a-only 形——resources 空；物化面照样无条件 createDirectories）。 */
@@ -149,10 +138,10 @@ class AgentscopeSkillStageSuppressionTest {
     private HarnessAgent buildMainReadOnlyAgent() {
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
-                (agentKey, workspace) -> List.of(new ProbeSkillRepository()), SUBAGENTS,
-                NO_MIDDLEWARES, EDGE_MODELS, new AgentscopeProperties());
+                (agentKey, workspace) -> List.of(new ProbeSkillRepository()),
+                NO_MIDDLEWARES, EDGE_MODELS, new AgentscopeProperties(), null);
         return factory.obtain("platform-agent-363", "sys", PROBE_MODEL,
-                null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
+                null, null, new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
     }
 
     private static Optional<HarnessSkillMiddleware> skillMiddlewareOf(HarnessAgent agent) {

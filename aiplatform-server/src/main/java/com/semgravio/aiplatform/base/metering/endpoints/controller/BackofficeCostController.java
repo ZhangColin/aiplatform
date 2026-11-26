@@ -69,9 +69,11 @@ public class BackofficeCostController {
 
     @GetMapping("/unpriced")
     @Operation(summary = "unpriced 全局警示（用量驱动）",
-            description = "窗口内有 token 用量且事件时点无生效单价的 (provider, model, "
+            description = "窗口内有 token 用量且事件时点无生效单价的 (供应商, model, "
                     + "档位) 按档位汇总 token（只计无价分量——同档位部分有价部分无价"
-                    + "时只计无价部分）。用量驱动：已配价档位与无用量档位不出现，静态"
+                    + "时只计无价部分）。provider 字段承载供应商（vendor，ADR-0053 ②"
+                    + "——补价动作的匹配对象是供应商级单价行，同 vendor 多账号共用）。"
+                    + "用量驱动：已配价档位与无用量档位不出现，静态"
                     + "配价缺口清单不做（无用量＝无实际损失）；据此发现漏配价并及时"
                     + "补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开"
                     + "区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝"
@@ -116,8 +118,9 @@ public class BackofficeCostController {
     @Operation(summary = "单项目成本下钻（byModel/byAgentKind 分解）",
             description = "单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/"
                     + "项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）"
-                    + "+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/"
-                    + "model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体"
+                    + "+ 未配价标注清单（窗口内有用量且时点无生效价的供应商/"
+                    + "model/档位——provider 字段承载 vendor，与 cost 互补不重叠）"
+                    + "+ 分模型（vendor+model 跨账号合并）+ 分智能体"
                     + "（dims.agentKind 原值 + agentKindName 中文名随行——#186，口径"
                     + "同全局总览；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId "
                     + "十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与"

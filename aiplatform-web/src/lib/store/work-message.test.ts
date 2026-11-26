@@ -4,7 +4,6 @@ import {
   useWorkMessageStore,
   workPartsOf,
   type PartEventRef,
-  type WorkPart,
 } from "@/lib/store/work-message";
 
 /** 事件引用速写。 */
@@ -16,12 +15,29 @@ function work(projectId = "p1") {
   return useWorkMessageStore.getState().works[projectId];
 }
 
+function actionInput(overrides: Partial<{
+  toolCallId: string;
+  state: "started" | "running" | "completed" | "failed";
+  label: string;
+  error?: string;
+  path?: string;
+}> = {}) {
+  return {
+    kind: "action" as const,
+    toolCallId: "t1",
+    toolName: "write_file",
+    state: "started" as const,
+    label: "编写【代码文件】",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   useWorkMessageStore.setState({ works: {} });
 });
 
 describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
-  it("startWork（run-start role=CODER）即出现：空部件的生长中消息", () => {
+  it("startWork（run-start agent=executor）即出现：空部件的生长中消息", () => {
     useWorkMessageStore.getState().startWork("p1", "r1");
 
     expect(work()).toEqual({
@@ -32,9 +48,9 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
     });
   });
 
-  it("同 runId 幂等（重放）：不清已长部件；新 runId（重试下一尝试/新一轮）重开", () => {
+  it("同 runId 幂等（重放）：不清已长部件；新 runId（下一轮生成）重开", () => {
     useWorkMessageStore.getState().startWork("p1", "r1");
-    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "开始" });
+    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r1:2" }), actionInput());
 
     useWorkMessageStore.getState().startWork("p1", "r1");
     expect(work()?.parts).toHaveLength(1);
@@ -44,555 +60,208 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
     expect(work()?.parts).toEqual([]);
   });
 
-  it("步骤清单快照（#236）：notePlan 整表落 plan 不进 parts；新 runId 重开不残留上一轮清单", () => {
-    const { startWork, notePlan } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePlan("p1", ref({ eventId: "r1:2" }), [
-      { id: "s1", title: "读取现有配色", state: "completed" },
-      { id: "s2", title: "调整主题色", state: "in_progress" },
-    ]);
-
-    expect(work()?.plan).toEqual([
-      { id: "s1", title: "读取现有配色", state: "completed" },
-      { id: "s2", title: "调整主题色", state: "in_progress" },
-    ]);
-    expect(work()?.parts).toEqual([]); // 快照不进部件流水
-
-    startWork("p1", "r2"); // 下一场 run：清单随消息重开清空
-    expect(work()?.plan).toBeUndefined();
-  });
-
-  it("无锚 + coder- 会话的步骤快照：补建锚（run-start 被缓冲淘汰的补建路径，与部件同款守卫）", () => {
-    useWorkMessageStore.getState().notePlan("p1", ref({ eventId: "r9:2", runId: "r9" }), [
-      { id: "s1", title: "改配色", state: "in_progress" },
-    ]);
-
-    expect(work()?.runId).toBe("r9");
-    expect(work()?.plan).toHaveLength(1);
-  });
-
-  it("run 级时钟锚（#225）：startWork 落 startedAt（run-start 信封 ts）；freezeWork 落 endedAt（收口信封 ts）——定格后值不随重放漂移", () => {
+  it("run 级时钟锚（#225）：startWork 落 startedAt；freezeWork 落 endedAt——定格后值不随重放漂移", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", undefined, 1_758_000_000_000);
+    startWork("p1", "r1", { title: "系统初始化" }, 1_000);
+    expect(work()?.startedAt).toBe(1_000);
 
-    expect(work()?.startedAt).toBe(1_758_000_000_000);
+    freezeWork("p1", "r1", 65_000);
+    expect(work()?.endedAt).toBe(65_000);
+    expect(work()?.frozen).toBe(true);
 
-    freezeWork("p1", "r1", 1_758_006_500);
-    expect(work()?.endedAt).toBe(1_758_006_500);
-
-    // 重放再定格（补发序）：endedAt 不漂移（首次定格为准）
-    freezeWork("p1", "r1", 1_758_009_900);
-    expect(work()?.endedAt).toBe(1_758_006_500);
+    freezeWork("p1", "r1", 99_000); // 重放再定格：首次为准
+    expect(work()?.endedAt).toBe(65_000);
   });
 
-  it("时钟锚缺省（run-start 被淘汰的补建路径）：startedAt 不落、时钟不渲染的口径成立", () => {
-    useWorkMessageStore.getState().startWork("p1", "r1");
-
+  it("时钟锚缺省（run-start 被淘汰的补建路径）：startedAt 不落", () => {
+    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r9:2", runId: "r9" }), actionInput());
     expect(work()?.startedAt).toBeUndefined();
   });
-
-  it("部件序列投影（解说 → 动作 → 解说）：到达序即呈现序", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "正在编写订单管理页面。" });
-    notePart("p1", ref({ eventId: "r1:3" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "write_file",
-      state: "started",
-      label: "编写【代码文件】",
-    });
-    notePart("p1", ref({ eventId: "r1:5" }), { kind: "text", text: "订单管理完成" });
-
-    const kinds = work()?.parts.map((part) => part.kind);
-    expect(kinds).toEqual(["text", "action", "text"]);
-  });
 });
 
-describe("work-message store · 动作卡全生命周期（toolCallId 锚定原位更新）", () => {
-  it("started → running → completed：同一行原位换装（React key 不变），label running 起具体", () => {
+describe("work-message store · 部件投影（动作 + 脱轨信号）", () => {
+  it("部件序列投影：到达序即呈现序", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    const action = {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "write_file",
-    } as const;
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput({ state: "started" }));
+    notePart("p1", ref({ eventId: "r1:3" }), { kind: "signal", signal: "derailed" });
 
-    notePart("p1", ref({ eventId: "r1:3" }), { ...action, state: "started", label: "编写【代码文件】" });
-    notePart("p1", ref({ eventId: "r1:4" }), { ...action, state: "running", label: "编写【订单管理】" });
-    notePart("p1", ref({ eventId: "r1:6" }), { ...action, state: "completed", label: "编写【订单管理】" });
-
-    const parts = work()?.parts ?? [];
-    expect(parts).toHaveLength(1); // 原位更新不另起行
-    const card = parts[0] as Extract<WorkPart, { kind: "action" }>;
-    expect(card.id).toBe("r1:3"); // 首见事件 id 为键，状态更新不改键
-    expect(card.state).toBe("completed");
-    expect(card.label).toBe("编写【订单管理】");
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toEqual([
+      {
+        kind: "action",
+        id: "r1:2",
+        source: undefined,
+        toolCallId: "t1",
+        toolName: "write_file",
+        state: "started",
+        label: "编写【代码文件】",
+        error: undefined,
+      },
+      { kind: "signal", id: "r1:3", source: undefined, signal: "derailed" },
+    ]);
   });
 
-  it("failed 终态：state 落 failed（动作层状态，与 run 终态无关）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "action",
-      toolCallId: "tc-9",
-      toolName: "execute",
-      state: "started",
-      label: "执行【命令】",
-    });
-    notePart("p1", ref({ eventId: "r1:3" }), {
-      kind: "action",
-      toolCallId: "tc-9",
-      toolName: "execute",
-      state: "failed",
-      label: "执行【命令】",
-    });
-
-    const card = work()?.parts[0] as Extract<WorkPart, { kind: "action" }>;
-    expect(card.state).toBe("failed");
-  });
-
-  it("失败留痕（#229）：failed 携 error 原位落卡；completed / 无 error 不落", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "action",
-      toolCallId: "tc-e1",
-      toolName: "execute",
-      state: "running",
-      label: "npm test",
-    });
-    notePart("p1", ref({ eventId: "r1:3" }), {
-      kind: "action",
-      toolCallId: "tc-e1",
-      toolName: "execute",
-      state: "failed",
-      label: "npm test",
-      error: "npm err! code ELIFECYCLE",
-    });
-    notePart("p1", ref({ eventId: "r1:4" }), {
-      kind: "action",
-      toolCallId: "tc-e2",
-      toolName: "execute",
-      state: "completed",
-      label: "pnpm build",
-    });
-
-    const parts = work()?.parts ?? [];
-    const failed = parts[0] as Extract<WorkPart, { kind: "action" }>;
-    expect(failed.error).toBe("npm err! code ELIFECYCLE"); // 失败红行双要素之一透传
-    const completed = parts[1] as Extract<WorkPart, { kind: "action" }>;
-    expect(completed.error).toBeUndefined();
-  });
-
-  it("多个动作并行（不同 toolCallId）各自成行、各自更新", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "write_file",
-      state: "started",
-      label: "编写【A】",
-    });
-    notePart("p1", ref({ eventId: "r1:3" }), {
-      kind: "action",
-      toolCallId: "tc-2",
-      toolName: "execute",
-      state: "started",
-      label: "执行【B】",
-    });
-    notePart("p1", ref({ eventId: "r1:4" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "write_file",
-      state: "completed",
-      label: "编写【A】",
-    });
-
-    const actions = (work()?.parts ?? []).filter(
-      (part): part is Extract<WorkPart, { kind: "action" }> => part.kind === "action",
-    );
-    expect(actions.map((a) => a.toolCallId)).toEqual(["tc-1", "tc-2"]);
-    expect(actions.map((a) => a.state)).toEqual(["completed", "started"]);
-  });
-});
-
-describe("work-message store · 锚定守卫（部件全事件流恒挂，工作消息只锚编码 run）", () => {
-  it("无锚 + coder- 会话的部件：补建锚（重放缓冲淘汰 run-start 的刷新回访恢复）", () => {
-    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r1:9", runId: "r9" }), {
-      kind: "text",
-      text: "正在收尾",
-    });
-
-    expect(work()?.runId).toBe("r9");
-    expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toHaveLength(1);
-  });
-
-  it("无锚 + 主智能体会话的部件：不建工作消息（对话面走 text 增量气泡，部件并行不双渲染）", () => {
-    const { notePart } = useWorkMessageStore.getState();
-    notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), { kind: "text", text: "对话轮解说" });
-    notePart("p1", ref({ eventId: "b2:2", sessionId: "main-p1", runId: "ra" }), { kind: "text", text: "答询作答" });
-    notePart("p1", ref({ eventId: "b3:2", sessionId: undefined, runId: "rn" }), { kind: "text", text: "无会话" });
-
-    expect(work()).toBeUndefined();
-  });
-
-  it("有锚 + 异 runId 的对话部件：锚定消息不受扰（不重开不进件）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "编码解说" });
-
-    notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), { kind: "text", text: "对话轮插话" });
-
-    expect(work()?.runId).toBe("r1");
-    expect(work()?.parts).toHaveLength(1);
-  });
-
-  it("生长中锚 + 异 runId 的编码部件（迟到/重放残段）：忽略不闪空（重锚只在无锚或已定格时）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r2");
-    notePart("p1", ref({ eventId: "r2:2", runId: "r2" }), { kind: "text", text: "当前尝试解说" });
-
-    // 上一尝试 r1 的残段（同 coder 会话、异 runId）迟到：不清当前锚
-    notePart("p1", ref({ eventId: "r1:9", runId: "r1" }), { kind: "text", text: "残段" });
-
-    expect(work()?.runId).toBe("r2");
-    expect(work()?.parts).toHaveLength(1);
-  });
-
-  it("已定格锚 + 异 runId 的编码部件（新 run 的 run-start 被缓冲淘汰）：重锚新 run", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "上一轮解说" });
-    freezeWork("p1", "r1");
-
-    notePart("p1", ref({ eventId: "r2:5", runId: "r2" }), { kind: "text", text: "新一轮解说" });
-
-    expect(work()?.runId).toBe("r2");
-    expect(work()?.frozen).toBe(false);
-    expect(work()?.parts).toHaveLength(1);
-  });
-});
-
-describe("work-message store · 重放幂等与定格", () => {
-  it("部件事件按 SSE id 只收一次（挂载重连重收缓冲不双长）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    const input = { kind: "text", text: "同一段" } as const;
-
-    notePart("p1", ref({ eventId: "r1:2" }), input);
-    notePart("p1", ref({ eventId: "r1:2" }), input);
-
-    expect(work()?.parts).toHaveLength(1);
-  });
-
-  it("freezeWork（run-finish / run-failed）定格：部件不再进；重放再定格幂等", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "write_file",
-      state: "running",
-      label: "编写【订单管理】",
-    });
-
-    freezeWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:3" }), { kind: "text", text: "迟到部件" });
-    freezeWork("p1", "r1");
-
-    expect(work()?.frozen).toBe(true);
-    expect(work()?.parts).toHaveLength(1);
-  });
-
-  it("freezeWork 非锚定 run（对话轮收口）忽略", () => {
-    const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-
-    freezeWork("p1", "rb");
-
-    expect(work()?.frozen).toBe(false);
-  });
-});
-
-describe("work-message store · 自检播报（#85：一场 run 一个自检部件，原位换装）", () => {
-  function checkPart() {
-    return work()?.parts.find(
-      (part): part is Extract<WorkPart, { kind: "check" }> => part.kind === "check",
-    );
-  }
-
-  it("checking → passed：同一行原位换装（React key 不变）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-
-    notePart("p1", ref({ eventId: "r1:8" }), { kind: "check", state: "checking" });
-    expect(checkPart()).toEqual({ kind: "check", id: "r1:8", state: "checking" });
-
-    notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "passed" });
-    expect(work()?.parts).toHaveLength(1);
-    expect(checkPart()).toEqual({
-      kind: "check",
-      id: "r1:8", // 原位更新不改键
-      state: "passed",
-    });
-  });
-
-  it("静默重试口径：重复 checking 幂等（不闪换、部件引用不变）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:8" }), { kind: "check", state: "checking" });
-    const partsBefore = work()?.parts;
-
-    // 首试核验未过（不出 ❌）→ 重试核验再发 checking——用户面仍是同一次检查
-    //（事件 id 簿记照收 = 重放去重口径；部件面零变更 = 不触发部件重渲染）
-    notePart("p1", ref({ eventId: "r1:12" }), { kind: "check", state: "checking" });
-
-    expect(work()?.parts).toBe(partsBefore); // 部件引用不变
-  });
-
-  it("末次核验未过：checking → failed（与 run-failed 同窗口，❌ 定格留驻）", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:8" }), { kind: "check", state: "checking" });
-
-    notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "failed" });
-    freezeWork("p1", "r1");
-
-    expect(checkPart()).toMatchObject({ state: "failed" });
-    expect(work()?.frozen).toBe(true);
-  });
-
-  it("定格后自检事件不进（重放/迟到防御）；未锚定对话会话的 part-check 不建工作消息", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    freezeWork("p1", "r1");
-
-    notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "checking" });
-    expect(work()?.parts).toEqual([]);
-
-    // 部件全事件流恒挂但只锚编码 run：对话会话的 part-check 不补建工作消息
-    notePart("p1", ref({ eventId: "rb:3", runId: "rb", sessionId: "main-p1" }), {
-      kind: "check",
-      state: "checking",
-    });
-    expect(work()?.parts).toEqual([]);
-  });
-});
-
-describe("work-message store · 成功无痕不回写事件面（#230：滤除只在呈现层）", () => {
-  it("completed 动作照收全量部件——store 不裁事件（静态面滤除是组件投影的事）", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "开始。" });
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "execute",
-      state: "started",
-      label: "npm install",
-    });
-    notePart("p1", ref({ eventId: "r1:3" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "execute",
-      state: "completed",
-      label: "npm install",
-    });
-
-    const parts = work()?.parts ?? [];
-    expect(parts).toHaveLength(2); // 文本 + completed 动作——全量收件
-    expect(parts[1]).toMatchObject({ state: "completed", label: "npm install" });
-  });
-});
-
-describe("work-message store · 脱轨信号部件（#240：入 parts 流水供活性行推导，静态面滤除在呈现层）", () => {
-  it("signal 入流水（每次吞段一件、不原位更新）；重放同 id 去重", () => {
+  it("脱轨信号逐件追加、不原位合并（每次吞段一件）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "signal", signal: "derailed" });
     notePart("p1", ref({ eventId: "r1:3" }), { kind: "signal", signal: "derailed" });
 
-    const parts = work()?.parts ?? [];
-    expect(parts).toEqual([
-      { kind: "signal", id: "r1:2", source: undefined, signal: "derailed" },
-      { kind: "signal", id: "r1:3", source: undefined, signal: "derailed" },
-    ]); // 连续吞段各一件（天然低频，节流触发器未触发）
-
-    notePart("p1", ref({ eventId: "r1:2" }), { kind: "signal", signal: "derailed" });
-    expect(work()?.parts).toHaveLength(2); // 重放去重
+    const parts = workPartsOf(useWorkMessageStore.getState(), "p1");
+    expect(parts).toHaveLength(2);
+    expect(parts.filter((part) => part.kind === "signal")).toHaveLength(2);
   });
+});
 
-  it("signal 携来源归属（#95 委派位：子智能体脱轨分角色推导的依据）", () => {
+describe("work-message store · 动作卡全生命周期（toolCallId 锚定原位更新）", () => {
+  it("started → running → completed：同一行原位换装（id 不变），label running 起具体", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2", source: "verify" }), {
-      kind: "signal",
-      signal: "derailed",
-    });
 
-    expect(work()?.parts[0]).toMatchObject({ kind: "signal", source: "verify" });
-  });
-});
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput({ state: "started" }));
+    notePart("p1", ref({ eventId: "r1:3" }), actionInput({ state: "running", label: "编写【订单管理】" }));
+    notePart("p1", ref({ eventId: "r1:4" }), actionInput({ state: "completed", label: "编写【订单管理】" }));
 
-// part-hint（#437 决策时微指令部件）2026-11-12 退役：微指令是模型面指引、用户面
-// 只添噪——store 的 hint 部件联合项与专测整节删除（事件退役钉见 bridge.test.ts）
-
-describe("work-message store · 座席（#290 designer 设计会话：同骨架异语料的呈现分岔锚）", () => {
-  it("startWork 座席随 run-start 配置键落锚：designer 座＝设计会话（计划区/活性行分岔的依据）", () => {
-    useWorkMessageStore.getState().startWork("p1", "r1", undefined, undefined, "designer");
-
-    expect(work()).toMatchObject({ runId: "r1", seat: "designer" });
-  });
-
-  it("缺省座席＝executor（旧调用面兼容）：无 seat 即编码 run 呈现", () => {
-    useWorkMessageStore.getState().startWork("p1", "r1");
-
-    expect(work()?.seat).toBeUndefined();
-  });
-
-  it("无锚 + designer- 会话的部件：补建锚且座席派生 designer（run-start 被缓冲淘汰的补建路径）", () => {
-    useWorkMessageStore.getState().notePart(
-      "p1",
-      ref({ eventId: "r9:2", runId: "r9", sessionId: "designer-p1-item-1" }),
-      { kind: "text", text: "先读 PRD 清单章" },
-    );
-
-    expect(work()).toMatchObject({ runId: "r9", seat: "designer" });
-    expect(work()?.parts).toHaveLength(1);
-  });
-
-  it("无锚 + coder- 会话补建锚仍派生 executor；main- 会话照旧不建（对话面走气泡）", () => {
-    useWorkMessageStore.getState().notePart(
-      "p1",
-      ref({ eventId: "r8:2", runId: "r8", sessionId: "coder-p1" }),
-      { kind: "text", text: "编码解说" },
-    );
-
-    expect(work()).toMatchObject({ runId: "r8", seat: "executor" });
-
-    useWorkMessageStore.getState().notePart(
-      "p1",
-      ref({ eventId: "rb:2", runId: "rb", sessionId: "main-p1" }),
-      { kind: "text", text: "对话轮" },
-    );
-    expect(work()?.runId).toBe("r8"); // 主智能体部件不重锚
-  });
-
-  it("定格留驻保座席；下一场 run 重开随新 run-start 座席换装（设计物逐件推进＝逐件新卡）", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", undefined, undefined, "designer");
-    notePart(
-      "p1",
-      ref({ eventId: "r1:2", sessionId: "designer-p1-item-1" }),
-      { kind: "text", text: "本件解说" },
-    );
-    freezeWork("p1", "r1");
-
-    expect(work()).toMatchObject({ frozen: true, seat: "designer" });
-
-    // 下一设计物（新 runId）重开：座席随新 run-start 再落（同轨恒 designer）
-    startWork("p1", "r2", undefined, undefined, "designer");
-    expect(work()).toMatchObject({ runId: "r2", frozen: false, seat: "designer", parts: [] });
-  });
-
-  it("同 runId 幂等（重放）：座席不覆写、部件保留", () => {
-    useWorkMessageStore.getState().startWork("p1", "r1", undefined, undefined, "designer");
-    useWorkMessageStore.getState().notePart(
-      "p1",
-      ref({ eventId: "r1:2", sessionId: "designer-p1-item-1" }),
-      { kind: "text", text: "解说" },
-    );
-
-    useWorkMessageStore.getState().startWork("p1", "r1");
-
-    expect(work()).toMatchObject({ seat: "designer" });
-    expect(work()?.parts).toHaveLength(1);
-  });
-});
-
-describe("work-message store · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
-  it("freezeWork 定格留驻：部件保留、只读、不再生长（成功收口不再清空——「过程上文、结果下卡」）", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
-    notePart("p1", ref({ eventId: "r1:2" }), {
+    const parts = workPartsOf(useWorkMessageStore.getState(), "p1");
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
       kind: "action",
-      toolCallId: "tc-1",
-      toolName: "write_file",
+      id: "r1:2", // React key 不变（行不重挂）
+      toolCallId: "t1",
       state: "completed",
       label: "编写【订单管理】",
     });
-
-    freezeWork("p1", "r1");
-
-    expect(work()?.frozen).toBe(true);
-    expect(work()?.parts).toHaveLength(2); // 部件保留，不清空（#117 语义反转）
-
-    // 定格后不再生长：迟到部件不进（后续事件不追加部件）
-    notePart("p1", ref({ eventId: "r1:9" }), { kind: "text", text: "迟到部件" });
-    expect(work()?.parts).toHaveLength(2);
   });
 
-  it("无 closing 定格（run-failed）：流水留驻（恢复出口归生成面）——现状回归", () => {
-    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+  it("失败留痕（#229）：failed 携 error 原位落卡；completed 不落 error", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
 
-    freezeWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput({ state: "running" }));
+    notePart(
+      "p1",
+      ref({ eventId: "r1:3" }),
+      actionInput({ state: "failed", label: "执行【构建】", error: "exit code 1" }),
+    );
 
-    expect(work()?.frozen).toBe(true);
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")[0]).toMatchObject({
+      state: "failed",
+      error: "exit code 1",
+    });
+  });
+
+  it("写文件目标路径（#618 预览跟随）：落定起携带、跨状态更新保留、无路径事件不清空", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput({ state: "started" }));
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")[0]).toMatchObject({ path: undefined });
+
+    notePart("p1", ref({ eventId: "r1:3" }),
+      actionInput({ state: "running", path: "src/app/about/page.tsx" }));
+    notePart("p1", ref({ eventId: "r1:4" }),
+      actionInput({ state: "completed", label: "编写【page】" }));
+
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")[0]).toMatchObject({
+      state: "completed",
+      path: "src/app/about/page.tsx",
+    });
+  });
+
+  it("多个动作并行（不同 toolCallId）各自成行、各自更新", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput({ toolCallId: "t1" }));
+    notePart("p1", ref({ eventId: "r1:3" }), actionInput({ toolCallId: "t2" }));
+    notePart("p1", ref({ eventId: "r1:4" }), actionInput({ toolCallId: "t1", state: "running" }));
+
+    const parts = workPartsOf(useWorkMessageStore.getState(), "p1");
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatchObject({ toolCallId: "t1", state: "running" });
+    expect(parts[1]).toMatchObject({ toolCallId: "t2", state: "started" });
+  });
+});
+
+describe("work-message store · 锚定守卫（部件全事件流恒挂，工作消息只锚编码 run）", () => {
+  it("无锚 + coder- 会话的部件：补建锚（重放缓冲淘汰 run-start 的刷新回访恢复）", () => {
+    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r9:2", runId: "r9" }), actionInput());
+
+    expect(work()?.runId).toBe("r9");
     expect(work()?.parts).toHaveLength(1);
   });
 
-  it("已定格再收 freezeWork（补发序防御）：幂等忽略；非锚定 run 忽略", () => {
-    const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    freezeWork("p1", "r1");
+  it("无锚 + 主智能体会话的部件：不建工作消息（对话面走 text 增量气泡）", () => {
+    const { notePart } = useWorkMessageStore.getState();
+    notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), actionInput());
+    notePart("p1", ref({ eventId: "b3:2", sessionId: undefined, runId: "rn" }), actionInput());
 
-    freezeWork("p1", "r1");
-    expect(work()?.frozen).toBe(true); // 已定格，再收幂等（首次定格为准）
-
-    freezeWork("p1", "r9");
-    expect(work()?.runId).toBe("r1");
+    expect(work()).toBeUndefined();
   });
 
-  it("下一场编码 run 重开：旧消息退场（历史收尾卡的常驻位 = chat store 对话流，#89）", () => {
-    const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    freezeWork("p1", "r1");
-
-    startWork("p1", "r2");
-
-    expect(work()).toEqual({
-      runId: "r2",
-      frozen: false,
-      parts: [],
-      seenEventIds: [],
-    });
-  });
-
-  it("source 归属（#95 委派位）：子智能体部件带 source，执行体缺省（分角色播的依据）", () => {
+  it("有锚 + 异 runId 的对话部件：锚定消息不受扰", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "执行体解说" });
-    notePart("p1", ref({ eventId: "r1:2", source: "verify" }), { kind: "text", text: "验证逐项通过" });
-    notePart("p1", ref({ eventId: "r1:3", source: "verify" }), {
-      kind: "action",
-      toolCallId: "tc-1",
-      toolName: "execute",
-      state: "completed",
-      label: "运行命令",
-    });
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput());
 
-    const parts = work()!.parts;
-    const text = parts[0] as Extract<WorkPart, { kind: "text" }>;
-    const subagentText = parts[1] as Extract<WorkPart, { kind: "text" }>;
-    const action = parts[2] as Extract<WorkPart, { kind: "action" }>;
-    expect(text.source).toBeUndefined();
-    expect(subagentText.source).toBe("verify");
-    expect(action.source).toBe("verify");
+    notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), actionInput());
+
+    expect(work()?.runId).toBe("r1");
+    expect(work()?.parts).toHaveLength(1);
+  });
+
+  it("生长中锚 + 异 runId 的编码部件（事件序异常）：忽略不闪空", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput());
+
+    notePart("p1", ref({ eventId: "r2:2", runId: "r2" }), actionInput({ toolCallId: "t2" }));
+
+    expect(work()?.runId).toBe("r1");
+    expect(work()?.parts).toHaveLength(1);
+  });
+
+  it("已定格锚 + 异 runId 的编码部件：重锚新 run", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2" }), actionInput());
+    freezeWork("p1", "r1");
+
+    notePart("p1", ref({ eventId: "r2:5", runId: "r2" }), actionInput({ toolCallId: "t2" }));
+
+    expect(work()?.runId).toBe("r2");
+    expect(work()?.frozen).toBe(false);
+  });
+});
+
+describe("work-message store · 重放幂等与定格", () => {
+  it("部件事件按 SSE id 只收一次", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    const input = actionInput();
+
+    notePart("p1", ref({ eventId: "r1:2" }), input);
+    notePart("p1", ref({ eventId: "r1:2" }), input);
+
+    expect(work()?.parts).toHaveLength(1);
+  });
+
+  it("freezeWork 定格：部件不再进；重放再定格幂等", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    freezeWork("p1", "r1", 1_000);
+
+    notePart("p1", ref({ eventId: "r1:3" }), actionInput({ toolCallId: "t9" }));
+
+    expect(work()?.frozen).toBe(true);
+    expect(work()?.parts).toEqual([]);
+  });
+
+  it("freezeWork 非锚定 run（对话轮收口）忽略", () => {
+    const { startWork, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    freezeWork("p1", "r2");
+
+    expect(work()?.frozen).toBe(false);
   });
 });

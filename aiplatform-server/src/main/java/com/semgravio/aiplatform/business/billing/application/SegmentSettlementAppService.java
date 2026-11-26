@@ -50,7 +50,8 @@ import com.semgravio.aiplatform.business.billing.domain.repository.ProjectBillin
  * 服务层 first-write-wins——段收口重试/重放不双扣，与计量 eventId 幂等同律；
  * 固定单价项的段址＝其发生锚点〔如用量事件 eventId〕，同锚点直记幂等）。</p>
  *
- * <p>段收口缝的编排接线（主智能体轮/run 场/设计会话轮三缝）归 #537 同缝落位
+ * <p>段收口缝的编排接线（主智能体轮/run 场两缝；设计会话轮生产者随 #610 设计线
+ * 退役，{@code DESIGN_TURN} 历史值保留）归 #537 同缝落位
  * ——本服务收 {@code usageRunIds}（段内各次智能体运行的用量事件寻址键），用量
  * 单源取自计量面（met_usage_events，与平台成本观测同一账）。</p>
  */

@@ -69,15 +69,6 @@ vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
-vi.mock("@/hooks/use-version", () => ({
-  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useVersionViewSession: () => ({
-    startView: { mutate: vi.fn(), isPending: false, isError: false, data: undefined, reset: vi.fn() },
-    start: vi.fn(),
-    finish: vi.fn(),
-  }),
-}));
-
 function seedChat(overrides: Partial<ProjectChat> = {}) {
   seed.works = {};
   seed.chats = {

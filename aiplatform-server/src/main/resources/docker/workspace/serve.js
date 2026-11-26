@@ -1,7 +1,7 @@
 // 极简静态文件服务器（demo 预览示意用，零依赖）
 // 用法：node /opt/serve.js <root> <port>
 // #138 注入口径收口：预览注入唯一源 = 预览网关 sub_filter（ADR-0014），本文件回归
-// 纯静态职责——快照「查看当时」静态兜底起服（不经网关、维持无注入）与集成测试探针。
+// 纯静态职责（运载纯静态页/集成测试探针）。
 const http = require('http');
 const fs = require('fs');
 const path = require('path');

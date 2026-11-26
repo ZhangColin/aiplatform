@@ -69,7 +69,7 @@ class KnowledgePortSemanticTest {
                 List.of("数据库每日全量备份任务在凌晨三点执行，失败后重试两次并告警。"),
                 null));
 
-        List<KnowledgeHit> hits = knowledgePort.retrieve("密码应该怎么加密存储", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("密码应该怎么加密存储", 5).hits();
 
         // 语义命中：与 query 同题的块排首位（跨项目全局检索，另一项目的 Bug 块不入首位）
         assertThat(hits).isNotEmpty();
@@ -79,7 +79,7 @@ class KnowledgePortSemanticTest {
         assertThat(first.sourceProjectName()).isEqualTo("电商系统");
         assertThat(first.title()).isEqualTo("PRD.md");
         // topK 生效
-        assertThat(knowledgePort.retrieve("密码应该怎么加密存储", 1)).hasSize(1);
+        assertThat(knowledgePort.retrieve("密码应该怎么加密存储", 1).hits()).hasSize(1);
     }
 
     @Test
@@ -89,7 +89,7 @@ class KnowledgePortSemanticTest {
                 List.of("问：接口超时怎么处理？\n答：网关侧设置 10 秒超时，超时返回 504 并记录审计日志。"),
                 null));
 
-        List<KnowledgeHit> hits = knowledgePort.retrieve("gateway timeout handling", 5);
+        List<KnowledgeHit> hits = knowledgePort.retrieve("gateway timeout handling", 5).hits();
 
         assertThat(hits).isNotEmpty();
         assertThat(hits.get(0).chunk()).contains("超时");

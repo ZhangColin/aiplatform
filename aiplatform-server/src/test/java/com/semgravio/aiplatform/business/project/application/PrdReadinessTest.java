@@ -22,7 +22,7 @@ class PrdReadinessTest {
     @Test
     void given_real_form_chapter_when_parse_then_items_flattened_to_minor_and_dimensions_aggregated() {
         // 真实走查形态同源（#304 项目 367868027623310018）：主智能体按中文文档习惯
-        // 给七章节加序号「## 七、验收与待确认」；条目可带 ** 强调；条目下缩进子项
+        // 给章标题加序号「## 七、验收与待确认」；条目可带 ** 强调；条目下缩进子项
         // 是说明行不是条目。旧两级子标题在场＝界标容忍（#462 不分级，全归待确认池）
         String prd = """
                 # 巾上添花 · 需求文档（PRD）
@@ -212,7 +212,7 @@ class PrdReadinessTest {
                 new PrdReadiness.DimensionState(ReadinessDimension.ACCEPTANCE, PrdReadiness.Status.MINOR));
     }
 
-    // ---------- 章界：下一章标题止章（章内非分组标题＝章界，同 DesignChecklist） ----------
+    // ---------- 章界：下一章标题止章（章内非分组标题＝章界） ----------
 
     @Test
     void given_next_chapter_after_items_when_parse_then_chapter_ends_at_heading() {

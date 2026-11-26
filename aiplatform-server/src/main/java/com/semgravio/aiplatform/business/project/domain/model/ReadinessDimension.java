@@ -9,7 +9,7 @@ import com.cartisan.core.domain.BaseEnum;
  * 五要素（目标与角色/主流程/功能与边界/数据与约束/验收），与缺项分级共用同一套
  * 维度判定——「验收与待确认」章条目的【维度】标注即本词表（判定语义归主智能体
  * 提示词：prd-writing 技能钉条目前导【维度】写法，词表与本文逐字同源——跨层
- * 同源对先例＝DesignChecklist 与前端 feature-list.ts，#285）。REST 投影用
+ * 同源对先例＝前端 convergence-card.tsx 的空态词表镜像，#285）。REST 投影用
  * {@link #label()}（呈现词表、封闭五值，前端零映射直渲染）。BaseEnum 实现是
  * 仓规架构约束（domain 枚举自动 Integer 转换），本词表本身不落库不经码传输。
  */

@@ -41,15 +41,14 @@ import com.semgravio.aiplatform.support.Tsid;
  * 后台订单 REST 面（#29 交易环②，机机签名——五头 HMAC 强制闸，见
  * {@link com.semgravio.aiplatform.config.WebMvcConfig}）。前端无任何后台操作
  * 入口，联调走 scripts/backoffice-quote.sh。清单/详情带交付物类型（#298 列加、
- * 筛选不加——设计单量小已备案）；设计资产包取件对偶源码包（#298——直取下单
- * 冻结件、不受用户支付门约束）。错误码前缀 ORD_（订单不存在 ORD_001、报价守卫
+ * 筛选不加；#611 收窄为系统单值）。错误码前缀 ORD_（订单不存在 ORD_001、报价守卫
  * ORD_007/008/009、运营取消 ORD_005/013/014、重试归档 ORD_012——项目已归档
- * PRJ_013、系统单取设计包 ORD_016、冻结件缺失 PRJ_051 为跨 BC 既有码透传）。
+ * PRJ_013、打包失败 WSP_002 为跨 BC 既有码透传）。
  */
 @RestController
 @RequestMapping("/api/backoffice/orders")
 @RequireSignature
-@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 设计资产包 / 报价 / 范围录入 / 运营取消 / 重试归档（机机签名）")
+@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价 / 范围录入 / 运营取消 / 重试归档（机机签名）")
 public class BackofficeOrderController {
 
     private final BackofficeOrderAppService queryAppService;
@@ -72,7 +71,7 @@ public class BackofficeOrderController {
                     + "查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName"
                     + "（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）"
                     + "与 deliverableType/deliverableTypeName 交付物类型（#298 列加"
-                    + "——1=设计 2=系统 3=系统＋设计；筛选维度不加，设计单量小已备案）。"
+                    + "——#611 收窄为系统单值 2=系统；筛选维度不加）。"
                     + "page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。"
                     + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
                     + "非数值分页 400（带字段明细）、时间类型不匹配 404。"
@@ -94,9 +93,9 @@ public class BackofficeOrderController {
     @GetMapping("/{id}")
     @Operation(summary = "订单详情（后台面）",
             description = "报价依据全量：状态、交付物类型（deliverableType/deliverableTypeName，"
-                    + "#298——1=设计 2=系统 3=系统＋设计）、金额+最新备注、价目历史"
+                    + "#298 列加——#611 收窄为系统单值 2=系统）、金额+最新备注、价目历史"
                     + "（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、"
-                    + "PRD 快照正文（下单冻结；设计单快照即含设计物清单章）、项目名、"
+                    + "PRD 快照正文（下单冻结）、项目名、"
                     + "下单账号 externalId＋昵称（可空/缺档为 null）、状态时点组。"
                     + "需要机机签名；订单不存在 404 ORD_001")
     @ErrorCodes({"ORD_001"})
@@ -113,25 +112,6 @@ public class BackofficeOrderController {
         Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
         return BinaryResponses.attachment(queryAppService.sourcePackage(orderId),
                 "application/gzip", orderId + "-source.tar.gz");
-    }
-
-    @GetMapping("/{id}/design-package")
-    @Operation(summary = "订单设计资产包（tar.gz 二进制流，下单冻结件直取）",
-            description = "设计面交付取件（#298，对偶源码包端点）：直取该单下单冻结时物化的"
-                    + "设计资产包（选件式 tar：选定稿自包含形态＋DESIGN.md 设计规范＋帧"
-                    + "衍生资产，落选稿不入；系统＋设计单＝统一部件容器）。交付物包按单"
-                    + "定格——交付时拿到冻结时的样子，此后改稿/再定稿不漂移。<b>不按"
-                    + "支付态门控</b>：后台是交付与排障面，用户支付门只盖用户面（未支付/"
-                    + "已取消照取；取消残留不清理＝本端点正本）。守卫序＝订单存在 →"
-                    + " 交付物类型（系统单 404 ORD_016 如实——交付物是源码包）→ 冻结件"
-                    + "读取（缺失 404 PRJ_051 不以空产物顶替）。响应为二进制文件流"
-                    + "（application/gzip，不走 ApiResponse JSON 信封，先例＝源码包端点）。"
-                    + "需要机机签名；订单不存在 404 ORD_001；读取失败 500 WSP_002")
-    @ErrorCodes({"ORD_001", "ORD_016", "PRJ_051", "WSP_002"})
-    public ResponseEntity<ByteArrayResource> designPackage(@PathVariable String id) {
-        Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
-        return BinaryResponses.attachment(queryAppService.designPackage(orderId),
-                "application/gzip", orderId + "-design.tar.gz");
     }
 
     @PostMapping("/{id}/quote")
@@ -180,10 +160,10 @@ public class BackofficeOrderController {
     @PostMapping("/{id}/retry-archive")
     @Operation(summary = "重试归档（已支付未归档的卡单补归档）",
             description = "对支付成功但归档失败的卡单手动补完结：一事务内订单落已归档"
-                    + "＋项目归档，成功后补发「已归档」通知并触发知识沉淀（成交 PRD "
-                    + "入知识库，best-effort 不炸主流程）。幂等由既有守卫保证——"
-                    + "重复触发/非已支付态 409 ORD_012；项目已归档 409 PRJ_013"
-                    + "（不产生重复素材）。X-User-Id/X-User-Name 透传头自动落痕订单行"
+                    + "＋项目归档，成功后补发「已归档」通知。知识入库自 #640 起改挂"
+                    + "用户面版本成版，订单归档不再触发知识沉淀。幂等由既有守卫保证——"
+                    + "重复触发/非已支付态 409 ORD_012；项目已归档 409 PRJ_013。"
+                    + "X-User-Id/X-User-Name 透传头自动落痕订单行"
                     + "（缺头落空，#158；支付链自动归档操作者为空）。需要机机签名")
     @ErrorCodes({"ORD_001", "ORD_012", "PRJ_013"})
     public ApiResponse<OrderResponse> retryArchive(@PathVariable String id) {

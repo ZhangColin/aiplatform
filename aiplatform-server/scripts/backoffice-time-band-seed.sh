@@ -18,6 +18,10 @@
 # 幂等：通道（provider）已有任意规则行（含已关行）即跳过——重复执行零新插；
 # 中断续跑收敛。既有行取自清单翻页全量（页大小 100，翻到取尽）。
 #
+# #558/ADR-0053 ②起 provider 列语义＝归一供应商（vendor）：归段匹配挂计量事件的
+# vendor 腿——同 vendor 多账号共用本表窗口行；本脚本 provider 值即 vendor 词表，
+# 数据与幂等口径零改动。
+#
 # 用法：./scripts/backoffice-time-band-seed.sh
 # 凭据：BACKOFFICE_API_KEY / BACKOFFICE_API_SECRET（或 .env.local /
 #   app-registry bootstrap 现取，同 backoffice-price-seed.sh）；不传操作者头——
@@ -28,7 +32,7 @@ set -euo pipefail
 source "$(dirname "$0")/backoffice-signed-http.sh"
 
 EFFECTIVE_FROM="2026-08-16T00:00:00Z"
-# provider：deepseek＝官方通道键（与 UsageEvent.provider / met_price_entries 同键）
+# provider：deepseek＝供应商（vendor——与 UsageEvent.vendor / met_price_entries 同键）
 PROVIDER="deepseek"
 # 峰窗两窗口（一单两行行＝一个规则版本）：工作日（dayMask 31＝Mon..Fri bitmask）
 # 01:00–04:00（60–240）＋06:00–10:00（360–600）UTC，band=1（峰）

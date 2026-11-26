@@ -38,7 +38,7 @@ export function useOrder(orderId: string | null | undefined) {
   });
 }
 
-/** 下单（过双确认门）：冻结已确认 PRD 版本全文冗余拷贝＋双版本引用入单，项目转待报价锁定态。 */
+/** 下单（过确认门）：冻结当前 PRD 全文冗余拷贝＋已确认用户面版本号入单，项目转待报价锁定态。 */
 export function usePlaceOrder(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({

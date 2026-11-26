@@ -18,23 +18,23 @@ import com.cartisan.core.exception.ApplicationException;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeRemoteModelCatalogResponse;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.ModelProvider;
-import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
+import com.semgravio.aiplatform.business.project.domain.model.ModelConfig;
 import com.semgravio.aiplatform.business.project.domain.port.ModelCatalog;
 import com.semgravio.aiplatform.business.project.domain.port.ModelCatalogFetcher;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
 
 /**
  * 后台模型清单手动拉取用例（#368，spec #364-T4，ADR-0031「手动同步、不做自动
- * 定时」）：按通道行真拉远端清单（OpenAI 兼容 models 端点）→ 与库内档位对照
+ * 定时」）：按通道行真拉远端清单（OpenAI 兼容 models 端点）→ 与库内配置对照
  * （远端有库里无＝建议入库；库内指向远端已无＝提示过时）。勾选入库不经此——
- * 复用 {@link BackofficeModelChannelAppService} 档位创建写口（语义键人工命名），
+ * 复用 {@link BackofficeModelChannelAppService} 配置创建写口（语义键人工命名），
  * 拉取面零新写路径、零留痕（纯读动作）。
  *
  * <p><b>明确报错不静默</b>：通道 key 空（PRJ_076）与上游不可用（PRJ_077——
  * 非 200/坏响应/连接异常，理由如实转述）皆错误信封回给运营，无降级假数据。
  * 停用通道可拉（巡检语义——停用拦在装配面 resolve 层，不拦维护面读上游）。</p>
  *
- * <p>不挂事务：两次库读各自即席（动态查库同 {@code ModelTierAppService} 口径），
+ * <p>不挂事务：两次库读各自即席（动态查库同 {@code ModelConfigAppService} 口径），
  * 不为一次上游 HTTP 调用占住连接。</p>
  */
 @Service
@@ -51,7 +51,7 @@ public class BackofficeModelCatalogAppService {
     }
 
     /**
-     * 拉取远端模型清单并与库内档位对照（每次全量真拉、无缓存）。
+     * 拉取远端模型清单并与库内配置对照（每次全量真拉、无缓存）。
      *
      * @throws ApplicationException PRJ_065 通道不存在；PRJ_076 通道 key 空；
      *                              PRJ_077 上游拉取失败（理由如实转述）
@@ -70,16 +70,16 @@ public class BackofficeModelCatalogAppService {
                 ((ModelCatalog.Failed) catalog).reason());
     }
 
-    /** 对照（票 #368 语义）：远端条目标已入库档位键（空＝建议入库）；库内实际
-     * 模型名不在远端清单＝过时档位。排序 modelId/tierKey 字典序——回执稳定可 diff。 */
+    /** 对照（票 #368 语义）：远端条目标已入库配置键（空＝建议入库）；库内实际
+     * 模型名不在远端清单＝过时配置。排序 modelId/configKey 字典序——回执稳定可 diff。 */
     private BackofficeRemoteModelCatalogResponse compare(ModelProvider provider,
             List<ModelCatalog.RemoteModel> remoteModels) {
-        List<ModelTier> providerTiers = channelStore.findAllTiers().stream()
-                .filter(tier -> provider.providerKey().equals(tier.providerKey()))
+        List<ModelConfig> providerTiers = channelStore.findAllConfigs().stream()
+                .filter(config -> provider.providerKey().equals(config.providerKey()))
                 .toList();
-        Map<String, List<String>> trackedTierKeysByModelName = providerTiers.stream()
-                .collect(groupingBy(ModelTier::modelName,
-                        mapping(ModelTier::tierKey, toList())));
+        Map<String, List<String>> trackedConfigKeysByModelName = providerTiers.stream()
+                .collect(groupingBy(ModelConfig::modelName,
+                        mapping(ModelConfig::configKey, toList())));
         Set<String> remoteModelNames = remoteModels.stream()
                 .map(ModelCatalog.RemoteModel::modelId)
                 .collect(toSet());
@@ -88,16 +88,16 @@ public class BackofficeModelCatalogAppService {
                 .sorted(Comparator.comparing(ModelCatalog.RemoteModel::modelId))
                 .map(model -> new BackofficeRemoteModelCatalogResponse.RemoteModelEntry(
                         model.modelId(), model.name(), model.status(), model.domain(),
-                        trackedTierKeysByModelName.getOrDefault(model.modelId(), List.of())))
+                        trackedConfigKeysByModelName.getOrDefault(model.modelId(), List.of())))
                 .toList();
-        List<BackofficeRemoteModelCatalogResponse.StaleTier> staleTiers = providerTiers.stream()
-                .filter(tier -> !remoteModelNames.contains(tier.modelName()))
-                .sorted(Comparator.comparing(ModelTier::tierKey))
-                .map(tier -> new BackofficeRemoteModelCatalogResponse.StaleTier(
-                        tier.tierKey(), tier.modelName(), tier.displayName(), tier.enabled()))
+        List<BackofficeRemoteModelCatalogResponse.StaleConfig> staleConfigs = providerTiers.stream()
+                .filter(config -> !remoteModelNames.contains(config.modelName()))
+                .sorted(Comparator.comparing(ModelConfig::configKey))
+                .map(config -> new BackofficeRemoteModelCatalogResponse.StaleConfig(
+                        config.configKey(), config.modelName(), config.displayName(), config.enabled()))
                 .toList();
         return new BackofficeRemoteModelCatalogResponse(provider.providerKey(),
-                LocalDateTime.now(), entries, staleTiers);
+                LocalDateTime.now(), entries, staleConfigs);
     }
 
     /** 通道行寻址：无行 404 PRJ_065（同维护面语义）。 */

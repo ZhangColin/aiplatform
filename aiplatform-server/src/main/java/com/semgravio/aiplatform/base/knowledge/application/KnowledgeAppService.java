@@ -10,9 +10,10 @@ import lombok.extern.slf4j.Slf4j;
 
 import com.semgravio.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
-import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeRetrieval;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
 
@@ -58,11 +59,12 @@ public class KnowledgeAppService {
     }
 
     /**
-     * 混检检索（#465，自纯向量升级）：向量＋三元组关键词双通道 RRF 融合，CASE/
-     * MODULE/RULE 沉淀素材与 PRD 同池命中；embedding 不可用降级为空列表
-     * （空注入，A5 §3），不抛错。
+     * 混检检索（#465，自纯向量升级；#639 返回「命中列表＋是否降级」）：向量＋
+     * 三元组关键词双通道 RRF 融合，CASE/MODULE/RULE 沉淀素材与 PRD 同池命中。
+     * embedding 不可用与检索异常一律降级（空命中、degraded=true、不抛错）——
+     * 与成功但 0 条命中可区分（A5 §3）。
      */
-    public List<KnowledgeHit> retrieve(String query, int topK) {
+    public KnowledgeRetrieval retrieve(String query, int topK) {
         if (isBlank(query)) {
             throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_QUERY_REQUIRED);
         }
@@ -72,9 +74,39 @@ public class KnowledgeAppService {
         List<float[]> vectors = embeddingClient.embed(List.of(query));
         if (vectors.isEmpty()) {
             log.warn("embedding 服务不可用，检索降级为空结果：query 长度={}", query.length());
-            return List.of();
+            return KnowledgeRetrieval.unavailable();
         }
-        return knowledgeStore.findRelevant(query, vectors.get(0), topK);
+        try {
+            return KnowledgeRetrieval.of(knowledgeStore.findRelevant(query, vectors.get(0), topK));
+        }
+        catch (RuntimeException e) {
+            log.warn("知识检索异常，按降级处理：{}", e.toString());
+            return KnowledgeRetrieval.unavailable();
+        }
+    }
+
+    /**
+     * 命中留痕写入（#639）：一条记录＝一次检索（项目、时间、命中条目、是否
+     * 降级）。成功 0 条照记（degraded=false）；降级照记（degraded=true）。
+     */
+    public void recordRetrieval(String projectId, KnowledgeRetrieval retrieval) {
+        if (isBlank(projectId) || retrieval == null) {
+            return;
+        }
+        knowledgeStore.recordRetrieval(projectId, retrieval.degraded(), retrieval.hits());
+    }
+
+    /**
+     * 该项目最近一次命中留痕（#639）：无记录＝成功 0 条的空结果（会话装配
+     * 据此重建，不重检索）。
+     */
+    public KnowledgeRetrieval latestRetrieval(String projectId) {
+        if (isBlank(projectId)) {
+            return KnowledgeRetrieval.empty();
+        }
+        RetrievalRecord record = knowledgeStore.latestRetrieval(projectId);
+        return record == null ? KnowledgeRetrieval.empty()
+                : new KnowledgeRetrieval(record.hits(), record.degraded());
     }
 
     /**
@@ -106,13 +138,14 @@ public class KnowledgeAppService {
     }
 
     /**
-     * 按项目级联清理（项目 DELETE 入口）。
+     * 按项目级联清理（项目 DELETE 入口；#639 起命中留痕一并清理）。
      */
     public void purgeByProject(String projectId) {
         if (isBlank(projectId)) {
             throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_PROJECT_ID_REQUIRED);
         }
         knowledgeStore.deleteByProject(projectId);
+        knowledgeStore.deleteRetrievalsByProject(projectId);
     }
 
     /**

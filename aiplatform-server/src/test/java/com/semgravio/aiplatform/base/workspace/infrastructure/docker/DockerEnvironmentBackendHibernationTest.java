@@ -2,7 +2,6 @@ package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -80,26 +79,4 @@ class DockerEnvironmentBackendHibernationTest {
         backend.hibernate(WorkspaceHandle.dev(WorkspaceId.of("42"), "ws-42", "previewnet"));
     }
 
-    @Test
-    void given_snapshot_containers_when_sweep_except_then_only_non_keep_removed() {
-        // 假面 docker ps：列出两个快照容器，其一在保留集（在用会话）
-        List<String> commands = new ArrayList<>();
-        DockerEnvironmentBackend backend = new DockerEnvironmentBackend() {
-            @Override
-            protected ExecResult runCapture(String... cmd) {
-                commands.add(String.join(" ", cmd));
-                if ("ps".equals(cmd[1])) {
-                    return new ExecResult("ws-42-snap-1\nws-42-snap-2\n", "", 0);
-                }
-                return new ExecResult("", "", 0);
-            }
-        };
-
-        int removed = backend.sweepSnapshotContainersExcept(Set.of("ws-42-snap-1"));
-
-        // 保留集外才删（在用快照不受影响）；返回清扫数
-        assertThat(removed).isEqualTo(1);
-        assertThat(commands).contains("docker rm -f ws-42-snap-2");
-        assertThat(commands).doesNotContain("docker rm -f ws-42-snap-1");
-    }
 }

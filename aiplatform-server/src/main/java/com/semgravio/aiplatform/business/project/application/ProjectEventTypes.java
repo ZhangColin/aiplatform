@@ -1,5 +1,10 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.Map;
+
+import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+
 /**
  * 平台通知事件名册常量（ADR-0001：代码侧每 BC 一个 EventTypes 常量类，禁止字符串
  * 字面量散落；正本见 docs/spec/SSE事件清单.md·平台通知族）。本上下文编排层在副作用
@@ -17,10 +22,10 @@ public final class ProjectEventTypes {
     public static final String WORKSPACE_DESTROYED = "workspace-destroyed";
 
     /**
-     * 文档已更新：工作区文档产物写出/修订落定后广播（写入方＝主智能体的 savePrd
-     * 工具，落盘成功经 PrdArtifactAdapter 发射，每次执行必发；#334 停驻落定的
-     * 复用发射口随确认门整段退役——去门化后单一写入方）。前端按失效为主模式
-     * 消费——invalidate 文档域后重拉 REST，不携带内容增量。
+     * 文档已更新：工作区文档产物写出/修订落定后广播。写方两处——主智能体的 savePrd
+     * 工具（落盘成功经 PrdArtifactAdapter 发射，每次执行必发）；迭代 run 成功收口
+     * 且内核按任务提示整合改了 PRD（#624，IterationAppService 对比起跑快照后发射）。
+     * 前端按失效为主模式消费——invalidate 文档域后重拉 REST，不携带内容增量。
      */
     public static final String DOCUMENT_UPDATED = "document-updated";
 
@@ -54,6 +59,22 @@ public final class ProjectEventTypes {
 
     /** 文档类型值：PRD（docs/PRD.md 写出/修订）。 */
     public static final String DOCUMENT_TYPE_PRD = "PRD";
+
+    /**
+     * document-updated 通知载荷（写方共用单源）：projectId + documentType + 归属
+     * 路由键（账户/访客双列互斥、未落侧空串）。savePrd 落盘与迭代收口 PRD 整合
+     * 两处发射口取同一拼装，载荷形状不漂移。
+     */
+    public static Map<String, Object> documentUpdatedPayload(Project project,
+            String documentType) {
+        return Map.of(
+                PROJECT_ID_FIELD, project.getId().toString(),
+                DOCUMENT_TYPE_FIELD, documentType,
+                EventsAppService.OWNER_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
+    }
 
     private ProjectEventTypes() {
     }

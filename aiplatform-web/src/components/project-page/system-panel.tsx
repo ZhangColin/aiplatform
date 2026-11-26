@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, FolderCode, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
+import { ExternalLink, LoaderCircle, Lock, Monitor, Navigation, Pin, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -9,6 +9,7 @@ import {
   type CoderRunStatus,
 } from "@/lib/store/generation";
 import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
+import { followedPreviewRoute } from "@/lib/preview/follow";
 import {
   encodeAnnotate,
   parseAnchorEvent,
@@ -21,7 +22,6 @@ import {
   previewActive,
   resolvePreviewAddress,
   systemPanelPhase,
-  type RecoveryAction,
 } from "@/lib/preview/state";
 import type { GenerationState } from "@/lib/projects/detail";
 import { useAnnotationStore } from "@/lib/store/annotation";
@@ -36,26 +36,24 @@ import {
   type PreviewDevice,
 } from "./device-frame";
 import { PreviewToolbar } from "./preview-toolbar";
-import { RestartUpdateButton } from "./restart-update";
 import { formatClock } from "./work-message";
-import { ResumeGenerationButton } from "./resume-generation";
 import { StopGenerationButton } from "./stop-generation";
 import { DemoVersionChip } from "./demo-version-chip";
 
 /**
  * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 更新
  * 超限终态恢复出口；#79 起为成果区「系统」tab，#80 浏览器条定稿；#222 档位改吃
- * 四态投影）：恒为预览的容器。门禁——四态投影非「从未生成」（含中断——阶段 0
- * 收口后应用可能已在跑）即取预览地址并挂机制；后端探活通过才返回 URL，有 URL
+ * 生成态投影）：恒为预览的容器。门禁——生成态投影非「从未生成」（生成中/已生成）
+ * 即取预览地址并挂机制；后端探活通过才返回 URL，有 URL
  * 即上真页面（空白页可接受）。档位推导归 lib/preview/state 纯函数（REST 投影为
  * 主源——刷新/回访后档位仍正确；更新轨会话信号只喂更新中/更新失败两处），
  * 本组件只呈现：无应用 = 占位随工作消息部件推进的步骤
  * 提示；有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联）；
  * 中断/失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话与重试不
  * 闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为 key，手动
- * 刷新的本地节拍并入同 key）。恢复出口单出口（#222，ADR-0020）：生成中断与
- * 从未生成（idle 档）给「继续生成」（断点续跑/计划重派），更新轮失败给「继续
- * 更新」；无推倒重来按钮。正常态全无手动触发。
+ * 刷新的本地节拍并入同 key）。失败＝明确展示＋重跑即恢复（#604 新失败语义）：
+ * 面板呈现失败文案与原因；专用恢复按钮（续跑/修正轨前端件）随 #608 呈现面清场
+ * 退役，重跑走常规点火入口（岔路口卡／PRD 确认／再提意见）。正常态全无手动触发。
  *
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
@@ -65,6 +63,12 @@ import { DemoVersionChip } from "./demo-version-chip";
  * goto/新窗口三入口触碰先行（#182）：用户主动（重）加载预览先 refetch 预览查询（经
  * 后端触碰拦截器异步唤醒休眠沙箱）再执行原动作，运行中无感、对话提交与网关零改动。
  * 舞台浅色锁定：预览里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
+ *
+ * <p>预览跟随（#618，ADR-0057）：生成中默认跟着内核正在写的页面走——跟随目标 =
+ * 工作消息里最新一条可映射页面路径的路由（lib/preview/follow 纯函数，组件／样式／
+ * 库／布局／API／动态段不切页），路由变化才导航（同页反复重写不重挂不跳）。浏览器
+ * 条「跟随／固定」开关：固定后不再自动导航；手动地址跳转自动转固定（用户接管）；
+ * 手动刷新保持当前档。降级自担：编译中白屏、无热更，不加检测／等待／重试兜底。</p>
  */
 export function SystemPanel({
   projectId,
@@ -72,12 +76,10 @@ export function SystemPanel({
   coderStatus,
   coderStoppedByUser,
   failureReason,
-  onGenerated,
-  onOpenFiles,
   variant = "default",
 }: {
   projectId: string;
-  /** 生成态四态投影（REST 事实；缺省 = 后端未透出）。 */
+  /** 生成态投影（REST 事实，三态无中断档；缺省 = 后端未透出）。 */
   generationState?: GenerationState;
   /** 本会话编码 run 状态（更新轨信号——更新中/更新失败）。 */
   coderStatus?: CoderRunStatus;
@@ -85,22 +87,16 @@ export function SystemPanel({
   coderStoppedByUser?: boolean;
   /** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行）。 */
   failureReason?: string;
-  /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
-  onGenerated: () => void;
-  /** Demo 页文件辅助抽屉挂点；缺省不出文件按钮。 */
-  onOpenFiles?: () => void;
   /** Demo 阶段页原型壳；缺省保留旧成果区浏览器条。 */
   variant?: "default" | "demo";
 }) {
   const epoch = useGenerationStore((s) => previewEpochOf(s, projectId));
-  const parts = useWorkMessageStore((s) => workPartsOf(s, projectId));
   const workStartedAt = useWorkMessageStore((s) => s.works[projectId]?.startedAt);
   const workEndedAt = useWorkMessageStore((s) => s.works[projectId]?.endedAt);
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   /** 手动刷新节拍：并入预览纪元的重挂 key（自动刷新外的唯一手动机制）。 */
   const [refreshTick, setRefreshTick] = useState(0);
-  // 门禁（#45 解除；#222 投影口径）：非「从未生成」即取预览地址（中断档的应用
-  // 可能已在跑——阶段 0 收口即起服）
+  // 门禁（#45 解除；#222 投影口径）：非「从未生成」即取预览地址（生成中/已生成）
   const active = previewActive(generationState, coderStatus);
   const preview = useProjectPreview(projectId, active);
   const url = preview.data?.url;
@@ -109,7 +105,20 @@ export function SystemPanel({
   // 能正确出地址）。iframe 源取 frameUrl，导航/刷新驱动重挂。
   const [navigatedUrl, setNavigatedUrl] = useState<string | undefined>(undefined);
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
-  const frameUrl = navigatedUrl ?? url ?? "";
+  // 预览跟随（#618，ADR-0057）：默认开；「固定」暂停自动导航，手动地址跳转自动转
+  // 固定（用户接管导航），手动刷新保持当前档。跟随目标 = 工作消息里最新一条可映射
+  // 页面路径的路由（纯函数过滤组件／样式／库／布局／API）——同页反复重写映射结果
+  // 不变，故不重挂不跳。跟随地址是渲染派生值（不写状态）：跟随档下优先于手动地址，
+  // 路由变化才换 URL；固定档回落到手动地址。
+  const [followMode, setFollowMode] = useState(true);
+  const followedRoute = useWorkMessageStore((s) =>
+    followedPreviewRoute(workPartsOf(s, projectId)),
+  );
+  const followUrl =
+    followMode && url && followedRoute !== undefined
+      ? resolvePreviewAddress(url, followedRoute)
+      : undefined;
+  const frameUrl = followUrl ?? navigatedUrl ?? url ?? "";
   // 圈注标注态（#97）：非常驻——activeTool 非空即标注态，对 iframe 发 postMessage
   // 进出；预览跨源（容器暴露端口），回传锚校验 origin = 预览源（防伪锚）
   const [activeTool, setActiveTool] = useState<AnnotationKind | null>(null);
@@ -162,7 +171,6 @@ export function SystemPanel({
     coderStoppedByUser,
     url,
     error: preview.error,
-    parts,
     failureReason,
   });
   const pageLive = phase.kind === "page" && !!url;
@@ -171,13 +179,6 @@ export function SystemPanel({
   const notice = phase.kind === "page" ? phase.notice : undefined;
   const updatingNotice = notice && !notice.failed ? notice : undefined;
   const failedNotice = notice?.failed ? notice : undefined;
-  // 恢复出口单出口（#222）：生成中断/从未生成 =「继续生成」（断点续跑或计划重派）、
-  // 更新轮失败 =「继续更新」（#48，重派终态那场的交接物）
-  const resume = <ResumeGenerationButton projectId={projectId} onGenerated={onGenerated} />;
-  const restartUpdate = <RestartUpdateButton projectId={projectId} />;
-  /** 兜底入口选择（失败细条/占位终态/引导占位共用，#222）：resume = 继续生成 / restart-update = 继续更新。 */
-  const recoveryAction = (recovery?: RecoveryAction) =>
-    recovery === "resume" ? resume : recovery === "restart-update" ? restartUpdate : null;
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));
@@ -199,9 +200,47 @@ export function SystemPanel({
     if (!url) return;
     const target = resolvePreviewAddress(url, addressDraft ?? "");
     // 命中 = 一次加载动作：触碰先行（#182）；拒绝不是加载动作，不触碰
-    if (target) touchThenLoad(() => setNavigatedUrl(target));
+    if (target) {
+      touchThenLoad(() => setNavigatedUrl(target));
+      // 手动地址跳转 = 用户接管导航（#618）：自动转为固定模式，后续写入不抢导航
+      setFollowMode(false);
+    }
     setAddressDraft(null); // 命中：navigatedUrl 驱动 frameUrl 回显新地址；拒绝：回显当前地址
   };
+  /**
+   * 跟随／固定开关（#618）：跟随 → 固定时把当前呈现的页定格为手动地址（冻结导航，
+   * 不跳回旧手动页）；固定 → 跟随直接放开，由派生地址接回当前写入页。
+   */
+  const toggleFollow = () => {
+    if (followMode) {
+      const current = followUrl ?? navigatedUrl ?? url;
+      if (current) setNavigatedUrl(current);
+    }
+    setFollowMode(!followMode);
+  };
+  /** 跟随／固定开关（#618）：跟随档 → 点「固定」暂停自动导航；固定档 → 点「跟随」恢复。 */
+  const followButton = (
+    <button
+      type="button"
+      onClick={toggleFollow}
+      aria-label="预览跟随开关"
+      aria-pressed={followMode}
+      title={
+        followMode
+          ? "暂停自动跟随，预览停在当前页"
+          : "恢复自动跟随，写到哪页切哪页"
+      }
+      className={cn(
+        "flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
+        followMode
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {followMode ? <Pin className="size-3" /> : <Navigation className="size-3" />}
+      {followMode ? "固定" : "跟随"}
+    </button>
+  );
 
   const refreshButton = (
     <button
@@ -252,17 +291,6 @@ export function SystemPanel({
             沙箱演示环境 · 隔离运行不产生正式扣款
           </span>
           <div className="flex items-center gap-1">
-            {onOpenFiles ? (
-              <button
-                type="button"
-                onClick={onOpenFiles}
-                title="查看源码文件"
-                aria-label="查看源码文件"
-                className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-soft/60 bg-surface-dawn text-ink-muted transition-colors hover:bg-surface-mist hover:text-ink-primary"
-              >
-                <FolderCode className="size-3.5" aria-hidden="true" />
-              </button>
-            ) : null}
             {refreshButton}
             {openButton}
           </div>
@@ -350,6 +378,7 @@ export function SystemPanel({
             </span>
           ) : null}
         </form>
+        {followButton}
         {variant === "default" ? (
           <>
             <DeviceToggle device={device} onDeviceChange={setDevice} />
@@ -371,7 +400,6 @@ export function SystemPanel({
                 <span className="ml-2 text-destructive/70">{failedNotice.reason}</span>
               )}
             </span>
-            {recoveryAction(failedNotice.recovery)}
           </div>
         ) : null}
         {/* 舞台浅色锁定（#80 口径，#201 起归 ./device-frame 单源：DeviceFrame 含舞台，
@@ -425,9 +453,7 @@ export function SystemPanel({
                   reason={phase.reason}
                   failed
                   stopped={coderStoppedByUser}
-                >
-                  {recoveryAction(phase.recovery)}
-                </DemoWaitingHint>
+                />
               ) : (
                 <PanelHint>
                   <TriangleAlert className="size-5 text-destructive" />
@@ -437,7 +463,6 @@ export function SystemPanel({
                       <p className="text-label-sm text-ink-faint">{phase.reason}</p>
                     )}
                   </div>
-                  {recoveryAction(phase.recovery)}
                 </PanelHint>
               )
             ) : phase.kind === "connecting" ? (
@@ -455,11 +480,8 @@ export function SystemPanel({
               <PanelHint>
                 <Monitor className="size-5 text-muted-foreground" />
                 <p>系统生成后，这里会出现可以操作的你的系统</p>
-                {/* idle 档也挂「继续生成」（#222 单出口；#542 派发门）：面板仅存在
-                    于 PRD 产出后——本档 = 岔路口/确认门待点火（试用态卡面「立即生成」
-                    与本键同单出口）或未起跑/存量无轨道（含旧机制卡死项目），重发
-                    /generate 即起跑（计划缺失走补产链自动续派） */}
-                {resume}
+                {/* 面板仅存在于 PRD 产出后——本档 = 岔路口/确认门待点火或未起跑/
+                    首建未成；重跑走常规点火入口（#608：面板不留专用恢复按钮） */}
               </PanelHint>
             )}
           </div>
@@ -552,7 +574,7 @@ function PanelHint({ children }: { children: ReactNode }) {
 }
 
 /**
- * 预览 iframe 的重挂 key：url + 重载序号——序号汇两路信号（切片收口 run-finish
+ * 预览 iframe 的重挂 key：url + 重载序号——序号汇两路信号（run 收口 run-finish
  * 纪元；手动刷新的本地节拍 #80，调用点求和传入），同 URL 也强制重建 iframe
  * （预览刷新的唯一机制）。
  */

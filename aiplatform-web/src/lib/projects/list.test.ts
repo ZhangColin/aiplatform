@@ -37,8 +37,8 @@ describe("列表摘要归一", () => {
 
   it("normalize：终点类型透传（#299 弱标识取数面：code＋名随行、缺省 undefined）", () => {
     expect(
-      normalizeProjectSummary({ id: "p3", endpointType: 1, endpointTypeName: "设计" }),
-    ).toMatchObject({ endpointType: 1, endpointTypeName: "设计" });
+      normalizeProjectSummary({ id: "p3", endpointType: 2, endpointTypeName: "系统" }),
+    ).toMatchObject({ endpointType: 2, endpointTypeName: "系统" });
     expect(normalizeProjectSummary({ id: "p4" }).endpointType).toBeUndefined();
   });
 

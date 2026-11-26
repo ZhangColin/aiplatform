@@ -5,7 +5,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
@@ -18,9 +17,9 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * （find 剪枝在源头排除，不进 node_modules 巨树）、内容读取命令构造（大小限读
  * 在容器侧先行，巨文件不进内存）、find 输出解析。#283 起点看判定对图片放行
  * （ADR-0027）：图片扩展名走 raw 直出（inline 大图），判定与命令构造同收此处；
- * #293 起 raw 直出面扩设计稿 HTML（稿伺服通道——设计稿画布固定画幅帧取件，
- * design/ 锚定单开判定）＋设计稿删除命令（悬卡删除）；#339 起收入口文件截断判定
- * （{@link #hasTruncationPlaceholder}——「其余代码略」式残缺产出的字面形）。纯函数无依赖。
+ * #293 起曾扩设计稿 HTML 伺服＋定稿/悬卡删除命令——消费面设计稿画布已随 #613
+ * 拆除，design/ HTML 判定与两命令成规则面上的死支路（去留待重建入口时再定）。
+ * 入口文件截断判定随审查与收口组退役（#605）。纯函数无依赖。
  */
 public final class ProjectFiles {
 
@@ -51,59 +50,7 @@ public final class ProjectFiles {
     public record Entry(String path, long size) {
     }
 
-    /**
-     * 基座预览入口文件（Next.js App Router 首页，工作区根相对形）：用户打开预览
-     * 看到的首屏——#339「首屏界面先行＋入口一次写全」的取件锚（与
-     * {@code DesignSpecs.BASELINE_GLOBALS_CSS} 同为基座固定位）。
-     */
-    public static final String BASELINE_ENTRY = "src/app/page.tsx";
-
-    /**
-     * 基座健壮件·数据访问层（#421 首批四件套的取件锚，工作区根相对形）：栈规则集
-     * AGENTS.md 节的就位判据——四件套随基座模板同批就位，此文件在场＝新基座
-     * （栈规则集拼入）；不在场＝存量工作区（不回补，节不拼入）。
-     */
-    public static final String BASELINE_ROBUST_DATA_ACCESS = "src/lib/robust/data-access.ts";
-
-    /**
-     * 入口文件截断占位短语（#339 受限宽容名单）：执行体「其余代码略」式残缺产出的
-     * <b>字面形</b>——只收强信号短语（含「其余/代码/以下/此处」等截断语境词，
-     * 不误伤「略」的常用义如「策略/略高于」）。逐字命中即判残缺。
-     */
-    private static final List<String> TRUNCATION_PLACEHOLDERS = List.of(
-            "其余代码略", "其余代码省略", "其余略", "其余省略", "其余部分略",
-            "省略其余", "以下省略", "此处省略", "代码略", "代码省略",
-            "rest of the code", "rest of code", "code omitted",
-            "rest omitted", "omitted for brevity", "existing code omitted");
-
-    /**
-     * 纯省略号注释行（整行仅注释包裹的省略号／「…」）：截断占位的强信号——JS/TS
-     * 展开运算符（{@code ...}）必与表达式同现、不独占整行为注释，故不误伤展开。
-     */
-    private static final Pattern ELLIPSIS_COMMENT_LINE = Pattern.compile(
-            "(?m)^\\s*(?://|/\\*|\\{/\\*)\\s*(\\.\\.\\.|…)\\s*(\\*/)?\\s*\\}?\\s*$");
-
     private ProjectFiles() {
-    }
-
-    /**
-     * 入口文件截断判定（#339 首屏界面先行＋入口一次写全）：内容含 {@link
-     * #TRUNCATION_PLACEHOLDERS 「其余代码略」式短语}或独占一行的纯省略号注释即判
-     * 残缺（逐字命中、大小写不敏感）。空内容/null 不判残缺——本判据裁的是模型
-     * 「写一半留占位」的截断形态（残缺即不收口、重试修全）；缺件由取件退出码在
-     * 调用侧覆盖，空件非本票点名的截断形态（仍由 8081 探活/片内 verify 兜）。
-     */
-    public static boolean hasTruncationPlaceholder(String content) {
-        if (content == null) {
-            return false;
-        }
-        String lower = content.toLowerCase(Locale.ROOT);
-        for (String marker : TRUNCATION_PLACEHOLDERS) {
-            if (lower.contains(marker.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return ELLIPSIS_COMMENT_LINE.matcher(content).find();
     }
 
     /**
@@ -120,12 +67,39 @@ public final class ProjectFiles {
     /**
      * 工作区相对形 → 锚定形（补前导 /）；锚定形/null 原样（null 透传——调用侧
      * 守卫在后）。{@link #relativeFormOf} 的对偶：落稿变更两形并存的事实面
-     * （write_file 件上报相对形、GenerateImageTool 落盘补锚定形，#306）在消费
-     * 边界归一到锚定形单一形——稿清单/定稿锚/比较先过本归一，下游免形差。
+     * （write_file 件上报相对形、平台工具落盘补锚定形，#306）在消费边界归一到
+     * 锚定形单一形——稿清单/定稿锚/比较先过本归一，下游免形差。
      */
     public static String anchoredFormOf(String path) {
         return path != null && !path.startsWith("/")
                 ? "/" + path : path;
+    }
+
+    /**
+     * 对话面只读视图（#622）：生成后问答查证面——比交付视图宽。放开根级
+     * {@code .env} 与 seed/脚本（{@code data/} 下非 pg 部分、{@code scripts/} 等），
+     * 供账号密码类问题查证；仍拒绝非交付根目录（{@code node_modules}／{@code .git}
+     * ／{@code .pnpm-store}／{@code .next}／{@code .platform}／{@code agents}／
+     * {@code external}）与 pg 数据目录 {@code data/pg}。逃逸／空白／锚定形照旧拒绝
+     * ——读取不越界。
+     */
+    public static boolean isDialogViewable(String path) {
+        if (path == null || path.isBlank() || path.startsWith("/")) {
+            return false;
+        }
+        String[] segments = path.split("/");
+        for (String segment : segments) {
+            if (segment.isBlank() || "..".equals(segment)) {
+                return false;
+            }
+        }
+        if (WorkspaceLayout.PG_DATA_DIR.equals(path)
+                || path.startsWith(WorkspaceLayout.PG_DATA_DIR + "/")) {
+            return false;
+        }
+        String first = segments[0];
+        return !(WorkspaceLayout.NON_DELIVERABLE_DIRS.contains(first)
+                && !WorkspaceLayout.DATA_DIR.equals(first));
     }
 
     /**
@@ -178,10 +152,50 @@ public final class ProjectFiles {
     }
 
     /**
-     * 存在性检查命令（#291 定稿守卫；path 须先过 {@link #isViewable}，此处不
-     * 代偿）：退出码 0 = 文件在、1 = 不存在——定稿选定的稿以容器事实为准（候选
-     * 稿可被悬卡删除，删除即不可定稿）。守卫结构同 {@link #contentCommand}，
-     * 命令体只有成功（无读取）。
+     * 对话面树列表命令（#622）：与交付视图同构（根级非交付目录在遍历源头 prune、
+     * 每行 {@code 大小\t相对路径}），但<b>不排除</b>根级 {@code .env}，且只排
+     * {@code data/pg}（{@code data/} 下其余文件如 seed 脚本保留可查）——对话面
+     * 只读视图的清单面（口径与 {@link #isDialogViewable} 一致）。命令全常量，无
+     * 用户可控片段。
+     */
+    public static String dialogListCommand() {
+        List<String> prunes = new ArrayList<>();
+        for (String dir : WorkspaceLayout.NON_DELIVERABLE_DIRS) {
+            if (!WorkspaceLayout.DATA_DIR.equals(dir)) {
+                prunes.add(dir);
+            }
+        }
+        prunes.add(WorkspaceLayout.PG_DATA_DIR);
+        String pruneExpr = prunes.stream()
+                .map(dir -> "-path " + WorkspaceLayout.ROOT + "/" + dir)
+                .collect(java.util.stream.Collectors.joining(" -o "));
+        return "find " + WorkspaceLayout.ROOT + " \\( " + pruneExpr + " \\)"
+                + " -prune -o -type f -printf '%s\\t%P\\n'";
+    }
+
+    /**
+     * 对话面内容读取命令（#622；path 须先过 {@link #isDialogViewable}，此处不
+     * 代偿）：守卫结构与 {@link #contentCommand} 同（1 = 不存在、2 = 超限、
+     * 0 = 大小首行 + 正文），判定面换成对话面只读视图（{@code .env}／seed/脚本
+     * 可读）。路径经单引号包裹 + 转义，无注入面。
+     */
+    public static String dialogContentCommand(String path) {
+        if (!isDialogViewable(path)) {
+            throw new IllegalArgumentException("非对话面可读路径，命令构造拒绝: " + path);
+        }
+        return ContainerCommands.existenceGuard(path)
+                + " s=$(stat -c %s " + ContainerCommands.quoted(path) + ");"
+                + " if [ $s -gt " + MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
+                + " printf '%s\\n' $s; cat " + ContainerCommands.quoted(path);
+    }
+
+    /**
+     * 存在性检查命令（#291 定稿守卫起立；path 须先过 {@link #isViewable}，此处不
+     * 代偿）：退出码 0 = 文件在、1 = 不存在——以容器事实为准。守卫结构同
+     * {@link #contentCommand}，命令体只有成功（无读取）。
+     *
+     * <p><b>死支路（#613 后）</b>：消费面（设计定稿守卫）已随设计线拆除，本命令
+     * 无生产触发源——规则面保留，去留待重建入口时再定。</p>
      */
     public static String existenceCommand(String path) {
         if (!isViewable(path)) {
@@ -200,15 +214,14 @@ public final class ProjectFiles {
     }
 
     /**
-     * 设计稿 HTML 伺服判定（#293 稿伺服通道）：design/ 锚定（大小写不敏感）＋
-     * html 扩展名（大小写不敏感）。设计稿画布的界面类稿＝固定画幅帧，取件走
-     * raw 路由 iframe 直渲；其余 HTML（应用源码等）不开伺服面（raw 只认图片与
-     * 本判定）。
+     * 设计稿 HTML 伺服判定（#293 稿伺服通道起立）：design/ 锚定（大小写不敏感）＋
+     * html 扩展名（大小写不敏感）——取件走 raw 路由 iframe 直渲；其余 HTML
+     * （应用源码等）不开伺服面（raw 只认图片与本判定）。
      *
-     * <p>design/ 锚定与轨道层 {@code CoderRunAttempts.designAnchored} 同律
-     * （彼两形兼容——write_file 件相对形＋落盘锚定形，#306；本收相对形，取件面
-     * 前置 {@link #relativeFormOf} 归一——本类在 domain 层不可上引 application
-     * 包，无法共享单点；两处口径同改，互指为约）。</p>
+     * <p><b>死支路（#613 后）</b>：消费面设计稿画布已拆，本判定无生产触发源——
+     * raw 端点按 #608/ADR-0027 补记保留，本分支挂在保留端点上随端点存活，
+     * 去留待重建入口时再定。旧互指 {@code CodingRunDispatcher.designAnchored}
+     * 已随设计线删除（两形归一由 {@link #relativeFormOf} 单独承担）。</p>
      */
     public static boolean isDraftHtml(String path) {
         if (path == null || !path.toLowerCase(Locale.ROOT)
@@ -246,9 +259,12 @@ public final class ProjectFiles {
     }
 
     /**
-     * 设计稿删除命令（#293 悬卡删除；path 须先过 {@link #isViewable}，design
+     * 设计稿删除命令（#293 悬卡删除起立；path 须先过 {@link #isViewable}，design
      * 锚定判定归调用侧）：{@code rm -f} 幂等——稿已不在也 0 退出（删除的终态
      * 就是不在，重复删除不报错）。路径经单引号包裹 + 转义，无注入面。
+     *
+     * <p><b>死支路（#613 后）</b>：消费面（设计稿悬卡删除）已随设计线拆除，本命令
+     * 无生产触发源——规则面保留，去留待重建入口时再定。</p>
      */
     public static String deleteCommand(String path) {
         if (!isViewable(path)) {

@@ -12,7 +12,10 @@ import java.util.Map;
 
 import cn.hutool.core.collection.CollUtil;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -27,6 +30,9 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.ProjectRetrievalStats;
+import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalRecord;
+import com.semgravio.aiplatform.base.knowledge.domain.model.RetrievalSearchResult;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
 
 /**
@@ -99,6 +105,9 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
     private static final String MATERIAL_COLUMNS =
             "id, kind, source_ref, project_id, project_name, title, status, operator_id, "
                     + "operator_name, created_at";
+
+    /** 命中留痕读列（顺序即 {@link #retrievalOf} 下标）。 */
+    private static final String RETRIEVAL_COLUMNS = "id, project_id, degraded, items, created_at";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -291,6 +300,125 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
                 keys[0], keys[1]);
         jdbcTemplate.update("DELETE FROM knw_materials WHERE id = ?", id);
         return true;
+    }
+
+    @Override
+    public void recordRetrieval(String projectId, boolean degraded, List<KnowledgeHit> hits) {
+        jdbcTemplate.update(
+                "INSERT INTO knw_retrievals (id, project_id, degraded, items) "
+                        + "VALUES (?, ?, ?, ?::jsonb)",
+                TsidGenerator.newInstance().generate(), projectId, degraded, itemsJson(hits));
+    }
+
+    @Override
+    public RetrievalRecord latestRetrieval(String projectId) {
+        List<RetrievalRecord> rows = jdbcTemplate.query(
+                "SELECT " + RETRIEVAL_COLUMNS + " FROM knw_retrievals WHERE project_id = ? "
+                        + "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (rs, rowNum) -> retrievalOf(rs), projectId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * 留痕读面（#639）：动态条件拼接（null 维不参与过滤），计数与当页行两查
+     * 共用同一 where/args（同 {@link #searchMaterials} 先例）；时间维为检索时间
+     * 闭区间含两端。
+     */
+    @Override
+    public RetrievalSearchResult searchRetrievals(String projectId, Instant from, Instant to,
+                                                  int offset, int limit) {
+        List<String> conditions = CollUtil.newArrayList();
+        List<Object> args = CollUtil.newArrayList();
+        if (projectId != null && !projectId.isBlank()) {
+            conditions.add("project_id = ?");
+            args.add(projectId);
+        }
+        if (from != null) {
+            conditions.add("created_at >= ?");
+            args.add(Timestamp.from(from));
+        }
+        if (to != null) {
+            conditions.add("created_at <= ?");
+            args.add(Timestamp.from(to));
+        }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        Long total = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_retrievals" + where, Long.class, args.toArray());
+        args.add(limit);
+        args.add(offset);
+        List<RetrievalRecord> items = jdbcTemplate.query(
+                "SELECT " + RETRIEVAL_COLUMNS + " FROM knw_retrievals" + where
+                        + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (rs, rowNum) -> retrievalOf(rs), args.toArray());
+        return new RetrievalSearchResult(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public void deleteRetrievalsByProject(String projectId) {
+        jdbcTemplate.update("DELETE FROM knw_retrievals WHERE project_id = ?", projectId);
+    }
+
+    /**
+     * 飞轮命中统计（#643 只读聚合）：含命中条目的留痕才算命中（成功 0 条与
+     * 降级的 items 为空、不计数）；无命中记录的项目不进结果（HAVING 过滤）。
+     */
+    @Override
+    public List<ProjectRetrievalStats> retrievalStats() {
+        return jdbcTemplate.query("""
+                SELECT project_id,
+                       COUNT(*) FILTER (WHERE jsonb_array_length(items) > 0) AS hit_count,
+                       MAX(created_at) FILTER (WHERE jsonb_array_length(items) > 0)
+                           AS latest_hit_at
+                FROM knw_retrievals
+                GROUP BY project_id
+                HAVING COUNT(*) FILTER (WHERE jsonb_array_length(items) > 0) > 0
+                """, (rs, rowNum) -> new ProjectRetrievalStats(
+                        rs.getString(1), rs.getInt(2), rs.getTimestamp(3).toInstant()));
+    }
+
+    /** 留痕行 → 读模型（列序＝{@link #RETRIEVAL_COLUMNS}）。 */
+    private RetrievalRecord retrievalOf(ResultSet rs) throws SQLException {
+        return new RetrievalRecord(
+                rs.getLong(1),
+                rs.getString(2),
+                rs.getTimestamp(5).toInstant(),
+                rs.getBoolean(3),
+                readItems(rs.getString(4)));
+    }
+
+    /** 命中条目 → jsonb 数组（键即端口模型字段名）。 */
+    private String itemsJson(List<KnowledgeHit> hits) {
+        ArrayNode array = objectMapper.createArrayNode();
+        if (hits != null) {
+            for (KnowledgeHit hit : hits) {
+                ObjectNode node = array.addObject();
+                node.put("kind", hit.kind());
+                node.put("sourceProjectName", hit.sourceProjectName());
+                node.put("title", hit.title());
+                node.put("chunk", hit.chunk());
+            }
+        }
+        return array.toString();
+    }
+
+    /** jsonb 数组 → 命中条目（null/畸形保守为无条目，读面不炸）。 */
+    private List<KnowledgeHit> readItems(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<KnowledgeHit> hits = new ArrayList<>();
+            for (JsonNode node : objectMapper.readTree(json)) {
+                hits.add(new KnowledgeHit(node.path("kind").asText(null),
+                        node.path("sourceProjectName").asText(null),
+                        node.path("title").asText(null),
+                        node.path("chunk").asText(null)));
+            }
+            return hits;
+        }
+        catch (Exception e) {
+            return List.of();
+        }
     }
 
     /** 登记行 → 读模型（列序＝{@link #MATERIAL_COLUMNS}）。 */

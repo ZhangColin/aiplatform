@@ -208,28 +208,10 @@ describe("智能体事件族收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
-  it("acceptance-start 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「生命周期事件」acceptance-start 行（#87：受理动作卡——受理轮
-    // 开场受理事实，对话区动作卡呈现源）
-    const env = parseSseEnvelope(
-      JSON.stringify({
-        type: "acceptance-start",
-        payload: { projectId: "p1", runId: "r1" },
-        ts: "",
-      }),
-    );
-
-    expect(asPlatformAgentEvent(env!)).toMatchObject({
-      type: "acceptance-start",
-      payload: { projectId: "p1", runId: "r1" },
-    });
-    expect(asPassthroughAgentEvent(env!)).toBeNull();
-  });
-
   it.each([
     {
-      type: "part-text",
-      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", engine: "agentscope", text: "正在编写订单管理页面。" },
+      type: "part-signal",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", engine: "agentscope", signal: "derailed" },
     },
     {
       type: "part-action",
@@ -244,14 +226,9 @@ describe("智能体事件族收窄", () => {
         label: "编写【代码文件】",
       },
     },
-    {
-      // 自检播报（#85）：平台侧产出（不经引擎映射表——无 engine 字段）
-      type: "part-check",
-      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", state: "checking" },
-    },
   ] as const)("消息部件事件 $type 按正本收窄为平台事件，不落入透传口", (frame) => {
-    // 期望值来自正本「消息部件事件」节（#77 parts 契约；字段值镜像服务端
-    // AgentscopeAgentClientTest 的部件序列断言——双侧同源于契约正本）
+    // 期望值来自正本「消息部件事件」节（#77 parts 契约；#608 后只余脱轨信号与
+    // 工具动作两件）
     const env = parseSseEnvelope(JSON.stringify({ ...frame, ts: "" }));
 
     expect(asPlatformAgentEvent(env!)).toMatchObject(frame);
@@ -322,36 +299,19 @@ describe("智能体事件族收窄", () => {
     }
   });
 
-  it("part-plan 按正本收窄（#236 全量快照：steps 携稳定 id/title/state 三值域）；平台 type 不落入透传口", () => {
-    const env = parseSseEnvelope(
-      JSON.stringify({
-        type: "part-plan",
-        payload: {
-          projectId: "p1",
-          runId: "r1",
-          sessionId: "coder-p1",
-          engine: "agentscope",
-          steps: [
-            { id: "s1", title: "读取现有配色", state: "completed" },
-            { id: "s2", title: "调整主题色", state: "in_progress" },
-            { id: "s3", title: "重启服务验证", state: "pending" },
-          ],
-        },
+  it.each(["part-text", "part-check", "part-plan"] as const)(
+    "%s（#608 呈现面清场退役）：不再属平台事件面，存量事件两侧均不认（忽略）",
+    (type) => {
+      const env = parseSseEnvelope(JSON.stringify({
+        type,
+        payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", text: "…", steps: [], state: "checking" },
         ts: "",
-      }),
-    );
-    const event = asPlatformAgentEvent(env!);
-    expect(event?.type).toBe("part-plan");
-    if (event?.type === "part-plan") {
-      expect(event.payload.steps).toHaveLength(3);
-      expect(event.payload.steps[0]).toEqual({
-        id: "s1",
-        title: "读取现有配色",
-        state: "completed",
-      });
-    }
-    expect(asPassthroughAgentEvent(env!)).toBeNull();
-  });
+      }));
+
+      expect(asPlatformAgentEvent(env!)).toBeNull();
+      expect(asPassthroughAgentEvent(env!)).toBeNull();
+    },
+  );
 
   it("run-start 携角色键（#77 引擎信息归一：role=CODER 标编码 run）", () => {
     const env = parseSseEnvelope(

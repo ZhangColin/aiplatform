@@ -76,11 +76,13 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     private static final int SHELL_OUTPUT_LIMIT = 100_000;
     /**
      * ①族守卫拒命的合成退出码（#440）：平台侧拒绝、容器从未执行。刻意避开本缝
-     * 已有码位语义——124＝{@link DockerExecCommand} 超时、125-127＝docker 自有
+     * 已有码位语义——124＝{@link #PROCESS_TIMEOUT_EXIT_CODE}（超时强杀）、125-127＝docker 自有
      * （daemon 错/不可执行/命令不存在）；见 250 必为守卫拒命，与容器退出码的
      * 最终区分以输出文案前缀「命令被平台拒绝执行（#440 …）」为准。
      */
     static final int SHELL_GUARD_REJECTED_EXIT_CODE = 250;
+    /** 进程超时强杀的退出码（#653，GNU timeout 同惯例）：{@link #runProcess} 超时路径的码位正本。 */
+    static final int PROCESS_TIMEOUT_EXIT_CODE = 124;
 
     /**
      * 框架内部状态根（工作区卷内、非交付目录）：框架压缩链 memory/、
@@ -708,8 +710,58 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     }
 
     /**
+     * 进程执行逻辑单源（#653，本类唯一的子进程 spawn 入口）：超时覆盖命令全程
+     * ——起进程即计，{@code waitFor(timeout)} 先行；stdout 异步泵到缓冲（与 stderr
+     * 同法），挂死命令（无输出不退出）在超时处强杀（{@link #PROCESS_TIMEOUT_EXIT_CODE}），
+     * 已泵到的部分输出不丢（强杀即关管道，泵随后 EOF 收敛，join 取部分量）。
+     */
+    static ExecOutput runProcess(ProcessBuilder process, byte[] stdin, int timeoutSeconds,
+            String timeoutStderr) {
+        try {
+            Process p = process.start();
+            // 泵与灌写均走 supplyAsync 公共池（与改前 stderr/stdin 同形态）：阻塞读
+            // 占线程整个命令时长，多工作区高并发下公共池排队会推迟泵启动——超时
+            // 判定由 waitFor 承担不受排队影响，极端排队只推迟 join 取量，现行规模可接受
+            CompletableFuture<byte[]> stdout = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return p.getInputStream().readAllBytes();
+                }
+                catch (Exception e) {
+                    return new byte[0];
+                }
+            });
+            CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+                }
+                catch (Exception e) {
+                    return "";
+                }
+            });
+            if (stdin != null) {
+                CompletableFuture.runAsync(() -> {
+                    try (OutputStream in = p.getOutputStream()) {
+                        in.write(stdin);
+                    }
+                    catch (Exception ignored) {
+                        // 容器侧提前退出：写断由退出码表达
+                    }
+                });
+            }
+            if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return new ExecOutput(PROCESS_TIMEOUT_EXIT_CODE, stdout.join(), timeoutStderr);
+            }
+            return new ExecOutput(p.exitValue(), stdout.join(), stderr.join());
+        }
+        catch (Exception e) {
+            return new ExecOutput(1, new byte[0], String.valueOf(e.getMessage()));
+        }
+    }
+
+    /**
      * 真实执行：{@code docker exec -i <容器> sh -c <命令>}（-i 供 stdin 直灌）。
-     * stderr 异步读、stdin 异步写防管道缓冲死锁；超时强杀。
+     * 进程语义委托 {@link #runProcess}（超时覆盖命令全程）。
      */
     public static final class DockerExecCommand implements ExecCommand {
 
@@ -730,36 +782,7 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
             String[] cmd = new String[prefix.length + 1];
             System.arraycopy(prefix, 0, cmd, 0, prefix.length);
             cmd[prefix.length] = command;
-            try {
-                Process p = new ProcessBuilder(cmd).start();
-                CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-                    }
-                    catch (Exception e) {
-                        return "";
-                    }
-                });
-                if (stdin != null) {
-                    CompletableFuture.runAsync(() -> {
-                        try (OutputStream in = p.getOutputStream()) {
-                            in.write(stdin);
-                        }
-                        catch (Exception ignored) {
-                            // 容器侧提前退出：写断由退出码表达
-                        }
-                    });
-                }
-                byte[] stdout = p.getInputStream().readAllBytes();
-                if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                    p.destroyForcibly();
-                    return new ExecOutput(124, new byte[0], "docker exec 超时");
-                }
-                return new ExecOutput(p.exitValue(), stdout, stderr.join());
-            }
-            catch (Exception e) {
-                return new ExecOutput(1, new byte[0], String.valueOf(e.getMessage()));
-            }
+            return runProcess(new ProcessBuilder(cmd), stdin, timeoutSeconds, "docker exec 超时");
         }
     }
 }
